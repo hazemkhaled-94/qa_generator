@@ -1,0 +1,10 @@
+# Serves SeaweedFS's own master and filer UIs. One listener per upstream, on
+# the upstream's own port, so their absolute asset paths resolve unchanged.
+
+:9333 {
+	reverse_proxy seaweedfs-master:9333
+}
+
+:8888 {
+	reverse_proxy seaweedfs-filer:8888
+}

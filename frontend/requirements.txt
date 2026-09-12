@@ -1,0 +1,7 @@
+# The pdf extra: st.pdf refuses to render without it, and the Documents page
+# shows the file inline.
+streamlit[pdf]>=1.62.0,<2.0.0
+requests>=2.32.5,<3.0.0
+opentelemetry-sdk>=1.44.0,<2.0.0
+opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0
+opentelemetry-instrumentation-requests>=0.65b0

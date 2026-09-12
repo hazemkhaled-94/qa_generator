@@ -1,0 +1,13 @@
+# The ingestion image builds from the repo root, so everything here would
+# otherwise be sent to the daemon as build context.
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+
+certs/
+configs/
+poetry.lock
+.env

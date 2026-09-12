@@ -1,0 +1,60 @@
+:root {
+  --qa-border: #E6E1EC;
+  --qa-muted: #6B6B72;
+  --qa-ink: #1A1A1A;
+  --qa-surface: #FBFAFC;
+  --qa-radius: 10px;
+}
+
+.block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 1320px; }
+header[data-testid="stHeader"] { background: transparent; }
+#MainMenu, footer { visibility: hidden; }
+
+.pill {
+  display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pill-ok   { background: #E1F5E8; color: #126933; }
+.pill-no   { background: #FCE6E6; color: #96181C; }
+.pill-warn { background: #FFF2D9; color: #855400; }
+.pill-run  { background: #E4ECFB; color: #1B3F91; }
+.pill-idle { background: #EFEFF2; color: #6B6B72; }
+
+.qa-muted { color: var(--qa-muted); font-size: 0.82rem; }
+
+.qa-brand { border-bottom: 1px solid var(--qa-border); padding-bottom: .9rem; margin-bottom: 1.6rem; }
+.qa-brand-title {
+  font-size: 1.45rem; font-weight: 700; letter-spacing: -0.01em; color: var(--qa-ink);
+}
+.qa-brand-sub { color: var(--qa-muted); font-size: 0.9rem; margin-top: .15rem; }
+
+/* Page header: same title block on every page. */
+.qa-page-title {
+  font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; color: var(--qa-ink);
+  margin: 0;
+}
+.qa-page-sub {
+  color: var(--qa-muted); font-size: 0.85rem; margin-top: .2rem; max-width: 78ch;
+}
+
+/* Status card, one per component on System health. */
+.qa-card {
+  border: 1px solid var(--qa-border); border-radius: var(--qa-radius);
+  background: var(--qa-surface); padding: .7rem .8rem; height: 100%;
+}
+.qa-card-label {
+  font-size: 0.78rem; font-weight: 600; color: var(--qa-ink);
+  overflow-wrap: anywhere;
+}
+.qa-card-detail {
+  color: var(--qa-muted); font-size: 0.76rem; margin-top: .35rem;
+  overflow-wrap: anywhere;
+}
+.qa-card-pill { margin-top: .35rem; }
+
+/* Section label above a group of metrics. */
+.qa-section {
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .2rem;
+}

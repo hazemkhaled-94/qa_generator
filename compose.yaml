@@ -1,0 +1,605 @@
+name: qa_generator
+
+# ── Networks: development vs deployment ────────────────────────────────────
+#
+# Development uses one network, `global`, so every service is reachable from
+# the host.
+#
+# Before deployment, replace it with three:
+#
+#   frontend: {}          api, streamlit, adminer, phoenix, argilla,
+#                         seaweedfs-s3, seaweedfs-ui
+#   backend:              every service; no host access, no outbound
+#     internal: true
+#   egress: {}            the four workers only
+#
+# Then drop `ports:` from postgres, seaweedfs-volume and seaweedfs-volume2.
+# Postgres is then reached through adminer, and the seaweedfs master and
+# filer UIs through seaweedfs-ui.
+#
+# Two constraints:
+#   - Publish a port only from a non-internal network.
+#   - Give each service exactly one non-internal network, or it gets two
+#     default routes and loses outbound.
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "5" }
+
+# ── Environment ────────────────────────────────────────────────────────────
+#
+# Every tuning value the backend reads is in configs/env/backend.env, which
+# the five backend services take with env_file and the Makefile sources for
+# the host commands, so one value reaches both.
+#
+# What stays here is what an env file cannot express: a value composed out of
+# others, a setting the container knows by a different name than .env does,
+# and a credential.
+
+# All services.
+x-service-env: &service-env
+  TZ: UTC
+  DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
+  LOG_LEVEL: ${LOG_LEVEL}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+  OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
+
+# Object store readers and writers.
+x-store-env: &store-env
+  S3_ENDPOINT: http://seaweedfs-s3:8333
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+
+# Extraction only. Its mode, temperature, timeout and attempt count are in
+# backend.env; which model and where it is served stay here, because that is
+# one deployment's choice rather than a project default.
+x-model-env: &model-env
+  EXTRACTION_MODEL: ${EXTRACTION_MODEL}
+  # Container's view of the model, not the host's.
+  EXTRACTION_MODEL_BASE_URL: ${EXTRACTION_MODEL_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+# ── Workers ────────────────────────────────────────────────────────────────
+
+x-worker: &worker
+  # Shared with api; one build for all five services.
+  image: qa_generator-backend:latest
+  build:
+    context: .
+    dockerfile: backend/api/Dockerfile
+    args:
+      SPACY_MODELS: ${SPACY_MODELS:-de_core_news_sm en_core_web_sm}
+  restart: unless-stopped
+  env_file: [configs/env/backend.env]
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - ./backend/api:/app/api:ro
+    - ./backend/database:/app/database:ro
+    - ./backend/blob_store:/app/blob_store:ro
+    - ./backend/settings:/app/settings:ro
+    - ./backend/stages:/app/stages:ro
+    - ./backend/ingestion:/app/ingestion:ro
+    - ./backend/preprocessing:/app/preprocessing:ro
+    - ./backend/extraction:/app/extraction:ro
+    - ./backend/topic_modelling:/app/topic_modelling:ro
+    - ./backend/nlp:/app/nlp:ro
+    - ./telemetry:/shared/telemetry:ro
+  depends_on:
+    postgres:      { condition: service_healthy }
+    seaweedfs-s3:  { condition: service_healthy }
+  networks: [global]
+  logging: *logging
+
+# Dagster. Profile: orchestration.
+x-dagster: &dagster
+  image: qa-generator:latest
+  profiles: ["orchestration"]
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment:
+    TZ: UTC
+    DAGSTER_HOME: /opt/dagster/dagster_home
+    DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
+    DAGSTER_DB_USER: ${DAGSTER_DB_USER}
+    DAGSTER_DB_PASSWORD: ${DAGSTER_DB_PASSWORD}
+    DAGSTER_DB_NAME: ${DAGSTER_DB_NAME}
+    S3_ENDPOINT: http://seaweedfs-s3:8333
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${S3_SECRET_KEY}
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://phoenix:4317
+    OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL}
+  volumes:
+    - dagster_home:/opt/dagster/dagster_home
+    - ./configs/dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
+    - ./configs/dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
+  depends_on:
+    postgres:      { condition: service_healthy }
+    seaweedfs-s3:  { condition: service_healthy }
+  networks: [global]
+  logging: *logging
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SEAWEEDFS_DB_NAME: ${SEAWEEDFS_DB_NAME}
+      SEAWEEDFS_DB_USER: ${SEAWEEDFS_DB_USER}
+      SEAWEEDFS_DB_PASSWORD: ${SEAWEEDFS_DB_PASSWORD}
+      PHOENIX_DB_NAME: ${PHOENIX_DB_NAME}
+      PHOENIX_DB_USER: ${PHOENIX_DB_USER}
+      PHOENIX_DB_PASSWORD: ${PHOENIX_DB_PASSWORD}
+      DAGSTER_DB_NAME: ${DAGSTER_DB_NAME}
+      DAGSTER_DB_USER: ${DAGSTER_DB_USER}
+      DAGSTER_DB_PASSWORD: ${DAGSTER_DB_PASSWORD}
+      ARGILLA_DB_NAME: ${ARGILLA_DB_NAME}
+      ARGILLA_DB_USER: ${ARGILLA_DB_USER}
+      ARGILLA_DB_PASSWORD: ${ARGILLA_DB_PASSWORD}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./configs/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER} -d ${APP_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    command:
+      - master
+      - -ip=seaweedfs-master
+      - -ip.bind=0.0.0.0
+      - -mdir=/data
+      - -volumeSizeLimitMB=${SEAWEEDFS_VOLUME_SIZE_MB}
+      - -defaultReplication=${SEAWEEDFS_REPLICATION}
+      - -peers=${SEAWEEDFS_MASTER_PEERS}
+    environment:
+      TZ: UTC
+    volumes:
+      - seaweedfs_master:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    command:
+      - volume
+      - -ip=seaweedfs-volume
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -dir=/data
+      - -master=seaweedfs-master:9333
+      - -max=${SEAWEEDFS_MAX_VOLUMES}
+      - -dataCenter=${SEAWEEDFS_DATACENTER}
+      - -rack=${SEAWEEDFS_RACK}
+    environment:
+      TZ: UTC
+    volumes:
+      - seaweedfs_volume:/data
+    ports:
+      - "${SEAWEEDFS_VOLUME_PORT}:8080"
+    depends_on:
+      seaweedfs-master: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8080/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  seaweedfs-volume2:
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    command:
+      - volume
+      - -ip=seaweedfs-volume2
+      - -ip.bind=0.0.0.0
+      - -port=8081
+      - -dir=/data
+      - -master=seaweedfs-master:9333
+      - -max=${SEAWEEDFS_MAX_VOLUMES}
+      - -dataCenter=${SEAWEEDFS_DATACENTER}
+      - -rack=${SEAWEEDFS_RACK}
+    environment:
+      TZ: UTC
+    volumes:
+      - seaweedfs_volume2:/data
+    ports:
+      - "${SEAWEEDFS_VOLUME2_PORT}:8081"
+    depends_on:
+      seaweedfs-master: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8081/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    command:
+      - filer
+      - -ip=seaweedfs-filer
+      - -ip.bind=0.0.0.0
+      - -master=seaweedfs-master:9333
+    env_file: [configs/env/seaweedfs-filer.env]
+    environment:
+      TZ: UTC
+      WEED_POSTGRES_USERNAME: ${SEAWEEDFS_DB_USER}
+      WEED_POSTGRES_PASSWORD: ${SEAWEEDFS_DB_PASSWORD}
+      WEED_POSTGRES_DATABASE: ${SEAWEEDFS_DB_NAME}
+      WEED_POSTGRES_SSLMODE: ${SEAWEEDFS_DB_SSLMODE}
+    depends_on:
+      seaweedfs-master: { condition: service_healthy }
+      postgres:         { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8888/; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 8 ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:4.44
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    command:
+      - s3
+      - -filer=seaweedfs-filer:8888
+      - -ip.bind=0.0.0.0
+      - -port=8333
+      - -config=/etc/seaweedfs/s3.json
+    environment:
+      TZ: UTC
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKETS: ${S3_BUCKETS}
+      SEAWEEDFS_REPLICATION: ${SEAWEEDFS_REPLICATION}
+    volumes:
+      - ./configs/seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+      - ./configs/seaweedfs/bucket-init.sh:/bucket-init.sh:ro
+    ports:
+      - "${S3_PORT}:8333"
+    depends_on:
+      seaweedfs-filer: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8333/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  # Reverse proxy for the master and filer UIs.
+  seaweedfs-ui:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    volumes:
+      - ./configs/seaweedfs/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${SEAWEEDFS_MASTER_PORT}:9333"
+      - "${SEAWEEDFS_FILER_PORT}:8888"
+    depends_on:
+      seaweedfs-master: { condition: service_healthy }
+      seaweedfs-filer:  { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }
+
+  api:
+    image: qa_generator-backend:latest
+    build:
+      context: .
+      dockerfile: backend/api/Dockerfile
+      args:
+        SPACY_MODELS: ${SPACY_MODELS:-de_core_news_sm en_core_web_sm}
+    restart: unless-stopped
+    env_file: [configs/env/backend.env]
+    environment:
+      <<: [*service-env, *store-env]
+    volumes:
+      - ./backend/api:/app/api:ro
+      - ./backend/database:/app/database:ro
+      - ./backend/blob_store:/app/blob_store:ro
+      - ./backend/settings:/app/settings:ro
+      - ./backend/stages:/app/stages:ro
+      - ./backend/ingestion:/app/ingestion:ro
+      - ./backend/preprocessing:/app/preprocessing:ro
+      - ./backend/extraction:/app/extraction:ro
+      - ./backend/topic_modelling:/app/topic_modelling:ro
+      - ./backend/nlp:/app/nlp:ro
+      - ./telemetry:/shared/telemetry:ro
+    ports:
+      - "${BACKEND_PORT}:8000"
+    depends_on:
+      postgres:     { condition: service_healthy }
+      seaweedfs-s3: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request as u; u.urlopen(\"http://localhost:8000/health\", timeout=3)' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  # Converts a stored file into a parsed document. Scalable.
+  parse-worker:
+    <<: *worker
+    command: ["python", "-m", "preprocessing.parsing.run", "--watch"]
+    environment:
+      <<: [*service-env, *store-env]
+    deploy:
+      resources:
+        limits: { cpus: "4.0", memory: 8G }
+
+  # Splits a converted document into passages, and reads their sentences
+  # and lemmas. Scalable.
+  chunk-worker:
+    <<: *worker
+    command: ["python", "-m", "preprocessing.chunking.run", "--watch"]
+    environment:
+      <<: [*service-env, *store-env]
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+
+  # Draws facts out of passages. Scalable.
+  extract-worker:
+    <<: *worker
+    command: ["python", "-m", "extraction.run", "--watch"]
+    environment:
+      <<: [*service-env, *model-env]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
+  # Fits the corpus topic model. Safe to scale, though pointless: a fit is one
+  # request row, and SKIP LOCKED gives it to exactly one worker.
+  topic-worker:
+    <<: *worker
+    command: ["python", "-m", "topic_modelling.run", "--watch"]
+    environment:
+      <<: *service-env
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      BACKEND_URL: ${BACKEND_URL}
+      PAGE_SIZE: ${PAGE_SIZE}
+      LOG_LEVEL: ${LOG_LEVEL}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+      OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
+    volumes:
+      - ./frontend:/app:ro
+      - ./telemetry:/shared/telemetry:ro
+    ports:
+      - "${STREAMLIT_PORT}:8501"
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request as u; u.urlopen(\"http://localhost:8501/_stcore/health\", timeout=3)' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
+  phoenix:
+    image: arizephoenix/phoenix:20.3.0
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_SQL_DATABASE_URL: postgresql://${PHOENIX_DB_USER}:${PHOENIX_DB_PASSWORD}@postgres:5432/${PHOENIX_DB_NAME}
+      PHOENIX_ENABLE_AUTH: ${PHOENIX_ENABLE_AUTH}
+      PHOENIX_ADMIN_SECRET: ${PHOENIX_ADMIN_SECRET}
+      PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD: ${PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD}
+      PHOENIX_SECRET: ${PHOENIX_SECRET}
+    volumes:
+      - phoenix_data:/mnt/data
+    ports:
+      - "${PHOENIX_PORT}:6006"
+      - "${PHOENIX_GRPC_PORT}:4317"
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 1G }
+
+  dagster-webserver:
+    <<: *dagster
+    command: dagster-webserver -h 0.0.0.0 -p 3000
+    ports:
+      - "${DAGSTER_WEBSERVER_PORT}:3000"
+    networks: [global]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+  dagster-daemon:
+    <<: *dagster
+    command: dagster-daemon run
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    restart: unless-stopped
+    env_file: [configs/env/elasticsearch.env]
+    environment:
+      TZ: UTC
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    volumes:
+      - ./certs:/usr/share/elasticsearch/config/certs:ro
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf --cacert /usr/share/elasticsearch/config/certs/ca.crt -u elastic:$$ELASTIC_PASSWORD https://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 2G }
+
+  argilla:
+    image: argilla/argilla-server:v2.8.0
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      ARGILLA_DATABASE_URL: postgresql+asyncpg://${ARGILLA_DB_USER}:${ARGILLA_DB_PASSWORD}@postgres:5432/${ARGILLA_DB_NAME}
+      ARGILLA_ELASTICSEARCH: https://elastic:${ELASTICSEARCH_PASSWORD}@elasticsearch:9200
+      ARGILLA_ELASTICSEARCH_CA_PATH: /etc/argilla-certs/ca.crt
+      ARGILLA_REDIS_URL: redis://redis:6379/0
+      ARGILLA_HOME_PATH: /argilla
+      USERNAME: ${ARGILLA_USERNAME}
+      PASSWORD: ${ARGILLA_PASSWORD}
+    volumes:
+      - ./certs:/etc/argilla-certs:ro
+      - argilla_data:/argilla
+    ports:
+      - "${ARGILLA_PORT}:6900"
+    depends_on:
+      postgres:      { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      redis:         { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request as u; u.urlopen(\"http://localhost:6900/api/v1/version\", timeout=3)' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+  redis:
+    image: redis:8.10.1
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      TZ: UTC
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 256M }
+
+  adminer:
+    image: adminer:6.0.1
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      TZ: UTC
+    ports:
+      - "${ADMINER_PORT}:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [global]
+    logging: *logging
+
+networks:
+  global: {}
+
+volumes:
+  postgres_data:
+  seaweedfs_master:
+  seaweedfs_volume:
+  seaweedfs_volume2:
+  phoenix_data:
+  dagster_home:
+  argilla_data:
+  elasticsearch_data:
+  redis_data:

@@ -1,0 +1,19 @@
+# Dagster instance configuration.
+# Mounted read-only into DAGSTER_HOME (/opt/dagster/dagster_home) in compose.yaml.
+# Connection values are injected from the container environment — no secrets in this file.
+
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: DAGSTER_DB_USER
+      password:
+        env: DAGSTER_DB_PASSWORD
+      hostname: postgres
+      db_name:
+        env: DAGSTER_DB_NAME
+      port: 5432
+
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher

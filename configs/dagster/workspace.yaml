@@ -1,0 +1,11 @@
+# Dagster workspace — defines code locations (Python packages with assets/jobs).
+# Mounted read-only into DAGSTER_HOME in compose.yaml.
+#
+# Add entries here once the pipeline package exists. Example:
+#
+#   load_from:
+#     - python_package:
+#         package_name: qa_generator.pipeline
+#         location_name: qa_generator
+
+load_from: []
