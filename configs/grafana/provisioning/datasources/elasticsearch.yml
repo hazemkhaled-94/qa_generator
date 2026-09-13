@@ -1,0 +1,37 @@
+# The log store, as Grafana reads it. Provisioned rather than clicked
+# together, so a fresh volume comes up with the datasource already there.
+#
+# `$__file{}` reads the CA the Makefile generated, because a provisioning
+# file can carry a certificate's contents and not a path to one. The
+# password is interpolated from the environment compose hands the container.
+
+apiVersion: 1
+
+datasources:
+  - name: Logs
+    uid: qa-logs
+    type: elasticsearch
+    access: proxy
+    url: https://elasticsearch:9200
+    isDefault: true
+    # Edits in the UI would be silently reverted on restart, which is worse
+    # than not offering them.
+    editable: false
+    basicAuth: true
+    basicAuthUser: elastic
+    jsonData:
+      # Every daily index at once. No `interval` here on purpose: with one,
+      # Grafana composes the index name from the time range and a query
+      # spanning a day the pipeline was idle asks for an index that does not
+      # exist.
+      index: "qa-logs-*"
+      timeField: "@timestamp"
+      # What the Logs panel reads as the line and as its severity. Without
+      # these every line renders as raw JSON at one colour.
+      logMessageField: message
+      logLevelField: log.level
+      maxConcurrentShardRequests: 5
+      tlsAuthWithCACert: true
+    secureJsonData:
+      basicAuthPassword: ${ELASTICSEARCH_PASSWORD}
+      tlsCACert: $__file{/etc/grafana/certs/ca.crt}

@@ -17,13 +17,12 @@ figure cannot reach the page without saying what it counts.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import streamlit as st
 
-from lib import config
-
-log = config.get_logger("page")
+log = logging.getLogger(__name__)
 
 #: What each queue status means, in one place: the same words appear on four
 #: pages and on the system status panel.

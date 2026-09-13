@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-import re
 
 from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.doc.labels import DocItemLabel
 
+from nlp.analysis import normalised
 from nlp.language import detect
 from preprocessing.parsing.models import Conversion, ParsedDocument
 
 #: Labels that carry a document's own title.
 _TITLE_LABELS = (DocItemLabel.TITLE, DocItemLabel.SECTION_HEADER)
-
-_WHITESPACE = re.compile(r"\s+")
 
 
 class EmptyDocument(Exception):
@@ -80,7 +78,9 @@ class DocumentAnalyser:
 
         Punctuation and digits are kept: in financial text they are the
         content.
+
+        The same fold as every other text comparison in the project. It used
+        to be `lower`, which leaves ß alone, so a document written STRASSE
+        and one written Straße hashed differently.
         """
-        return hashlib.sha256(
-            _WHITESPACE.sub(" ", body).strip().lower().encode()
-        ).hexdigest()
+        return hashlib.sha256(normalised(body).encode()).hexdigest()

@@ -35,6 +35,7 @@ LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE
 ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSAGE)))
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
+        logs-shipper \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
@@ -78,6 +79,10 @@ down-volumes:
 	@sleep 5
 	$(COMPOSE) down -v
 
+# The container logs, as the engine holds them. Every service, this project's
+# and the infrastructure alike. What the api, the four workers and the
+# frontend log also goes to Elasticsearch as JSON; Grafana is where you read
+# it back across services, filtered and over time.
 logs:
 	$(COMPOSE) logs -f
 
@@ -87,6 +92,12 @@ logs-frontend:
 # Upload failures surface here; the frontend only sees the status code.
 logs-api:
 	$(COMPOSE) logs -f api
+
+# The shipper's own log. Where to look when Grafana shows nothing: a
+# connection refused, a certificate it will not trust, or a rejected mapping
+# is reported here and nowhere else.
+logs-shipper:
+	$(COMPOSE) logs -f filebeat
 
 # ── Database ───────────────────────────────────────────────────────────────
 #

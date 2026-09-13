@@ -1,0 +1,191 @@
+{
+  "uid": "qa-pipeline-logs",
+  "title": "Pipeline logs",
+  "description": "Every line the api, the four workers and the frontend logged. Filter by service and level at the top; the panels below all follow those.",
+  "tags": ["qa_generator"],
+  "timezone": "utc",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+        "query": "{\"find\": \"terms\", \"field\": \"service.name\", \"size\": 20}",
+        "includeAll": true,
+        "multi": true,
+        "allValue": "*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "custom",
+        "query": "debug,info,warning,error,critical",
+        "includeAll": true,
+        "multi": true,
+        "allValue": "*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Lines per level",
+      "description": "How much each service is saying, and at what severity. A step up in error while info stays flat is a stage failing every row it claims rather than a busier pipeline.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "stacking": { "mode": "normal" }, "lineWidth": 0 },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "error" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-red" } }] },
+          { "matcher": { "id": "byName", "options": "warning" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "info" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "debug" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "service.name:($service) AND log.level:($level)",
+          "alias": "{{term log.level}}",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            { "id": "3", "type": "terms", "field": "log.level", "settings": { "size": "10", "order": "desc", "orderBy": "_count", "min_doc_count": "0" } },
+            { "id": "2", "type": "date_histogram", "field": "@timestamp", "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Errors in range",
+      "description": "Lines at error or critical over the selected window, whatever the Level filter above is set to. Zero is what this should read.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "service.name:($service) AND log.level:(error OR critical)",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp", "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "What failed, and where",
+      "description": "One row per error, with the exception type and the first of its traceback. The whole traceback is in error.stack_trace on the log line below.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left", "cellOptions": { "type": "auto", "wrapText": true } } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "error.stack_trace" }, "properties": [{ "id": "custom.width", "value": 520 }] }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "service.name:($service) AND log.level:(error OR critical)",
+          "metrics": [{ "id": "1", "type": "raw_data", "settings": { "size": "100" } }],
+          "bucketAggs": [],
+          "timeField": "@timestamp"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "@timestamp": true,
+              "service.name": true,
+              "log.logger": true,
+              "message": true,
+              "error.type": true,
+              "error.stack_trace": true
+            },
+            "renameByName": {
+              "@timestamp": "When",
+              "service.name": "Service",
+              "log.logger": "Logger",
+              "message": "Message",
+              "error.type": "Exception",
+              "error.stack_trace": "Traceback"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Every line",
+      "description": "The stream itself, newest first. Expand a line to see its fields: trace.id ties it to the span in Phoenix, and error.stack_trace carries the whole traceback.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 17 },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "service.name:($service) AND log.level:($level)",
+          "metrics": [{ "id": "1", "type": "logs", "settings": { "limit": "1000" } }],
+          "bucketAggs": [],
+          "timeField": "@timestamp"
+        }
+      ]
+    }
+  ]
+}

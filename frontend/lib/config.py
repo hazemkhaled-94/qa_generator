@@ -1,24 +1,12 @@
-"""Environment configuration and logging."""
+"""The settings the frontend reads out of its environment."""
 
 from __future__ import annotations
 
-import logging
 import os
-
-import telemetry
 
 #: The one address the frontend holds. The database, the object store and the
 #: pipeline stages all live behind it.
 BACKEND_URL = os.environ["BACKEND_URL"].rstrip("/")
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-
-
-telemetry.configure("frontend", LOG_LEVEL)
-
-
-def get_logger(name: str) -> logging.Logger:
-    """Returns a logger using the project-wide configuration."""
-    return logging.getLogger(name)
 
 
 def _integer(name: str) -> int:

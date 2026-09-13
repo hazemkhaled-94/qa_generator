@@ -78,7 +78,7 @@ RUN pip install --no-cache-dir -r requirements.lock
 # The spaCy pipelines NLP_MODELS names. Baked in because the runtime has no
 # network: a pipeline missing at run time fails every passage of every
 # document, and nothing downloads one on demand.
-ARG SPACY_MODELS="de_core_news_sm en_core_web_sm"
+ARG SPACY_MODELS="de_core_news_md en_core_web_md"
 RUN for model in ${SPACY_MODELS}; do python -m spacy download "$model"; done
 
 # Fails the build if any CUDA wheel is present.
@@ -94,9 +94,18 @@ COPY backend/preprocessing/ ./preprocessing/
 COPY backend/extraction/ ./extraction/
 COPY backend/topic_modelling/ ./topic_modelling/
 COPY backend/nlp/ ./nlp/
+COPY backend/llm/ ./llm/
 COPY telemetry/ /shared/telemetry/
 
 RUN useradd --create-home --uid 1000 app
+
+# Where the JSON log lines go, when LOG_DIR points here. Created before the
+# volume is mounted over it and owned by the user that writes: an empty
+# named volume takes the ownership of the image directory it covers, and a
+# directory that only exists at mount time arrives owned by root, which this
+# process is not.
+RUN mkdir -p /var/log/qa && chown app:app /var/log/qa
+
 USER app
 
 EXPOSE 8000

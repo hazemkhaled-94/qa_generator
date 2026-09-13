@@ -6,6 +6,10 @@ from typing import Any
 
 import requests
 
+#: How long each verb waits, by what it costs the backend. A read is a query;
+#: a delete walks three stores; a post carries a file.
+_TIMEOUTS = {"GET": 10.0, "PATCH": 30.0, "DELETE": 60.0, "POST": 60.0}
+
 
 class Endpoint:
     """One group of backend endpoints, serving one page.
@@ -20,54 +24,20 @@ class Endpoint:
         self._base_url = base_url
         self._session = session
 
-    def _get(self, path: str, *, timeout: float = 10) -> requests.Response:
-        """Sends a GET and raises on any error status.
-
-        Raises:
-            requests.exceptions.RequestException: On a network failure or an
-                error status.
-        """
-        response = self._session.get(f"{self._base_url}{path}", timeout=timeout)
-        response.raise_for_status()
-        return response
-
-    def _delete(self, path: str, *, timeout: float = 60) -> requests.Response:
-        """Sends a DELETE and raises on any error status.
-
-        Raises:
-            requests.exceptions.RequestException: On a network failure or an
-                error status.
-        """
-        response = self._session.delete(f"{self._base_url}{path}", timeout=timeout)
-        response.raise_for_status()
-        return response
-
-    def _patch(
-        self, path: str, *, timeout: float = 30, **kwargs: Any
+    def _request(
+        self, method: str, path: str, *, timeout: float | None = None, **kwargs: Any
     ) -> requests.Response:
-        """Sends a PATCH and raises on any error status.
-
-        Raises:
-            requests.exceptions.RequestException: On a network failure or an
-                error status.
-        """
-        response = self._session.patch(
-            f"{self._base_url}{path}", timeout=timeout, **kwargs
-        )
-        response.raise_for_status()
-        return response
-
-    def _post(
-        self, path: str, *, timeout: float = 60, **kwargs: Any
-    ) -> requests.Response:
-        """Sends a POST and raises on any error status.
+        """Sends one request and raises on any error status.
 
         Raises:
             requests.exceptions.RequestException: On a network failure or an
                 error status, whose body carries the reason.
         """
-        response = self._session.post(
-            f"{self._base_url}{path}", timeout=timeout, **kwargs
+        response = self._session.request(
+            method,
+            f"{self._base_url}{path}",
+            timeout=_TIMEOUTS[method] if timeout is None else timeout,
+            **kwargs,
         )
         response.raise_for_status()
         return response

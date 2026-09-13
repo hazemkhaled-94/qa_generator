@@ -18,8 +18,8 @@ from nlp.pipelines import languages
 _MIN_CHARS = 40
 
 
-def _language(code: str) -> Language:
-    """Turns an ISO 639-1 code into the language lingua knows by it."""
+def _language(code: str) -> Language | None:
+    """Turns an ISO 639-1 code into the language lingua knows by it, or None."""
     iso = getattr(IsoCode639_1, code.upper(), None)
     try:
         return Language.from_iso_code_639_1(iso) if iso else None

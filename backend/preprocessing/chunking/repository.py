@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import ClassVar
 
-from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Passage, Status
-from database.qa_generator.repository import Repository
+from database.qa_generator.repository import Repository, matching
 from preprocessing.chunking.models import (
     Chunk,
     Chunking,
@@ -50,9 +50,10 @@ def _filtered(query, document, search, block_type, field):
     if document:
         query = query.where(Passage.doc_sha256 == document)
     if search:
-        columns = SEARCH_FIELDS.get(field or "", SEARCH_FIELDS[DEFAULT_FIELD])
         query = query.where(
-            or_(*(c.icontains(search, autoescape=True) for c in columns))
+            matching(
+                search, *SEARCH_FIELDS.get(field or "", SEARCH_FIELDS[DEFAULT_FIELD])
+            )
         )
     if block_type:
         query = query.where(Passage.block_type == block_type)

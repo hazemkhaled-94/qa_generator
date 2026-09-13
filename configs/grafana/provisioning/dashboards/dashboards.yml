@@ -1,0 +1,16 @@
+# Loads every dashboard JSON beside this file.
+
+apiVersion: 1
+
+providers:
+  - name: qa_generator
+    type: file
+    folder: qa_generator
+    disableDeletion: false
+    # Edits are kept until the file changes, so a panel can be adjusted in
+    # the UI and then written back here.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

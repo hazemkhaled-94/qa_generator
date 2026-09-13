@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from api.dependencies import export_bucket, topic_catalog, topics_queue
 from api.errors import ApiError, ErrorBody
-from api.routes.stage import StageQueued, StageRetry, StageStatus, status_of
+from api.routes.stage import StageAction, StageStatus, answered, status_of
 from topic_modelling.models import StoredTopic, TopicFit, TopicRemoval
 
 router = APIRouter(prefix="/topics", tags=["topics"])
@@ -128,22 +128,15 @@ def discover() -> TopicDiscovery:
 
 
 @router.post("/stop")
-def stop() -> StageQueued:
+def stop() -> StageAction:
     """Takes a queued fit back off the queue."""
-    queued = topics_queue.stop()
-    return StageQueued(
-        stage="topics",
-        queued=queued,
-        detail=f"{queued} fit(s) taken off the queue; one in progress will finish."
-        if queued
-        else "no fit was queued.",
-    )
+    return answered("topics", "stop", topics_queue.stop())
 
 
 @router.post("/retry")
-def retry() -> StageRetry:
+def retry() -> StageAction:
     """Returns a failed fit to the queue."""
-    return StageRetry(stage="topics", retried=topics_queue.retry())
+    return answered("topics", "retry", topics_queue.retry())
 
 
 @router.delete("")

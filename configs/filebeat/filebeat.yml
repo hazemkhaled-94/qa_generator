@@ -1,0 +1,73 @@
+# Reads the JSON lines the api, the four workers and the frontend write to
+# the shared `logs` volume, and puts each one in Elasticsearch.
+#
+# Only this project's own processes. The infrastructure containers - Postgres,
+# SeaweedFS, Redis, Elasticsearch itself - keep the json-file driver and are
+# read with `make logs`. Collecting those too would mean reaching the engine's
+# own log store, whose location differs between Docker and Podman and, on
+# macOS, sits inside a virtual machine the bind mount cannot see. A second
+# input here is all it would take once that path is known for one machine.
+#
+# Nothing is transformed on the way through: the application already writes
+# ECS field names, so Elasticsearch's own template maps `log.level` and
+# `service.name` as keywords with nothing configured here.
+
+filebeat.inputs:
+  - type: filestream
+    id: qa-generator
+    enabled: true
+    paths:
+      - /var/log/qa/*.log
+    parsers:
+      # One JSON object per line, merged into the event root rather than
+      # nested under a key. overwrite_keys is what lets the line's own
+      # @timestamp stand: without it every event is dated when it was read,
+      # which for a worker that has been down is hours wrong.
+      - ndjson:
+          target: ""
+          overwrite_keys: true
+          expand_keys: true
+          add_error_key: true
+    # A scaled stage writes one file per container and those files stop being
+    # written when it goes. Long enough that a stopped worker's last lines are
+    # still picked up on the next start.
+    ignore_older: 72h
+    clean_inactive: 96h
+
+processors:
+  # Filebeat's own version and the ECS version it claims, on every document.
+  # Neither is queried and both are indexed.
+  - drop_fields:
+      fields: ["agent", "ecs", "input"]
+      ignore_missing: true
+
+output.elasticsearch:
+  hosts: ["https://elasticsearch:9200"]
+  username: "elastic"
+  password: "${ELASTICSEARCH_PASSWORD}"
+  ssl.certificate_authorities: ["/usr/share/filebeat/certs/ca.crt"]
+  index: "qa-logs-%{+yyyy.MM.dd}"
+
+# Required once `index` is set: without a template name and pattern Filebeat
+# refuses to start, and without ILM disabled it writes to its own managed
+# alias instead of the index above.
+setup.template.name: "qa-logs"
+setup.template.pattern: "qa-logs-*"
+setup.ilm.enabled: false
+
+# There is no Kibana in this deployment; Grafana reads the indices directly.
+setup.kibana.enabled: false
+setup.dashboards.enabled: false
+
+# Filebeat's own logs go to the container's stderr, so `make logs-shipper`
+# shows why nothing is arriving when nothing is arriving.
+logging.level: info
+logging.to_files: false
+logging.to_stderr: true
+
+# One page of documents per request, and a bounded wait so a quiet pipeline
+# still ships within a few seconds rather than when the batch fills.
+queue.mem:
+  events: 4096
+  flush.min_events: 512
+  flush.timeout: 5s

@@ -16,7 +16,8 @@ class UploadApi(Endpoint):
                 413 or 415 when the file is refused, with the reason in the
                 response body.
         """
-        return self._post(
+        return self._request(
+            "POST",
             "/documents",
             files={"file": (filename, data, "application/octet-stream")},
         ).json()

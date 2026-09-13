@@ -283,9 +283,8 @@ def _removal(client, document: dict) -> None:
     st.html(
         "<div class='qa-danger-zone'>"
         "<div class='qa-danger-title'>Delete</div>"
-        "<div class='qa-danger-detail'>Both of these act on this document "
-        "only, and neither can be undone. Each asks once more before it "
-        "happens.</div></div>"
+        "<div class='qa-danger-detail'>Actions are done on this document "
+        "only, and can not be undone!</div></div>"
     )
 
     derived, whole, *_ = st.columns(stage.DANGER)

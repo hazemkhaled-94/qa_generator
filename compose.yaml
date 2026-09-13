@@ -37,10 +37,16 @@ x-logging: &logging
 # and a credential.
 
 # All services.
+#
+# LOG_DIR is a path inside the container rather than a deployment choice, so
+# it is here and not in .env: it names the shared `logs` volume that filebeat
+# reads. Set it to nothing and the process logs to stdout only, which is what
+# every host command does.
 x-service-env: &service-env
   TZ: UTC
   DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
   LOG_LEVEL: ${LOG_LEVEL}
+  LOG_DIR: /var/log/qa
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
   OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
 
@@ -50,13 +56,14 @@ x-store-env: &store-env
   S3_ACCESS_KEY: ${S3_ACCESS_KEY}
   S3_SECRET_KEY: ${S3_SECRET_KEY}
 
-# Extraction only. Its mode, temperature, timeout and attempt count are in
+# The stages that call a served model: extraction reads passages with it,
+# topic modelling names topics with it. Its mode, temperature, timeout and attempt count are in
 # backend.env; which model and where it is served stay here, because that is
 # one deployment's choice rather than a project default.
 x-model-env: &model-env
-  EXTRACTION_MODEL: ${EXTRACTION_MODEL}
+  LLM_MODEL: ${LLM_MODEL}
   # Container's view of the model, not the host's.
-  EXTRACTION_MODEL_BASE_URL: ${EXTRACTION_MODEL_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
+  LLM_BASE_URL: ${LLM_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
@@ -69,7 +76,7 @@ x-worker: &worker
     context: .
     dockerfile: backend/api/Dockerfile
     args:
-      SPACY_MODELS: ${SPACY_MODELS:-de_core_news_sm en_core_web_sm}
+      SPACY_MODELS: ${SPACY_MODELS:-de_core_news_md en_core_web_md}
   restart: unless-stopped
   env_file: [configs/env/backend.env]
   extra_hosts:
@@ -85,7 +92,9 @@ x-worker: &worker
     - ./backend/extraction:/app/extraction:ro
     - ./backend/topic_modelling:/app/topic_modelling:ro
     - ./backend/nlp:/app/nlp:ro
+    - ./backend/llm:/app/llm:ro
     - ./telemetry:/shared/telemetry:ro
+    - logs:/var/log/qa
   depends_on:
     postgres:      { condition: service_healthy }
     seaweedfs-s3:  { condition: service_healthy }
@@ -353,7 +362,7 @@ services:
       context: .
       dockerfile: backend/api/Dockerfile
       args:
-        SPACY_MODELS: ${SPACY_MODELS:-de_core_news_sm en_core_web_sm}
+        SPACY_MODELS: ${SPACY_MODELS:-de_core_news_md en_core_web_md}
     restart: unless-stopped
     env_file: [configs/env/backend.env]
     environment:
@@ -369,7 +378,9 @@ services:
       - ./backend/extraction:/app/extraction:ro
       - ./backend/topic_modelling:/app/topic_modelling:ro
       - ./backend/nlp:/app/nlp:ro
+      - ./backend/llm:/app/llm:ro
       - ./telemetry:/shared/telemetry:ro
+      - logs:/var/log/qa
     ports:
       - "${BACKEND_PORT}:8000"
     depends_on:
@@ -424,7 +435,8 @@ services:
     <<: *worker
     command: ["python", "-m", "topic_modelling.run", "--watch"]
     environment:
-      <<: *service-env
+      # The model names each topic once the fit is done.
+      <<: [*service-env, *model-env]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 2G }
@@ -439,12 +451,14 @@ services:
       BACKEND_URL: ${BACKEND_URL}
       PAGE_SIZE: ${PAGE_SIZE}
       LOG_LEVEL: ${LOG_LEVEL}
+      LOG_DIR: /var/log/qa
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
       OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
       STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
     volumes:
       - ./frontend:/app:ro
       - ./telemetry:/shared/telemetry:ro
+      - logs:/var/log/qa
     ports:
       - "${STREAMLIT_PORT}:8501"
     depends_on:
@@ -577,6 +591,73 @@ services:
       resources:
         limits: { cpus: "0.25", memory: 256M }
 
+  # Reads the JSON lines the api, the four workers and the frontend write to
+  # the shared volume, and puts each one in Elasticsearch. Runs as root, which
+  # is how it reads a volume the app user owns; --strict.perms=false is what
+  # lets it accept a config file owned by whoever cloned the repository.
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.17.0
+    restart: unless-stopped
+    user: root
+    command: ["filebeat", "-e", "--strict.perms=false"]
+    environment:
+      TZ: UTC
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    volumes:
+      - ./configs/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./certs:/usr/share/filebeat/certs:ro
+      # Read-only: this reads the pipeline's logs and must not be able to
+      # delete or rotate what the processes writing them are managing.
+      - logs:/var/log/qa:ro
+      # The registry, so a restart resumes where it left off rather than
+      # shipping every line in every file again.
+      - filebeat_data:/usr/share/filebeat/data
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+      # service_started, not service_healthy: an empty named volume takes its
+      # ownership from the image directory of whichever container mounts it
+      # first, and this one runs as root and has no /var/log/qa to copy. The
+      # api mounting first is what makes the volume writable by the app user.
+      # Started rather than healthy on purpose - a shipper that waits for the
+      # api to be well cannot ship the logs saying why it is not.
+      api: { condition: service_started }
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Read by the provisioned datasource, which cannot hold a credential
+      # of its own in a file that is in git.
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    volumes:
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./certs:/etc/grafana/certs:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [global]
+    logging: *logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
   adminer:
     image: adminer:6.0.1
     restart: unless-stopped
@@ -603,3 +684,10 @@ volumes:
   argilla_data:
   elasticsearch_data:
   redis_data:
+  grafana_data:
+  filebeat_data:
+  #: Written by the api, the four workers and the frontend; read by filebeat.
+  #: A volume rather than the engine's own log store, because that store is
+  #: in a different place under Docker and Podman and, on macOS, inside a
+  #: virtual machine.
+  logs:

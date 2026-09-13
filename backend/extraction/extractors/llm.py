@@ -2,35 +2,13 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Any, ClassVar
+from typing import ClassVar
 
-import instructor
-import litellm
-from instructor.core import InstructorRetryException
 from pydantic import BaseModel, Field
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from extraction.extractors.base import ExtractionFailed, Extractor
 from extraction.models import CandidateFact, PassageToExtract, Provenance
-
-log = logging.getLogger(__name__)
-
-#: Failures worth another attempt. An authentication failure, an unknown
-#: model or a malformed schema is none of these and is raised at once.
-_TRANSIENT = (
-    litellm.exceptions.APIConnectionError,
-    litellm.exceptions.Timeout,
-    litellm.exceptions.RateLimitError,
-    litellm.exceptions.InternalServerError,
-    litellm.exceptions.ServiceUnavailableError,
-    InstructorRetryException,
-)
+from llm.client import Client, ModelUnavailable
 
 #: Recorded on every fact drawn with the prompt below. Bumped whenever that
 #: prompt changes what counts as a fact: two prompts are two datasets.
@@ -117,17 +95,6 @@ class _Facts(BaseModel):
     )
 
 
-def _mode(name: str) -> instructor.Mode:
-    """Turns a mode name from the environment into the mode itself."""
-    try:
-        return instructor.Mode[name.strip().upper()]
-    except KeyError:
-        raise ValueError(
-            f"EXTRACTION_STRUCTURED_MODE={name!r} is not an instructor mode; "
-            f"expected one of {', '.join(sorted(m.name for m in instructor.Mode))}"
-        ) from None
-
-
 class LlmExtractor(Extractor):
     """Reads facts out of prose with a local model.
 
@@ -140,50 +107,27 @@ class LlmExtractor(Extractor):
     block_types: ClassVar[tuple[str, ...]] = ()
     method: ClassVar[str] = "llm"
 
-    def __init__(
-        self,
-        *,
-        model: str,
-        base_url: str | None,
-        temperature: float,
-        timeout: float,
-        max_attempts: int,
-        structured_mode: str = "JSON_SCHEMA",
-    ) -> None:
-        """Initialises the extractor and its client."""
-        self._model = model
-        self._base_url = base_url
-        self._temperature = temperature
-        self._timeout = timeout
-        # Any: instructor replaces create() at run time, so a checker would
-        # match these keywords against the unpatched signature.
-        self._client: Any = instructor.from_litellm(
-            litellm.completion, mode=_mode(structured_mode)
-        )
-        # Only _TRANSIENT: retrying a bad model name or schema costs the
-        # backoff on every passage and buries the real error.
-        self._attempt = retry(
-            retry=retry_if_exception_type(_TRANSIENT),
-            stop=stop_after_attempt(max_attempts),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            reraise=True,
-        )(self._ask)
+    def __init__(self, client: Client) -> None:
+        """Initialises the extractor with the model it asks."""
+        self._client = client
 
     @property
     def provenance(self) -> Provenance:
         """What produced these facts, recorded on each one."""
         return Provenance(
-            model=self._model,
+            model=self._client.model,
             prompt_version=PROMPT_VERSION,
-            temperature=self._temperature,
+            temperature=self._client.temperature,
         )
 
     def extract(self, passage: PassageToExtract) -> list[CandidateFact]:
         """Asks the model for the facts in one passage."""
         try:
-            answer = self._attempt(passage)
-        except Exception as exc:
-            raise ExtractionFailed(f"{type(exc).__name__}: {exc}") from exc
+            answer = self._client.answer(
+                system=_SYSTEM, user=self._prompt(passage), shape=_Facts
+            )
+        except ModelUnavailable as exc:
+            raise ExtractionFailed(str(exc)) from exc
         return [
             CandidateFact(
                 statement=fact.statement, sentences=tuple(dict.fromkeys(fact.sentences))
@@ -191,22 +135,6 @@ class LlmExtractor(Extractor):
             for fact in answer.facts
             if fact.statement.strip() and fact.sentences
         ]
-
-    def _ask(self, passage: PassageToExtract) -> _Facts:
-        """Sends one passage to the model."""
-        return self._client.chat.completions.create(
-            model=self._model,
-            # Omitted when unset: a provider with its own address would be
-            # sent to the wrong one by a base URL meant for Ollama.
-            **({"api_base": self._base_url} if self._base_url else {}),
-            temperature=self._temperature,
-            timeout=self._timeout,
-            response_model=_Facts,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": self._prompt(passage)},
-            ],
-        )
 
     @staticmethod
     def _prompt(passage: PassageToExtract) -> str:

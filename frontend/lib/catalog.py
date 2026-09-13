@@ -31,11 +31,6 @@ class Toolbar(NamedTuple):
     page: DeltaGenerator
 
 
-def page_size() -> int:
-    """Rows per page, from the environment."""
-    return config.PAGE_SIZE
-
-
 def label_for(document: dict) -> str:
     """Names a document the way a person would recognise it."""
     return document.get("filename") or f"{document['sha256'][:12]}…"
@@ -137,7 +132,7 @@ def paged(
     which is drawn afterwards: asking the backend for the total first cost a
     second request, and its own count query, on every rerun.
     """
-    size = page_size()
+    size = config.PAGE_SIZE
     slot = f"{key}-page"
     page = int(st.session_state.get(slot, 1))
 

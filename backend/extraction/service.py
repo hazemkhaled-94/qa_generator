@@ -3,30 +3,27 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import ClassVar
 
 from extraction.extractors import ExtractionFailed, ExtractorRegistry
 from extraction.models import CheckedFact, PassageToExtract
 from extraction.repository import PassageQueue
 from extraction.validation import FactChecker
+from nlp.analysis import normalised
 from stages import StageService
 from telemetry import tracer
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
 
-_WHITESPACE = re.compile(r"\s+")
-
 
 def _is_heading(passage: PassageToExtract) -> bool:
     """Reports whether a passage is its own heading and nothing more."""
     if not passage.section_path:
         return False
-    text = _WHITESPACE.sub(" ", passage.text).strip().casefold()
+    text = normalised(passage.text)
     return any(
-        text == segment.strip().casefold()
-        for segment in passage.section_path.split(" > ")
+        text == normalised(segment) for segment in passage.section_path.split(" > ")
     )
 
 

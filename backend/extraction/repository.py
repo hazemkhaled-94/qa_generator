@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from sqlalchemy import Select, delete, func, insert, or_, select
+from sqlalchemy import Select, delete, func, insert, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Fact, Passage, Status
-from database.qa_generator.repository import Repository
+from database.qa_generator.repository import Repository, matching
 from extraction.models import (
     CheckedFact,
     FactQuality,
@@ -49,9 +49,10 @@ def _filtered(query, document, search, method, field):
     if document:
         query = query.where(Passage.doc_sha256 == document)
     if search:
-        columns = SEARCH_FIELDS.get(field or "", SEARCH_FIELDS[DEFAULT_FIELD])
         query = query.where(
-            or_(*(c.icontains(search, autoescape=True) for c in columns))
+            matching(
+                search, *SEARCH_FIELDS.get(field or "", SEARCH_FIELDS[DEFAULT_FIELD])
+            )
         )
     if method:
         query = query.where(Fact.extraction_method == method)

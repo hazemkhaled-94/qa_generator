@@ -17,6 +17,11 @@ COPY frontend/ .
 COPY telemetry/ /shared/telemetry/
 
 RUN useradd --create-home --uid 1000 app
+
+# See the same lines in backend/api/Dockerfile: the named volume takes its
+# ownership from this directory, and root-owned is not writable from here.
+RUN mkdir -p /var/log/qa && chown app:app /var/log/qa
+
 USER app
 
 EXPOSE 8501

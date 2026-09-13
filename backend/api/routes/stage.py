@@ -22,19 +22,27 @@ from typing import Any, Literal, Protocol
 from fastapi import APIRouter
 
 from api.errors import ApiError, ErrorBody
-from stages import QueueState
+from stages import QueueState, Unnarrowable
 
 #: The verbs a narrowed action accepts. A Literal rather than a free string,
 #: so the OpenAPI document lists them and anything else is refused before it
 #: reaches a queue.
 Action = Literal["start", "stop", "retry", "rerun"]
 
-#: How each verb reads once it has happened, for the message the page shows.
+#: What each refusal the queue can raise is answered with.
+_REFUSED = {"unknown_scope": 404, "invalid_value": 400}
+
+#: How each verb reads once it has happened, and how it reads when it moved
+#: nothing. Both here, so the whole-queue route and the narrowed one cannot
+#: describe the same operation differently.
 _DONE = {
-    "start": "queued",
-    "stop": "taken off the queue",
-    "retry": "returned to the queue",
-    "rerun": "queued again",
+    "start": ("queued; the worker will pick them up", "nothing new to do"),
+    "stop": (
+        "taken off the queue; the item in progress finishes",
+        "nothing was queued",
+    ),
+    "retry": ("returned to the queue", "nothing has failed"),
+    "rerun": ("queued again; the worker will pick them up", "there is nothing to redo"),
 }
 
 
@@ -48,8 +56,8 @@ class StageRepository(Protocol):
     #: Which columns this stage may be narrowed to, by the name a route takes.
     scopes: dict[str, Any]
 
-    def narrow(self, scope: str, value: str) -> Any:
-        """Builds the condition one scope's value selects."""
+    def narrowed(self, scope: str, value: str) -> Any:
+        """Builds the condition one scope's value selects, refusing either."""
         ...
 
     def queue_state(self, within: Any = None) -> QueueState:
@@ -92,44 +100,20 @@ class StageStatus:
 
 @dataclass(frozen=True)
 class StageAction:
-    """What one narrowed verb moved.
+    """What one verb moved.
 
-    One shape for all four, because narrowed they differ only in which rows
-    they select and what the count then means.
+    One shape for every verb, narrowed or not: they differ only in which rows
+    they select and what the count then means, which `action` and `detail`
+    say. `scope` and `value` are absent when the verb ran over the whole
+    queue.
     """
 
     stage: str
-    scope: str
-    value: str
     action: str
     rows: int
     detail: str
-
-
-@dataclass(frozen=True)
-class StageQueued:
-    """The answer to starting or stopping a stage."""
-
-    stage: str
-    queued: int
-    detail: str
-
-
-@dataclass(frozen=True)
-class StageRetry:
-    """The result of returning failed rows to a queue."""
-
-    stage: str
-    retried: int
-
-
-@dataclass(frozen=True)
-class StageRerun:
-    """The answer to a request to run a stage again from the start."""
-
-    stage: str
-    reset: int
-    detail: str
+    scope: str | None = None
+    value: str | None = None
 
 
 def status_of(
@@ -158,22 +142,69 @@ def status_of(
 def _narrowed(repository: StageRepository, scope: str, value: str):
     """Builds the condition one scope and value select, refusing either.
 
+    The wording is the queue's; this only chooses the status it answers with.
+
     Raises:
         ApiError: 404 `unknown_scope` if this stage cannot be narrowed that
             way, 400 `invalid_value` if the value is not what the column
             holds.
     """
     try:
-        return repository.narrow(scope, value)
-    except KeyError:
-        accepted = ", ".join(repository.scopes) or "nothing"
-        raise ApiError(
-            404, "unknown_scope", f"this stage narrows to {accepted}, not {scope!r}"
-        ) from None
-    except ValueError:
-        raise ApiError(
-            400, "invalid_value", f"{value!r} is not a valid {scope}"
-        ) from None
+        return repository.narrowed(scope, value)
+    except Unnarrowable as exc:
+        raise ApiError(_REFUSED[exc.code], exc.code, str(exc)) from None
+
+
+def answered(
+    name: str,
+    action: Action,
+    rows: int,
+    *,
+    scope: str | None = None,
+    value: str | None = None,
+) -> StageAction:
+    """Says what one verb moved, in the words every route uses for it.
+
+    Separate from :func:`acted` for topic modelling, which owns its routes
+    because a fit is asked for rather than started, and so counts its own
+    rows - but should still describe `stop` the way every other stage does.
+    """
+    done, nothing = _DONE[action]
+    return StageAction(
+        stage=name,
+        action=action,
+        rows=rows,
+        detail=(
+            f"{rows} row(s) {done}."
+            if rows
+            else f"{nothing}{f' for that {scope}' if scope else ''}."
+        ),
+        scope=scope,
+        value=value,
+    )
+
+
+def acted(
+    name: str,
+    repository: StageRepository,
+    action: Action,
+    *,
+    within: Any = None,
+    scope: str | None = None,
+    value: str | None = None,
+) -> StageAction:
+    """Runs one queue verb and says what it moved.
+
+    Shared by the whole-queue route and the narrowed one, so the same verb
+    cannot describe itself two ways depending on which was called.
+    """
+    rows = {
+        "start": repository.start,
+        "stop": repository.stop,
+        "retry": repository.retry,
+        "rerun": repository.reset,
+    }[action](within)
+    return answered(name, action, rows, scope=scope, value=value)
 
 
 def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
@@ -186,53 +217,16 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
         """Reports how much work this stage has waiting."""
         return status_of(name, repository)
 
-    @router.post("/start", status_code=202)
-    def start() -> StageQueued:
-        """Queues everything this stage has not been asked to do yet.
+    @router.post("/{action}", status_code=202)
+    def whole_queue(action: Action) -> StageAction:
+        """Runs one queue verb over everything this stage owns.
 
-        Returns at once: the worker claims the rows on its next poll.
+        Returns at once: none of these does the work. `start` makes rows
+        claimable, `stop` makes them `new` again, `retry` clears a failure
+        and `rerun` queues finished rows too, skipping whatever a worker
+        holds right now. The worker picks them up on its next poll.
         """
-        queued = repository.start()
-        return StageQueued(
-            stage=name,
-            queued=queued,
-            detail=f"{queued} queued; the worker will pick them up."
-            if queued
-            else "nothing new to do.",
-        )
-
-    @router.post("/stop")
-    def stop() -> StageQueued:
-        """Takes back everything this stage has not started yet.
-
-        The row a worker is holding is left to finish.
-        """
-        queued = repository.stop()
-        return StageQueued(
-            stage=name,
-            queued=queued,
-            detail=f"{queued} taken off the queue; the item in progress will finish."
-            if queued
-            else "nothing was queued.",
-        )
-
-    @router.post("/retry")
-    def retry() -> StageRetry:
-        """Returns every failed row of this stage to the queue."""
-        return StageRetry(stage=name, retried=repository.retry())
-
-    @router.post("/rerun", status_code=202)
-    def rerun() -> StageRerun:
-        """Queues every row of this stage again, finished ones included.
-
-        Safe while a worker is running: rows a worker holds are skipped.
-        """
-        reset = repository.reset()
-        return StageRerun(
-            stage=name,
-            reset=reset,
-            detail=f"{reset} queued; the worker will pick them up.",
-        )
+        return acted(name, repository, action)
 
     @router.get("/{scope}/{value}/status", responses=refusals)
     def scoped_status(scope: str, value: str) -> StageStatus:
@@ -248,28 +242,18 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
         """Runs one queue verb against a single item.
 
         The same operation as the route without a scope, against the rows
-        that scope selects. Nothing runs here either: the worker picks up
-        whatever has become claimable.
+        that scope selects.
 
         Raises:
             ApiError: 404 `unknown_scope`, 400 `invalid_value`.
         """
-        within = _narrowed(repository, scope, value)
-        rows = {
-            "start": repository.start,
-            "stop": repository.stop,
-            "retry": repository.retry,
-            "rerun": repository.reset,
-        }[action](within)
-        return StageAction(
-            stage=name,
+        return acted(
+            name,
+            repository,
+            action,
+            within=_narrowed(repository, scope, value),
             scope=scope,
             value=value,
-            action=action,
-            rows=rows,
-            detail=f"{rows} row(s) {_DONE[action]}."
-            if rows
-            else f"nothing to {action} for that {scope}.",
         )
 
     return router

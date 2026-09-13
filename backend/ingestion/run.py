@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
 
     settings = Settings.load()
-    telemetry.configure("ingestion", settings.log_level)
+    telemetry.configure("ingestion")
     telemetry.trace_engine(engine())
 
     if args.list:

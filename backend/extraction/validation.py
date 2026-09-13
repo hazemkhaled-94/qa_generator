@@ -7,7 +7,6 @@ rather than guessed from how many words it shares with its source.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -18,21 +17,14 @@ from extraction.models import (
     PassageToExtract,
     Provenance,
 )
-from nlp.analysis import VERSION, claim, vocabulary
+from nlp.analysis import VERSION, claim, normalised, vocabulary
 from nlp.models import Claim
 from nlp.pipelines import name as pipeline_name
-
-_WHITESPACE = re.compile(r"\s+")
 
 #: The method whose statements a model writes. A deterministic reader
 #: composes its statement from the grid, so it is neither a sentence nor
 #: expected to read like one.
 _WRITTEN = "llm"
-
-
-def normalised(text: str) -> str:
-    """Collapses spacing and case, for comparing two strings as words."""
-    return _WHITESPACE.sub(" ", text).strip().casefold()
 
 
 @dataclass(frozen=True)

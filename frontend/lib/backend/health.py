@@ -21,7 +21,7 @@ class HealthApi(Endpoint):
         down from the backend's database being down.
         """
         try:
-            self._get("/health", timeout=5)
+            self._request("GET", "/health", timeout=5)
         except requests.exceptions.RequestException as exc:
             log.warning("backend unreachable: %s", exc)
             return False, str(exc)
@@ -30,7 +30,7 @@ class HealthApi(Endpoint):
     def components(self) -> dict[str, dict]:
         """Fetches the state of everything behind the API."""
         try:
-            return self._get("/status").json()
+            return self._request("GET", "/status").json()
         except requests.exceptions.RequestException as exc:
             log.warning("cannot read backend status: %s", exc)
             return {}

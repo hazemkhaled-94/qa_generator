@@ -18,7 +18,6 @@ class Settings:
     pipeline_version: str
     max_file_size_mb: int
     allowed_mime_types: tuple[str, ...]
-    log_level: str
 
     @property
     def max_file_size_bytes(self) -> int:
@@ -36,5 +35,4 @@ class Settings:
             pipeline_version=required("PIPELINE_VERSION"),
             max_file_size_mb=integer("MAX_FILE_SIZE_MB"),
             allowed_mime_types=csv("ALLOWED_MIME_TYPES"),
-            log_level=required("LOG_LEVEL").upper(),
         )

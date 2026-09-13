@@ -78,6 +78,7 @@ Once it reports ready:
 | Frontend | http://localhost:8501 | Upload documents, browse passages and facts, view system status |
 | API | http://localhost:8000/docs | OpenAPI documentation |
 | Phoenix | http://localhost:6006 | Traces — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
+| Grafana | http://localhost:3001 | Logs — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
 | Adminer | http://localhost:9001 | Database browser |
 
 Upload a PDF from the frontend, then pick it in the table on the Documents
@@ -95,6 +96,7 @@ make down-volumes    # stop services and delete all data
 make logs            # follow all logs
 make logs-api        # follow the API log
 make logs-frontend   # follow the frontend log
+make logs-shipper    # follow the log shipper, when Grafana shows nothing
 make check           # run the self-checks; no database, no served model
 make lint            # ruff check and format check
 make format          # apply every fix ruff can make
@@ -430,6 +432,8 @@ because no document in the corpus has any.
 | `backend/settings/` | Reading configuration out of the environment, and nowhere else |
 | `backend/checks.py` | Self-checks for the logic that would fail silently |
 | `telemetry/` | Logging and OpenTelemetry configuration |
+| `configs/filebeat/` | What the log shipper reads and where it puts it |
+| `configs/grafana/` | The log datasource and dashboard, provisioned |
 | `frontend/` | Streamlit application |
 | `configs/env/` | The settings that are decisions rather than credentials, and so live in git |
 | `configs/` | Service configuration and init scripts |
@@ -460,6 +464,56 @@ own different columns of the same `documents` row. That is the right shape at
 this size; splitting them further would mean a schema and a migration history
 each, and a contract between them that is not a table.
 
+## Logs
+
+One configuration, in `telemetry/`, and every process calls it before it does
+anything else. Each record is rendered twice: as a line of text on stdout,
+which is what `make logs` shows, and as one JSON object per line in a file,
+which is what reaches Elasticsearch. Same record, same fields; the JSON
+carries the ones a text line has no room for.
+
+    api, 4 workers, streamlit  ──▶  logs volume  ──▶  filebeat  ──▶  elasticsearch  ──▶  grafana
+
+Nothing is aggregated and nothing is dropped on the way. Every level from
+`LOG_LEVEL` upwards is shipped, `DEBUG` included when it is set that low. An
+exception is written whole: `error.type`, `error.message` and the entire
+traceback in `error.stack_trace`, so a failure is readable in Grafana without
+going back to the container. Every stage that records a failure against a row
+also logs it with its traceback — the row's error column is one line for a
+person reading the Documents page, not the whole story.
+
+The field names are [ECS](https://www.elastic.co/guide/en/ecs/current/index.html).
+That is the only reason none of this needs an index template of its own:
+`log.level`, `service.name`, `log.logger` and `error.type` are names
+Elasticsearch's own template already maps as keywords, so Grafana can group on
+them out of the box. `trace.id` is on every line too, which is what ties a log
+line to its span in Phoenix.
+
+Only this project's processes are shipped. Postgres, SeaweedFS, Redis and
+Elasticsearch itself keep the `json-file` driver and are read with `make logs`.
+Collecting those too would mean reading the engine's own log store, which is in
+a different place under Docker and Podman and, on macOS, inside a virtual
+machine a bind mount cannot see; one more input in
+`configs/filebeat/filebeat.yml` is all it takes once that path is known for a
+given machine.
+
+A worker writes to `{stage}-{container}.log` on a shared volume rather than to
+one file per stage, because a scaled stage runs several containers over one
+volume and two processes rotating one file take each other's lines with them.
+Files rotate at 50 MB, three kept; the shipper has read a line long before it
+is deleted. `LOG_DIR` is what turns the file on — it is set for the containers
+and unset for every `make` target, so a host command logs to the terminal and
+nowhere else.
+
+Elasticsearch is the one Argilla already uses. That is a deliberate reuse
+rather than a second node, and it is a shared heap: `ES_JAVA_OPTS` in
+`configs/env/elasticsearch.env` is where to raise it if a long run makes either
+slow.
+
+```bash
+make logs-shipper    # why nothing is arriving, when nothing is arriving
+```
+
 ## Configuration
 
 All configuration is environment variables, split by what the value is rather
@@ -468,7 +522,7 @@ than by which service reads it:
 | File | In git | Holds |
 |---|---|---|
 | `configs/env/backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction and topic settings the api and the four workers read |
-| `configs/env/elasticsearch.env` | yes | The Elasticsearch node's certificate paths, security flags and heap |
+| `configs/env/elasticsearch.env` | yes | The Elasticsearch node's certificate paths, security flags and heap. One node serves both Argilla and the logs |
 | `configs/env/seaweedfs-filer.env` | yes | Which metadata store the filer uses |
 | `.env` | no | Credentials, ports, and the addresses a host reaches a service at. `.env.example` lists it |
 
@@ -491,7 +545,7 @@ The values most likely to need changing:
 | `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. Medium, not small: the small German model does not tag a modal as a finite verb |
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | — | Where that model is served |
-| `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included |
+| `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector |
 
 `MAX_FILE_SIZE_MB` must be kept in step with `server.maxUploadSize` in

@@ -20,7 +20,6 @@ def main(argv: list[str] | None = None) -> int:
     return queue_main(
         name="parsing",
         module="preprocessing.parsing.run",
-        log_level=settings.log_level,
         repository=ParseQueue,
         build_service=lambda: build_service(settings),
         argv=sys.argv[1:] if argv is None else argv,

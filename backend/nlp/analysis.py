@@ -23,6 +23,18 @@ _BATCH = 64
 #: the punctuation inside and offers every path segment as a word.
 _URL = re.compile(r"https?://\S+|www\.\S+")
 
+_WHITESPACE = re.compile(r"\s+")
+
+
+def normalised(text: str) -> str:
+    """Collapses spacing and case, for comparing two strings as words.
+
+    `casefold` rather than `lower`, because this corpus is partly German and
+    only casefold folds ß to ss - "STRASSE" and "Straße" are the same word.
+    """
+    return _WHITESPACE.sub(" ", text).strip().casefold()
+
+
 #: Recorded on every fact, beside the model and the prompt: the parser
 #: decides the verdicts, so two parsers are two datasets.
 VERSION = spacy.__version__

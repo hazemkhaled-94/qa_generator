@@ -30,6 +30,21 @@ from database.qa_generator.repository import Repository
 ABANDONED = "the worker did not finish; the run was interrupted"
 
 
+class Unnarrowable(Exception):
+    """A narrowing a stage cannot make, and why.
+
+    One exception rather than the KeyError and ValueError `narrow` raises,
+    because the route and the command line answer the same two refusals and
+    would otherwise each spell out the same two messages. `code` is what the
+    API answers with; the command line reads only the message.
+    """
+
+    def __init__(self, code: str, detail: str) -> None:
+        """Initialises the refusal."""
+        super().__init__(detail)
+        self.code = code
+
+
 def _also(*conditions: Any) -> tuple[Any, ...]:
     """Drops the narrowings a caller did not give.
 
@@ -191,6 +206,28 @@ class StageQueue(Repository):
         """
         column = self.scopes[scope]
         return column == column.type.python_type(value)
+
+    def narrowed(self, scope: str, value: str) -> Any:
+        """Builds that condition, refusing a scope or a value with a reason.
+
+        The wording is here rather than at each caller: the route and the
+        command line refuse the same two things.
+
+        Raises:
+            Unnarrowable: If this stage accepts no such scope, or the value
+                is not what that column holds.
+        """
+        try:
+            return self.narrow(scope, value)
+        except KeyError:
+            accepted = ", ".join(self.scopes) or "nothing"
+            raise Unnarrowable(
+                "unknown_scope", f"this stage narrows to {accepted}, not {scope!r}"
+            ) from None
+        except ValueError:
+            raise Unnarrowable(
+                "invalid_value", f"{value!r} is not a valid {scope}"
+            ) from None
 
     def stop(self, within: Any = None) -> int:
         """Takes back every row this stage has not started yet."""

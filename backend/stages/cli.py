@@ -13,7 +13,7 @@ from collections.abc import Callable
 import telemetry
 from database.qa_generator import engine
 from settings import decimal
-from stages.queue import StageQueue
+from stages.queue import StageQueue, Unnarrowable
 from stages.service import StageService
 from stages.worker import watch
 
@@ -55,27 +55,25 @@ def narrowing(queue: StageQueue, only: str | None):
 
     Raises:
         SystemExit: If it is not `scope=value`, names a scope this stage does
-            not take, or carries a value that column cannot hold.
+            not take, or carries a value that column cannot hold. The last
+            two are the queue's own wording, which the route answers with too.
     """
     if only is None:
         return None
     scope, _, value = only.partition("=")
-    accepted = ", ".join(queue.scopes) or "nothing"
     if not value:
+        accepted = ", ".join(queue.scopes) or "nothing"
         raise SystemExit(f"--only takes SCOPE=VALUE, where SCOPE is one of {accepted}")
     try:
-        return queue.narrow(scope, value)
-    except KeyError:
-        raise SystemExit(f"this stage narrows to {accepted}, not {scope!r}") from None
-    except ValueError:
-        raise SystemExit(f"{value!r} is not a valid {scope}") from None
+        return queue.narrowed(scope, value)
+    except Unnarrowable as exc:
+        raise SystemExit(str(exc)) from None
 
 
 def queue_main(
     *,
     name: str,
     module: str,
-    log_level: str,
     repository: Callable[[], StageQueue],
     build_service: Callable[[], StageService],
     argv: list[str],
@@ -87,7 +85,7 @@ def queue_main(
     """
     args = parser(module, _ACTIONS).parse_args(argv)
 
-    telemetry.configure(name, log_level)
+    telemetry.configure(name)
     telemetry.trace_engine(engine())
 
     def act(run):

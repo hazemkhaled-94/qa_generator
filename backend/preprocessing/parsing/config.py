@@ -19,7 +19,6 @@ class Settings:
     heading_hierarchy: bool
     document_timeout_seconds: float | None
     artifacts_path: str | None
-    log_level: str
 
     @classmethod
     def load(cls) -> Settings:
@@ -35,5 +34,4 @@ class Settings:
             heading_hierarchy=boolean("PARSING_HEADING_HIERARCHY"),
             document_timeout_seconds=decimal("PARSING_TIMEOUT_SECONDS"),
             artifacts_path=optional("DOCLING_ARTIFACTS_PATH"),
-            log_level=required("LOG_LEVEL").upper(),
         )

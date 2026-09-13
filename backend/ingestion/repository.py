@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from database.qa_generator import (
@@ -12,7 +12,7 @@ from database.qa_generator import (
     Passage,
     Status,
 )
-from database.qa_generator.repository import Repository
+from database.qa_generator.repository import Repository, matching
 from ingestion.models import DocumentName, PdfFacts, StoredDocument, UploadedFile
 
 #: The name and date a digest first arrived under. DISTINCT ON rather than two
@@ -55,11 +55,7 @@ def _filtered(query, search: str | None):
     if not search:
         return query
     return query.where(
-        or_(
-            _FIRST_EVENT.c.filename.icontains(search, autoescape=True),
-            Document.title.icontains(search, autoescape=True),
-            Document.sha256.icontains(search, autoescape=True),
-        )
+        matching(search, _FIRST_EVENT.c.filename, Document.title, Document.sha256)
     )
 
 

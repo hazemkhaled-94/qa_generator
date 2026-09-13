@@ -23,7 +23,7 @@ from topic_modelling.repository import TopicCatalog, TopicQueue
 settings = Settings.load()
 
 # Before anything else: a line logged earlier carries no trace id.
-telemetry.configure("api", settings.log_level)
+telemetry.configure("api")
 
 # Builds the engine as a side effect, so an unreachable database fails this
 # import rather than the first upload.

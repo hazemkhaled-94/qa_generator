@@ -7,7 +7,8 @@
     span = tracer(__name__)
 
 Neither logging nor tracing may prevent a process from starting: an
-unreachable collector degrades to recording spans without exporting them.
+unreachable collector degrades to recording spans without exporting them,
+and a log directory that cannot be written degrades to stdout alone.
 """
 
 from __future__ import annotations
@@ -29,6 +30,6 @@ def configure(service_name: str, level: str | None = None) -> None:
     # Order matters: the shared format references the trace fields, and
     # tracing logs while setting itself up.
     logs.add_trace_fields()
-    logs.configure(level)
+    logs.configure(service_name, level)
     traces.configure(service_name)
     logging.getLogger(__name__).info("telemetry configured for %s", service_name)

@@ -17,7 +17,6 @@ class Settings:
     embedding_model: str
     max_tokens: int
     merge_peers: bool
-    log_level: str
 
     @classmethod
     def load(cls) -> Settings:
@@ -31,5 +30,4 @@ class Settings:
             embedding_model=required("EMBEDDING_MODEL"),
             max_tokens=integer("EMBEDDING_MAX_TOKENS"),
             merge_peers=boolean("CHUNKING_MERGE_PEERS"),
-            log_level=required("LOG_LEVEL").upper(),
         )

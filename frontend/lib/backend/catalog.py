@@ -28,16 +28,16 @@ class CatalogApi(Endpoint):
 
     def document_names(self) -> list[dict]:
         """Fetches every document by name, for the document picker."""
-        return self._get("/documents/names").json()
+        return self._request("GET", "/documents/names").json()
 
     def file(self, sha256: str) -> bytes:
         """Fetches one stored document."""
-        return self._get(f"/documents/{sha256}/file", timeout=60).content
+        return self._request("GET", f"/documents/{sha256}/file", timeout=60).content
 
     def delete(self, sha256: str, derived_only: bool = False) -> dict:
         """Deletes a document, or only what the pipeline built from it."""
         path = f"/documents/{sha256}" + ("/derived" if derived_only else "")
-        return self._delete(path).json()
+        return self._request("DELETE", path).json()
 
     def stage_status(self, stage: str, scope: tuple[str, str] | None = None) -> dict:
         """Reads one stage's queue depth and whether a worker is on it.
@@ -46,7 +46,7 @@ class CatalogApi(Endpoint):
         ("document", sha256) or ("passage", id). Without one, the whole
         queue.
         """
-        return self._get(f"/{stage}{_within(scope)}/status").json()
+        return self._request("GET", f"/{stage}{_within(scope)}/status").json()
 
     def stage_action(
         self, stage: str, action: str, scope: tuple[str, str] | None = None
@@ -56,15 +56,17 @@ class CatalogApi(Endpoint):
         None of these runs anything: they move rows between statuses, and the
         stage's worker picks up whatever is claimable on its next poll.
         """
-        return self._post(f"/{stage}{_within(scope)}/{action}", timeout=30).json()
+        return self._request(
+            "POST", f"/{stage}{_within(scope)}/{action}", timeout=30
+        ).json()
 
     def topics(self) -> list[dict]:
         """Fetches the fitted topics with how much of the corpus each holds."""
-        return self._get("/topics").json()
+        return self._request("GET", "/topics").json()
 
     def topic_fit(self) -> dict:
         """Fetches the state of the topic model as a whole."""
-        return self._get("/topics/fit").json()
+        return self._request("GET", "/topics/fit").json()
 
     def topic_visualisation(self, language: str) -> str | None:
         """Fetches one language's pyLDAvis page, or None if no fit drew it."""
@@ -80,22 +82,23 @@ class CatalogApi(Endpoint):
         self, topic_id: int, label: str | None, include_in_coverage: bool
     ) -> dict:
         """Names a topic, or takes it out of coverage reporting."""
-        return self._patch(
+        return self._request(
+            "PATCH",
             f"/topics/{topic_id}",
             json={"label": label, "include_in_coverage": include_in_coverage},
         ).json()
 
     def discover_topics(self) -> dict:
         """Queues a fit over the whole corpus."""
-        return self._post("/topics/discover", timeout=30).json()
+        return self._request("POST", "/topics/discover", timeout=30).json()
 
     def delete_topics(self) -> dict:
         """Deletes every topic and membership."""
-        return self._delete("/topics").json()
+        return self._request("DELETE", "/topics").json()
 
     def passage_types(self) -> list[str]:
         """Fetches the block types present in the corpus."""
-        return self._get("/passages/types").json()
+        return self._request("GET", "/passages/types").json()
 
     def passages(self, **filters) -> dict:
         """Fetches one page of passages."""
@@ -103,7 +106,7 @@ class CatalogApi(Endpoint):
 
     def passage(self, passage_id: int) -> dict:
         """Fetches one passage in full, its sentences and cell grids included."""
-        return self._get(f"/passages/{passage_id}").json()
+        return self._request("GET", f"/passages/{passage_id}").json()
 
     def facts(self, **filters) -> dict:
         """Fetches one page of facts."""
@@ -116,4 +119,4 @@ class CatalogApi(Endpoint):
     def _query(self, path: str, filters: dict) -> dict:
         """Fetches one filtered endpoint, dropping the empty filters."""
         query = urlencode({k: v for k, v in filters.items() if v not in (None, "")})
-        return self._get(f"{path}?{query}" if query else path).json()
+        return self._request("GET", f"{path}?{query}" if query else path).json()

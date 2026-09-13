@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     settings = Settings.load()
-    telemetry.configure("topic_modelling", settings.log_level)
+    telemetry.configure("topic_modelling")
     telemetry.trace_engine(engine())
 
     if args.status:

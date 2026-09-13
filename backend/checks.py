@@ -13,14 +13,17 @@ label carryover.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import signal
+import sys
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/x")
 os.environ.setdefault("NLP_MODELS", "de:de_core_news_md,en:en_core_web_md")
 os.environ.setdefault("NLP_DEFAULT_LANGUAGE", "en")
 
+import telemetry
 from database.qa_generator import Rejection
 from extraction.extractors.table import TableExtractor
 from extraction.models import CandidateFact, PassageToExtract
@@ -31,10 +34,42 @@ from preprocessing.chunking.models import Chunking
 from preprocessing.chunking.passages import NoPassages, chunking_of, lines_of
 from stages.worker import Shutdown, watch
 
+log = logging.getLogger("checks")
+
 _TEXT = (
     "The device weighs 4 kg and runs for 12 hours. "
     "It arrives in March 2026 from the Hamburg plant."
 )
+
+#: The fitter settings the topic checks run under, and a corpus with two
+#: clear subjects to run them over. Shared, because a second copy is a second
+#: thing to keep in step with the first.
+_TOPIC_SETTINGS = {
+    "num_topics": 2,
+    "passes": 5,
+    "random_state": 42,
+    "top_terms": 5,
+    "min_weight": 0.1,
+    "no_below": 2,
+    "no_above": 0.9,
+}
+
+_TOPIC_CORPUS = (
+    "lieferung versand transport monatlich paketdienst",
+    "lieferung versand transport jaehrlich spedition",
+    "wartung reparatur instandhaltung ersatzteil pruefung",
+    "wartung reparatur instandhaltung wartungsplan intervall",
+)
+
+
+def _vocabularies() -> list:
+    """Builds the corpus as the fitter takes it, one passage per text."""
+    from topic_modelling.models import PassageVocabulary
+
+    return [
+        PassageVocabulary(id=index, lemmas=text.split())
+        for index, text in enumerate(_TOPIC_CORPUS, start=1)
+    ]
 
 
 def _passage(text: str = _TEXT, language: str = "en", **kwargs) -> PassageToExtract:
@@ -732,24 +767,8 @@ def topic_weights() -> None:
     from topic_modelling.models import PassageVocabulary
     from topic_modelling.topics import NoVocabulary, TopicFitter
 
-    settings = {
-        "num_topics": 2,
-        "passes": 5,
-        "random_state": 42,
-        "top_terms": 5,
-        "min_weight": 0.1,
-        "no_below": 2,
-        "no_above": 0.9,
-    }
-    corpus = [
-        "lieferung versand transport monatlich paketdienst",
-        "lieferung versand transport jaehrlich spedition",
-        "wartung reparatur instandhaltung ersatzteil pruefung",
-        "wartung reparatur instandhaltung wartungsplan intervall",
-    ]
-    passages = [
-        PassageVocabulary(id=i, lemmas=t.split()) for i, t in enumerate(corpus, start=1)
-    ]
+    settings = _TOPIC_SETTINGS
+    passages = _vocabularies()
 
     fitting = TopicFitter(**settings).fit(lambda: passages, "de")
     assert fitting.weights, "a corpus with two clear subjects produced no membership"
@@ -822,24 +841,8 @@ def topic_visualisation() -> None:
     from topic_modelling.topics import TopicFitter
     from topic_modelling.visualisation import render
 
-    settings = {
-        "num_topics": 2,
-        "passes": 5,
-        "random_state": 42,
-        "top_terms": 5,
-        "min_weight": 0.1,
-        "no_below": 2,
-        "no_above": 0.9,
-    }
-    corpus = [
-        "lieferung versand transport monatlich paketdienst",
-        "lieferung versand transport jaehrlich spedition",
-        "wartung reparatur instandhaltung ersatzteil pruefung",
-        "wartung reparatur instandhaltung wartungsplan intervall",
-    ]
-    passages = [
-        PassageVocabulary(id=i, lemmas=t.split()) for i, t in enumerate(corpus, start=1)
-    ]
+    settings = _TOPIC_SETTINGS
+    passages = _vocabularies()
     fitting = TopicFitter(**settings).fit(lambda: passages, "de")
     space = fitting.space
 
@@ -1065,8 +1068,97 @@ def queue_narrowing() -> None:
             assert expected is None, f"{scope}={value} should have been refused"
 
 
+def structured_logs() -> None:
+    """A shipped log line must carry the level, the trace and the traceback.
+
+    The failure this catches is silent in both directions. An `@timestamp`
+    Filebeat cannot parse is quietly replaced with the time the line was
+    read, so every line is misdated and nobody is told; and an exception
+    rendered without `error.stack_trace` leaves the dashboard showing that
+    something failed and not what.
+
+    Raises:
+        AssertionError: If a field is missing or misnamed, if the timestamp
+            is not one Elasticsearch accepts, if the traceback is lost, or
+            if a caller's own fields do not survive.
+    """
+    import json
+    import tempfile
+    from datetime import datetime
+
+    from telemetry.logs import JsonFormatter, _file
+
+    record = logging.LogRecord(
+        name="extraction.service",
+        level=logging.ERROR,
+        pathname="extraction/service.py",
+        lineno=104,
+        msg="failed passage %d",
+        args=(41,),
+        exc_info=None,
+        func="process_next",
+    )
+    try:
+        raise ValueError("the model would not answer")
+    except ValueError:
+        record.exc_info = sys.exc_info()
+    # As telemetry.add_trace_fields puts them on: zeros outside a span.
+    record.otelTraceID = "0" * 32
+    record.otelSpanID = "0" * 16
+    record.passage_id = 41  # a caller's own field, passed as extra=
+
+    line = json.loads(JsonFormatter("extraction").format(record))
+
+    assert line["log.level"] == "error", line["log.level"]
+    assert line["log.logger"] == "extraction.service", line["log.logger"]
+    assert line["service.name"] == "extraction", line["service.name"]
+    assert line["message"] == "failed passage 41", line["message"]
+    assert line["log.origin.file.line"] == 104, line["log.origin.file.line"]
+    assert line["trace.id"] == "0" * 32, line["trace.id"]
+    assert line["passage_id"] == 41, "a caller's own fields must survive"
+
+    # The whole traceback, not just the message.
+    assert line["error.type"] == "ValueError", line["error.type"]
+    assert line["error.message"] == "the model would not answer"
+    assert "Traceback" in line["error.stack_trace"], line["error.stack_trace"]
+    assert "ValueError" in line["error.stack_trace"]
+
+    # Parseable, offset-aware and UTC: what Filebeat needs to keep it rather
+    # than substitute the time it read the line.
+    assert line["@timestamp"].endswith("Z"), line["@timestamp"]
+    when = datetime.fromisoformat(line["@timestamp"])
+    assert when.tzinfo is not None, line["@timestamp"]
+    assert when.utcoffset().total_seconds() == 0, line["@timestamp"]
+
+    # One line, whatever the record holds: the shipper reads them one per
+    # line, so an embedded newline is a second, unparseable event.
+    assert "\n" not in JsonFormatter("extraction").format(record)
+
+    # A directory that cannot be written costs the shipped copy and nothing
+    # else. Raising here would stop a worker over a mounted volume.
+    assert _file("extraction") is None, "no LOG_DIR must mean no file handler"
+    with tempfile.TemporaryDirectory() as directory:
+        os.environ["LOG_DIR"] = f"{directory}/nested"
+        try:
+            handler = _file("extraction")
+            assert handler is not None, "a writable LOG_DIR must give a handler"
+            # Named per container: a scaled stage runs several on one volume.
+            assert handler.baseFilename.startswith(f"{directory}/nested/extraction-")
+            handler.close()
+
+            os.environ["LOG_DIR"] = "/proc/nowhere/qa"
+            assert _file("extraction") is None, "an unwritable LOG_DIR must not raise"
+        finally:
+            del os.environ["LOG_DIR"]
+
+
 def main() -> int:
-    """Runs every check, stopping at the first failure."""
+    """Runs every check, stopping at the first failure.
+
+    Reports through the shared logger rather than stdout, so a failure here
+    reads the same as a failure anywhere else and reaches the same place.
+    """
+    telemetry.configure("checks")
     for check in (
         sentence_numbering,
         fact_checks,
@@ -1079,6 +1171,7 @@ def main() -> int:
         graceful_shutdown,
         stop_before_claiming,
         queue_narrowing,
+        structured_logs,
         topic_vocabulary,
         topic_weights,
         topic_visualisation,
@@ -1087,10 +1180,12 @@ def main() -> int:
     ):
         try:
             check()
-        except AssertionError as exc:
-            print(f"FAIL {check.__name__}: {exc}")
+        except AssertionError:
+            # exception(), not error(): the assertion's own line is the most
+            # useful thing here and a message alone throws it away.
+            log.exception("FAIL %s", check.__name__)
             return 1
-        print(f"ok   {check.__name__}")
+        log.info("ok   %s", check.__name__)
     return 0
 
 
