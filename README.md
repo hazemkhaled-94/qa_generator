@@ -580,6 +580,16 @@ The values most likely to need changing:
 `frontend/.streamlit/config.toml`, or Streamlit rejects the file before the API
 sees it.
 
+The frontend follows the dark mode of whatever is showing it. That file gives
+Streamlit a palette under `[theme.light]` and another under `[theme.dark]`, and
+`frontend/styles.css` branches on the same `prefers-color-scheme` the browser
+reports, so the chrome and the custom styling cannot disagree about which theme
+is up. There is deliberately no in-app switch: a second way to choose would be
+a second source of truth. Put a colour in `[theme]` itself, or set `theme.base`,
+and it applies to both themes — which is what pinned the app to light before.
+The topic map stays on white in either theme; it is a pyLDAvis document inside
+an iframe, so nothing outside it can restyle it.
+
 Changing `NLP_MODELS` changes what a fact is, in the same way changing the
 prompt does. Both are recorded on every fact — `spacy_model`, `spacy_version`,
 `extraction_model`, `prompt_version` — so two generations of the dataset can be
