@@ -83,3 +83,20 @@ def test_a_web_address_is_not_vocabulary() -> None:
     )
     assert not {"publikationen", "fokus", "im", "en", "die"} & set(linked), linked
     assert "risk" in linked, "the link text is still vocabulary"
+
+
+def test_no_language_is_judged_on_case_when_none_is_named(monkeypatch) -> None:
+    """NLP_CAPITALISED_NOUNS names the languages that capitalise every noun.
+
+    Empty is valid: a deployment reading only languages that capitalise
+    nothing names none, and the rule stops applying rather than misfiring.
+    """
+    from nlp import analysis
+
+    monkeypatch.setenv("NLP_CAPITALISED_NOUNS", "")
+    analysis._capitalises_nouns.cache_clear()
+    try:
+        kept = lemmas("Der Bericht 'Risks in the Focus' nennt die Kosten.", "de")
+        assert {"the"} & set(kept), kept
+    finally:
+        analysis._capitalises_nouns.cache_clear()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
+from functools import lru_cache
 
 import spacy
 from spacy.tokens import Doc, Span
@@ -11,6 +12,7 @@ from spacy.tokens import Doc, Span
 from nlp.language import URL
 from nlp.models import Claim, Sentence
 from nlp.pipelines import pipeline
+from settings import optional
 
 #: Parts of speech kept as vocabulary. Everything else is grammar, which is
 #: what a stopword list used to be needed for.
@@ -19,9 +21,6 @@ _CONTENT = frozenset({"NOUN", "PROPN", "ADJ"})
 #: Parts of speech a noun is tagged with, in the languages that capitalise one.
 _NOMINAL = frozenset({"NOUN", "PROPN"})
 
-#: Languages whose every noun is capitalised, so a lower-case one is a word
-#: the pipeline read in a language it was not trained on.
-_CAPITALISES_NOUNS = frozenset({"de"})
 
 #: How many texts to hand spaCy at once.
 _BATCH = 64
@@ -38,6 +37,17 @@ _WHITESPACE = re.compile(r"\s+")
 #: German tokenizer reads a year ending a sentence as one token, `2026.`, and
 #: the same year anywhere else as `2026`.
 _TRAILING = ".,;:"
+
+
+@lru_cache(maxsize=1)
+def _capitalises_nouns() -> frozenset[str]:
+    """Reads the languages whose every noun is written with a capital.
+
+    Optional: a deployment configured for languages that capitalise nothing
+    names none, and no token is judged on its case.
+    """
+    named = optional("NLP_CAPITALISED_NOUNS") or ""
+    return frozenset(code.strip().lower() for code in named.split(",") if code.strip())
 
 
 def _bare(form: str) -> str:
@@ -124,16 +134,17 @@ def _references(span: Doc | Span) -> tuple[str, ...]:
 def _foreign(token, language: str) -> bool:
     """Whether a token is a foreign word read as a noun of this language.
 
-    German capitalises every noun, so a lower-case one is a word from another
-    language: the German pipeline tags the English `the`, `and` and `of` as
-    proper nouns, which puts them in the German vocabulary as subjects.
+    A language named in NLP_CAPITALISED_NOUNS writes every noun with a
+    capital, so a lower-case one is a word from another language: the German
+    pipeline tags the English `the`, `and` and `of` as proper nouns, which
+    puts them in the German vocabulary as subjects.
 
     A lower-case German adjective the tagger reads as a noun goes with them.
     Measured over 200 German passages: 7,807 lemmas fell to 7,782, of which
     ten were German.
     """
     return (
-        language in _CAPITALISES_NOUNS
+        language in _capitalises_nouns()
         and token.pos_ in _NOMINAL
         and token.text[:1].islower()
     )

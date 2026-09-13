@@ -13,6 +13,12 @@ from lib import backend, page, stage
 _MAP_HEIGHT = 850
 
 
+def _per_passage(topic: dict) -> float:
+    """Validated facts per passage this topic owns."""
+    owned = topic["dominant_passages"]
+    return topic["validated_facts"] / owned if owned else 0.0
+
+
 def view() -> None:
     """Renders the topics page."""
     page.header(
@@ -65,6 +71,10 @@ def view() -> None:
                     "Passages": topic["passages"],
                     "Dominant in": topic["dominant_passages"],
                     "Documents": topic["documents"],
+                    "Tables": page.share(
+                        topic["table_passages"], topic["dominant_passages"]
+                    ),
+                    "Facts each": f"{_per_passage(topic):.1f}",
                     "Mean weight": f"{topic['mean_weight']:.2f}",
                     "In coverage": "yes" if topic["include_in_coverage"] else "no",
                 }
@@ -360,6 +370,30 @@ def _detail(client, chosen: dict, topics: list[dict]) -> None:
             ),
         }
     )
+    page.metrics(
+        {
+            "Tables": (
+                *page.portion(chosen["table_passages"], chosen["dominant_passages"]),
+                (
+                    "Passages it owns that are tables rather than prose. A topic "
+                    "that is mostly tables is usually about a document's "
+                    "apparatus - a budget annex, a figure's source line - rather "
+                    "than about a subject. Whether that is worth keeping is a "
+                    "judgement about this corpus, which is why it is a figure "
+                    "here and not a rule in the code."
+                ),
+            ),
+            "Facts each": (
+                f"{_per_passage(chosen):.1f}",
+                f"{chosen['validated_facts']:,} in total",
+                (
+                    "Validated facts per passage it owns. A question can only be "
+                    "asked from a fact, so a topic well below the others yields "
+                    "few questions however large it looks."
+                ),
+            ),
+        }
+    )
     st.caption(
         "Top terms: " + ", ".join(chosen["top_terms"]),
         help="The terms with the highest weight in this topic, in order. "
@@ -386,7 +420,11 @@ def _detail(client, chosen: dict, topics: list[dict]) -> None:
         value=chosen["include_in_coverage"],
         key=f"topics-coverage-{chosen['id']}",
         help="Clear this for a topic too diffuse to be a meaningful coverage "
-        "partition. It keeps its passages either way.",
+        "partition, or for one that describes a document's apparatus rather "
+        "than a subject. Tables and Facts each above are what to read it off. "
+        "Nothing in the code decides this: what counts as a subject belongs to "
+        "the corpus, not to the pipeline. The topic keeps its passages either "
+        "way.",
     )
     apply.markdown("<div style='height:1.8rem'></div>", unsafe_allow_html=True)
     if apply.button(

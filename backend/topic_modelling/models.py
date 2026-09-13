@@ -86,6 +86,11 @@ class StoredTopic:
     dominant_passages: int
     mean_weight: float
     documents: int
+    #: How many of its passages are tables rather than prose.
+    table_passages: int
+    #: Validated facts drawn from its passages, which is what a question can
+    #: be asked from.
+    validated_facts: int
 
 
 @dataclass(frozen=True)

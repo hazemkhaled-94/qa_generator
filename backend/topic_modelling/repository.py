@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 from sqlalchemy import delete, func, insert, select, update
 
-from database.qa_generator import Passage, PassageTopic, Status, Topic
+from database.qa_generator import Fact, Passage, PassageTopic, Status, Topic
 from database.qa_generator.repository import Repository
 from stages import Columns, StageQueue
 from topic_modelling.models import (
@@ -396,15 +396,35 @@ class TopicCatalog(Repository):
 
     def topics(self) -> list[StoredTopic]:
         """Reads the fitted topics with how much of the corpus each holds."""
-        # Two queries, not one. Folding the dominant-topic count into the
+        # Three queries, not one. Folding either of the first two into the
         # aggregate below would join a second row per passage and inflate both
         # the membership count and the mean weight.
         with self._session() as session:
-            dominant = dict(
-                session.execute(
+            # Over the passages this topic owns rather than every passage
+            # holding it: a passage belongs to several topics, so counting all
+            # of them dilutes whatever separates one topic from another.
+            owned = {
+                row.topic_id: row
+                for row in session.execute(
                     select(
-                        _DOMINANT.c.topic_id, func.count().label("passages")
-                    ).group_by(_DOMINANT.c.topic_id)
+                        _DOMINANT.c.topic_id,
+                        func.count().label("passages"),
+                        func.count()
+                        .filter(Passage.block_type == "table")
+                        .label("tables"),
+                    )
+                    .join(Passage, Passage.id == _DOMINANT.c.passage_id)
+                    .group_by(_DOMINANT.c.topic_id)
+                ).all()
+            }
+            drawn = dict(
+                session.execute(
+                    select(_DOMINANT.c.topic_id, func.count(Fact.id))
+                    .join(
+                        Fact,
+                        (Fact.passage_id == _DOMINANT.c.passage_id) & Fact.validated,
+                    )
+                    .group_by(_DOMINANT.c.topic_id)
                 ).all()
             )
             rows = session.execute(
@@ -446,9 +466,11 @@ class TopicCatalog(Repository):
                 labelled_by=row.labelled_by,
                 include_in_coverage=row.include_in_coverage,
                 passages=row.passages,
-                dominant_passages=dominant.get(row.id, 0),
+                dominant_passages=owned[row.id].passages if row.id in owned else 0,
                 mean_weight=float(row.mean_weight),
                 documents=row.documents,
+                table_passages=owned[row.id].tables if row.id in owned else 0,
+                validated_facts=drawn.get(row.id, 0),
             )
             for row in rows
         ]

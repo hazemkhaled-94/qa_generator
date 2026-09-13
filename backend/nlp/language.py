@@ -19,8 +19,7 @@ from nlp.pipelines import languages
 _MIN_CHARS = 40
 
 #: A web address. Markdown renders a link as [text](url), and a site writes
-#: its paths in its own language: `/die-bafin/publikationen-daten/` is German
-#: whatever the page says.
+#: its path segments in its own language whatever the page they lead to says.
 URL = re.compile(r"https?://\S+|www\.\S+")
 
 
