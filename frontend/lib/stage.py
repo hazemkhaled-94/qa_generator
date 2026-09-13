@@ -40,6 +40,42 @@ DANGER = [2.6, 2.1, 4.8]
 #: through them.
 _ORDER = ("new", "pending", "in_progress", "failed")
 
+#: What each verb is for, as the prefix its button is keyed with. The
+#: stylesheet colours on that prefix, so a control says what it does by being
+#: keyed for it and no call site has to remember to pass a style.
+#:
+#: The five are graded by what they cost if pressed by mistake:
+#:
+#:   go       starts work that was going to be done anyway
+#:   recover  re-queues only what already failed
+#:   halt     withdraws from the queue; nothing already finished is lost
+#:   redo     throws finished output away and rebuilds it
+#:   danger   deletes data, and cannot be undone
+INTENT = {
+    "start": "go",
+    "discover": "go",
+    "retry": "recover",
+    "stop": "halt",
+    "rerun": "redo",
+}
+
+
+#: Read out in the help of every section that draws controls. The colours are
+#: graded by consequence, and a grading nobody can decode is decoration.
+COLOUR_KEY = (
+    "The controls are coloured by what pressing one costs. Green starts work "
+    "that was going to be done anyway. Blue re-queues only what already "
+    "failed. Grey withdraws from the queue, losing nothing already finished. "
+    "Amber throws finished output away and rebuilds it. Red deletes data and "
+    "cannot be undone. A control that would do nothing right now is greyed "
+    "out rather than hidden, so the row keeps its shape."
+)
+
+
+def key_for(action: str, *parts: str) -> str:
+    """Names a button so the stylesheet can colour it by what it does."""
+    return "-".join((INTENT[action], action, *parts))
+
 
 class Queue:
     """One stage as a page refers to it: its name and how it reads."""
@@ -120,17 +156,19 @@ def controls(
     queued = counts.get("pending", 0)
     failed = counts.get("failed", 0)
     held = counts.get("in_progress", 0)
-    key = f"{queue.name}-{kind}-{value}"
 
-    name, begin, again, halt, retry, state = st.columns(
+    def key(action: str) -> str:
+        """Keys one of this item's buttons for its verb and its colour."""
+        return key_for(action, queue.name, kind, str(value))
+
+    labelled, begun, redone, halted, retried, state = st.columns(
         CONTROLS, vertical_alignment="center"
     )
-    name.html(f"<div class='qa-control-label'>{queue.label}</div>")
+    labelled.html(f"<div class='qa-control-label'>{queue.label}</div>")
 
-    if begin.button(
+    if begun.button(
         "Start",
-        key=f"start-{key}",
-        type="primary",
+        key=key("start"),
         disabled=not waiting,
         width="stretch",
         help=f"Queue the {waiting:,} {unit} of this {kind} that {queue.label} "
@@ -141,9 +179,9 @@ def controls(
     ):
         _act(client, queue.name, scope, "start")
 
-    if redo and again.button(
+    if redo and redone.button(
         "Redo",
-        key=f"rerun-{key}",
+        key=key("rerun"),
         disabled=not total,
         width="stretch",
         help=f"Queue every {unit} of this {kind} again, finished ones "
@@ -155,9 +193,9 @@ def controls(
     ):
         _act(client, queue.name, scope, "rerun")
 
-    if halt.button(
+    if halted.button(
         "Stop",
-        key=f"stop-{key}",
+        key=key("stop"),
         disabled=not queued,
         width="stretch",
         help=f"Take the {queued:,} queued {unit} back off the queue, to `new`."
@@ -167,9 +205,9 @@ def controls(
     ):
         _act(client, queue.name, scope, "stop")
 
-    if retry.button(
+    if retried.button(
         "Retry",
-        key=f"retry-{key}",
+        key=key("retry"),
         disabled=not failed,
         width="stretch",
         help=f"Queue the {failed:,} failed {unit} again, clearing the error "
@@ -195,14 +233,14 @@ def corpus_controls(
     vocabulary, so there is no single topic to start, stop or refit: the
     stage has no scope to narrow to, and the page says so beside these. The
     keys are the route's own verbs, which is why the first is `discover`
-    rather than `start`. The first is the one drawn as primary.
+    rather than `start`; it is coloured as a start either way, because that
+    is what it does.
     """
     columns = st.columns([1.3] * len(verbs) + [CONTROLS[-1]])
     for index, (action, (label, enabled, explanation)) in enumerate(verbs.items()):
         if columns[index].button(
             label,
-            key=f"corpus-{stage}-{action}",
-            type="primary" if index == 0 else "secondary",
+            key=key_for(action, "corpus", stage),
             disabled=not enabled,
             width="stretch",
             help=explanation,

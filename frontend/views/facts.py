@@ -460,7 +460,7 @@ def _detail(client, fact: dict) -> None:
         "Queues extraction over the one passage this fact came from, "
         "replacing every fact drawn from it - this one included. A single "
         "fact cannot be re-read on its own: extraction reads a passage and "
-        "writes all of its facts together.",
+        "writes all of its facts together. " + stage.COLOUR_KEY,
     )
     stage.controls(client, _EXTRACTION, scope)
 

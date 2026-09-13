@@ -267,7 +267,7 @@ def _detail(client, row: dict) -> None:
         "replaces all of its passages at once - to re-chunk, use the "
         "Documents page. Deleting a single passage is the same: passages "
         "belong to their document, so the Documents page deletes them "
-        "together.",
+        "together. " + stage.COLOUR_KEY,
     )
     stage.controls(client, _EXTRACTION, scope)
 

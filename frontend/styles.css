@@ -4,8 +4,32 @@
   --qa-ink: #1A1A1A;
   --qa-surface: #FBFAFC;
   --qa-radius: 10px;
-  /* Destructive. Dark enough to read as a warning against white, not so
-     saturated that a page with three delete buttons looks alarmed. */
+
+  /* One hue per thing a control does, graded by what pressing it by mistake
+     would cost. Each is dark enough to read against white and muted enough
+     that a row of four does not look like a warning. */
+
+  /* go — starts work that was going to be done anyway. */
+  --qa-go: #15683A;
+  --qa-go-line: #A9D4BB;
+  --qa-go-wash: #EFF8F2;
+
+  /* recover — re-queues only what already failed. */
+  --qa-recover: #1B4F9E;
+  --qa-recover-line: #B4C6E3;
+  --qa-recover-wash: #F1F5FC;
+
+  /* halt — withdraws from the queue; nothing finished is lost. */
+  --qa-halt: #3D4453;
+  --qa-halt-line: #C3C8D2;
+  --qa-halt-wash: #F4F5F8;
+
+  /* redo — throws finished output away and rebuilds it. */
+  --qa-redo: #8A5A00;
+  --qa-redo-line: #E6CE9B;
+  --qa-redo-wash: #FDF8EC;
+
+  /* danger — deletes data, and cannot be undone. */
   --qa-danger: #A32020;
   --qa-danger-line: #E3B4B4;
   --qa-danger-wash: #FDF4F4;
@@ -34,6 +58,29 @@ header[data-testid="stHeader"] { background: transparent; }
    pointing up beside `Rejected` says something untrue, so the icon goes. */
 [data-testid="stMetricDelta"] svg { display: none; }
 [data-testid="stMetricDelta"] { gap: 0; font-size: 0.74rem; }
+
+/* Every figure box the same size, whatever it carries.
+
+   Two things make them differ: only some figures have a second line, and a
+   long label wraps to two. A column is already a flex item that stretches to
+   the tallest in its row, so the fix is to let it — and then to fill it from
+   the inside, which a min-height guess could not do for a label that wraps.
+
+   The column's own height is deliberately not set here. `height: 100%` on it
+   resolves against a row whose height is its content, so it computes to auto
+   and overrides the very stretch it was meant to produce: the boxes went on
+   differing by exactly the height of one delta line. */
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"],
+[data-testid="stColumn"]
+  [data-testid="stElementContainer"]:has([data-testid="stMetric"], .qa-card),
+[data-testid="stElementContainer"]:has(.qa-card) > [data-testid="stHtml"],
+[data-testid="stMetric"] {
+  height: 100%;
+}
+/* The second line sits at the bottom, so the figures above it line up across
+   a row whether or not a given box has one. */
+[data-testid="stMetric"] { display: flex; flex-direction: column; }
+[data-testid="stMetric"] [data-testid="stMetricDelta"] { margin-top: auto; }
 
 .qa-brand { border-bottom: 1px solid var(--qa-border); padding-bottom: .9rem; margin-bottom: 1.6rem; }
 .qa-brand-title {
@@ -74,27 +121,73 @@ header[data-testid="stHeader"] { background: transparent; }
   text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .2rem;
 }
 
-/* Destructive controls.
+/* Controls, coloured by what they do.
 
-   Keyed, not typed: Streamlit has no danger button, and the key a widget is
-   given is already on its container as `st-key-<key>`. Any button keyed
-   `danger-…` is red, so nothing has to remember to pass a style. */
-[class*="st-key-danger-"] button {
+   Keyed, not typed: Streamlit offers `primary` and `secondary` and nothing
+   else, and four verbs all drawn secondary were the same button four times.
+   The key a widget is given is already on its container as `st-key-<key>`,
+   and lib.stage keys every control with its intent, so a control is coloured
+   by what it does and no call site passes a style.
+
+   Every rule below is :not(:disabled). A disabled control does nothing, so
+   colouring it would promise an action that is not on offer; disabled stays
+   Streamlit's own grey, identical for all five. */
+
+[class*="st-key-recover-"] button:not(:disabled),
+[class*="st-key-halt-"] button:not(:disabled),
+[class*="st-key-redo-"] button:not(:disabled),
+[class*="st-key-danger-"] button:not(:disabled) {
+  background: #FFF !important;
+}
+
+[class*="st-key-recover-"] button:not(:disabled) {
+  border-color: var(--qa-recover-line) !important;
+  color: var(--qa-recover) !important;
+}
+[class*="st-key-recover-"] button:hover:not(:disabled) {
+  border-color: var(--qa-recover) !important;
+  background: var(--qa-recover-wash) !important;
+}
+
+[class*="st-key-halt-"] button:not(:disabled) {
+  border-color: var(--qa-halt-line) !important;
+  color: var(--qa-halt) !important;
+}
+[class*="st-key-halt-"] button:hover:not(:disabled) {
+  border-color: var(--qa-halt) !important;
+  background: var(--qa-halt-wash) !important;
+}
+
+[class*="st-key-redo-"] button:not(:disabled) {
+  border-color: var(--qa-redo-line) !important;
+  color: var(--qa-redo) !important;
+}
+[class*="st-key-redo-"] button:hover:not(:disabled) {
+  border-color: var(--qa-redo) !important;
+  background: var(--qa-redo-wash) !important;
+}
+
+[class*="st-key-danger-"] button:not(:disabled) {
   border-color: var(--qa-danger-line) !important;
   color: var(--qa-danger) !important;
-  background: #FFF !important;
 }
 [class*="st-key-danger-"] button:hover:not(:disabled) {
   border-color: var(--qa-danger) !important;
   background: var(--qa-danger-wash) !important;
 }
-[class*="st-key-danger-"] button:disabled {
-  border-color: var(--qa-border) !important;
-  color: var(--qa-muted) !important;
+
+/* Filled, not outlined: the two that commit something. Start is the action a
+   row is there for, and the second delete click is the irreversible one, so
+   neither should look like the three beside it. */
+[class*="st-key-go-"] button:not(:disabled) {
+  background: var(--qa-go) !important;
+  border-color: var(--qa-go) !important;
+  color: #FFF !important;
+}
+[class*="st-key-go-"] button:hover:not(:disabled) {
+  background: #0F5230 !important; border-color: #0F5230 !important;
 }
 
-/* The second click, the one that actually deletes: filled, so it cannot be
-   mistaken for the button that only armed it. */
 [class*="st-key-danger-confirm"] button:not(:disabled) {
   background: var(--qa-danger) !important;
   border-color: var(--qa-danger) !important;

@@ -372,7 +372,7 @@ def _fit_controls(client, fit: dict, has_topics: bool) -> None:
     page.section(
         "Fit the model",
         "These three act on the whole corpus, and they are the only controls "
-        "on this page that cannot be per item.",
+        "on this page that cannot be per item. " + stage.COLOUR_KEY,
     )
     st.caption(
         "LDA fits every topic jointly over one vocabulary, so a single topic "

@@ -187,7 +187,8 @@ def _detail(client, document: dict) -> None:
         "Each row queues, withdraws or repeats one stage for this document "
         "alone. None of these buttons does the work: they move rows between "
         "statuses, and the stage's worker picks up whatever has become "
-        "claimable on its next poll. Nothing here touches any other document.",
+        "claimable on its next poll. Nothing here touches any other document. "
+        + stage.COLOUR_KEY,
     )
     for queue in _STAGES:
         stage.controls(client, queue, scope)
