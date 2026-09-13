@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Callable
+from typing import Any
 
 import telemetry
 from database.qa_generator import engine
@@ -27,6 +28,10 @@ _ACTIONS = {
     "retry": "return failed rows to the queue",
     "rerun": "queue every row again, finished ones included",
 }
+
+#: One operation only a single stage has, as (help, verb, run). `run` takes
+#: whatever `--only` narrowed to and returns how many rows it changed.
+Extra = tuple[str, str, Callable[[Any], int]]
 
 
 def parser(module: str, actions: dict[str, str]) -> argparse.ArgumentParser:
@@ -77,13 +82,17 @@ def queue_main(
     repository: Callable[[], StageQueue],
     build_service: Callable[[], StageService],
     argv: list[str],
+    extra: dict[str, Extra] | None = None,
 ) -> int:
     """Runs one stage's command line.
 
     The repository and the service are built only when a flag needs them, so
-    `--status` costs a query and not a converter.
+    `--status` costs a query and not a converter. `extra` adds the operations
+    only this stage has, in the same mutually exclusive group as the rest.
     """
-    args = parser(module, _ACTIONS).parse_args(argv)
+    extra = extra or {}
+    actions = {**_ACTIONS, **{flag: help for flag, (help, _, _) in extra.items()}}
+    args = parser(module, actions).parse_args(argv)
 
     telemetry.configure(name)
     telemetry.trace_engine(engine())
@@ -104,6 +113,11 @@ def queue_main(
     ):
         if chosen:
             log.info("%s: %d row(s) %s", name, act(run), verb)
+            return 0
+
+    for flag, (_, verb, run) in extra.items():
+        if getattr(args, flag):
+            log.info("%s: %d row(s) %s", name, act(lambda q, w, do=run: do(w)), verb)
             return 0
 
     if args.rerun:

@@ -7,7 +7,7 @@ from typing import ClassVar
 
 from extraction.extractors import ExtractionFailed, ExtractorRegistry
 from extraction.models import CheckedFact, PassageToExtract
-from extraction.repository import PassageQueue
+from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import FactChecker
 from nlp.analysis import normalised
 from stages import StageService
@@ -15,6 +15,36 @@ from telemetry import tracer
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
+
+#: How many re-judged facts to write at once.
+_REJUDGE_BATCH = 500
+
+
+def revalidate(catalog: FactCatalog, within=None) -> int:
+    """Judges every stored fact again, without calling the model.
+
+    What the model wrote is the record of one extraction and is kept; what
+    the checks read off it is derived, and is replaced with what today's
+    checks read. This is what applies a change to the checks to facts that
+    were extracted before it.
+    """
+    checker = FactChecker()
+    verdicts: list[tuple[int, CheckedFact]] = []
+    written = 0
+
+    def flush() -> None:
+        """Writes what has piled up."""
+        nonlocal written
+        written += catalog.rejudge(verdicts)
+        verdicts.clear()
+
+    for fact_id, passage, candidate, method in catalog.judged(within):
+        verdicts.append((fact_id, checker.check(passage, candidate, method)))
+        if len(verdicts) >= _REJUDGE_BATCH:
+            flush()
+    flush()
+    log.info("re-judged %d fact(s)", written)
+    return written
 
 
 def _is_heading(passage: PassageToExtract) -> bool:

@@ -120,6 +120,8 @@ make chunk           #   ... and `chunk-status`, `chunk-stop`, `chunk-retry`,
 make extract-start   # the same five, over passages
 make extract         #   ... and `extract-status`, `extract-stop`,
                      #       `extract-retry`, `extract-rerun`
+make extract-revalidate  # judge stored facts again; the model is not called
+make chunk-revocabulary  # read stored passages' vocabulary again, in place
 make topics-discover # ask for a fit over the whole corpus, and run it
 make topics          # run any queued fit here, in the foreground
 make topics-status   # show the topics held, and any queued fit
@@ -143,6 +145,32 @@ make extract-status SHA=<sha256>  # that document's passages by extract state
 Parsing and chunking narrow to a document, extraction to a document or a
 passage, topic modelling to neither — a fit is all-or-nothing over one
 vocabulary, so there is no single topic to start, stop or refit.
+
+### Replaying a stage without redoing it
+
+Two operations re-derive what a stage computed, over rows already stored,
+without the expensive part:
+
+| | |
+|---|---|
+| `make extract-revalidate` | Judges every stored fact again. The model is not called and no statement changes — only what the checks read off one. |
+| `make chunk-revocabulary` | Reads every stored passage's vocabulary again. Only `passages.lemmas` changes. |
+
+Both take `SHA` and `extract-revalidate` takes `PASSAGE` too, like the five
+queue verbs.
+
+These exist because the obvious way to apply a change is the destructive one.
+`extract-rerun` calls the model again over the whole corpus, which costs hours
+and returns the same statements when only a check changed. `chunk-rerun`
+deletes every passage of a document, and the facts drawn from them go with it.
+When what changed is a fact check or how vocabulary is read, neither is needed.
+
+What each leaves alone is the point. A re-judgement keeps the statement, the
+method and the model's provenance — the record of one extraction — and
+replaces only the verdict, the resolved span and the counts the checks read. A
+re-read keeps the passages and their sentence offsets, so every citation still
+resolves to the text it was checked against. Fit the topics afterwards for a
+re-read to show.
 
 Documents are ingestion's, not a stage's:
 

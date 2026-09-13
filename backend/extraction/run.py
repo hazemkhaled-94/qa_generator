@@ -10,11 +10,23 @@ import logging
 import sys
 
 from extraction.factory import build_service
-from extraction.repository import PassageQueue
+from extraction.repository import FactCatalog, PassageQueue
+from extraction.service import revalidate
 from llm.config import Settings
 from stages.cli import queue_main
 
 log = logging.getLogger(__name__)
+
+#: This stage's own operation. The model is not called: it re-reads what the
+#: checks read off facts already stored, which is how a change to the checks
+#: reaches facts extracted before it.
+_EXTRA = {
+    "revalidate": (
+        "judge every stored fact again, without calling the model",
+        "judged again",
+        lambda within: revalidate(FactCatalog(), within),
+    )
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         repository=lambda: PassageQueue(lease=settings.lease),
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
+        extra=_EXTRA,
     )
 
 

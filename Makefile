@@ -39,8 +39,9 @@ ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSA
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
+        chunk-revocabulary \
         extract extract-status extract-start extract-stop extract-retry \
-        extract-rerun \
+        extract-rerun extract-revalidate \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         documents delete delete-derived \
@@ -236,6 +237,13 @@ chunk-retry:
 chunk-rerun:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --rerun $(ONLY)
 
+# Read every stored passage's vocabulary again, in place. Only the lemmas the
+# topic model is fitted over change; passages, sentence offsets and facts all
+# stay, which is what chunk-rerun cannot promise - it deletes the passages and
+# the facts go with them. Fit the topics afterwards to see the difference.
+chunk-revocabulary:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --revocabulary $(ONLY)
+
 # Drain the extraction queue here. Needs the model in LLM_MODEL to be
 # served at LLM_BASE_URL.
 extract:
@@ -262,6 +270,12 @@ extract-retry:
 # the code behind it changed and its output needs rebuilding.
 extract-rerun:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --rerun $(ONLY)
+
+# Judge every stored fact again with today's checks. The model is not called
+# and no statement changes: only what the checks read off one. This is what
+# applies a change to the checks without re-extracting the corpus.
+extract-revalidate:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --revalidate $(ONLY)
 
 # ── Topic modelling ────────────────────────────────────────────────────────
 #

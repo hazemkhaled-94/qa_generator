@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import ClassVar
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Passage, Status
@@ -39,6 +39,9 @@ SEARCH_FIELDS = {
 }
 
 DEFAULT_FIELD = "text"
+
+#: The passages table itself, for the bulk update a re-read writes.
+_PASSAGES = Passage.__table__
 
 
 def _filtered(query, document, search, block_type, field):
@@ -131,6 +134,40 @@ class PassageCatalog(Repository):
 
     Separate from the queue: the API serves these and never claims a row.
     """
+
+    def texts(self, within=None) -> list[tuple[int, str, str | None]]:
+        """Reads every passage's id, text and language, grouped by language.
+
+        Joined to the document so `--only document=` narrows here too: this
+        stage queues over documents, so that is the column it narrows on.
+        """
+        query = (
+            select(Passage.id, Passage.text, Passage.language)
+            .join(Document, Document.sha256 == Passage.doc_sha256)
+            .order_by(Passage.language, Passage.id)
+        )
+        if within is not None:
+            query = query.where(within)
+        with self._session() as session:
+            return [(row.id, row.text, row.language) for row in session.execute(query)]
+
+    def revocabulary(self, lemmas: list[tuple[int, list[str]]]) -> int:
+        """Replaces the stored lemmas, and nothing else.
+
+        Sentence offsets are left alone: a fact cites one by index, so moving
+        them would point every citation in the corpus at different text.
+        """
+        if not lemmas:
+            return 0
+        with self._session.begin() as session:
+            # The table rather than the entity: an executemany against the
+            # mapped class is read as an ORM bulk update by primary key, which
+            # wants the key among the values being set.
+            session.execute(
+                update(_PASSAGES).where(_PASSAGES.c.id == bindparam("row")),
+                [{"row": passage_id, "lemmas": terms} for passage_id, terms in lemmas],
+            )
+        return len(lemmas)
 
     def block_types(self) -> list[str]:
         """Lists the block types actually present, for a filter to offer."""

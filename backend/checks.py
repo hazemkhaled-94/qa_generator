@@ -1049,6 +1049,43 @@ def topic_labels() -> None:
     assert [t.label for t in twice].count("Shipping") == 1, [t.label for t in twice]
 
 
+def replayed_verdicts() -> None:
+    """Re-judging a stored fact must reach the same verdict as extracting it.
+
+    The re-judgement rebuilds the candidate from the columns the first one
+    wrote, so a citation that does not survive that round trip would silently
+    re-judge a different fact from the one stored.
+
+    Raises:
+        AssertionError: If a verdict, a code or a resolved span moves when the
+            same candidate is judged twice.
+    """
+    check = FactChecker()
+    passage = _passage()
+
+    for statement, cited in (
+        ("The device weighs 4 kg.", (0,)),
+        ("The device weighs 7 kg.", (0,)),
+        ("It arrives in March 2026.", (1,)),
+        ("The device arrives in March 2026.", (0, 1)),
+        ("Anything.", (7,)),
+        ("Anything.", ()),
+    ):
+        first = check.check(passage, CandidateFact(statement, cited), "llm")
+        # What the catalogue hands back for a second judgement: the statement
+        # and the citation as they were stored, not as they were proposed.
+        again = check.check(
+            passage,
+            CandidateFact(first.statement, tuple(first.evidence_sentence_ids)),
+            first.extraction_method,
+        )
+        assert again.validated == first.validated, statement
+        assert again.rejection_code == first.rejection_code, statement
+        assert again.evidence_text == first.evidence_text, statement
+        assert again.evidence_sentence_ids == first.evidence_sentence_ids, statement
+        assert again.units_added == first.units_added, statement
+
+
 def queue_narrowing() -> None:
     """A narrowed queue operation must select one item, not the whole queue.
 
@@ -1216,6 +1253,7 @@ def main() -> int:
         graceful_shutdown,
         stop_before_claiming,
         queue_narrowing,
+        replayed_verdicts,
         structured_logs,
         topic_vocabulary,
         topic_weights,

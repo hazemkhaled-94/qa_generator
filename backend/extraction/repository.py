@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import ClassVar
 
-from sqlalchemy import Select, delete, func, insert, select
+from sqlalchemy import Select, bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Fact, Passage, Status
 from database.qa_generator.repository import Repository, matching
 from extraction.models import (
+    CandidateFact,
     CheckedFact,
     FactQuality,
     PassageToExtract,
@@ -38,6 +40,12 @@ SEARCH_FIELDS = {
 }
 
 DEFAULT_FIELD = "both"
+
+#: How many facts to hold at once while re-judging them.
+_BATCH = 500
+
+#: The facts table itself, for the bulk update a re-judgement writes.
+_FACTS = Fact.__table__
 
 
 def _filtered(query, document, search, method, field):
@@ -174,6 +182,103 @@ class FactCatalog(Repository):
 
     Separate from the queue: the API serves these and never claims a row.
     """
+
+    def judged(
+        self, within=None
+    ) -> Iterator[tuple[int, PassageToExtract, CandidateFact, str]]:
+        """Streams every stored fact beside the passage it was drawn from.
+
+        Yields the fact's id, its passage, what the model proposed and the
+        method that proposed it, which is everything a re-judgement needs: the
+        model is not called again.
+        """
+        query = (
+            select(
+                Fact.id,
+                Fact.statement,
+                Fact.evidence_sentence_ids,
+                Fact.extraction_method,
+                Passage.id.label("passage_id"),
+                Passage.text,
+                Passage.section_path,
+                Passage.block_type,
+                Passage.sentences,
+                Passage.table_cells,
+                Document.language,
+            )
+            .select_from(Fact)
+            .join(Passage, Fact.passage_id == Passage.id)
+            .join(Document, Document.sha256 == Passage.doc_sha256)
+            .order_by(Fact.id)
+            .execution_options(yield_per=_BATCH)
+        )
+        if within is not None:
+            query = query.where(within)
+        with self._session() as session:
+            for row in session.execute(query):
+                yield (
+                    row.id,
+                    PassageToExtract(
+                        id=row.passage_id,
+                        text=row.text,
+                        section_path=row.section_path,
+                        block_type=row.block_type,
+                        language=row.language,
+                        sentences=[
+                            Sentence(
+                                index=entry["i"],
+                                start=entry["start"],
+                                end=entry["end"],
+                                text=row.text[entry["start"] : entry["end"]],
+                                predicates=entry.get("predicates", 0),
+                            )
+                            for entry in row.sentences or []
+                        ],
+                        table_cells=row.table_cells or [],
+                    ),
+                    CandidateFact(
+                        statement=row.statement,
+                        sentences=tuple(row.evidence_sentence_ids or ()),
+                    ),
+                    row.extraction_method,
+                )
+
+    def rejudge(self, verdicts: list[tuple[int, CheckedFact]]) -> int:
+        """Writes back what the checks read, leaving what the model wrote.
+
+        The statement, the method and the model's own provenance are the
+        record of one extraction and are never rewritten here.
+        """
+        if not verdicts:
+            return 0
+        with self._session.begin() as session:
+            # The table rather than the entity: an executemany against the
+            # mapped class is read as an ORM bulk update by primary key, which
+            # wants the key among the values being set.
+            session.execute(
+                update(_FACTS).where(_FACTS.c.id == bindparam("row")),
+                [
+                    {
+                        "row": fact_id,
+                        "evidence_text": checked.evidence_text,
+                        "evidence_sentence_ids": checked.evidence_sentence_ids,
+                        "evidence_start": checked.evidence_start,
+                        "evidence_end": checked.evidence_end,
+                        "validated": checked.validated,
+                        "rejection_code": checked.rejection_code,
+                        "validation_error": checked.validation_error,
+                        "statement_predicates": checked.statement_predicates,
+                        "evidence_predicates": checked.evidence_predicates,
+                        "units_statement": checked.units_statement,
+                        "units_added": checked.units_added,
+                        "unresolved_references": checked.unresolved_references,
+                        "spacy_model": checked.spacy_model,
+                        "spacy_version": checked.spacy_version,
+                    }
+                    for fact_id, checked in verdicts
+                ],
+            )
+        return len(verdicts)
 
     def page(
         self,
