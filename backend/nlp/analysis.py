@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 import spacy
 from spacy.tokens import Doc, Span
 
+from nlp.language import URL
 from nlp.models import Claim, Sentence
 from nlp.pipelines import pipeline
 
@@ -27,8 +28,9 @@ _BATCH = 64
 
 #: A web address. Markdown renders a link as [text](url), and the brackets
 #: stop the tokenizer recognising the address as one token, so it splits on
-#: the punctuation inside and offers every path segment as a word.
-_URL = re.compile(r"https?://\S+|www\.\S+")
+#: the punctuation inside and offers every path segment as a word. Shared
+#: with the detector, which must read the same text this does.
+_URL = URL
 
 _WHITESPACE = re.compile(r"\s+")
 

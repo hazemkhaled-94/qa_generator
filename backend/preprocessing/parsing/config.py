@@ -15,6 +15,8 @@ class Settings:
     """
 
     ocr_char_threshold: int
+    #: Lowest confidence a conversion may carry and still be kept.
+    min_confidence: float
     table_mode: str
     heading_hierarchy: bool
     document_timeout_seconds: float | None
@@ -30,6 +32,7 @@ class Settings:
         """
         return cls(
             ocr_char_threshold=integer("PARSING_OCR_CHAR_THRESHOLD"),
+            min_confidence=decimal("PARSING_MIN_CONFIDENCE"),
             table_mode=required("PARSING_TABLE_MODE"),
             heading_hierarchy=boolean("PARSING_HEADING_HIERARCHY"),
             document_timeout_seconds=decimal("PARSING_TIMEOUT_SECONDS"),

@@ -15,6 +15,14 @@ from preprocessing.parsing.models import Conversion, ParsedDocument
 _TITLE_LABELS = (DocItemLabel.TITLE, DocItemLabel.SECTION_HEADER)
 
 
+class Unconvincing(Exception):
+    """Raised when a conversion is too unsure of itself to build on."""
+
+
+class AlreadyHeld(Exception):
+    """Raised when another document holds the same text as this one."""
+
+
 class EmptyDocument(Exception):
     """Raised when a conversion produced no body text to work with."""
 

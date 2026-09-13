@@ -63,6 +63,21 @@ class ParseQueue(RowQueue):
             char_count=claimed.char_count,
         )
 
+    def holder_of(self, content_sha256: str, besides: str) -> str | None:
+        """Names another document holding this exact text, if one does.
+
+        Ingestion catches a file uploaded twice by its bytes. The same report
+        released as a second PDF has different bytes and the same text, and is
+        only knowable here, once the text exists.
+        """
+        with self._session() as session:
+            return session.scalar(
+                select(Document.sha256).where(
+                    Document.content_sha256 == content_sha256,
+                    Document.sha256 != besides,
+                )
+            )
+
     def complete(self, sha256: str, parsed: ParsedDocument) -> None:
         """Records a successful parse, releasing the claim.
 

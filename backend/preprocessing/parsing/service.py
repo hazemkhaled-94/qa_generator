@@ -8,8 +8,17 @@ from typing import ClassVar, Protocol
 
 from opentelemetry.trace import Span
 
-from preprocessing.parsing.analysis import DocumentAnalyser, EmptyDocument
-from preprocessing.parsing.models import ClaimedDocument, SourceDocument
+from preprocessing.parsing.analysis import (
+    AlreadyHeld,
+    DocumentAnalyser,
+    EmptyDocument,
+    Unconvincing,
+)
+from preprocessing.parsing.models import (
+    ClaimedDocument,
+    ParsedDocument,
+    SourceDocument,
+)
 from preprocessing.parsing.pipelines import (
     ConversionFailed,
     PipelineRegistry,
@@ -80,6 +89,7 @@ class ParsingService(StageService):
         pipelines: PipelineRegistry,
         analyser: DocumentAnalyser,
         ocr_char_threshold: int,
+        min_confidence: float,
     ) -> None:
         """Initialises the service with its collaborators."""
         super().__init__(repository)
@@ -89,6 +99,7 @@ class ParsingService(StageService):
         self._pipelines = pipelines
         self._analyser = analyser
         self._ocr_char_threshold = ocr_char_threshold
+        self._min_confidence = min_confidence
 
     def process_next(self) -> str | None:
         """Parses one queued document.
@@ -105,7 +116,13 @@ class ParsingService(StageService):
             current.set_attribute("document.media_type", document.media_type)
             try:
                 self._parse(document, current)
-            except (UnsupportedFormat, ConversionFailed, EmptyDocument) as exc:
+            except (
+                UnsupportedFormat,
+                ConversionFailed,
+                EmptyDocument,
+                Unconvincing,
+                AlreadyHeld,
+            ) as exc:
                 self._fail(document.sha256, str(exc), current)
             except Exception as exc:
                 self._fail(document.sha256, f"{type(exc).__name__}: {exc}", current)
@@ -142,6 +159,8 @@ class ParsingService(StageService):
         )
 
         parsed = self._analyser.analyse(converted)
+        self._trustworthy(parsed)
+        self._unheld(document.sha256, parsed)
         self._repository.complete(document.sha256, parsed)
 
         self._done(current)
@@ -156,6 +175,38 @@ class ParsingService(StageService):
             "n/a" if parsed.confidence is None else f"{parsed.confidence:.3f}",
             parsed.title,
         )
+
+    def _trustworthy(self, parsed: ParsedDocument) -> None:
+        """Refuses a conversion the converter itself is unsure of.
+
+        Judged on the lower bound rather than the mean, which is the figure
+        that says how bad the worst of the document is.
+
+        Raises:
+            Unconvincing: If the lower bound is under PARSING_MIN_CONFIDENCE.
+        """
+        measured = parsed.confidence_low
+        if measured is not None and measured < self._min_confidence:
+            raise Unconvincing(
+                f"the converter puts this document's confidence at "
+                f"{measured:.2f}, under the {self._min_confidence:.2f} floor. "
+                "Everything drawn from it would be built on text nothing "
+                "vouches for. Lower PARSING_MIN_CONFIDENCE to accept it."
+            )
+
+    def _unheld(self, sha256: str, parsed: ParsedDocument) -> None:
+        """Refuses a document whose text the corpus already holds.
+
+        Raises:
+            AlreadyHeld: If another document has the same content digest.
+        """
+        held = self._repository.holder_of(parsed.content_sha256, besides=sha256)
+        if held:
+            raise AlreadyHeld(
+                f"document {held[:12]} already holds this exact text. Parsing "
+                "it again would count every fact and every topic membership "
+                "twice. Delete whichever copy you do not want."
+            )
 
     def _is_scanned(self, document: ClaimedDocument) -> bool:
         """Decides whether a document carries a text layer worth reading.

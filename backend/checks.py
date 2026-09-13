@@ -434,6 +434,24 @@ def passage_language() -> None:
     assert detect("Risiko") is None
     assert detect("") is None
 
+    # A site writes its paths in its own language. Read with the addresses in,
+    # a list of English links to bafin.de came back German, which sent 45
+    # English passages into the German topic model and put `the`, `and` and
+    # `of` among the top terms of two of its topics.
+    links = (
+        "1. [Risks arising from significant corrections on the international "
+        "financial markets](https://www.bafin.de/EN/die-bafin/"
+        "publikationen-daten/risiken-im-fokus/Fokusrisiken_2026/RIF1/rif_1.html)\n"
+        "2. [Risks arising from corporate loan defaults](https://www.bafin.de/EN/"
+        "die-bafin/publikationen-daten/risiken-im-fokus/Fokusrisiken_2026/RIF2/"
+        "rif_2.html)"
+    )
+    assert detect(links) == "en", detect(links)
+
+    # And the length is measured on the prose, not on the addresses: a link
+    # with a two-word label is not a passage anything can be read out of.
+    assert detect("[Digitalisation](https://www.bafin.de/EN/die-bafin/x.html)") is None
+
 
 def kept_chunks() -> None:
     """Chunking must store every chunk, and count the ones over budget.

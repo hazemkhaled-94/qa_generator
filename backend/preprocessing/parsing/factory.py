@@ -36,4 +36,5 @@ def build_service(settings: Settings) -> ParsingService:
         ),
         analyser=DocumentAnalyser(),
         ocr_char_threshold=settings.ocr_char_threshold,
+        min_confidence=settings.min_confidence,
     )
