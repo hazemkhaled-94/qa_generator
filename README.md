@@ -97,7 +97,8 @@ make logs            # follow all logs
 make logs-api        # follow the API log
 make logs-frontend   # follow the frontend log
 make logs-shipper    # follow the log shipper, when Grafana shows nothing
-make check           # run the self-checks; no database, no served model
+make test            # run the test suite; no database, no served model
+make test-fast       # the same, without the tests that load a spaCy pipeline
 make lint            # ruff check and format check
 make format          # apply every fix ruff can make
 make lock            # rewrite backend/api/requirements.lock
@@ -458,7 +459,7 @@ because no document in the corpus has any.
 | `backend/topic_modelling/` | Each language becomes topics over its own vocabulary |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
 | `backend/settings/` | Reading configuration out of the environment, and nowhere else |
-| `backend/checks.py` | Self-checks for the logic that would fail silently |
+| `tests/` | The test suite: `unit/` per package, `static/` over the repository itself |
 | `telemetry/` | Logging and OpenTelemetry configuration |
 | `configs/filebeat/` | What the log shipper reads and where it puts it |
 | `configs/grafana/` | The log datasource and dashboard, provisioned |

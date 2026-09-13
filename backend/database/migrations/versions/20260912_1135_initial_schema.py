@@ -1,6 +1,9 @@
 """Initial schema.
 
-Every table the models declare, as they stood when migrations were adopted.
+The `vector` and `pg_trgm` extensions, then every table the models declare,
+as they stood when migrations were adopted. The downgrade leaves the
+extensions in place.
+
 An existing deployment is brought onto the migration history with
 `alembic stamp head` rather than by running this.
 
@@ -32,6 +35,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Applies the change."""
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+
     op.create_table(
         "documents",
         sa.Column(

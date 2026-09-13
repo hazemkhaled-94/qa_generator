@@ -114,6 +114,12 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.pytest.ini_options]
+pythonpath = [".", "backend", "tests"]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = ["nlp: loads a spaCy pipeline"]
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

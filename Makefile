@@ -45,7 +45,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSA
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         documents delete delete-derived \
-        check lint format lock certs dagster-dev
+        test test-fast check lint format lock certs dagster-dev
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -344,24 +344,30 @@ delete-derived:
 	@[ -n "$(SHA)" ] || { echo "usage: make delete-derived SHA=<sha256>"; exit 2; }
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --delete-derived $(SHA)
 
-# ── Static checks ──────────────────────────────────────────────────────────
+# ── Tests ──────────────────────────────────────────────────────────────────
 
-# The logic that would fail silently: the fact checks, the sentence numbering
-# a citation resolves against, the chunker's size filter, the table reader's
-# labelling, the parser's word repair, the worker's shutdown and the topic
-# model's weights and vocabulary. No database and no served model, so it runs
-# before anything is started; it does load the spaCy pipelines.
-check:
-	PYTHONPATH=backend poetry run python -m checks
+# The whole suite. No database and no served model, so it runs before
+# anything is started; it does load the spaCy pipelines. Configuration lives
+# in [tool.pytest.ini_options] in pyproject.toml.
+test:
+	poetry run pytest
+
+# Without the tests that load a spaCy pipeline.
+test-fast:
+	poetry run pytest -m "not nlp"
+
+check: test
+
+# ── Static checks ──────────────────────────────────────────────────────────
 
 # Configuration lives in [tool.ruff] in pyproject.toml.
 lint:
-	poetry run ruff check backend frontend telemetry
-	poetry run ruff format --check backend frontend telemetry
+	poetry run ruff check backend frontend telemetry tests
+	poetry run ruff format --check backend frontend telemetry tests
 
 format:
-	poetry run ruff check --fix backend frontend telemetry
-	poetry run ruff format backend frontend telemetry
+	poetry run ruff check --fix backend frontend telemetry tests
+	poetry run ruff format backend frontend telemetry tests
 
 # ── Dependency locks ───────────────────────────────────────────────────────
 
