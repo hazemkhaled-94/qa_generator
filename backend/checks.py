@@ -153,13 +153,26 @@ def fact_checks() -> None:
         == Rejection.EVIDENCE_ABSENT
     )
 
-    # The model filled both fields with one string.
+    # The model filled both fields with one string, and the string carried two
+    # claims it was supposed to draw one of.
     copied = check.check(
         passage,
         CandidateFact("The device weighs 4 kg and runs for 12 hours.", (0,)),
         "llm",
     )
     assert copied.rejection_code == Rejection.COPIED, copied.validation_error
+
+    # A cited sentence carrying one claim already is the fact, so quoting it is
+    # the answer. Rejecting these threw away 238 of one corpus's 270 copies.
+    quoted = _passage(
+        "The market presented a mixed picture in 2025. "
+        "Transaction volumes remained low and prices fell further."
+    )
+    assert [s.predicates for s in quoted.sentences] == [1, 2], quoted.sentences
+    verbatim = check.check(quoted, CandidateFact(quoted.sentences[0].text, (0,)), "llm")
+    assert verbatim.validated, (verbatim.rejection_code, verbatim.validation_error)
+    restated = check.check(quoted, CandidateFact(quoted.sentences[1].text, (1,)), "llm")
+    assert restated.rejection_code == Rejection.COPIED, restated.validation_error
 
     # Two claims in one statement is two facts, not one.
     both = check.check(
@@ -195,6 +208,23 @@ def fact_checks() -> None:
         named.validation_error
     )
     assert "bundesbank" in named.units_added, named.units_added
+
+    # A year ending a German sentence is one token, "2026.", and the same year
+    # anywhere else is "2026". Comparing the two surface forms reported the
+    # year as invented: 60 of one corpus's 201 unsupported additions were a
+    # number whose only difference from the cited text was a full stop.
+    dated = _passage(
+        "Im Jahr 2026 überwacht die Bafin die Kreditrisiken der Institute. "
+        "Der Bericht erscheint spaeter.",
+        language="de",
+    )
+    ending = check.check(
+        dated,
+        CandidateFact("Die Bafin überwacht die Kreditrisiken im Jahr 2026.", (0,)),
+        "llm",
+    )
+    assert not ending.units_added, ending.units_added
+    assert ending.validated, (ending.rejection_code, ending.validation_error)
 
     # Neither a common noun nor a verb is a unit. The two sides are parsed
     # separately, so the tagger disagrees with itself about a noun; and the
@@ -727,6 +757,21 @@ def topic_vocabulary() -> None:
     mixed = lemmas("Die Bafin prueft the risk on the market genau.", "de")
     assert "--" not in mixed, mixed
     assert all(term.isalpha() for term in mixed), mixed
+
+    # German capitalises every noun, so a lower-case one is a word from another
+    # language. The German pipeline tags the English "the", "and" and "of" as
+    # proper nouns, which put them among the top terms of two German topics.
+    embedded = lemmas(
+        "Quelle: Baker and Davis, Economic Policy Index. Der Bericht "
+        "'Risks in the Focus of Bafin' nennt die Kosten mit dem Markt.",
+        "de",
+    )
+    assert not {"the", "and", "of", "with"} & set(embedded), embedded
+    # The English content words are still vocabulary; only the grammar goes.
+    assert {"economic", "risks", "focus"} <= set(embedded), embedded
+    # And a German sentence keeps every noun it has.
+    german_only = lemmas("Die Lieferung erreicht den Hafen puenktlich.", "de")
+    assert {"lieferung", "hafen"} <= set(german_only), german_only
 
     # A table is vocabulary too: its headings and cell values are what it is
     # about, and leaving them out put every fact the cell reader draws from a

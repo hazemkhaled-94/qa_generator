@@ -15,6 +15,13 @@ from nlp.pipelines import pipeline
 #: what a stopword list used to be needed for.
 _CONTENT = frozenset({"NOUN", "PROPN", "ADJ"})
 
+#: Parts of speech a noun is tagged with, in the languages that capitalise one.
+_NOMINAL = frozenset({"NOUN", "PROPN"})
+
+#: Languages whose every noun is capitalised, so a lower-case one is a word
+#: the pipeline read in a language it was not trained on.
+_CAPITALISES_NOUNS = frozenset({"de"})
+
 #: How many texts to hand spaCy at once.
 _BATCH = 64
 
@@ -24,6 +31,19 @@ _BATCH = 64
 _URL = re.compile(r"https?://\S+|www\.\S+")
 
 _WHITESPACE = re.compile(r"\s+")
+
+#: Sentence punctuation the tokenizer keeps inside a token's surface form. The
+#: German tokenizer reads a year ending a sentence as one token, `2026.`, and
+#: the same year anywhere else as `2026`.
+_TRAILING = ".,;:"
+
+
+def _bare(form: str) -> str:
+    """Trims the sentence punctuation a token carried into its surface form.
+
+    Trailing only, so `12,5` and `12.5` stay the different values they are.
+    """
+    return form.rstrip(_TRAILING) or form
 
 
 def normalised(text: str) -> str:
@@ -68,7 +88,7 @@ def _units(span: Doc | Span) -> tuple[str, ...]:
     found = set()
     for token in span:
         if token.like_num:
-            found.add(token.text.casefold())
+            found.add(_bare(token.text).casefold())
         elif token.pos_ == "PROPN":
             found.add(token.lemma_.casefold())
     return tuple(sorted(found))
@@ -99,6 +119,20 @@ def _references(span: Doc | Span) -> tuple[str, ...]:
     return tuple(sorted({t.text.casefold() for t in span if _refers(t)}))
 
 
+def _foreign(token, language: str) -> bool:
+    """Whether a token is a foreign word read as a noun of this language.
+
+    German capitalises every noun, so a lower-case one is a word from another
+    language: the German pipeline tags the English `the`, `and` and `of` as
+    proper nouns, which puts them in the German vocabulary as subjects.
+    """
+    return (
+        language in _CAPITALISES_NOUNS
+        and token.pos_ in _NOMINAL
+        and token.text[:1].islower()
+    )
+
+
 def _lemmas(document: Doc) -> list[str]:
     """Collects the content lemmas of a document.
 
@@ -111,6 +145,7 @@ def _lemmas(document: Doc) -> list[str]:
         token.lemma_.casefold()
         for token in document
         if token.pos_ in _CONTENT
+        and not _foreign(token, document.lang_)
         # The lemma, not the token: the lemma is what is stored, and a
         # lemmatiser handed a word from another language returns the
         # placeholder "--" for a token that is itself perfectly alphabetic.
@@ -149,10 +184,11 @@ def vocabulary(text: str, language: str | None) -> frozenset[str]:
     """
     document = pipeline(language)(text)
     return frozenset(
-        form.casefold()
+        variant.casefold()
         for token in document
         for form in (token.text, token.lemma_)
-        if form
+        for variant in (form, _bare(form))
+        if variant
     )
 
 

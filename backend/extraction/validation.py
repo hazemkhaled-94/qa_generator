@@ -49,14 +49,21 @@ class Judged:
 
 
 def _copied(judged: Judged) -> tuple[str, str] | None:
-    """The model filled both fields with one string."""
+    """The model filled both fields with one string.
+
+    Evidence carrying exactly one claim already is the fact, so a statement
+    equal to it is the answer rather than a failure.
+    """
     if normalised(judged.statement) != normalised(judged.evidence):
+        return None
+    if judged.evidence_predicates == 1:
         return None
     return (
         Rejection.COPIED,
         (
-            "the statement is its evidence copied rather than written, so it "
-            "restates the passage instead of drawing a claim out of it"
+            f"the statement is its evidence copied rather than written, and "
+            f"that evidence carries {judged.evidence_predicates} claims, so it "
+            "restates the passage instead of drawing one claim out of it"
         ),
     )
 
