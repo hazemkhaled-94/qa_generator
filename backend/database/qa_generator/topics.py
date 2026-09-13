@@ -77,7 +77,13 @@ class Topic(Base):
         "and the only signature a label is matched on across a refit.",
     )
     label: Mapped[str | None] = mapped_column(
-        Text, comment="Name assigned by a person, if any."
+        Text, comment="The subject this topic is, in words."
+    )
+    labelled_by: Mapped[str | None] = mapped_column(
+        Text,
+        comment="What named it: 'person', or the model identifier. A name a "
+        "person typed is never overwritten by a model's, and a report that "
+        "reads by name should say which it is reading.",
     )
     include_in_coverage: Mapped[bool] = mapped_column(
         Boolean,
