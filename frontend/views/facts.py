@@ -433,7 +433,7 @@ def _detail(client, fact: dict) -> None:
     st.text(fact["evidence_text"])
 
     if fact["validation_error"]:
-        st.error(f"Why this was rejected: {fact['validation_error']}")
+        st.error(f"Rejection reason: {fact['validation_error']}")
     for label, values, explanation in (
         (
             "Added to the statement",
