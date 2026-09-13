@@ -580,15 +580,23 @@ The values most likely to need changing:
 `frontend/.streamlit/config.toml`, or Streamlit rejects the file before the API
 sees it.
 
-The frontend follows the dark mode of whatever is showing it. That file gives
-Streamlit a palette under `[theme.light]` and another under `[theme.dark]`, and
-`frontend/styles.css` branches on the same `prefers-color-scheme` the browser
-reports, so the chrome and the custom styling cannot disagree about which theme
-is up. There is deliberately no in-app switch: a second way to choose would be
-a second source of truth. Put a colour in `[theme]` itself, or set `theme.base`,
+The frontend comes in light and dark. That file gives Streamlit a palette
+under `[theme.light]` and another under `[theme.dark]`; it starts from the
+browser's `prefers-color-scheme` and the toolbar menu, top right, switches
+between them per page. Put a colour in `[theme]` itself, or set `theme.base`,
 and it applies to both themes — which is what pinned the app to light before.
-The topic map stays on white in either theme; it is a pyLDAvis document inside
-an iframe, so nothing outside it can restyle it.
+
+`frontend/styles.css` reads its own palette off `light-dark()`, which resolves
+against the `color-scheme` Streamlit sets on the app container from the theme
+it actually settled on. So the custom styling follows the chrome whichever way
+the chrome was decided — a `prefers-color-scheme` media query would have got
+the menu wrong, staying light while everything around it went dark. Only the
+five accent hues are written twice; the neutrals are mixed from `currentColor`
+and each border and wash from its own hue, so they need no second value.
+
+The topic map stays on white in either theme. It is a pyLDAvis document inside
+an iframe, so nothing outside it can restyle it; it is framed and given a
+background of its own so it reads as a figure printed on white.
 
 Changing `NLP_MODELS` changes what a fact is, in the same way changing the
 prompt does. Both are recorded on every fact — `spacy_model`, `spacy_version`,

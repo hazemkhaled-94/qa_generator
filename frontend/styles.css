@@ -1,17 +1,24 @@
 /* Two themes, one stylesheet.
 
-   Streamlit resolves light against dark from the browser's
-   prefers-color-scheme, and .streamlit/config.toml gives it a palette for
-   each. This file branches on the same media query, so the custom styling
-   and the app chrome are always reading the same signal.
+   Every pair below is written light-first with light-dark(), which resolves
+   against the `color-scheme` of the element using it. Streamlit sets that on
+   the app container to the theme it actually settled on, so these follow
+   whether the reader chose from the toolbar menu or the browser reported a
+   preference. A prefers-color-scheme media query would only have caught the
+   second, and would have disagreed with the chrome the moment anyone used
+   the menu.
 
-   Only the five accent hues are written twice. Everything neutral is mixed
+   Only the five accent hues need a pair at all. Everything neutral is mixed
    from `currentColor` — whatever Streamlit set the text to — so it follows
    the theme with no second value to keep in step, and every border and wash
-   is mixed from its own hue for the same reason. A theme is eight values,
-   not forty. */
+   is mixed from its own hue for the same reason. A theme is seven pairs,
+   not forty values. */
 
 :root {
+  /* Both, so the page itself — scrollbars, and anything outside the app
+     container — follows along rather than staying stubbornly light. */
+  color-scheme: light dark;
+
   /* currentColor resolves where a var() is used, not where it is declared,
      so each of these takes the text colour of the element using it. */
   --qa-ink: currentColor;
@@ -21,40 +28,26 @@
   --qa-radius: 10px;
 
   /* One hue per thing a control does, graded by what pressing it by mistake
-     would cost. Each reads against this theme's background at well above the
-     4.5:1 text minimum.
+     would cost. Each reads against its own theme's background at well above
+     the 4.5:1 text minimum; the dark half is lifted because a hue chosen for
+     white cannot also serve on near-black — #15683A on #131019 is 1.7:1, and
+     no single colour clears 4.5:1 against both.
 
      go      — starts work that was going to be done anyway
      recover — re-queues only what already failed
      halt    — withdraws from the queue; nothing finished is lost
      redo    — throws finished output away and rebuilds it
      danger  — deletes data, and cannot be undone */
-  --qa-go: #15683A;
-  --qa-recover: #1B4F9E;
-  --qa-halt: #3D4453;
-  --qa-redo: #8A5A00;
-  --qa-danger: #A32020;
+  --qa-go: light-dark(#15683A, #4FBF82);
+  --qa-recover: light-dark(#1B4F9E, #7FB0F0);
+  --qa-halt: light-dark(#3D4453, #A9B2C4);
+  --qa-redo: light-dark(#8A5A00, #E0AE4E);
+  --qa-danger: light-dark(#A32020, #F08A8A);
 
-  /* Read on top of a filled accent button. */
-  --qa-on-accent: #FFFFFF;
+  /* Read on top of a filled accent button, so it flips as the accent does. */
+  --qa-on-accent: light-dark(#FFFFFF, #131019);
   /* Which way a hover moves an accent. Light darkens; dark lightens. */
-  --qa-shade: #000000;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* The same five, lifted to read against a near-black ground. A hue
-       chosen for white is too dark here — #15683A on #131019 is 1.7:1. */
-    --qa-go: #4FBF82;
-    --qa-recover: #7FB0F0;
-    --qa-halt: #A9B2C4;
-    --qa-redo: #E0AE4E;
-    --qa-danger: #F08A8A;
-
-    /* The accents are now light, so what sits on them must be dark. */
-    --qa-on-accent: #131019;
-    --qa-shade: #FFFFFF;
-  }
+  --qa-shade: light-dark(#000000, #FFFFFF);
 }
 
 /* Mixed from the hue above, so they follow whichever palette is active.
@@ -75,7 +68,8 @@
 
 .block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 1320px; }
 header[data-testid="stHeader"] { background: transparent; }
-#MainMenu, footer { visibility: hidden; }
+/* The toolbar menu stays: it is where the light/dark toggle lives. */
+footer { visibility: hidden; }
 
 .pill {
   display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;

@@ -1,11 +1,11 @@
 # One palette per theme, and nothing forcing either.
 #
 # Streamlit picks between [theme.light] and [theme.dark] from the browser's
-# prefers-color-scheme, which is the same signal styles.css branches on, so
-# the stylesheet and the app chrome can never disagree about which theme is
-# showing. Switching is done wherever the operating system or browser sets
-# dark mode; there is no in-app toggle, deliberately — a second way to choose
-# would be a second source of truth, and the two would drift apart.
+# prefers-color-scheme, or from whatever the reader chose in the toolbar
+# menu, and records the choice per page in localStorage. Either way it sets
+# `color-scheme` on the app container to the theme it settled on, and
+# styles.css reads its own palette off that with light-dark(), so the custom
+# styling follows the chrome however the chrome was decided.
 #
 # `base` is deliberately unset, and no colour is written in [theme] itself.
 # Both apply to light and dark alike, which is exactly what pinned this app
@@ -44,5 +44,9 @@ enableXsrfProtection = true
 gatherUsageStats = false
 
 [client]
-toolbarMode = "minimal"
+# "viewer", not "minimal": minimal hides the toolbar menu altogether, and the
+# theme toggle lives in it. Viewer keeps that and the print and screen-record
+# items while dropping rerun, clear-cache and deploy, which are a developer's
+# and not a reader's.
+toolbarMode = "viewer"
 showErrorDetails = "none"
