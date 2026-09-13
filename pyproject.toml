@@ -6,7 +6,9 @@ authors = [
     {name = "Hazem Khaled",email = "hazem.mkhaled@icloud.com"}
 ]
 license = {file = "LICENSE"}
-requires-python = ">=3.12,<3.15"
+# Upper bound: gensim builds against CPython internals removed in 3.14, and
+# has no wheel for it. Both images are python:3.13-slim.
+requires-python = ">=3.12,<3.14"
 dependencies = []
 
 

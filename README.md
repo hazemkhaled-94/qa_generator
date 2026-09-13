@@ -30,7 +30,7 @@ placeholder in `backend/preprocessing/parsing/pipelines/pdf.py`.
 
 | | |
 |---|---|
-| Python | 3.12–3.14 |
+| Python | 3.12 or 3.13 |
 | [Poetry](https://python-poetry.org/docs/#installation) | 2.0 or later |
 | [Podman](https://podman.io/docs/installation) or Docker | with Compose |
 
