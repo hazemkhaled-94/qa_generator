@@ -14,6 +14,7 @@ from topic_modelling.models import (
     Fitting,
     PassageVocabulary,
     PassageWeight,
+    TopicSpace,
 )
 
 log = logging.getLogger(__name__)
@@ -22,13 +23,11 @@ log = logging.getLogger(__name__)
 _BATCH = 500
 
 #: The corpus, as the fitter takes it: a callable handing back a fresh walk
-#: over every passage. A callable and not an iterable, because the fit walks
-#: the corpus several times and a generator is spent after the first.
+#: over every passage.
 Corpus = Callable[[], Iterable[PassageVocabulary]]
 
 #: Smallest share of terms two topics must have in common before a label is
-#: carried from one to the other. Set high: attaching a person's label to the
-#: wrong topic is worse than making them type it again.
+#: carried from one to the other.
 _LABEL_MATCH = 0.4
 
 
@@ -37,11 +36,7 @@ class NoVocabulary(Exception):
 
 
 class _BagsOfWords:
-    """The corpus as bags of words, rebuilt on every walk.
-
-    What the model takes: an iterable it may walk once per pass. Wrapping it
-    in a TfidfModel keeps it lazy, so the corpus is still streamed.
-    """
+    """The corpus as bags of words, rebuilt on every walk."""
 
     def __init__(self, corpus: Corpus, dictionary: corpora.Dictionary) -> None:
         """Initialises the view."""
@@ -57,26 +52,9 @@ class _BagsOfWords:
 class TopicFitter:
     """Fits topics over the terms one language's passages use.
 
-    Not a pretrained model and not an LLM: the vocabulary is the lemmas
-    chunking stored, which is what keeps the result industry-agnostic.
-    Grammar never reaches it, because only content parts of speech are
-    lemmatised; the frequency filter is left to catch the boilerplate no word
-    list could know about.
-
-    Non-negative matrix factorisation over a tf-idf weighted space, rather
-    than LDA over raw counts. LDA is defined over counts - words drawn from a
-    multinomial - so tf-idf cannot be fed to it without contradicting its own
-    likelihood, and measured on this corpus doing so was worse than counts.
-    Factorisation carries no such assumption, and weighting the input is what
-    stops one dominant vocabulary spreading across every topic: measured at
-    twelve topics, term overlap between topics fell from 32% to 11% and
-    coherence rose from 0.52 to 0.66.
-
-    The weights it returns are normalised, so a passage's memberships still
-    read as shares and still satisfy the CHECK on passage_topics.weight.
-
-    The fit is seeded, so the same corpus and the same settings give the same
-    topics.
+    Non-negative matrix factorisation over a tf-idf weighted space. The
+    vocabulary is the content lemmas chunking stored. The weights returned
+    are normalised, and the fit is seeded.
     """
 
     def __init__(
@@ -90,12 +68,7 @@ class TopicFitter:
         no_below: int,
         no_above: float,
     ) -> None:
-        """Initialises the fitter, refusing a setting that cannot do its job.
-
-        Checked here because these arrive from the environment: a weight
-        floor of 0 would write a row for every topic of every passage, and
-        breach the CHECK constraint on passage_topics.weight.
-        """
+        """Initialises the fitter, refusing a setting that cannot do its job."""
         if num_topics < 2:
             raise ValueError(
                 f"TOPIC_NUM_TOPICS={num_topics} is not a partition of anything; "
@@ -128,9 +101,7 @@ class TopicFitter:
         """Fits one language's model and scores its passages against it.
 
         The corpus is walked rather than held: once to build the vocabulary,
-        once per pass, and once more to score. The tf-idf weighting is read
-        off the vocabulary's own document frequencies and applied lazily, so
-        it costs no extra walk and the corpus is still streamed.
+        once per pass, and once more to score.
         """
         dictionary = corpora.Dictionary()
         counted = 0
@@ -155,9 +126,7 @@ class TopicFitter:
             )
 
         bows = _BagsOfWords(corpus, dictionary)
-        # Reads one passage in the healthy case, because any() short-circuits.
-        # Catches the corpus that cannot be walked twice: the vocabulary above
-        # spent it, and the model would fit an empty corpus without complaining.
+        # Catches a corpus that cannot be walked twice.
         if not any(bool(bow) for bow in bows):
             raise NoVocabulary(
                 f"a second walk over the corpus yielded none of the "
@@ -173,8 +142,7 @@ class TopicFitter:
             len(dictionary),
             before,
         )
-        # From the dictionary rather than the corpus: it already counted the
-        # document frequencies idf is, so this needs no walk of its own.
+        # From the dictionary, which already counted the document frequencies.
         weighting = TfidfModel(dictionary=dictionary)
         model = Nmf(
             corpus=weighting[bows],
@@ -184,7 +152,7 @@ class TopicFitter:
             random_state=self._random_state,
         )
 
-        weights, without = self._score(model, corpus, dictionary, weighting)
+        weights, without, space = self._score(model, corpus, dictionary, weighting)
         return Fitting(
             language=language,
             topics=self._topics(model),
@@ -192,6 +160,7 @@ class TopicFitter:
             passages=counted,
             without_topics=without,
             vocabulary=len(dictionary),
+            space=space,
         )
 
     def _topics(self, model: Nmf) -> list[FittedTopic]:
@@ -212,31 +181,44 @@ class TopicFitter:
         corpus: Corpus,
         dictionary: corpora.Dictionary,
         weighting: TfidfModel,
-    ) -> tuple[list[PassageWeight], int]:
-        """Scores every passage against the fitted model."""
+    ) -> tuple[list[PassageWeight], int, TopicSpace]:
+        """Scores every passage against the fitted model.
+
+        Reads each passage's whole distribution and applies the weight floor
+        here, so the stored memberships and the visualisation's matrices come
+        out of one walk.
+        """
         weights: list[PassageWeight] = []
+        doc_topic: list[list[float]] = []
+        doc_lengths: list[int] = []
         without = 0
         for passage in corpus():
-            found = model.get_document_topics(
-                weighting[dictionary.doc2bow(passage.lemmas)],
-                minimum_probability=self._min_weight,
-            )
+            bow = dictionary.doc2bow(passage.lemmas)
+            found = model.get_document_topics(weighting[bow], minimum_probability=0)
+            if found:
+                row = [0.0] * model.num_topics
+                for index, weight in found:
+                    row[int(index)] = float(weight)
+                total = sum(row)
+                doc_topic.append([value / total for value in row])
+                doc_lengths.append(sum(count for _, count in bow))
+
+            kept = [
+                (index, weight) for index, weight in found if weight > self._min_weight
+            ]
             # A passage holding none of the vocabulary, and one whose every
-            # weight fell below the floor, are both absent from every
-            # topic-weighted report, so both are counted here.
-            if not found:
+            # weight fell below the floor, are both counted here.
+            if not kept:
                 without += 1
                 continue
             weights.extend(
                 PassageWeight(
                     passage_id=passage.id,
                     topic_index=int(index),
-                    # Clamped: the weights are normalised in floating point,
-                    # so a distribution's last member can round a hair above 1
-                    # and breach the CHECK constraint on the column.
+                    # Clamped to satisfy the CHECK on passage_topics.weight.
                     weight=min(1.0, float(weight)),
                 )
-                for index, weight in found
+                for index, weight in kept
             )
         if without:
             log.warning(
@@ -244,7 +226,17 @@ class TopicFitter:
                 "was filtered out, so they are in no topic-weighted report",
                 without,
             )
-        return weights, without
+        return (
+            weights,
+            without,
+            TopicSpace(
+                topic_term=model.get_topics(normalize=True).tolist(),
+                doc_topic=doc_topic,
+                doc_lengths=doc_lengths,
+                vocabulary=[dictionary[i] for i in range(len(dictionary))],
+                term_frequency=[dictionary.cfs[i] for i in range(len(dictionary))],
+            ),
+        )
 
 
 def carry_labels(
@@ -252,12 +244,11 @@ def carry_labels(
 ) -> list[FittedTopic]:
     """Re-attaches a previous fit's labels to the topics that replaced them.
 
-    Matched on shared top terms, which is the only signature a topic stores.
-    Each previous label is used at most once, on its best match.
+    Matched on shared top terms. Each previous label is used at most once, on
+    its best match.
 
     ponytail: a greedy pass, so a label can land on the second-best topic when
-    two compete for it. Fixing that properly is an assignment problem; an
-    unlabelled topic costs one person one minute.
+    two compete for it. The upgrade is to solve it as an assignment problem.
     """
     taken: set[int] = set()
     carried: list[FittedTopic] = []
@@ -278,6 +269,7 @@ def carry_labels(
                 topic_index=topic.topic_index,
                 top_terms=topic.top_terms,
                 label=best.label,
+                labelled_by=best.labelled_by,
                 include_in_coverage=best.include_in_coverage,
             )
         )

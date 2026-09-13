@@ -8,8 +8,10 @@ from typing import ClassVar
 
 from opentelemetry.trace import Span
 
+from blob_store.seaweedfs import ExportBucket
 from stages import StageService
 from telemetry import tracer
+from topic_modelling.labels import TopicLabeller
 from topic_modelling.models import Fitting
 from topic_modelling.repository import TopicQueue
 from topic_modelling.topics import NoVocabulary, TopicFitter, carry_labels
@@ -17,28 +19,40 @@ from topic_modelling.topics import NoVocabulary, TopicFitter, carry_labels
 log = logging.getLogger(__name__)
 span = tracer(__name__)
 
+#: How many of a topic's strongest passages the model is shown when naming it.
+_EXCERPTS = 4
+
 
 class TopicModellingService(StageService):
     """Fits the corpus topic model when a run asks for it.
 
-    The unit of work is a whole language, because the factorisation estimates
-    every topic together over one vocabulary. That is also why work arrives as an explicit
-    request: a new document does not make one topic stale, it makes all of
-    them stale, and whether that is worth a refit is a person's decision.
-
-    Each fit replaces every topic and every membership. Human labels are
-    carried across by matching top terms. A fit that fails leaves the previous
-    topics in place, with the reason on the request row beside them.
+    The unit of work is a whole language. Each fit replaces every topic and
+    every membership, carrying human labels across by matching top terms. A
+    fit that fails leaves the previous topics in place, with the reason on
+    the request row beside them.
     """
 
     name: ClassVar[str] = "topic_modelling"
     unit: ClassVar[str] = "fit"
 
-    def __init__(self, *, repository: TopicQueue, fitter: TopicFitter) -> None:
-        """Initialises the service with its collaborators."""
+    def __init__(
+        self,
+        *,
+        repository: TopicQueue,
+        fitter: TopicFitter,
+        export: ExportBucket,
+        labeller: TopicLabeller | None = None,
+    ) -> None:
+        """Initialises the service with its collaborators.
+
+        The labeller is optional; without one a topic keeps its terms and no
+        name.
+        """
         super().__init__(repository)
         self._repository: TopicQueue = repository
         self._fitter = fitter
+        self._export = export
+        self._labeller = labeller
 
     def request(self) -> int:
         """Asks for a fit, without doing it."""
@@ -66,9 +80,8 @@ class TopicModellingService(StageService):
     def _fit(self, fit_id: int, current: Span) -> None:
         """Fits every language the corpus holds and stores what they produced.
 
-        A language whose vocabulary the frequency filter empties is logged and
-        left out rather than failing the run: one unusable language must not
-        cost the others their topics.
+        A language whose vocabulary the frequency filter empties is logged
+        and left out rather than failing the run.
 
         Raises:
             NoVocabulary: If no language produced a model at all.
@@ -90,13 +103,11 @@ class TopicModellingService(StageService):
             except NoVocabulary as exc:
                 log.warning("no %s model: %s", language, exc)
                 continue
+            carried = carry_labels(
+                fitting.topics, self._repository.labelled_topics(language)
+            )
             fittings.append(
-                replace(
-                    fitting,
-                    topics=carry_labels(
-                        fitting.topics, self._repository.labelled_topics(language)
-                    ),
-                )
+                replace(fitting, topics=self._named(carried, fitting, language))
             )
 
         if not fittings:
@@ -106,6 +117,7 @@ class TopicModellingService(StageService):
             )
 
         memberships = self._repository.replace(fit_id, fittings)
+        self._draw(fittings)
         self._annotate(current, fittings, memberships)
 
         for fitting in fittings:
@@ -120,8 +132,6 @@ class TopicModellingService(StageService):
                 fitting.labels_carried,
             )
             if fitting.without_topics:
-                # Loud on purpose: a passage with no topic is absent from
-                # every topic-weighted report, and so are its facts.
                 log.warning(
                     "%d of %d %s passage(s) have no topic. They and everything "
                     "drawn from them are outside every topic-weighted report.",
@@ -129,6 +139,64 @@ class TopicModellingService(StageService):
                     fitting.passages,
                     fitting.language,
                 )
+
+    def _draw(self, fittings: list[Fitting]) -> None:
+        """Stores each language's model as a page.
+
+        The topics are already written when this runs, so a failure here is
+        logged and left: a model with no picture is still a model. pyLDAvis is
+        imported here for the same reason, so an image built before it was
+        declared still fits.
+        """
+        try:
+            from topic_modelling.visualisation import render
+        except ImportError:
+            log.exception("pyLDAvis is missing, so the topics were not drawn")
+            return
+
+        for fitting in fittings:
+            try:
+                self._export.put(
+                    self._export.topic_visualisation_key(fitting.language),
+                    render(fitting.space, fitting.language),
+                    content_type=self._export.TOPIC_VISUALISATION_TYPE,
+                )
+            except Exception:
+                log.exception("could not draw the %s topics", fitting.language)
+
+    def _named(self, topics: list, fitting: Fitting, language: str) -> list:
+        """Names the topics no person has named, with the model.
+
+        Only the unnamed ones: a name a person typed, or one carried from the
+        last fit, is left alone.
+        """
+        if self._labeller is None:
+            return topics
+
+        strongest: dict[int, list[int]] = {}
+        for weight in sorted(fitting.weights, key=lambda w: -w.weight):
+            held = strongest.setdefault(weight.topic_index, [])
+            if len(held) < _EXCERPTS:
+                held.append(weight.passage_id)
+
+        named = []
+        for topic in topics:
+            if topic.label:
+                named.append(topic)
+                continue
+            label = self._labeller.label(
+                topic,
+                language,
+                self._repository.excerpts(strongest.get(topic.topic_index, [])),
+            )
+            named.append(
+                replace(topic, label=label, labelled_by=self._labeller.model)
+                if label
+                else topic
+            )
+        found = sum(1 for t in named if t.label)
+        log.info("%s: %d of %d topic(s) named", language, found, len(named))
+        return named
 
     def _annotate(
         self, current: Span, fittings: list[Fitting], memberships: int

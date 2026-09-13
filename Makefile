@@ -21,6 +21,19 @@ LOCK_TMP := backend/api/requirements.lock.new
 OVERRIDE = $(if $(MAKEOVERRIDES),&& export $(MAKEOVERRIDES),)
 LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE)
 
+# Narrows a stage target to one item instead of the whole queue, mirroring
+# the route's /{scope}/{value} segment:
+#
+#   make parse-start   SHA=<sha256>     one document
+#   make chunk-rerun   SHA=<sha256>     one document
+#   make extract-start SHA=<sha256>     every passage of one document
+#   make extract-retry PASSAGE=<id>     one passage
+#
+# Which scopes a stage accepts is the stage's own; parsing and chunking take
+# a document, extraction takes either, topic modelling takes neither. SHA
+# wins if both are given.
+ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSAGE)))
+
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
@@ -28,7 +41,7 @@ LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE
         extract extract-status extract-start extract-stop extract-retry \
         extract-rerun \
         topics topics-status topics-discover topics-stop topics-delete \
-        topics-retry \
+        topics-retry topics-visualise \
         documents delete delete-derived \
         check lint format lock certs dagster-dev
 
@@ -48,8 +61,8 @@ dev: install certs
 # SPACY_MODELS in backend/api/Dockerfile.
 install:
 	poetry install --with llm,nlp,data,storage,api,pipeline,viz,observability,dev
-	poetry run python -m spacy download de_core_news_sm
-	poetry run python -m spacy download en_core_web_sm
+	poetry run python -m spacy download de_core_news_md
+	poetry run python -m spacy download en_core_web_md
 
 # ── Services ───────────────────────────────────────────────────────────────
 
@@ -144,6 +157,14 @@ schema-reset:
 #   make extract-retry    POST /extraction/retry
 #   make extract-rerun    POST /extraction/rerun
 #
+# Add SHA or PASSAGE to narrow any of them to one item, which mirrors the
+# route's own /{scope}/{value} segment:
+#
+#   make parse-start SHA=abc…       POST /parsing/document/abc…/start
+#   make extract-rerun SHA=abc…     POST /extraction/document/abc…/rerun
+#   make extract-retry PASSAGE=41   POST /extraction/passage/41/retry
+#   make extract-status SHA=abc…     GET /extraction/document/abc…/status
+#
 # None of them runs anything: they move rows between statuses, and whichever
 # worker is watching picks up what is claimable.
 #
@@ -156,26 +177,26 @@ parse:
 
 # Report how many documents are in each parse state.
 parse-status:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --status
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --status $(ONLY)
 
 # Queue every document this stage has not been asked to do yet. Nothing
 # reaches a worker until this runs.
 parse-start:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --start
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --start $(ONLY)
 
 # Take back whatever has not begun. The one in hand finishes.
 parse-stop:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --stop
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --stop $(ONLY)
 
 # Return every failed document to the pending queue. A document a worker died
 # holding is failed by the next run, so this covers that too.
 parse-retry:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --retry
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --retry $(ONLY)
 
 # Run this stage again over every document, finished ones included. For when
 # the code behind it changed and its output needs rebuilding.
 parse-rerun:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --rerun
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.parsing.run --rerun $(ONLY)
 
 # Split every parsed document into passages. Replaces the passages a document
 # already had, which cascades to the facts and questions drawn from them.
@@ -184,66 +205,64 @@ chunk:
 
 # Report how many documents are in each chunking state.
 chunk-status:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --status
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --status $(ONLY)
 
 # Queue every document this stage has not been asked to do yet. Nothing
 # reaches a worker until this runs.
 chunk-start:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --start
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --start $(ONLY)
 
 # Take back whatever has not begun. The one in hand finishes.
 chunk-stop:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --stop
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --stop $(ONLY)
 
 # Return every failed document to the pending queue.
 chunk-retry:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --retry
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --retry $(ONLY)
 
 # Run this stage again over every document, finished ones included. For when
 # the code behind it changed and its output needs rebuilding.
 chunk-rerun:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --rerun
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --rerun $(ONLY)
 
-# Drain the extraction queue here. Needs the model in EXTRACTION_MODEL to be
-# served at EXTRACTION_MODEL_BASE_URL.
+# Drain the extraction queue here. Needs the model in LLM_MODEL to be
+# served at LLM_BASE_URL.
 extract:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run
 
 # Report the extraction queue, and how many facts passed every check.
 extract-status:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --status
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --status $(ONLY)
 
 # Queue every passage this stage has not been asked to do yet. Nothing
 # reaches a worker until this runs.
 extract-start:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --start
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --start $(ONLY)
 
 # Take back whatever has not begun. The one in hand finishes.
 extract-stop:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --stop
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --stop $(ONLY)
 
 # Return every failed passage to the pending queue.
 extract-retry:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --retry
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --retry $(ONLY)
 
 # Run this stage again over every passage, finished ones included. For when
 # the code behind it changed and its output needs rebuilding.
 extract-rerun:
-	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --rerun
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --rerun $(ONLY)
 
 # ── Topic modelling ────────────────────────────────────────────────────────
 #
-# The one stage nothing triggers on its own. LDA fits every topic jointly over
-# one vocabulary, so a topic cannot be rediscovered by itself and a new
-# document does not make one topic stale - it makes all of them stale. Whether
-# that is worth a refit is a decision, so it is asked for: topics-discover
-# queues a run and the worker picks it up, exactly as POST /topics/discover
-# and the button on the Topics page do.
+# The one stage nothing triggers on its own. Every topic is fitted jointly
+# over one vocabulary, so a topic cannot be rediscovered by itself and a fit
+# is asked for: topics-discover queues a run and the worker picks it up.
 #
-#   make topics-status      GET /topics/status
-#   make topics-discover   POST /topics/discover
-#   make topics-stop       POST /topics/stop
-#   make topics-retry      POST /topics/retry
+#   make topics-status       GET /topics/status
+#   make topics-discover    POST /topics/discover
+#   make topics-visualise    GET /topics/visualisation/{language}
+#   make topics-stop        POST /topics/stop
+#   make topics-retry       POST /topics/retry
 #   make topics-delete    DELETE /topics
 
 # Run any queued fit now, in the foreground.
@@ -258,6 +277,11 @@ topics-status:
 # labels are carried over where the top terms still match.
 topics-discover:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --discover
+
+# Write each language's pyLDAvis page to ./topics/<language>.html. Drawn by a
+# fit, so run topics-discover first if there is none.
+topics-visualise:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --visualise
 
 # Delete every topic and membership. Passages, facts and questions stay.
 # Irreversible for any label a person assigned: nothing else stores one.

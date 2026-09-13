@@ -18,10 +18,25 @@ class PassageWeight:
     """How strongly one passage belongs to one topic."""
 
     passage_id: int
-    #: Position in the fitted model, not the topics table's primary key,
-    #: which does not exist until the rows are written.
+    #: Position in the fitted model, not the topics table's primary key.
     topic_index: int
     weight: float
+
+
+@dataclass(frozen=True)
+class TopicSpace:
+    """One language's fitted model, as pyLDAvis reads it."""
+
+    #: Term weight per topic, one row per topic, summing to 1.
+    topic_term: list[list[float]]
+    #: Topic weight per passage, one row per passage, summing to 1.
+    doc_topic: list[list[float]]
+    #: Terms held by each passage of `doc_topic`, in the same order.
+    doc_lengths: list[int]
+    #: The vocabulary, in the column order of `topic_term`.
+    vocabulary: list[str]
+    #: Occurrences of each term across the corpus, in the same order.
+    term_frequency: list[int]
 
 
 @dataclass(frozen=True)
@@ -31,6 +46,8 @@ class FittedTopic:
     topic_index: int
     top_terms: list[str]
     label: str | None = None
+    #: What named it: "person", or the model identifier.
+    labelled_by: str | None = None
     include_in_coverage: bool = True
 
 
@@ -44,6 +61,8 @@ class Fitting:
     passages: int
     without_topics: int
     vocabulary: int
+    #: The whole fitted model, for the visualisation.
+    space: TopicSpace
 
     @property
     def labels_carried(self) -> int:
@@ -60,10 +79,10 @@ class StoredTopic:
     topic_index: int
     top_terms: list[str]
     label: str | None
+    labelled_by: str | None
     include_in_coverage: bool
     passages: int
-    #: How many passages hold it as their highest weight, which is the
-    #: closest thing to "passages about this topic".
+    #: How many passages hold it as their highest weight.
     dominant_passages: int
     mean_weight: float
     documents: int
@@ -80,9 +99,7 @@ class LanguageFit:
     passages_without_topics: int | None
     fitted_at: str | None
     #: Passages of this language the corpus holds now, and memberships its
-    #: topics hold now. Re-chunking a document deletes its passages and the
-    #: membership rows go with them, so a fit can be left describing a corpus
-    #: that no longer exists.
+    #: topics hold now.
     live_passages: int = 0
     memberships: int = 0
 
@@ -96,12 +113,7 @@ class LanguageFit:
 
 @dataclass(frozen=True)
 class TopicFit:
-    """The state of the topic model as a whole.
-
-    Describes the current model rather than a history of fits: there is no
-    run table, so what is knowable is what the stored topics say about
-    themselves, plus whether a fit is queued, running or failed.
-    """
+    """The current topic model, and the state of any fit asked for."""
 
     status: str | None
     error: str | None
@@ -123,6 +135,7 @@ class TopicRemoval:
 
     topics: int
     memberships: int
-    #: How many removed topics carried a human label, which is what a refit
-    #: cannot recover.
+    #: How many removed topics carried a human label.
     labels: int = 0
+    #: The languages whose topics went, for the visualisations keyed by one.
+    languages: list[str] = field(default_factory=list)

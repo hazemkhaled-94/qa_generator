@@ -66,6 +66,16 @@ class CatalogApi(Endpoint):
         """Fetches the state of the topic model as a whole."""
         return self._get("/topics/fit").json()
 
+    def topic_visualisation(self, language: str) -> str | None:
+        """Fetches one language's pyLDAvis page, or None if no fit drew it."""
+        response = self._session.get(
+            f"{self._base_url}/topics/visualisation/{quote(language)}", timeout=60
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.text
+
     def describe_topic(
         self, topic_id: int, label: str | None, include_in_coverage: bool
     ) -> dict:

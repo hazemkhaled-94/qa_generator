@@ -18,10 +18,12 @@ litellm>=1.98.0,<2.0.0
 instructor>=1.15.4,<2.0.0
 tenacity>=9.1.4,<10.0.0
 rapidfuzz>=3.14.5,<4.0.0
-# Topic modelling: the LDA implementation. spaCy splits a passage into the
-# sentences a fact cites, reads the statements the model writes, and builds
-# the vocabulary the fit runs over; its pipelines are downloaded below.
+# Topic modelling: the factorisation, and the figure a fit draws of it.
+# spaCy splits a passage into the sentences a fact cites, reads the statements
+# the model writes, and builds the vocabulary the fit runs over; its pipelines
+# are downloaded below.
 gensim>=4.4.0,<5.0.0
+pyldavis>=3.4.1,<4.0.0
 spacy>=3.8.16,<4.0.0
 opentelemetry-sdk>=1.44.0,<2.0.0
 opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0

@@ -1,23 +1,26 @@
 """Routes for the topic modelling stage.
 
-Reads and writes the queue and never works it, like every other stage. What
-differs is where the work comes from: asking is what creates the row, so
-/discover replaces /start and there is no /rerun.
+Reads and writes the queue and never works it, like every other stage. Asking
+is what creates the row, so /discover replaces /start and there is no /rerun.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
-from api.dependencies import topic_catalog, topics_queue
+from api.dependencies import export_bucket, topic_catalog, topics_queue
 from api.errors import ApiError, ErrorBody
 from api.routes.stage import StageQueued, StageRetry, StageStatus, status_of
 from topic_modelling.models import StoredTopic, TopicFit, TopicRemoval
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+
+#: An ISO 639-1 code, as the passages table records one.
+_LANGUAGE = re.compile(r"^[a-z]{2}$")
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,34 @@ def fit() -> TopicFit:
     return topic_catalog.fit_state()
 
 
+@router.get(
+    "/visualisation/{language}",
+    responses={code: {"model": ErrorBody} for code in (400, 404)},
+    response_class=Response,
+)
+def visualisation(language: str) -> Response:
+    """Serves one language's topic model as a pyLDAvis page.
+
+    Produced by a fit, so a language modelled before this route existed has
+    none until the next one.
+
+    Raises:
+        ApiError: 400 `invalid_language` if it is not an ISO 639-1 code, 404
+            `no_visualisation` if no fit has drawn that language.
+    """
+    if not _LANGUAGE.fullmatch(language):
+        raise ApiError(400, "invalid_language", "not an ISO 639-1 language code")
+
+    drawn = export_bucket.find(export_bucket.topic_visualisation_key(language))
+    if drawn is None:
+        raise ApiError(
+            404,
+            "no_visualisation",
+            f"no topic visualisation for {language}; fit the model to draw one",
+        )
+    return Response(content=drawn, media_type=export_bucket.TOPIC_VISUALISATION_TYPE)
+
+
 @router.post("/discover", status_code=202)
 def discover() -> TopicDiscovery:
     """Queues a fit over the whole corpus.
@@ -117,9 +148,12 @@ def retry() -> StageRetry:
 
 @router.delete("")
 def delete() -> TopicRemoval:
-    """Deletes every topic, and with it every membership.
+    """Deletes every topic, and with it every membership and visualisation.
 
     Passages, facts and questions stay. Labels a person assigned go with the
-    topics: nothing else stores them. Any queued fit goes too.
+    topics. Any queued fit goes too.
     """
-    return topic_catalog.delete_all()
+    removed = topic_catalog.delete_all()
+    for language in removed.languages:
+        export_bucket.remove(export_bucket.topic_visualisation_key(language))
+    return removed

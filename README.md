@@ -80,9 +80,11 @@ Once it reports ready:
 | Phoenix | http://localhost:6006 | Traces — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
 | Adminer | http://localhost:9001 | Database browser |
 
-Upload a PDF from the frontend, then press **Start** on the Documents page:
-nothing runs until it is asked to. The System health page reports the state of
-every component.
+Upload a PDF from the frontend, then pick it in the table on the Documents
+page and press **Start** on the Parsing row: nothing runs until it is asked
+to. Every control there acts on the document you picked and on nothing else,
+so one document can be re-run or deleted while the rest of a corpus is
+mid-flight. The System health page reports the state of every component.
 
 ## Common commands
 
@@ -119,10 +121,26 @@ make extract         #   ... and `extract-status`, `extract-stop`,
 make topics-discover # ask for a fit over the whole corpus, and run it
 make topics          # run any queued fit here, in the foreground
 make topics-status   # show the topics held, and any queued fit
+make topics-visualise # write each language's pyLDAvis page to ./topics/
 make topics-stop     # withdraw a queued fit
 make topics-retry    # return a failed fit to the queue
 make topics-delete   # delete every topic and membership
 ```
+
+Any of those five verbs narrows to a single item with `SHA` or `PASSAGE`,
+which is the same operation against fewer rows:
+
+```bash
+make parse-start SHA=<sha256>     # queue one document for parsing
+make chunk-rerun SHA=<sha256>     # rebuild one document's passages
+make extract-start SHA=<sha256>   # queue every passage of one document
+make extract-retry PASSAGE=<id>   # return one failed passage to the queue
+make extract-status SHA=<sha256>  # that document's passages by extract state
+```
+
+Parsing and chunking narrow to a document, extraction to a document or a
+passage, topic modelling to neither — a fit is all-or-nothing over one
+vocabulary, so there is no single topic to start, stop or refit.
 
 Documents are ingestion's, not a stage's:
 
@@ -146,6 +164,23 @@ put rows on or off it:
 | Chunking | `GET /chunking/status` | `POST /chunking/start` | `POST /chunking/stop` | `POST /chunking/retry` | `POST /chunking/rerun` |
 | Extraction | `GET /extraction/status` | `POST /extraction/start` | `POST /extraction/stop` | `POST /extraction/retry` | `POST /extraction/rerun` |
 | Topic modelling | `GET /topics/status` | `POST /topics/discover` | `POST /topics/stop` | `POST /topics/retry` | — |
+
+Each verb comes twice. The routes above act on the whole queue; the same
+verb under `/{scope}/{value}` acts on one item, which is what the frontend's
+per-item controls call:
+
+| Stage | Narrows to | Example |
+|---|---|---|
+| Parsing | `document` | `POST /parsing/document/{sha256}/start` |
+| Chunking | `document` | `POST /chunking/document/{sha256}/rerun` |
+| Extraction | `document`, `passage` | `POST /extraction/passage/{id}/retry` |
+| Topic modelling | — | a fit is all-or-nothing |
+
+`GET /{stage}/{scope}/{value}/status` reports that item's queue the same way
+`/{stage}/status` reports the whole one. A scope a stage does not accept is a
+404 `unknown_scope`; a value its column cannot hold is a 400 `invalid_value`.
+Narrowing is a `WHERE` on the stage's own table and nothing more, so a
+narrowed verb and a whole-queue one cannot disagree about what they do.
 
 **Nothing starts by itself.** A row arrives `new`, which no worker looks at.
 `start` moves it to `pending`, which is the only status a worker claims, and
@@ -190,7 +225,7 @@ podman compose up -d --scale extract-worker=4
 
 Every claim is timestamped, and a stage's lease says how long one may go
 unfinished before another run sweeps it. Extraction derives its lease from
-`EXTRACTION_TIMEOUT_SECONDS` and `EXTRACTION_MAX_ATTEMPTS`, so raising either
+`LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`, so raising either
 one never makes a healthy worker look abandoned.
 
 The model is the bottleneck, not the pipeline: a median passage measured at
@@ -220,6 +255,7 @@ PostgreSQL's `max_connections`.
 | `GET /topics` | Topics, their terms, and how much of the corpus each holds |
 | `PATCH /topics/{id}` | Name a topic, or take it out of coverage reporting |
 | `GET /topics/fit` | When the topics were fitted, over what, and whether they still describe the corpus |
+| `GET /topics/visualisation/{language}` | One language's model as a self-contained pyLDAvis page |
 | `DELETE /topics` | Every topic and membership |
 | `GET /health` | That the process is up, for the container healthcheck |
 | `GET /status` | Every component behind the API, and what each service holds |
@@ -317,6 +353,23 @@ A passage is the document rather than a sentence, which was measured too: a
 sentence averages 5.7 content tokens, too few to express the mixture of topics
 the model is about, and 6% of them hold none of the vocabulary at all. German,
 twelve topics: c_v 0.522 per passage against 0.396 per sentence.
+
+### Seeing the model
+
+Each fit also draws every language it fitted as a
+[pyLDAvis](https://github.com/bmabey/pyLDAvis) figure and stores it in the
+`export` bucket under `topics/<language>.html`. Read it on the Topics page,
+at `GET /topics/visualisation/{language}`, or as a file with
+`make topics-visualise`.
+
+The figure is drawn during the fit rather than on demand, because it needs the
+weight of every term in every topic and the database keeps only a topic's top
+terms. A language modelled before a fit that draws has no figure until the next
+one; the route answers 404 and the page says so.
+
+The pages are self-contained: d3 and the LDAvis script are inlined, so nothing
+is fetched when one is opened. Topics are numbered as `topics.topic_index`
+numbers them, so topic 3 in the figure is topic 3 in the table beside it.
 
 A fit is always every language and always the whole corpus. Gensim's `update()`
 would allow incremental training, and incremental training is deliberately not
@@ -435,9 +488,9 @@ The values most likely to need changing:
 | `ALLOWED_MIME_TYPES` | `backend.env` | `application/pdf` | Types with a parser behind them |
 | `EMBEDDING_MODEL` | `backend.env` | `intfloat/multilingual-e5-large` | The one embedding model, and the only tokenizer in the project |
 | `EMBEDDING_MAX_TOKENS` | `backend.env` | 512 | That model's context window, and so the longest passage |
-| `NLP_MODELS` | `backend.env` | `de:de_core_news_sm,en:en_core_web_sm` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image |
-| `EXTRACTION_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
-| `EXTRACTION_MODEL_BASE_URL` | `.env` | — | Where that model is served |
+| `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. Medium, not small: the small German model does not tag a modal as a finite verb |
+| `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
+| `LLM_BASE_URL` | `.env` | — | Where that model is served |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector |
 

@@ -125,6 +125,17 @@ class TopicQueue(StageQueue):
             for row in rows:
                 yield PassageVocabulary(id=row.id, lemmas=list(row.lemmas or []))
 
+    def excerpts(self, passage_ids: list[int]) -> list[str]:
+        """Reads the text of a few passages, for naming the topic holding them."""
+        if not passage_ids:
+            return []
+        with self._session() as session:
+            return list(
+                session.scalars(
+                    select(Passage.text).where(Passage.id.in_(passage_ids))
+                ).all()
+            )
+
     def labelled_topics(self, language: str) -> list[FittedTopic]:
         """Reads the topics of one language a person has said something about."""
         with self._session() as session:
@@ -133,6 +144,7 @@ class TopicQueue(StageQueue):
                     topic_index=row.topic_index,
                     top_terms=list(row.top_terms or []),
                     label=row.label,
+                    labelled_by=row.labelled_by,
                     include_in_coverage=row.include_in_coverage,
                 )
                 for row in session.execute(
@@ -140,6 +152,7 @@ class TopicQueue(StageQueue):
                         Topic.topic_index,
                         Topic.top_terms,
                         Topic.label,
+                        Topic.labelled_by,
                         Topic.include_in_coverage,
                     ).where(
                         Topic.status == Status.MODELLED,
@@ -177,6 +190,7 @@ class TopicQueue(StageQueue):
                     "topic_index": topic.topic_index,
                     "top_terms": topic.top_terms,
                     "label": topic.label,
+                    "labelled_by": topic.labelled_by,
                     "include_in_coverage": topic.include_in_coverage,
                     "status": Status.MODELLED,
                     "requested_at": requested_at or fitted_at,
@@ -252,6 +266,7 @@ class TopicCatalog(Repository):
                 .where(Topic.id == topic_id, ~_OUTSTANDING)
                 .values(
                     label=(label or "").strip() or None,
+                    labelled_by="person" if (label or "").strip() else None,
                     include_in_coverage=include_in_coverage,
                 )
             ).rowcount
@@ -262,10 +277,16 @@ class TopicCatalog(Repository):
     def delete_all(self) -> TopicRemoval:
         """Removes every topic, and with it every membership.
 
-        Any outstanding request goes too, so deleting the topics does not
-        leave a fit queued to bring them back.
+        Any outstanding request goes too.
         """
         with self._session.begin() as session:
+            languages = list(
+                session.scalars(
+                    select(Topic.language)
+                    .where(~_OUTSTANDING, Topic.language.is_not(None))
+                    .distinct()
+                ).all()
+            )
             topics = (
                 session.scalar(
                     select(func.count()).select_from(Topic).where(~_OUTSTANDING)
@@ -284,7 +305,12 @@ class TopicCatalog(Repository):
                 session.scalar(select(func.count()).select_from(PassageTopic)) or 0
             )
             session.execute(delete(Topic))
-        return TopicRemoval(topics=topics, memberships=memberships, labels=labels)
+        return TopicRemoval(
+            topics=topics,
+            memberships=memberships,
+            labels=labels,
+            languages=languages,
+        )
 
     def fit_state(self) -> TopicFit:
         """Reports the state of the model, one entry per language.
@@ -388,6 +414,7 @@ class TopicCatalog(Repository):
                     Topic.topic_index,
                     Topic.top_terms,
                     Topic.label,
+                    Topic.labelled_by,
                     Topic.include_in_coverage,
                     func.count(PassageTopic.passage_id).label("passages"),
                     func.coalesce(func.avg(PassageTopic.weight), 0.0).label(
@@ -404,6 +431,7 @@ class TopicCatalog(Repository):
                     Topic.topic_index,
                     Topic.top_terms,
                     Topic.label,
+                    Topic.labelled_by,
                     Topic.include_in_coverage,
                 )
                 .order_by(Topic.language, Topic.topic_index)
@@ -415,6 +443,7 @@ class TopicCatalog(Repository):
                 topic_index=row.topic_index,
                 top_terms=list(row.top_terms or []),
                 label=row.label,
+                labelled_by=row.labelled_by,
                 include_in_coverage=row.include_in_coverage,
                 passages=row.passages,
                 dominant_passages=dominant.get(row.id, 0),

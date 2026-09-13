@@ -121,6 +121,22 @@ class Bucket:
         """
         return s3_client().get_object(Bucket=self.name, Key=key)["Body"].read()
 
+    def find(self, key: str) -> bytes | None:
+        """Reads an object, or None if it is not there.
+
+        Raises:
+            botocore.exceptions.ClientError: If the store answered with
+                anything other than "no such key". Being unreachable is not
+                the same as holding nothing.
+        """
+        client = s3_client()
+        try:
+            return client.get_object(Bucket=self.name, Key=key)["Body"].read()
+        except client.exceptions.ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in _ABSENT:
+                return None
+            raise
+
     def remove(self, key: str) -> bool:
         """Deletes an object, if it is there.
 

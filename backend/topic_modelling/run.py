@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 import telemetry
+from blob_store.seaweedfs import ExportBucket
 from database.qa_generator import engine
 from settings import decimal
 from stages import watch
@@ -26,10 +28,14 @@ log = logging.getLogger(__name__)
 _ACTIONS = {
     "status": "report the fit queue and the topics held",
     "discover": "queue a fit over the whole corpus",
+    "visualise": "write each language's pyLDAvis page to a file",
     "stop": "withdraw a queued fit",
     "retry": "return a failed fit to the queue",
     "delete": "delete every topic and membership",
 }
+
+#: Where --visualise writes, one file per modelled language.
+_DRAWN = Path("topics")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         log.info("topics and the fit queue: %s", TopicQueue().counts())
         return 0
+
+    if args.visualise:
+        return _visualise()
 
     if args.delete:
         removed = TopicCatalog().delete_all()
@@ -75,6 +84,31 @@ def main(argv: list[str] | None = None) -> int:
 
     watch(service.drain, decimal("WORKER_POLL_SECONDS"))
     return 0
+
+
+def _visualise() -> int:
+    """Writes every stored visualisation to a file, one per language."""
+    export = ExportBucket()
+    languages = [one.language for one in TopicCatalog().fit_state().languages]
+    if not languages:
+        log.error("no topics are stored, so there is nothing to draw")
+        return 1
+
+    _DRAWN.mkdir(parents=True, exist_ok=True)
+    missing = 0
+    for language in languages:
+        drawn = export.find(export.topic_visualisation_key(language))
+        if drawn is None:
+            log.warning(
+                "no %s visualisation; it is drawn by a fit, so run --discover",
+                language,
+            )
+            missing += 1
+            continue
+        written = _DRAWN / f"{language}.html"
+        written.write_bytes(drawn)
+        log.info("wrote %s (%d bytes)", written, len(drawn))
+    return 1 if missing == len(languages) else 0
 
 
 if __name__ == "__main__":

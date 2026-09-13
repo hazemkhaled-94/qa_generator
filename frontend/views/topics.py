@@ -5,8 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from lib import backend, page, stage
+
+#: Room for the pyLDAvis figure, which is drawn at a fixed size.
+_MAP_HEIGHT = 850
 
 
 def view() -> None:
@@ -72,6 +76,9 @@ def view() -> None:
         )
 
         st.divider()
+        _map(client, fit)
+
+        st.divider()
         chosen = st.selectbox(
             "Topic to work on",
             topics,
@@ -133,19 +140,15 @@ def _model_figures(fit: dict, topics: list[dict]) -> dict[str, tuple[object, str
             (
                 "How long ago the oldest of the stored language models was "
                 "fitted, with the date beneath. Adding documents does not make "
-                "one topic stale; it makes all of them stale, because LDA fits "
-                "every topic jointly over one vocabulary."
+                "one topic stale; it makes all of them stale, because every "
+                "topic is fitted jointly over one vocabulary."
             ),
         ),
     }
 
 
 def _age(fitted_at: str | None) -> tuple[str, str]:
-    """Reads a fit timestamp as an age, with the date beneath it.
-
-    The age rather than the date is the figure: `2026-09-13` did not fit the
-    column, and how stale the model is was the question being asked of it.
-    """
+    """Reads a fit timestamp as an age, with the date beneath it."""
     if not fitted_at:
         return "never", "no fit has succeeded"
     when = datetime.fromisoformat(fitted_at)
@@ -157,12 +160,7 @@ def _age(fitted_at: str | None) -> tuple[str, str]:
 
 
 def _health(fit: dict, topics: list[dict]) -> list[dict[str, str]]:
-    """Builds one row per thing that has to hold for the topics to be usable.
-
-    This is where the warnings used to be: a coloured box carried one
-    sentence and no measurement, and said nothing at all when everything was
-    well. Every check is listed here either way, with what it measured.
-    """
+    """Builds one row per thing that has to hold for the topics to be usable."""
     rows = []
     for one in fit["languages"]:
         if not one["topics"]:
@@ -267,6 +265,50 @@ def _health(fit: dict, topics: list[dict]) -> list[dict[str, str]]:
     return rows
 
 
+def _map(client, fit: dict) -> None:
+    """Draws one language model as a pyLDAvis figure."""
+    page.section(
+        "Topic map",
+        "The whole model at once, from pyLDAvis. The table above says how "
+        "big each topic is; this says how far apart they are, and which "
+        "terms separate them rather than merely appearing in them.",
+    )
+    languages = [one["language"] for one in fit["languages"] if one["topics"]]
+    if not languages:
+        return
+
+    language = st.selectbox(
+        "Language model to draw",
+        languages,
+        key="topics-map-language",
+        help="One figure per language, because one model is fitted per "
+        "language. Topic numbers match the table above.",
+    )
+    drawn = client.topic_visualisation(language)
+    if drawn is None:
+        st.info(
+            f"No map for {language} yet. It is drawn during a fit, so topics "
+            "modelled before this page existed have none — fit the model "
+            "again with the button below to draw one."
+        )
+        return
+
+    st.caption(
+        "Left: every topic as a circle, sized by the share of the corpus it "
+        "holds and placed so that topics using similar terms sit close "
+        "together. Overlapping circles are topics that have not separated. "
+        "Right: the terms of whichever topic you select — the pale bar is "
+        "how often the term appears in the whole corpus, the dark bar how "
+        "often inside the topic. A dark bar nearly as long as its pale one "
+        "is a term that belongs to this topic rather than to everything.",
+        help="Slide λ towards 0 to rank terms by how exclusive they are to "
+        "the topic, and towards 1 to rank them by raw frequency. λ = 0.6 is "
+        "usually the most readable. The Top terms column in the table above "
+        "is the λ = 1 ordering.",
+    )
+    components.html(drawn, height=_MAP_HEIGHT, scrolling=True)
+
+
 def _detail(client, chosen: dict, topics: list[dict]) -> None:
     """Shows one topic's own figures and lets a person name it."""
     total_memberships = sum(topic["passages"] for topic in topics)
@@ -360,11 +402,7 @@ def _detail(client, chosen: dict, topics: list[dict]) -> None:
 
 
 def _fit_controls(client, fit: dict, has_topics: bool) -> None:
-    """Draws the corpus-wide fit controls, and says why they cannot be less.
-
-    Outside any polling fragment: a fragment that redraws every few seconds
-    would take the confirmation below away mid-decision.
-    """
+    """Draws the corpus-wide fit controls, outside any polling fragment."""
     counts = client.stage_status("topics")["rows"]
     queued = counts.get("pending", 0)
     running = queued + counts.get("in_progress", 0)
@@ -375,11 +413,11 @@ def _fit_controls(client, fit: dict, has_topics: bool) -> None:
         "on this page that cannot be per item. " + stage.COLOUR_KEY,
     )
     st.caption(
-        "LDA fits every topic jointly over one vocabulary, so a single topic "
+        "Every topic is fitted jointly over one vocabulary, so a single topic "
         "cannot be started, stopped or refitted on its own: a new document "
         "does not make one topic stale, it makes all of them stale. A fit is "
         "all-or-nothing, and every existing topic is replaced when one "
-        "succeeds."
+        "succeeds. Each fit also redraws the topic map above."
     )
     stage.corpus_controls(
         client,
@@ -440,11 +478,7 @@ def _provenance(fit: dict, has_topics: bool) -> None:
 
 
 def _removal(client, has_topics: bool) -> None:
-    """Offers the deletion, behind a confirmation.
-
-    Drawn whether or not there are topics: with none, it is what clears a
-    fit request that failed.
-    """
+    """Offers the deletion, behind a confirmation."""
     st.html(
         "<div class='qa-danger-zone'>"
         "<div class='qa-danger-title'>Delete</div>"
