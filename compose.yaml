@@ -435,8 +435,9 @@ services:
     <<: *worker
     command: ["python", "-m", "topic_modelling.run", "--watch"]
     environment:
-      # The model names each topic once the fit is done.
-      <<: [*service-env, *model-env]
+      # The model names each topic once the fit is done. The store holds the
+      # figure each fit draws of itself.
+      <<: [*service-env, *model-env, *store-env]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 2G }

@@ -155,9 +155,19 @@ class TopicModellingService(StageService):
             return
 
         for fitting in fittings:
+            # Taken away before the new one is drawn: these topics have just
+            # replaced the ones the stored figure describes, and a figure of
+            # topics that no longer exist is worse than none. The route
+            # answers 404 for a language that has no figure.
+            key = self._export.topic_visualisation_key(fitting.language)
+            try:
+                self._export.remove(key)
+            except Exception:
+                log.exception("could not take away the old %s figure", fitting.language)
+                continue
             try:
                 self._export.put(
-                    self._export.topic_visualisation_key(fitting.language),
+                    key,
                     render(fitting.space, fitting.language),
                     content_type=self._export.TOPIC_VISUALISATION_TYPE,
                 )
