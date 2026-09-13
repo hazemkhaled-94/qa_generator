@@ -136,28 +136,34 @@ class PassageCatalog(Repository):
     """
 
     def texts(self, within=None) -> list[tuple[int, str, str | None]]:
-        """Reads every passage's id, text and language, grouped by language.
+        """Reads every passage's id, text and its document's language.
+
+        The document's language and not the passage's: it is the fallback for
+        a passage too short to detect, which is what chunking reads it as.
 
         Joined to the document so `--only document=` narrows here too: this
         stage queues over documents, so that is the column it narrows on.
         """
         query = (
-            select(Passage.id, Passage.text, Passage.language)
+            select(Passage.id, Passage.text, Document.language)
             .join(Document, Document.sha256 == Passage.doc_sha256)
-            .order_by(Passage.language, Passage.id)
+            .order_by(Document.language, Passage.id)
         )
         if within is not None:
             query = query.where(within)
         with self._session() as session:
             return [(row.id, row.text, row.language) for row in session.execute(query)]
 
-    def revocabulary(self, lemmas: list[tuple[int, list[str]]]) -> int:
-        """Replaces the stored lemmas, and nothing else.
+    def revocabulary(self, read: list[tuple[int, str | None, list[str]]]) -> int:
+        """Replaces the stored language and lemmas, and nothing else.
 
         Sentence offsets are left alone: a fact cites one by index, so moving
-        them would point every citation in the corpus at different text.
+        them would point every citation in the corpus at different text. The
+        language is safe to move beside them because extraction reads the
+        document's language rather than the passage's, so only which topic
+        model covers this passage changes.
         """
-        if not lemmas:
+        if not read:
             return 0
         with self._session.begin() as session:
             # The table rather than the entity: an executemany against the
@@ -165,9 +171,12 @@ class PassageCatalog(Repository):
             # wants the key among the values being set.
             session.execute(
                 update(_PASSAGES).where(_PASSAGES.c.id == bindparam("row")),
-                [{"row": passage_id, "lemmas": terms} for passage_id, terms in lemmas],
+                [
+                    {"row": passage_id, "language": language, "lemmas": terms}
+                    for passage_id, language, terms in read
+                ],
             )
-        return len(lemmas)
+        return len(read)
 
     def block_types(self) -> list[str]:
         """Lists the block types actually present, for a filter to offer."""

@@ -19,7 +19,7 @@ from stages.cli import queue_main
 #: model without a re-chunk deleting every passage and its facts.
 _EXTRA = {
     "revocabulary": (
-        "read every stored passage's vocabulary again, in place",
+        "read every stored passage's language and vocabulary again",
         "read again",
         lambda within: revocabulary(PassageCatalog(), within),
     )

@@ -237,10 +237,10 @@ chunk-retry:
 chunk-rerun:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --rerun $(ONLY)
 
-# Read every stored passage's vocabulary again, in place. Only the lemmas the
-# topic model is fitted over change; passages, sentence offsets and facts all
-# stay, which is what chunk-rerun cannot promise - it deletes the passages and
-# the facts go with them. Fit the topics afterwards to see the difference.
+# Read every stored passage's language and vocabulary again, in place. Only
+# those two change; passages, sentence offsets and facts all stay, which is
+# what chunk-rerun cannot promise - it deletes the passages and the facts go
+# with them. Fit the topics afterwards to see the difference.
 chunk-revocabulary:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m preprocessing.chunking.run --revocabulary $(ONLY)
 

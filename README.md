@@ -121,7 +121,7 @@ make extract-start   # the same five, over passages
 make extract         #   ... and `extract-status`, `extract-stop`,
                      #       `extract-retry`, `extract-rerun`
 make extract-revalidate  # judge stored facts again; the model is not called
-make chunk-revocabulary  # read stored passages' vocabulary again, in place
+make chunk-revocabulary  # read stored passages' language and vocabulary again
 make topics-discover # ask for a fit over the whole corpus, and run it
 make topics          # run any queued fit here, in the foreground
 make topics-status   # show the topics held, and any queued fit
@@ -154,7 +154,7 @@ without the expensive part:
 | | |
 |---|---|
 | `make extract-revalidate` | Judges every stored fact again. The model is not called and no statement changes — only what the checks read off one. |
-| `make chunk-revocabulary` | Reads every stored passage's vocabulary again. Only `passages.lemmas` changes. |
+| `make chunk-revocabulary` | Reads every stored passage's language and vocabulary again. Only `passages.language` and `passages.lemmas` change. |
 
 Both take `SHA` and `extract-revalidate` takes `PASSAGE` too, like the five
 queue verbs.

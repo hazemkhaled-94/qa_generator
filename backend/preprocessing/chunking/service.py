@@ -10,6 +10,7 @@ from docling_core.types.doc.document import DoclingDocument
 from opentelemetry.trace import Span
 
 from nlp.analysis import read
+from nlp.language import detect
 from preprocessing.chunking.passages import NoPassages, PassageBuilder
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from stages import StageService
@@ -20,35 +21,47 @@ span = tracer(__name__)
 
 
 def revocabulary(catalog: PassageCatalog, within=None) -> int:
-    """Reads every stored passage's vocabulary again, in place.
+    """Reads every stored passage's language and vocabulary again, in place.
 
-    The lemmas are what the topic model is fitted over, and nothing else
-    reads them. Replacing them applies a change to how vocabulary is read
-    without re-chunking, which would delete every passage and take its facts
-    with it.
+    The same two readings chunking makes, over passages already stored: the
+    language is detected per passage and falls back to the document's, and
+    the vocabulary is read with the pipeline that language names. Applies a
+    change to either without re-chunking, which would delete every passage
+    and take its facts with it.
     """
     passages = catalog.texts(within)
     if not passages:
-        log.warning("no passages to read a vocabulary from")
+        log.warning("no passages to read")
         return 0
 
+    # Detected first, so each passage is read by the pipeline for the language
+    # it is actually in, and one batch is parsed per language.
+    spoken = [
+        (passage_id, text, detect(text) or fallback)
+        for passage_id, text, fallback in passages
+    ]
     written = 0
-    for language, group in groupby(passages, key=lambda row: row[2]):
+    for language, group in groupby(sorted(spoken, key=_spoken), key=_spoken):
         batch = list(group)
-        lemmas = [
-            (passage_id, terms)
+        found = [
+            (passage_id, language, terms)
             for (passage_id, _, _), (_, terms) in zip(
                 batch, read([text for _, text, _ in batch], language), strict=True
             )
         ]
-        written += catalog.revocabulary(lemmas)
+        written += catalog.revocabulary(found)
         log.info(
             "%s: read %d passage(s), %d term(s)",
             language or "no language",
-            len(lemmas),
-            sum(len(terms) for _, terms in lemmas),
+            len(found),
+            sum(len(terms) for _, _, terms in found),
         )
     return written
+
+
+def _spoken(row: tuple[int, str, str | None]) -> str:
+    """Names the language a passage was detected as, for grouping."""
+    return row[2] or ""
 
 
 class ParsedStore(Protocol):
