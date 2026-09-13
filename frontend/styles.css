@@ -4,6 +4,11 @@
   --qa-ink: #1A1A1A;
   --qa-surface: #FBFAFC;
   --qa-radius: 10px;
+  /* Destructive. Dark enough to read as a warning against white, not so
+     saturated that a page with three delete buttons looks alarmed. */
+  --qa-danger: #A32020;
+  --qa-danger-line: #E3B4B4;
+  --qa-danger-wash: #FDF4F4;
 }
 
 .block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 1320px; }
@@ -22,6 +27,13 @@ header[data-testid="stHeader"] { background: transparent; }
 .pill-idle { background: #EFEFF2; color: #6B6B72; }
 
 .qa-muted { color: var(--qa-muted); font-size: 0.82rem; }
+
+/* The line under a figure is a second reading of that figure — `75% of
+   3,327` under `2,479` — and never a change in it. st.metric draws its delta
+   with a direction arrow and offers no way to turn one off, and an arrow
+   pointing up beside `Rejected` says something untrue, so the icon goes. */
+[data-testid="stMetricDelta"] svg { display: none; }
+[data-testid="stMetricDelta"] { gap: 0; font-size: 0.74rem; }
 
 .qa-brand { border-bottom: 1px solid var(--qa-border); padding-bottom: .9rem; margin-bottom: 1.6rem; }
 .qa-brand-title {
@@ -53,8 +65,60 @@ header[data-testid="stHeader"] { background: transparent; }
 }
 .qa-card-pill { margin-top: .35rem; }
 
-/* Section label above a group of metrics. */
-.qa-section {
+/* Section label above a group of metrics. The h5 form is what page.section
+   emits: st.markdown is the only heading call that carries a `help` tooltip,
+   and every label on the page is required to have one. */
+.qa-section,
+.stMarkdown h5 {
   font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .2rem;
 }
+
+/* Destructive controls.
+
+   Keyed, not typed: Streamlit has no danger button, and the key a widget is
+   given is already on its container as `st-key-<key>`. Any button keyed
+   `danger-…` is red, so nothing has to remember to pass a style. */
+[class*="st-key-danger-"] button {
+  border-color: var(--qa-danger-line) !important;
+  color: var(--qa-danger) !important;
+  background: #FFF !important;
+}
+[class*="st-key-danger-"] button:hover:not(:disabled) {
+  border-color: var(--qa-danger) !important;
+  background: var(--qa-danger-wash) !important;
+}
+[class*="st-key-danger-"] button:disabled {
+  border-color: var(--qa-border) !important;
+  color: var(--qa-muted) !important;
+}
+
+/* The second click, the one that actually deletes: filled, so it cannot be
+   mistaken for the button that only armed it. */
+[class*="st-key-danger-confirm"] button:not(:disabled) {
+  background: var(--qa-danger) !important;
+  border-color: var(--qa-danger) !important;
+  color: #FFF !important;
+}
+[class*="st-key-danger-confirm"] button:hover:not(:disabled) {
+  background: #8A1A1A !important; border-color: #8A1A1A !important;
+}
+
+/* Where the delete buttons sit, so they are never next to a stage control. */
+.qa-danger-zone {
+  border: 1px solid var(--qa-danger-line); border-radius: var(--qa-radius);
+  background: var(--qa-danger-wash); padding: .6rem .8rem; margin-bottom: .6rem;
+}
+.qa-danger-title {
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--qa-danger);
+}
+.qa-danger-detail { color: var(--qa-muted); font-size: 0.78rem; margin-top: .25rem; }
+
+/* Label beside one item's controls: the stage's name on the left, the state
+   its verbs left the item in on the right. */
+.qa-control-label {
+  font-size: 0.8rem; font-weight: 600; color: var(--qa-ink);
+  padding-top: .45rem;
+}
+.qa-state-bad { color: var(--qa-danger); }

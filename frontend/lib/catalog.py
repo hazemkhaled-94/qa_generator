@@ -41,6 +41,19 @@ def label_for(document: dict) -> str:
     return document.get("filename") or f"{document['sha256'][:12]}…"
 
 
+#: What the type slot filters, by the heading the page gives it. Passages are
+#: filtered on the kind of block the parser found; facts on how the fact was
+#: drawn.
+_TYPE_HELP = {
+    "Type": "The kind of block the parser found this passage in - a "
+    "paragraph, a heading, a list, a table. Narrows every figure and row "
+    "below to one kind.",
+    "Method": "How the fact was drawn: `llm` by the served model, "
+    "`deterministic` by a rule that needs no model. Narrows every figure and "
+    "row below to one method.",
+}
+
+
 def filters(
     key: str,
     documents: list[dict] | None = None,
@@ -56,7 +69,13 @@ def filters(
     search_slot, field_slot, document_slot, type_slot, page_slot = st.columns(_SLOTS)
 
     search = search_slot.text_input(
-        "Search", key=f"{key}-search", placeholder="Contains…"
+        "Search",
+        key=f"{key}-search",
+        placeholder="Contains…",
+        help="A case-insensitive substring, matched against the column "
+        "chosen beside this. Not a word search and not a regular "
+        "expression: `risk` matches `risks` and `Risikos` alike. Leave it "
+        "empty to match everything.",
     )
 
     field = None
@@ -87,7 +106,13 @@ def filters(
     block_type = None
     if types:
         picked = type_slot.selectbox(
-            type_label, [f"All {type_label.lower()}s", *types], key=f"{key}-type"
+            type_label,
+            [f"All {type_label.lower()}s", *types],
+            key=f"{key}-type",
+            help=_TYPE_HELP.get(
+                type_label,
+                f"Narrows every figure and row below to one {type_label.lower()}.",
+            ),
         )
         block_type = picked if picked in types else None
 
@@ -140,21 +165,3 @@ def paged(
         else "Everything matching fits on one page.",
     )
     return total, rows
-
-
-#: How each status reads as a colour. `new` is explicitly neutral: it is the
-#: state every row starts in, and defaulting it to the finished colour made a
-#: corpus nobody had started look done.
-_TONES = {
-    "new": "pill-idle",
-    "failed": "pill-no",
-    "pending": "pill-warn",
-    "in_progress": "pill-warn",
-    "working": "pill-run",
-    "idle": "pill-idle",
-}
-
-
-def stage_pill(status: str) -> str:
-    """Renders one stage status as a coloured pill, as trusted HTML."""
-    return f"<span class='pill {_TONES.get(status, 'pill-ok')}'>{status}</span>"

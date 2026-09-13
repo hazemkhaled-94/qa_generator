@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from sqlalchemy import Select, delete, func, insert, or_, select
+from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Fact, Passage, Status
 from database.qa_generator.repository import Repository
@@ -70,6 +73,12 @@ class PassageQueue(RowQueue):
         error=Passage.extract_error,
         claimed_at=Passage.extract_claimed_at,
     )
+    #: This stage queues over passages, so it answers for one of those and for
+    #: every passage of one document - which is the unit a person thinks in.
+    scopes: ClassVar[dict[str, InstrumentedAttribute]] = {
+        "document": Passage.doc_sha256,
+        "passage": Passage.id,
+    }
     done = Status.EXTRACTED
     next_pending = _NEXT_PENDING
 
@@ -189,6 +198,7 @@ class FactCatalog(Repository):
                     Fact.evidence_predicates,
                     Fact.units_added,
                     Fact.unresolved_references,
+                    Fact.passage_id,
                     Passage.doc_sha256,
                     Passage.ordinal,
                     Passage.page_from,

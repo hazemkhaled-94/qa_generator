@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import ClassVar
 
 from sqlalchemy import select
+from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Status
 from preprocessing.parsing.models import ClaimedDocument, ParsedDocument
@@ -37,6 +39,8 @@ class ParseQueue(RowQueue):
         error=Document.parse_error,
         claimed_at=Document.parse_claimed_at,
     )
+    #: One document at a time, which is what the Documents page acts on.
+    scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}
     done = Status.PARSED
     #: Four times PARSING_TIMEOUT_SECONDS, which is thirty minutes.
     lease = timedelta(hours=2)

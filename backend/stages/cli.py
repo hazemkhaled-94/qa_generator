@@ -39,8 +39,36 @@ def parser(module: str, actions: dict[str, str]) -> argparse.ArgumentParser:
     group = built.add_mutually_exclusive_group()
     for flag, description in actions.items():
         group.add_argument(f"--{flag}", action="store_true", help=description)
+    built.add_argument(
+        "--only",
+        metavar="SCOPE=VALUE",
+        help="narrow the action to one item, as document=<sha256> or "
+        "passage=<id>. Which scopes a stage takes is its own; --only on a "
+        "stage that takes none is refused.",
+    )
     built.add_argument("--watch", action="store_true", help="drain and keep draining")
     return built
+
+
+def narrowing(queue: StageQueue, only: str | None):
+    """Reads `--only` into the condition it selects, or nothing.
+
+    Raises:
+        SystemExit: If it is not `scope=value`, names a scope this stage does
+            not take, or carries a value that column cannot hold.
+    """
+    if only is None:
+        return None
+    scope, _, value = only.partition("=")
+    accepted = ", ".join(queue.scopes) or "nothing"
+    if not value:
+        raise SystemExit(f"--only takes SCOPE=VALUE, where SCOPE is one of {accepted}")
+    try:
+        return queue.narrow(scope, value)
+    except KeyError:
+        raise SystemExit(f"this stage narrows to {accepted}, not {scope!r}") from None
+    except ValueError:
+        raise SystemExit(f"{value!r} is not a valid {scope}") from None
 
 
 def queue_main(
@@ -62,21 +90,26 @@ def queue_main(
     telemetry.configure(name, log_level)
     telemetry.trace_engine(engine())
 
+    def act(run):
+        """Runs one queue operation, narrowed to whatever --only names."""
+        queue = repository()
+        return run(queue, narrowing(queue, args.only))
+
     if args.status:
-        log.info("%s queue: %s", name, repository().counts_by_status())
+        log.info("%s queue: %s", name, act(lambda q, w: q.counts_by_status(w)))
         return 0
 
-    for chosen, verb, act in (
-        (args.start, "queued", lambda queue: queue.start()),
-        (args.stop, "taken off the queue", lambda queue: queue.stop()),
-        (args.retry, "returned to the queue", lambda queue: queue.retry()),
+    for chosen, verb, run in (
+        (args.start, "queued", lambda q, w: q.start(w)),
+        (args.stop, "taken off the queue", lambda q, w: q.stop(w)),
+        (args.retry, "returned to the queue", lambda q, w: q.retry(w)),
     ):
         if chosen:
-            log.info("%s: %d row(s) %s", name, act(repository()), verb)
+            log.info("%s: %d row(s) %s", name, act(run), verb)
             return 0
 
     if args.rerun:
-        log.info("%s: %d row(s) queued again", name, repository().reset())
+        log.info("%s: %d row(s) queued again", name, act(lambda q, w: q.reset(w)))
 
     service = build_service()
     if not args.watch:

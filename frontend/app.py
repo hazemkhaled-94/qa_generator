@@ -11,7 +11,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.html(f"<style>{(Path(__file__).parent / 'styles.css').read_text()}</style>")
+# st.markdown, not st.html: st.html sanitizes its input and drops the <style>
+# element, so the stylesheet reached the page as nothing at all. Markdown with
+# unsafe_allow_html is the one call that passes a style block through.
+st.markdown(
+    f"<style>{(Path(__file__).parent / 'styles.css').read_text()}</style>",
+    unsafe_allow_html=True,
+)
 
 # Above the navigation, so every page carries it and no page repeats it.
 st.html(

@@ -6,6 +6,12 @@ once against those declarations.
 
 A row arrives `new` and no worker looks at it until something asks for it, so
 a stage selects on its own status column and on nothing else.
+
+Every queue operation takes an optional `within`, which narrows it to part of
+the queue - one document, one passage - instead of all of it. A stage says
+which narrowings it accepts by declaring `scopes`; the route and the command
+line both build theirs through :meth:`StageQueue.narrow`, so neither learns a
+column name.
 """
 
 from __future__ import annotations
@@ -22,6 +28,15 @@ from database.qa_generator.repository import Repository
 
 #: Recorded against a row whose worker never came back.
 ABANDONED = "the worker did not finish; the run was interrupted"
+
+
+def _also(*conditions: Any) -> tuple[Any, ...]:
+    """Drops the narrowings a caller did not give.
+
+    `where()` takes no None, and every operation below is written once for
+    the narrowed and the whole-queue case.
+    """
+    return tuple(condition for condition in conditions if condition is not None)
 
 
 @dataclass(frozen=True)
@@ -55,6 +70,10 @@ class StageQueue(Repository):
     #: one directly on this class would make `self.status` try to read the
     #: repository as if it were a row.
     columns: ClassVar[Columns]
+    #: Which columns a caller may narrow an operation to, by the name the
+    #: route and the command line take. Empty means this stage answers for
+    #: the whole queue only, which is true of anything fitted all at once.
+    scopes: ClassVar[dict[str, InstrumentedAttribute]] = {}
     #: The status this stage sets when it finishes a row.
     done: ClassVar[Status]
     #: How long a claim may go unfinished before a later run treats it as
@@ -163,29 +182,39 @@ class StageQueue(Repository):
                 )
             ).rowcount
 
-    def stop(self) -> int:
+    def narrow(self, scope: str, value: str) -> Any:
+        """Builds the condition one scope's value selects.
+
+        Raises:
+            KeyError: If this stage accepts no such scope.
+            ValueError: If the value is not what that column holds.
+        """
+        column = self.scopes[scope]
+        return column == column.type.python_type(value)
+
+    def stop(self, within: Any = None) -> int:
         """Takes back every row this stage has not started yet."""
         with self._session.begin() as session:
             return session.execute(
                 update(self.columns.entity)
-                .where(self.columns.status == Status.PENDING)
+                .where(*_also(self.columns.status == Status.PENDING, within))
                 .values({self.columns.status: Status.NEW})
             ).rowcount
 
-    def retry(self) -> int:
+    def retry(self, within: Any = None) -> int:
         """Returns every failed row to the queue, clearing its error."""
-        return self._requeue(self.columns.status == Status.FAILED)
+        return self._requeue(self.columns.status == Status.FAILED, within)
 
-    def _requeue(self, where) -> int:
+    def _requeue(self, *where: Any) -> int:
         """Moves the rows a condition selects to pending, clearing the error."""
         with self._session.begin() as session:
             return session.execute(
                 update(self.columns.entity)
-                .where(where)
+                .where(*_also(*where))
                 .values({self.columns.status: Status.PENDING, self.columns.error: None})
             ).rowcount
 
-    def queue_state(self) -> QueueState:
+    def queue_state(self, within: Any = None) -> QueueState:
         """Reports the queue depth and whether a worker is on it."""
         # One query for both: a page polls this every few seconds.
         with self._session() as session:
@@ -197,6 +226,7 @@ class StageQueue(Repository):
                         self.columns.claimed_at >= func.now() - self.lease
                     ),
                 )
+                .where(*_also(within))
                 .group_by(self.columns.status)
                 .order_by(self.columns.status)
             ).all()
@@ -208,9 +238,9 @@ class StageQueue(Repository):
             rows={status: total for status, total, _ in rows},
         )
 
-    def counts_by_status(self) -> dict[str, int]:
+    def counts_by_status(self, within: Any = None) -> dict[str, int]:
         """Counts rows in each state of this stage."""
-        return self.queue_state().rows
+        return self.queue_state(within).rows
 
 
 class RowQueue(StageQueue, abstract=True):
@@ -221,13 +251,13 @@ class RowQueue(StageQueue, abstract=True):
     the base without them rather than answering them with something else.
     """
 
-    def start(self) -> int:
+    def start(self, within: Any = None) -> int:
         """Queues the rows this stage has never been asked to do."""
-        return self._requeue(self.columns.status == Status.NEW)
+        return self._requeue(self.columns.status == Status.NEW, within)
 
-    def reset(self) -> int:
+    def reset(self, within: Any = None) -> int:
         """Returns every row to the queue, finished ones included.
 
         Skips rows a worker holds right now.
         """
-        return self._requeue(self.columns.status != Status.IN_PROGRESS)
+        return self._requeue(self.columns.status != Status.IN_PROGRESS, within)

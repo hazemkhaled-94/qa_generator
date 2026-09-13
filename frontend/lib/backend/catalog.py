@@ -6,9 +6,17 @@ about a document - and all four need the document list to choose from.
 
 from __future__ import annotations
 
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from lib.backend.base import Endpoint
+
+
+def _within(scope: tuple[str, str] | None) -> str:
+    """Renders the path segment that narrows a stage route to one item."""
+    if scope is None:
+        return ""
+    kind, value = scope
+    return f"/{quote(str(kind))}/{quote(str(value))}"
 
 
 class CatalogApi(Endpoint):
@@ -31,17 +39,24 @@ class CatalogApi(Endpoint):
         path = f"/documents/{sha256}" + ("/derived" if derived_only else "")
         return self._delete(path).json()
 
-    def stage_status(self, stage: str) -> dict:
-        """Reads one stage's queue depth and whether a worker is on it."""
-        return self._get(f"/{stage}/status").json()
+    def stage_status(self, stage: str, scope: tuple[str, str] | None = None) -> dict:
+        """Reads one stage's queue depth and whether a worker is on it.
 
-    def stage_action(self, stage: str, action: str) -> dict:
-        """Moves rows on or off one stage's queue.
+        `scope` narrows it to one item, as the pair the route takes:
+        ("document", sha256) or ("passage", id). Without one, the whole
+        queue.
+        """
+        return self._get(f"/{stage}{_within(scope)}/status").json()
+
+    def stage_action(
+        self, stage: str, action: str, scope: tuple[str, str] | None = None
+    ) -> dict:
+        """Moves rows on or off one stage's queue, for one item or for all.
 
         None of these runs anything: they move rows between statuses, and the
         stage's worker picks up whatever is claimable on its next poll.
         """
-        return self._post(f"/{stage}/{action}", timeout=30).json()
+        return self._post(f"/{stage}{_within(scope)}/{action}", timeout=30).json()
 
     def topics(self) -> list[dict]:
         """Fetches the fitted topics with how much of the corpus each holds."""

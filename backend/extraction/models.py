@@ -87,6 +87,9 @@ class StoredFact:
     evidence_predicates: int
     units_added: list[str]
     unresolved_references: list[str]
+    #: The passage this was drawn from, which is the unit extraction queues
+    #: over: a page offering to read one fact's passage again needs its id.
+    passage_id: int
     doc_sha256: str
     ordinal: int
     page_from: int | None

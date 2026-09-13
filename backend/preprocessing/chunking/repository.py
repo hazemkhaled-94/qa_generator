@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import ClassVar
 
 from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Passage, Status
 from database.qa_generator.repository import Repository
@@ -67,6 +69,8 @@ class ChunkQueue(RowQueue):
         error=Document.chunk_error,
         claimed_at=Document.chunk_claimed_at,
     )
+    #: One document at a time, which is what the Documents page acts on.
+    scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}
     done = Status.CHUNKED
     lease = timedelta(minutes=30)
     next_pending = _NEXT_PENDING

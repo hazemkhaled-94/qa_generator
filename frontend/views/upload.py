@@ -14,11 +14,18 @@ def view() -> None:
     page.header(
         "Upload",
         "Add PDFs to the corpus. Nothing runs on its own: a stored file waits "
-        "at `new` until somebody presses Start on the Documents page.",
+        "at `new` until somebody picks it on the Documents page and presses "
+        "Start on its Parsing row.",
     )
 
     client = backend.upload_api()
 
+    page.section(
+        "Choose the files",
+        "Each file is stored under the digest of its own bytes, so uploading "
+        "one the corpus already holds is recorded and stores nothing. A file "
+        "over the size limit is refused with the reason.",
+    )
     with st.form("upload", border=False):
         files = st.file_uploader(
             "Documents",
