@@ -6,6 +6,7 @@ and a reader can tell which ones a test is actually about.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from database.qa_generator import (
@@ -19,10 +20,14 @@ from database.qa_generator import (
 )
 
 
-#: A digest-shaped string, distinct per call site.
 def digest(seed: str = "a") -> str:
-    """Builds a 64-character hex digest from a short seed."""
-    return (seed * 64)[:64]
+    """Builds a distinct digest from a short seed.
+
+    A real SHA-256, not a repeated letter: the routes check a path
+    parameter against `[0-9a-f]{64}` before it becomes an object key, so a
+    stand-in that is not hex is refused as malformed rather than unknown.
+    """
+    return hashlib.sha256(seed.encode()).hexdigest()
 
 
 def document(sha256: str | None = None, **columns: Any) -> Document:

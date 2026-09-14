@@ -1,0 +1,376 @@
+{
+  "/chunking/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/chunking/{action}": {
+    "post": {
+      "parameters": [
+        "action"
+      ],
+      "responses": [
+        "202",
+        "422"
+      ]
+    }
+  },
+  "/chunking/{scope}/{value}/status": {
+    "get": {
+      "parameters": [
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/chunking/{scope}/{value}/{action}": {
+    "post": {
+      "parameters": [
+        "action",
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "202",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/documents": {
+    "get": {
+      "parameters": [
+        "limit",
+        "offset",
+        "q"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    },
+    "post": {
+      "parameters": [],
+      "responses": [
+        "200",
+        "413",
+        "415",
+        "422"
+      ]
+    }
+  },
+  "/documents/names": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/documents/{sha256}": {
+    "delete": {
+      "parameters": [
+        "sha256"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/documents/{sha256}/derived": {
+    "delete": {
+      "parameters": [
+        "sha256"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/documents/{sha256}/file": {
+    "get": {
+      "parameters": [
+        "sha256"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/extraction/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/extraction/{action}": {
+    "post": {
+      "parameters": [
+        "action"
+      ],
+      "responses": [
+        "202",
+        "422"
+      ]
+    }
+  },
+  "/extraction/{scope}/{value}/status": {
+    "get": {
+      "parameters": [
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/extraction/{scope}/{value}/{action}": {
+    "post": {
+      "parameters": [
+        "action",
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "202",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/facts": {
+    "get": {
+      "parameters": [
+        "document",
+        "field",
+        "limit",
+        "method",
+        "offset",
+        "q"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/facts/quality": {
+    "get": {
+      "parameters": [
+        "document",
+        "field",
+        "method",
+        "q"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/health": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/parsing/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/parsing/{action}": {
+    "post": {
+      "parameters": [
+        "action"
+      ],
+      "responses": [
+        "202",
+        "422"
+      ]
+    }
+  },
+  "/parsing/{scope}/{value}/status": {
+    "get": {
+      "parameters": [
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/parsing/{scope}/{value}/{action}": {
+    "post": {
+      "parameters": [
+        "action",
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "202",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/passages": {
+    "get": {
+      "parameters": [
+        "block_type",
+        "document",
+        "field",
+        "limit",
+        "offset",
+        "q"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/passages/types": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/passages/{passage_id}": {
+    "get": {
+      "parameters": [
+        "passage_id"
+      ],
+      "responses": [
+        "200",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics": {
+    "delete": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    },
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics/discover": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202"
+      ]
+    }
+  },
+  "/topics/fit": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics/retry": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics/stop": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/topics/visualisation/{language}": {
+    "get": {
+      "parameters": [
+        "language"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/topics/{topic_id}": {
+    "patch": {
+      "parameters": [
+        "topic_id"
+      ],
+      "responses": [
+        "200",
+        "404",
+        "422"
+      ]
+    }
+  }
+}
