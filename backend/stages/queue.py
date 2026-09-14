@@ -45,15 +45,6 @@ class Unnarrowable(Exception):
         self.code = code
 
 
-def _also(*conditions: Any) -> tuple[Any, ...]:
-    """Drops the narrowings a caller did not give.
-
-    `where()` takes no None, and every operation below is written once for
-    the narrowed and the whole-queue case.
-    """
-    return tuple(condition for condition in conditions if condition is not None)
-
-
 @dataclass(frozen=True)
 class Columns:
     """The pair of columns a stage owns, plus the time of its claim."""
@@ -89,6 +80,12 @@ class StageQueue(Repository):
     #: route and the command line take. Empty means this stage answers for
     #: the whole queue only, which is true of anything fitted all at once.
     scopes: ClassVar[dict[str, InstrumentedAttribute]] = {}
+    #: Which rows of the table are this queue's at all, when the table holds
+    #: rows that are not. Every operation below carries it, so a stage cannot
+    #: start, sweep or count a row that is none of its business: topics holds
+    #: both the fit requests and the topics, and only the topics are a unit
+    #: of question generation.
+    base: ClassVar[Any] = None
     #: The status this stage sets when it finishes a row.
     done: ClassVar[Status]
     #: How long a claim may go unfinished before a later run treats it as
@@ -120,6 +117,16 @@ class StageQueue(Repository):
         super().__init__()
         if lease is not None:
             self.lease = lease
+
+    def _where(self, *conditions: Any) -> tuple[Any, ...]:
+        """This queue's own rows, narrowed by whatever the caller gave.
+
+        `where()` takes no None, and every operation below is written once
+        for the narrowed and the whole-queue case.
+        """
+        return tuple(
+            condition for condition in (self.base, *conditions) if condition is not None
+        )
 
     def _claim(self, *returning: InstrumentedAttribute):
         """Takes the next pending row and marks it in progress."""
@@ -180,13 +187,15 @@ class StageQueue(Repository):
             return session.execute(
                 update(self.columns.entity)
                 .where(
-                    self.columns.status == Status.IN_PROGRESS,
-                    # A NULL claim counts as abandoned: such a row matches no
-                    # other operation and would sit in_progress forever.
-                    or_(
-                        self.columns.claimed_at.is_(None),
-                        self.columns.claimed_at < func.now() - self.lease,
-                    ),
+                    *self._where(
+                        self.columns.status == Status.IN_PROGRESS,
+                        # A NULL claim counts as abandoned: such a row matches
+                        # no other operation and would sit in_progress forever.
+                        or_(
+                            self.columns.claimed_at.is_(None),
+                            self.columns.claimed_at < func.now() - self.lease,
+                        ),
+                    )
                 )
                 .values(
                     {
@@ -234,7 +243,7 @@ class StageQueue(Repository):
         with self._session.begin() as session:
             return session.execute(
                 update(self.columns.entity)
-                .where(*_also(self.columns.status == Status.PENDING, within))
+                .where(*self._where(self.columns.status == Status.PENDING, within))
                 .values({self.columns.status: Status.NEW})
             ).rowcount
 
@@ -247,7 +256,7 @@ class StageQueue(Repository):
         with self._session.begin() as session:
             return session.execute(
                 update(self.columns.entity)
-                .where(*_also(*where))
+                .where(*self._where(*where))
                 .values({self.columns.status: Status.PENDING, self.columns.error: None})
             ).rowcount
 
@@ -263,7 +272,7 @@ class StageQueue(Repository):
                         self.columns.claimed_at >= func.now() - self.lease
                     ),
                 )
-                .where(*_also(within))
+                .where(*self._where(within))
                 .group_by(self.columns.status)
                 .order_by(self.columns.status)
             ).all()

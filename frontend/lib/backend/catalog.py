@@ -1,7 +1,7 @@
-"""Backend calls made by the Documents, Passages, Facts and Topics pages.
+"""Backend calls made by every page that shows what the pipeline produced.
 
-One client, because all four ask the same shape of question - a page of rows
-about a document - and all four need the document list to choose from.
+One client, because they all ask the same shape of question - a page of rows
+about a document - and they all need the document list to choose from.
 """
 
 from __future__ import annotations
@@ -115,6 +115,24 @@ class CatalogApi(Endpoint):
     def fact_quality(self, **filters) -> dict:
         """Fetches how well extraction is doing, under the same filter."""
         return self._query("/facts/quality", filters)
+
+    def questions(self, **filters) -> dict:
+        """Fetches one page of questions."""
+        return self._query("/questions", filters)
+
+    def question(self, question_id: int) -> dict:
+        """Fetches one question with the facts it was written from."""
+        return self._request("GET", f"/questions/{question_id}").json()
+
+    def question_quality(self, **filters) -> dict:
+        """Fetches how well generation is doing, under the same filter."""
+        return self._query("/questions/quality", filters)
+
+    def decide_question(self, question_id: int, status: str) -> dict:
+        """Accepts or rejects one question."""
+        return self._request(
+            "PATCH", f"/questions/{question_id}", json={"status": status}
+        ).json()
 
     def _query(self, path: str, filters: dict) -> dict:
         """Fetches one filtered endpoint, dropping the empty filters."""

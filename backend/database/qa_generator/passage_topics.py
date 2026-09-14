@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, Float, ForeignKey, Index
+from sqlalchemy import BigInteger, CheckConstraint, Float, ForeignKey, Index, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
@@ -53,3 +53,19 @@ class PassageTopic(Base):
 
     passage: Mapped[Passage] = relationship(back_populates="topic_links")
     topic: Mapped[Topic] = relationship(back_populates="passage_links")
+
+
+#: Each passage's strongest topic, one row per passage. Declared beside the
+#: table rather than in either service, because two of them read it and the
+#: dominant topic is a property of this membership rather than of whoever
+#: asks: topic modelling counts what each topic owns, question generation
+#: takes the facts a topic is the subject of.
+#:
+#: DISTINCT ON rather than a max-weight join, so two topics tied at the same
+#: weight yield one row instead of two.
+DOMINANT = (
+    select(PassageTopic.passage_id, PassageTopic.topic_id)
+    .order_by(PassageTopic.passage_id, PassageTopic.weight.desc())
+    .distinct(PassageTopic.passage_id)
+    .subquery()
+)

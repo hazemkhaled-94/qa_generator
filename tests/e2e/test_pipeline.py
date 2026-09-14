@@ -1,9 +1,12 @@
 """One document, all the way through, in this process.
 
 Every stage is the real service against the real database and the real
-object store. Two things are stood in for, both because they reach outside
-the machine: the PDF converter, whose layout models are a download, and the
-served model, which is a GPU somewhere.
+object store. Four things are stood in for: the PDF converter, whose layout
+models are a download; the served models, which are a GPU somewhere; the
+embedding model, which is 2.2 GB of weights and which the dedup gate needs
+only to be consistent; and the topic fit, which is the one stood in for
+because it cannot run here rather than because it is expensive - the
+frequency filter needs more documents than one fixture has.
 
 What this covers that the per-stage tests do not is the handover: each
 stage leaves a row in the state the next one claims, and nothing starts
@@ -35,6 +38,11 @@ from preprocessing.parsing.models import Conversion, SourceDocument
 from preprocessing.parsing.pipelines import Pipeline, PipelineRegistry
 from preprocessing.parsing.repository import ParseQueue
 from preprocessing.parsing.service import ParsingService
+from question_generation.config import Settings as QuestionSettings
+from question_generation.generation import QuestionWriter
+from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.service import QuestionGenerationService, reverify
+from question_generation.verification import QuestionChecker, Verifier
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
@@ -103,6 +111,101 @@ class StubModel:
         )
 
 
+#: What question generation is configured with here. Constructed rather than
+#: loaded: these are the run's settings, not the deployment's.
+QUESTIONS = QuestionSettings(
+    per_topic=4,
+    group_size=2,
+    unanswerable_share=0.25,
+    duplicate_cosine=0.93,
+    embedding_model="stub",
+    max_tokens=512,
+    verifier_model="ollama/stub-verifier",
+)
+
+
+class StubWriter:
+    """A served model that turns each group of facts into one question."""
+
+    model = "ollama/stub"
+    temperature = 0.0
+
+    def __init__(self) -> None:
+        """Initialises the call counter."""
+        self.calls = 0
+
+    def answer(self, *, system: str, user: str, shape):
+        """Writes a question naming the facts it was given."""
+        self.calls += 1
+        cited = [line for line in user.splitlines() if line.startswith("[")]
+        asked = f"Which of these does the device do: {' '.join(cited)}?"
+        if "answer" in shape.model_fields:
+            return shape(question=asked, answer="4 kg")
+        return shape(question=f"On Mars, {asked}")
+
+
+class StubVerifier:
+    """A second model that finds the answer only in an answerable question."""
+
+    model = "ollama/stub-verifier"
+    temperature = 0.0
+
+    def __init__(self) -> None:
+        """Initialises the call counter."""
+        self.calls = 0
+
+    def answer(self, *, system: str, user: str, shape):
+        """Recovers 4 kg unless the question was perturbed onto Mars."""
+        self.calls += 1
+        found = "Mars" not in user
+        return shape(in_passage=found, answer="4 kg" if found else "")
+
+
+class StubEmbedder:
+    """A deterministic embedding, so the dedup gate still behaves.
+
+    The real one is 2.2 GB of weights, and what the gate needs of it here is
+    only that the same question embeds the same way twice and a different one
+    does not. A one-hot vector off the digest gives exactly that, and gives
+    it without the download.
+    """
+
+    def embed(self, text: str) -> list[float]:
+        """Answers with the unit vector this text always gets."""
+        import hashlib
+
+        vector = [0.0] * 1024
+        vector[int.from_bytes(hashlib.sha256(text.encode()).digest()[:2]) % 1024] = 1.0
+        return vector
+
+
+def fit_topics(engine) -> int:
+    """Writes the topic a fit would have produced, over every passage.
+
+    Stood in for like the converter and the model, and for a reason of its
+    own: the frequency filter needs more documents than this fixture has, so
+    a real fit over two passages produces no vocabulary and no topics. What
+    the stage after it needs is a topic and the memberships, which is what
+    this writes.
+    """
+    with engine.begin() as connection:
+        topic_id = connection.execute(
+            text(
+                "INSERT INTO topics (language, topic_index, top_terms, status, "
+                "requested_at, fitted_at) VALUES ('en', 0, ARRAY['device'], "
+                "'modelled', now(), now()) RETURNING id"
+            )
+        ).scalar_one()
+        connection.execute(
+            text(
+                "INSERT INTO passage_topics (passage_id, topic_id, weight) "
+                "SELECT id, :topic, 0.9 FROM passages"
+            ),
+            {"topic": topic_id},
+        )
+    return topic_id
+
+
 @pytest.fixture(scope="module")
 def chunker():
     """The real passage builder, or a skip when its tokenizer is not here.
@@ -160,6 +263,17 @@ def _pipeline_with(chunker, model) -> dict:
             ),
             checker=FactChecker(),
         ),
+        "questions": QuestionGenerationService(
+            repository=QuestionQueue(),
+            writer=QuestionWriter(StubWriter()),
+            checker=QuestionChecker(
+                embedder=StubEmbedder(),
+                verifier=Verifier(StubVerifier()),
+                nearest=QuestionCatalog().nearest,
+                threshold=QUESTIONS.duplicate_cosine,
+            ),
+            settings=QUESTIONS,
+        ),
         "model": model,
     }
 
@@ -171,7 +285,7 @@ def counts(engine) -> dict[str, int]:
             table: connection.execute(
                 text(f"SELECT count(*) FROM {table}")
             ).scalar_one()
-            for table in ("documents", "passages", "facts")
+            for table in ("documents", "passages", "facts", "questions")
         }
 
 
@@ -339,3 +453,128 @@ def test_the_digest_survives_every_stage(pipeline, engine) -> None:
 
     assert held == [sha]
     assert sha != digest("a")
+
+
+def _through_questions(pipeline, engine) -> int:
+    """Runs one document all the way to its questions, and answers with the topic."""
+    _run(pipeline)
+    topic_id = fit_topics(engine)
+    QuestionQueue().start()
+    pipeline["questions"].drain()
+    return topic_id
+
+
+def test_a_document_becomes_questions(pipeline, engine) -> None:
+    """The sixth stage, claiming from a topic the way the rest claim from a row."""
+    topic_id = _through_questions(pipeline, engine)
+
+    held = counts(engine)
+    assert held["questions"] > 0
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT question_status FROM topics WHERE id = :id"),
+                {"id": topic_id},
+            ).scalar()
+            == Status.GENERATED
+        )
+
+
+def test_nothing_generates_until_something_asks_it_to(pipeline, engine) -> None:
+    """A fitted topic arrives `new`, like every other row in the pipeline."""
+    _run(pipeline)
+    fit_topics(engine)
+
+    assert pipeline["questions"].drain() == 0
+    assert counts(engine)["questions"] == 0
+
+
+def test_every_question_can_be_traced_back_to_a_passage(pipeline, engine) -> None:
+    """Through its facts, which is the only route there is."""
+    _through_questions(pipeline, engine)
+
+    with engine.connect() as connection:
+        orphans = connection.execute(
+            text(
+                "SELECT count(*) FROM questions q WHERE NOT EXISTS ("
+                "  SELECT 1 FROM question_facts qf JOIN facts f ON f.id = qf.fact_id "
+                "  JOIN passages p ON p.id = f.passage_id WHERE qf.question_id = q.id)"
+            )
+        ).scalar_one()
+
+    assert orphans == 0
+
+
+def test_an_unanswerable_question_carries_no_target_answer(pipeline, engine) -> None:
+    """The share is spread by position, so one of four is perturbed."""
+    _through_questions(pipeline, engine)
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT answerable, target_answer FROM questions")
+        ).all()
+
+    assert rows
+    assert all(answerable or target is None for answerable, target in rows)
+
+
+def test_re_extracting_the_corpus_takes_its_questions_with_it(pipeline, engine) -> None:
+    """question_facts cascades from facts, and the trigger does the rest.
+
+    The destructive path, proved rather than assumed: `extract-rerun` is not
+    a cheap way to apply a prompt change once questions exist.
+    """
+    _through_questions(pipeline, engine)
+    assert counts(engine)["questions"] > 0
+
+    PassageQueue().reset()
+    pipeline["extract"].drain()
+
+    assert counts(engine)["questions"] == 0, "the questions outlived their facts"
+
+
+def test_re_judging_a_fact_leaves_the_question_for_the_re_check_to_find(
+    pipeline, engine
+) -> None:
+    """The quiet path: nothing is deleted, and the question is now wrong.
+
+    `extract-revalidate` updates a fact in place, so a question resting on
+    one that no longer passes its checks survives with nothing to say so.
+    That is what questions-reverify is for.
+    """
+    _through_questions(pipeline, engine)
+    before = counts(engine)["questions"]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE facts SET validated = false, rejection_code = 'copied' "
+                "WHERE id = (SELECT min(fact_id) FROM question_facts)"
+            )
+        )
+
+    assert counts(engine)["questions"] == before, "nothing should have been deleted"
+    assert reverify(QuestionCatalog(), QUESTIONS) > 0
+
+    with engine.connect() as connection:
+        reasons = connection.scalars(
+            text("SELECT rejected_reason FROM questions WHERE status = 'rejected'")
+        ).all()
+    assert "source_changed" in reasons
+
+
+def test_a_re_check_never_overturns_a_person(pipeline, engine) -> None:
+    """Accepting is a person's, and a nightly re-check must not undo it."""
+    _through_questions(pipeline, engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE questions SET status = 'rejected', rejected_reason = NULL")
+        )
+
+    reverify(QuestionCatalog(), QUESTIONS)
+
+    with engine.connect() as connection:
+        states = set(
+            connection.scalars(text("SELECT DISTINCT status FROM questions")).all()
+        )
+    assert states == {"rejected"}, "a re-check accepted something"

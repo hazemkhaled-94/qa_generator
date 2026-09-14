@@ -138,6 +138,88 @@ def test_a_search_never_reaches_the_database_as_a_wildcard(typed) -> None:
     assert "_" not in escaped.replace("/_", "")
 
 
+#: A fact id, a document and a passage, which is all grouping reads.
+FACTS = st.lists(
+    st.tuples(
+        st.integers(min_value=1, max_value=10_000),
+        st.sampled_from("abcd"),
+        st.integers(min_value=1, max_value=20),
+    ),
+    min_size=0,
+    max_size=24,
+    unique_by=lambda one: one[0],
+)
+
+
+def _sources(rows):
+    """Turns the generated triples into the facts selection reads."""
+    from factories import source
+
+    return [
+        source(fact_id, document=document, passage_id=passage)
+        for fact_id, document, passage in rows
+    ]
+
+
+@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
+@settings(max_examples=200, deadline=None)
+def test_a_fact_is_never_written_about_twice_in_one_deal(rows, wanted, size) -> None:
+    """A fact in two groups is the same claim tested twice."""
+    from question_generation.selection import groups
+
+    used = [
+        fact.id
+        for one in groups(_sources(rows), wanted=wanted, size=size)
+        for fact in one.facts
+    ]
+
+    assert len(used) == len(set(used))
+
+
+@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
+@settings(max_examples=200, deadline=None)
+def test_every_group_holds_between_one_fact_and_the_size_asked_for(
+    rows, wanted, size
+) -> None:
+    """An empty group has no language and no difficulty to read off it."""
+    from question_generation.selection import groups
+
+    formed = groups(_sources(rows), wanted=wanted, size=size)
+
+    assert len(formed) <= wanted
+    assert all(1 <= len(one.facts) <= size for one in formed)
+
+
+@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
+@settings(max_examples=200, deadline=None)
+def test_difficulty_always_matches_the_spread_it_is_read_from(
+    rows, wanted, size
+) -> None:
+    """The property the re-check relies on to notice evidence that moved."""
+    from question_generation.models import difficulty_of
+    from question_generation.selection import groups
+
+    for one in groups(_sources(rows), wanted=wanted, size=size):
+        assert one.difficulty == difficulty_of(
+            documents=len({fact.doc_sha256 for fact in one.facts}),
+            passages=len({fact.passage_id for fact in one.facts}),
+        )
+
+
+@given(count=st.integers(1, 40), share=st.floats(0.0, 1.0))
+@settings(max_examples=200, deadline=None)
+def test_the_unanswerable_share_is_never_more_than_it_was_asked_for(
+    count, share
+) -> None:
+    """A run must not quietly become mostly questions with no answer."""
+    from question_generation.selection import perturbed
+
+    over = sum(perturbed(index, share) for index in range(count))
+
+    assert 0 <= over <= count
+    assert over == int(count * share) or over == int(count * share) + 1
+
+
 @contextmanager
 def given_setting(value: str):
     """Sets the setting under test, and takes it back out afterwards.

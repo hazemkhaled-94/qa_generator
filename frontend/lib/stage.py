@@ -36,6 +36,10 @@ CONTROLS = [2.3, 1.15, 1.15, 1.15, 1.15, 2.6]
 #: truncated label on the one irreversible control is the worst place for it.
 DANGER = [2.6, 2.1, 4.8]
 
+#: The two controls that decide one row's fate, and the space after them.
+#: Narrower than DANGER: neither deletes anything.
+VERDICT = [1.3, 1.3, 5.4]
+
 #: The order the states are read out in, which is the order a row moves
 #: through them.
 _ORDER = ("new", "pending", "in_progress", "failed")
@@ -44,7 +48,9 @@ _ORDER = ("new", "pending", "in_progress", "failed")
 #: stylesheet colours on that prefix, so a control says what it does by being
 #: keyed for it and no call site has to remember to pass a style.
 #:
-#: The five are graded by what they cost if pressed by mistake:
+#: Each is graded by what it costs if pressed by mistake. Most are queue
+#: verbs; `accept` and `reject` decide one stored row's fate and are graded
+#: the same way, because a person reads the colour and not the list:
 #:
 #:   go       starts work that was going to be done anyway
 #:   recover  re-queues only what already failed
@@ -54,8 +60,10 @@ _ORDER = ("new", "pending", "in_progress", "failed")
 INTENT = {
     "start": "go",
     "discover": "go",
+    "accept": "go",
     "retry": "recover",
     "stop": "halt",
+    "reject": "halt",
     "rerun": "redo",
 }
 

@@ -12,8 +12,8 @@ included, to test whether a chatbot recognises the limits of its knowledge.
 The pipeline runs entirely on local infrastructure. No document content leaves
 the deployment.
 
-**Status:** ingestion, parsing, chunking, fact extraction and topic modelling
-are implemented. Question generation, quality assurance and the evaluation
+**Status:** ingestion, parsing, chunking, fact extraction, topic modelling and
+question generation are implemented. Quality assurance and the evaluation
 harness are not yet built.
 
 Nothing here is bound to a subject or an industry. The parser, the chunker and
@@ -60,6 +60,12 @@ make install
 This installs the dependencies and downloads the spaCy pipelines named in
 `NLP_MODELS`. They are also baked into the backend image, because the runtime
 has no network.
+
+`EMBEDDING_MODEL` is not baked in. One image serves the api and all five
+workers, and its weights are 2.2 GB that four of those processes never load —
+and that every CI build of the image would carry. It is fetched on first use
+instead, into the `models` volume: chunking wants its tokenizer and question
+generation wants its weights, so whichever starts first pays for it once.
 
 ## Run
 
@@ -135,10 +141,14 @@ make topics-visualise # write each language's pyLDAvis page to ./topics/
 make topics-stop     # withdraw a queued fit
 make topics-retry    # return a failed fit to the queue
 make topics-delete   # delete every topic and membership
+make questions-start # the same five, over topics
+make questions       #   ... and `questions-status`, `questions-stop`,
+                     #       `questions-retry`, `questions-rerun`
+make questions-reverify  # check stored questions again; no model is called
 ```
 
-Any of those five verbs narrows to a single item with `SHA` or `PASSAGE`,
-which is the same operation against fewer rows:
+Any of those five verbs narrows to a single item with `SHA`, `PASSAGE` or
+`TOPIC`, which is the same operation against fewer rows:
 
 ```bash
 make parse-start SHA=<sha256>     # queue one document for parsing
@@ -146,24 +156,35 @@ make chunk-rerun SHA=<sha256>     # rebuild one document's passages
 make extract-start SHA=<sha256>   # queue every passage of one document
 make extract-retry PASSAGE=<id>   # return one failed passage to the queue
 make extract-status SHA=<sha256>  # that document's passages by extract state
+make questions-start TOPIC=<id>   # write the questions for one topic
 ```
 
 Parsing and chunking narrow to a document, extraction to a document or a
-passage, topic modelling to neither — a fit is all-or-nothing over one
-vocabulary, so there is no single topic to start, stop or refit.
+passage, question generation to a topic, topic modelling to nothing — a fit is
+all-or-nothing over one vocabulary, so there is no single topic to start, stop
+or refit.
 
 ### Replaying a stage without redoing it
 
-Two operations re-derive what a stage computed, over rows already stored,
+Three operations re-derive what a stage computed, over rows already stored,
 without the expensive part:
 
 | | |
 |---|---|
 | `make extract-revalidate` | Judges every stored fact again. The model is not called and no statement changes — only what the checks read off one. |
 | `make chunk-revocabulary` | Reads every stored passage's language and vocabulary again. Only `passages.language` and `passages.lemmas` change. |
+| `make questions-reverify` | Puts every stored question through the gates that need no model: its facts still pass their own checks, its evidence is still spread the way its difficulty says, it is still well formed, and no earlier question already asks it. |
 
-Both take `SHA` and `extract-revalidate` takes `PASSAGE` too, like the five
-queue verbs.
+The first two take `SHA`, `extract-revalidate` takes `PASSAGE`, and
+`questions-reverify` takes `TOPIC`, like the five queue verbs.
+
+`questions-reverify` only ever rejects. Accepting is a person's decision, and
+a re-check that un-rejected would overturn one on its next run. It is what
+carries a change made further up the pipeline through to the questions resting
+on it: `extract-revalidate` can turn a fact that passed into one that does not,
+and re-extracting a single document can take a cross-document question's second
+citation away without taking the question. Neither leaves any sign on the
+question itself, which is what this finds.
 
 These exist because the obvious way to apply a change is the destructive one.
 `extract-rerun` calls the model again over the whole corpus, which costs hours
@@ -200,6 +221,7 @@ put rows on or off it:
 | Chunking | `GET /chunking/status` | `POST /chunking/start` | `POST /chunking/stop` | `POST /chunking/retry` | `POST /chunking/rerun` |
 | Extraction | `GET /extraction/status` | `POST /extraction/start` | `POST /extraction/stop` | `POST /extraction/retry` | `POST /extraction/rerun` |
 | Topic modelling | `GET /topics/status` | `POST /topics/discover` | `POST /topics/stop` | `POST /topics/retry` | — |
+| Question generation | `GET /questions/status` | `POST /questions/start` | `POST /questions/stop` | `POST /questions/retry` | `POST /questions/rerun` |
 
 Each verb comes twice. The routes above act on the whole queue; the same
 verb under `/{scope}/{value}` acts on one item, which is what the frontend's
@@ -210,6 +232,7 @@ per-item controls call:
 | Parsing | `document` | `POST /parsing/document/{sha256}/start` |
 | Chunking | `document` | `POST /chunking/document/{sha256}/rerun` |
 | Extraction | `document`, `passage` | `POST /extraction/passage/{id}/retry` |
+| Question generation | `topic` | `POST /questions/topic/{id}/rerun` |
 | Topic modelling | — | a fit is all-or-nothing |
 
 `GET /{stage}/{scope}/{value}/status` reports that item's queue the same way
@@ -255,6 +278,10 @@ each claims one row at a time with `FOR UPDATE SKIP LOCKED`, so two workers
 never take the same row. `topic-worker` can be scaled too, though there is no
 point: a fit is one request row, and only one worker can claim it.
 
+`question-worker` scales the same way and has far less to divide. Its queue is
+one row per topic, so twelve topics per language is two dozen rows for the
+whole corpus, and a worker past that has nothing to claim.
+
 ```bash
 podman compose up -d --scale extract-worker=4
 ```
@@ -268,6 +295,11 @@ The model is the bottleneck, not the pipeline: a median passage measured at
 473 s on a 31B model. A passage whose sentences carry no finite verb — a
 heading, a caption, a navigation line — is skipped before the call rather than
 sent and rejected afterwards.
+
+A topic's lease is derived from what a topic actually costs, not from what one
+model call costs: `QUESTIONS_PER_TOPIC` candidates, each of them a writer call
+and a verifier call. Sized any smaller and a run would fail workers that are
+only halfway through their first topic.
 
 Each process opens its own connection pool, sized by `DATABASE_POOL_SIZE` and
 `DATABASE_POOL_OVERFLOW`; the total across every worker has to stay under
@@ -293,13 +325,25 @@ PostgreSQL's `max_connections`.
 | `GET /topics/fit` | When the topics were fitted, over what, and whether they still describe the corpus |
 | `GET /topics/visualisation/{language}` | One language's model as a self-contained pyLDAvis page |
 | `DELETE /topics` | Every topic and membership |
+| `GET /questions` | Questions, accepted and rejected alike, with what each cites |
+| `GET /questions/{id}` | One question with the facts it was written from |
+| `GET /questions/quality` | How many questions hold up, which gate stopped the rest, and how much of the corpus's subject matter is covered |
+| `PATCH /questions/{id}` | Accept or reject one question |
 | `GET /health` | That the process is up, for the container healthcheck |
 | `GET /status` | Every component behind the API, and what each service holds |
 
-`/documents`, `/passages` and `/facts` take `q` for a case-insensitive
-substring and `limit`/`offset` to page; the last two also take `document` to
-narrow to one digest. The frontend renders each as a page of its own and
-filters nothing itself.
+`/documents`, `/passages`, `/facts` and `/questions` take `q` for a
+case-insensitive substring and `limit`/`offset` to page; the last three also
+take `document` to narrow to one digest, and `/questions` takes `topic` as
+well. The frontend renders each as a page of its own and filters nothing
+itself.
+
+`/questions` is the one path that is both a stage and its output. Every other
+stage is a verb with its product under a noun — `/extraction` and `/facts` —
+but a question is what generation produces and what it is called, so the queue
+routes and the read routes share the router. The queue routes are declared
+first, which is what keeps `/questions/status` from being read as a question
+with the id `status`.
 
 A document moves through the stages by its status columns, one request at a
 time: ingestion leaves `parse_status = 'new'`, starting parsing moves it to
@@ -308,7 +352,16 @@ time: ingestion leaves `parse_status = 'new'`, starting parsing moves it to
 stage. Extraction does the same over the passage's `extract_status`. Nothing
 schedules the stages; a person or the orchestrator does. Topic modelling stands
 outside that chain: it reads every passage whatever stage its document has
-reached, and runs when a request row in `topics` asks it to.
+reached, and runs when a request row in `topics` asks it to. Question
+generation is back inside it, over a row of its own in the same table: a
+fitted topic arrives `question_status = 'new'` and waits to be asked, like
+everything else.
+
+`topics` therefore carries two queues. A row with a NULL `topic_index` is a
+request to refit and is topic modelling's; a row that is a topic is question
+generation's. Every operation on the second carries `topic_index IS NOT NULL`,
+because without it `start` would queue the asking as though it were a subject
+and the two workers would fight over one row.
 
 A fact or a question reaches its topics by joining through its passage —
 `facts.passage_id` to `passage_topics` — rather than holding a topic of its
@@ -360,6 +413,90 @@ A table is read by a deterministic cell reader, not by the model. It cites the
 numbered rendered row its own value sits in, so a table citation is an index
 like any other and the checks need no rule of their own. Only the checks that
 apply to a written sentence are applied to a composed one.
+
+## What a question is
+
+A question is written from one or more **facts**, never from a passage. A fact
+is already one claim standing on its own — which is what `not_atomic` and
+`unresolved_reference` are for — so it is something to ask about rather than
+something to summarise.
+
+The unit of work is a **topic**, because a question's subject is one. The facts
+a topic may be asked about are the facts of the passages that topic is
+strongest in; a passage belongs a little to many topics, and writing a question
+for every one of them asks the same thing under a dozen subjects. A topic with
+`include_in_coverage = false` is skipped, which is the neutral switch for "this
+is not a subject" — nothing in the code decides that.
+
+Within a topic the facts are dealt **one document at a time in turn** rather
+than taken in order. Reading straight down the list fills every group from one
+document; dealing them round-robin makes a group span two wherever the topic
+has two, and a question needing two documents is a question a retriever
+actually has to retrieve for. `difficulty` is then read off the result rather
+than judged:
+
+| | |
+|---|---|
+| `single_passage` | Answerable from one passage |
+| `cross_passage` | Needs two passages of one document |
+| `cross_document` | Needs passages from two different documents |
+
+Some questions are written to have **no answer in the corpus**, by perturbing a
+verified fact just out of reach. These test whether a chatbot says it does not
+know instead of inventing something, which is half of what this dataset is for.
+`QUESTIONS_UNANSWERABLE_SHARE` sets how many are attempted, spread by position
+rather than drawn at random, so a share of 0.25 is exactly one in four and is
+the same one in four on a re-run.
+
+### The gates
+
+Four, applied cheapest first, because each one that fires saves the cost of
+those behind it. A question that fails one is stored with the gate's name
+rather than dropped: the rate at which that happens is how the writer is
+judged, so it belongs in the data and not in a log.
+
+| Gate | Rejects a question that | Costs |
+|---|---|---|
+| `malformed` | is not a question, carries no target answer when it claims one, is in the wrong language, or is one of its own facts handed back | nothing |
+| `duplicate` | is a near twin of one already accepted | one index probe |
+| `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
+| `not_recoverable` | cites evidence its own answer is not in | one model call |
+
+The last is the one no similarity measure makes. A second model is shown **only
+the cited passages** and asked to answer; the question survives if what comes
+back carries every number, name and date the target answer asserts. That is the
+same test extraction uses for `unsupported_addition`, pointed the other way.
+
+Three things about it are load-bearing. The verifier is a **different** model,
+named by `QUESTIONS_VERIFIER_MODEL`, because a model marking its own work
+recovers what it just wrote and the gate then passes everything. The escape
+hatch is explicit — the verifier answers whether the passage states it at all,
+not just what it says — or the model confabulates rather than declining. And it
+sees only the cited passages, never the corpus: what is being measured is the
+dataset, not a retriever.
+
+It catches what nothing else did. *"Ein Liquiditätsmanagementtool ist eine
+einjährige Rückgabefrist"* survived an NLI model, an LLM judge and a structural
+check, because it reads exactly like its passage. It does not survive being
+asked, because recoverability is not similarity — and a paraphrase, a
+decomposition and a resolved pronoun all survive it, which a similarity
+threshold does not let them do.
+
+### What a refit and a re-extraction do to them
+
+Questions belong to their facts, not to a topic. A fit replaces every row in
+`topics`, so refitting returns every topic to `new` and the questions are
+written again — but the questions themselves survive, and selection skips the
+facts an accepted question already rests on, so the second run writes only about
+what the first did not reach. Without that skip the writer would be paid for
+once per duplicate before the dedup gate could throw the duplicate away.
+
+Re-extracting is the destructive one. `question_facts` cascades from `facts`
+and a trigger deletes a question once its last citation is gone, so
+`extract-rerun` over the corpus takes the questions with it. Re-extracting a
+*single* document is quieter and worse: a cross-document question that loses one
+of its two citations is not deleted, and its stored difficulty stops being true.
+That is what `questions-reverify` exists to find.
 
 ## Topic modelling
 
@@ -463,7 +600,7 @@ gates a merge; the two that do not are excluded from it.
 | `tests/e2e/` | One document through every stage in this process, with the converter and the model stood in for | a container |
 | `tests/frontend/` | Each Streamlit page against a scripted backend | nothing |
 | `tests/smoke/` | Both images built and looked inside, and the compose file resolved | a container engine |
-| `tests/eval/` | How a real served model reads the golden passages | a served model |
+| `tests/eval/` | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions | a served model |
 
 The integration layers start a PostgreSQL and a SeaweedFS of their own through
 testcontainers and skip, with a reason, where no container engine answers.
@@ -471,7 +608,16 @@ Nothing they do touches a running stack.
 
 `tests/eval/` never gates: a model's answers move between versions and between
 runs at the same temperature, so a threshold there would fail on somebody
-else's Tuesday rather than on a regression. It prints its numbers.
+else's Tuesday rather than on a regression. It prints its numbers. The one
+thing it does assert is that the round-trip gate splits its golden questions
+the right way round, which is not a measurement of the model's taste — it is
+whether the gate is wired up at all, and a gate that accepts everything cannot
+be told from no gate.
+
+Two tests would need a 2.2 GB download to run and skip instead of taking one:
+`tests/unit/questions/test_embedding.py` skips unless `EMBEDDING_MODEL` is
+already in the Hugging Face cache, and the end-to-end pipeline stands the
+embedder in for with a digest.
 
 ### Continuous integration
 
@@ -513,6 +659,7 @@ PyPI's build, which has no CUDA variant to avoid.
 | `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas |
 | `backend/extraction/` | Those passages become facts citing a sentence |
 | `backend/topic_modelling/` | Each language becomes topics over its own vocabulary |
+| `backend/question_generation/` | Each topic's facts become questions with known answers |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
 | `backend/settings/` | Reading configuration out of the environment, and nowhere else |
 | `tests/` | The test suite, one directory per layer; see Tests below |
@@ -558,7 +705,7 @@ which is what `make logs` shows, and as one JSON object per line in a file,
 which is what reaches Elasticsearch. Same record, same fields; the JSON
 carries the ones a text line has no room for.
 
-    api, 4 workers, streamlit  ──▶  logs volume  ──▶  filebeat  ──▶  elasticsearch  ──▶  grafana
+    api, 5 workers, streamlit  ──▶  logs volume  ──▶  filebeat  ──▶  elasticsearch  ──▶  grafana
 
 Nothing is aggregated and nothing is dropped on the way. Every level from
 `LOG_LEVEL` upwards is shipped, `DEBUG` included when it is set that low. An
@@ -607,7 +754,7 @@ than by which service reads it:
 
 | File | In git | Holds |
 |---|---|---|
-| `configs/env/backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction and topic settings the api and the four workers read |
+| `configs/env/backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction, topic and question settings the api and the five workers read |
 | `configs/env/elasticsearch.env` | yes | The Elasticsearch node's certificate paths, security flags and heap. One node serves both Argilla and the logs |
 | `configs/env/seaweedfs-filer.env` | yes | Which metadata store the filer uses |
 | `.env` | no | Credentials, ports, and the addresses a host reaches a service at. `.env.example` lists it |
@@ -631,6 +778,10 @@ The values most likely to need changing:
 | `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. Medium, not small: the small German model does not tag a modal as a finite verb |
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | — | Where that model is served |
+| `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Unset means the writer marks its own work, which it will always pass; the worker warns on every start |
+| `QUESTIONS_PER_TOPIC` | `backend.env` | 10 | How many questions to aim for per topic. This times the topic count is what a full run costs |
+| `QUESTIONS_UNANSWERABLE_SHARE` | `backend.env` | 0.25 | What share of questions are written to have no answer in the corpus |
+| `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector |
 

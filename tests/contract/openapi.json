@@ -286,6 +286,110 @@
       ]
     }
   },
+  "/questions": {
+    "get": {
+      "parameters": [
+        "answerable",
+        "document",
+        "field",
+        "limit",
+        "offset",
+        "q",
+        "status",
+        "topic"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/questions/quality": {
+    "get": {
+      "parameters": [
+        "answerable",
+        "document",
+        "field",
+        "q",
+        "status",
+        "topic"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/questions/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/questions/{action}": {
+    "post": {
+      "parameters": [
+        "action"
+      ],
+      "responses": [
+        "202",
+        "422"
+      ]
+    }
+  },
+  "/questions/{question_id}": {
+    "get": {
+      "parameters": [
+        "question_id"
+      ],
+      "responses": [
+        "200",
+        "404",
+        "422"
+      ]
+    },
+    "patch": {
+      "parameters": [
+        "question_id"
+      ],
+      "responses": [
+        "200",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/questions/{scope}/{value}/status": {
+    "get": {
+      "parameters": [
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/questions/{scope}/{value}/{action}": {
+    "post": {
+      "parameters": [
+        "action",
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "202",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
   "/status": {
     "get": {
       "parameters": [],

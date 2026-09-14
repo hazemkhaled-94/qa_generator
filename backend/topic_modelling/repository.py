@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import delete, func, insert, select, update
 
 from database.qa_generator import Fact, Passage, PassageTopic, Status, Topic
+from database.qa_generator.passage_topics import DOMINANT as _DOMINANT
 from database.qa_generator.repository import Repository
 from stages import Columns, StageQueue
 from topic_modelling.models import (
@@ -37,15 +38,6 @@ _NEXT_PENDING = (
     .with_for_update(skip_locked=True)
     .limit(1)
     .scalar_subquery()
-)
-
-#: Each passage's strongest topic, one row per passage. DISTINCT ON rather
-#: than a max-weight join, so two topics tied at the same weight yield one row.
-_DOMINANT = (
-    select(PassageTopic.passage_id, PassageTopic.topic_id)
-    .order_by(PassageTopic.passage_id, PassageTopic.weight.desc())
-    .distinct(PassageTopic.passage_id)
-    .subquery()
 )
 
 

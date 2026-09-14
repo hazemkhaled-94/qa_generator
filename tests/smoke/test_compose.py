@@ -37,6 +37,7 @@ EXPECTED = {
     "chunk-worker",
     "extract-worker",
     "topic-worker",
+    "question-worker",
     "streamlit",
 }
 
@@ -136,6 +137,7 @@ def test_the_workers_run_the_stage_each_is_named_for(resolved) -> None:
         ("chunk-worker", "preprocessing.chunking.run"),
         ("extract-worker", "extraction.run"),
         ("topic-worker", "topic_modelling.run"),
+        ("question-worker", "question_generation.run"),
     ):
         command = " ".join(str(part) for part in services[worker].get("command", []))
         assert module in command, f"{worker} runs {command!r}"
@@ -163,6 +165,12 @@ def test_everything_waited_on_has_a_healthcheck_to_wait_for(resolved) -> None:
 def test_the_stages_wait_for_the_stores_they_write_to(resolved) -> None:
     """A worker that starts first fails its first row and stops."""
     services = resolved["services"]
-    for worker in ("api", "parse-worker", "chunk-worker", "extract-worker"):
+    for worker in (
+        "api",
+        "parse-worker",
+        "chunk-worker",
+        "extract-worker",
+        "question-worker",
+    ):
         waits_for = set(services[worker].get("depends_on", {}))
         assert "postgres" in waits_for, f"{worker} waits for {sorted(waits_for)}"

@@ -25,15 +25,18 @@ LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE
 # Narrows a stage target to one item instead of the whole queue, mirroring
 # the route's /{scope}/{value} segment:
 #
-#   make parse-start   SHA=<sha256>     one document
-#   make chunk-rerun   SHA=<sha256>     one document
-#   make extract-start SHA=<sha256>     every passage of one document
-#   make extract-retry PASSAGE=<id>     one passage
+#   make parse-start     SHA=<sha256>     one document
+#   make chunk-rerun     SHA=<sha256>     one document
+#   make extract-start   SHA=<sha256>     every passage of one document
+#   make extract-retry   PASSAGE=<id>     one passage
+#   make questions-start TOPIC=<id>       one topic
 #
 # Which scopes a stage accepts is the stage's own; parsing and chunking take
-# a document, extraction takes either, topic modelling takes neither. SHA
-# wins if both are given.
-ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSAGE)))
+# a document, extraction takes either, question generation takes a topic, and
+# topic modelling takes none. The first one given wins.
+ONLY = $(if $(SHA),--only document=$(SHA),\
+       $(if $(PASSAGE),--only passage=$(PASSAGE),\
+       $(if $(TOPIC),--only topic=$(TOPIC))))
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
         logs-shipper \
@@ -45,6 +48,8 @@ ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSA
         extract-rerun extract-revalidate \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
+        questions questions-status questions-start questions-stop \
+        questions-retry questions-rerun questions-reverify \
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
@@ -338,6 +343,57 @@ topics-stop:
 # Return every failed fit to the queue.
 topics-retry:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --retry
+
+# ── Question generation ────────────────────────────────────────────────────
+#
+# The same five verbs as every other stage, over topics. A question's subject
+# is a topic, so that is what the queue is over, and TOPIC=<id> narrows any
+# of them to one:
+#
+#   make questions-status                 GET /questions/status
+#   make questions-start                 POST /questions/start
+#   make questions-start TOPIC=7         POST /questions/topic/7/start
+#
+# Needs the model in LLM_MODEL served at LLM_BASE_URL, the second model in
+# QUESTIONS_VERIFIER_MODEL served beside it, and EMBEDDING_MODEL downloaded -
+# the first run fetches it into the Hugging Face cache and later runs read it
+# from there.
+
+# Drain the question queue here, in the foreground.
+questions:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run
+
+# Report the queue by topic state, and how many questions are held.
+questions-status:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --status $(ONLY)
+
+# Queue every topic this stage has not been asked to do yet. Nothing reaches
+# a worker until this runs.
+questions-start:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --start $(ONLY)
+
+# Take back whatever has not begun. The one in hand finishes.
+questions-stop:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --stop $(ONLY)
+
+# Return every failed topic to the pending queue.
+questions-retry:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --retry $(ONLY)
+
+# Run this stage again over every topic, finished ones included. Cheaper than
+# it looks: facts an accepted question already rests on are skipped, so this
+# writes about what the last run did not reach rather than starting over.
+questions-rerun:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --rerun $(ONLY)
+
+# Put every stored question through the gates that need no model: its facts
+# still pass their own checks, its evidence is still spread the way its
+# difficulty says, it is still well formed, and no earlier question already
+# asks it. Rejects what no longer holds and never un-rejects, because
+# accepting is a person's. This is what carries extract-revalidate, or a
+# re-extraction of one document, through to the questions resting on it.
+questions-reverify:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --reverify $(ONLY)
 
 # ── Documents ──────────────────────────────────────────────────────────────
 

@@ -25,7 +25,42 @@ HEALTHY = {
     "ingestion": {"ok": True, "detail": "Documents held.", "metrics": {"documents": 2}},
 }
 
-EMPTY_PAGE = {"total": 0, "documents": [], "passages": [], "facts": []}
+EMPTY_PAGE = {
+    "total": 0,
+    "documents": [],
+    "passages": [],
+    "facts": [],
+    "questions": [],
+}
+
+#: One accepted question, as /questions returns it.
+QUESTION = {
+    "id": 1,
+    "question_text": "Within how many hours is a standard request answered?",
+    "target_answer": "48 hours",
+    "answerable": True,
+    "difficulty": "cross_document",
+    "language": "en",
+    "status": "accepted",
+    "rejected_reason": None,
+    "created_at": "2026-09-14T10:00:00",
+    "facts": 2,
+    "documents": ["a" * 64, "b" * 64],
+    "topics": ["Support"],
+}
+
+#: What /questions/quality returns for that one question.
+QUESTION_QUALITY = {
+    "total": 1,
+    "accepted": 1,
+    "draft": 0,
+    "unanswerable": 0,
+    "topics_covered": 1,
+    "topics_in_coverage": 2,
+    "mean_question_chars": 54.0,
+    "rejected": {},
+    "difficulty": {"cross_document": 1},
+}
 
 
 def text_of(app) -> str:
@@ -92,6 +127,7 @@ def test_the_health_page_survives_a_backend_that_is_down(run_view) -> None:
         ("documents", "catalog_api"),
         ("passages", "catalog_api"),
         ("facts", "catalog_api"),
+        ("questions", "catalog_api"),
     ],
 )
 def test_a_listing_page_renders_when_the_corpus_is_empty(
@@ -106,6 +142,8 @@ def test_a_listing_page_renders_when_the_corpus_is_empty(
                 passages=EMPTY_PAGE,
                 facts=EMPTY_PAGE,
                 fact_quality={},
+                questions=EMPTY_PAGE,
+                question_quality=QUESTION_QUALITY,
                 document_names=[],
                 passage_types=[],
                 stage_status={"stage": view, "working": False, "rows": {}},
@@ -123,6 +161,7 @@ def test_a_listing_page_renders_when_the_corpus_is_empty(
         ("passages", "catalog_api"),
         ("facts", "catalog_api"),
         ("topics", "catalog_api"),
+        ("questions", "catalog_api"),
         ("upload", "upload_api"),
     ],
 )
@@ -138,6 +177,8 @@ def test_a_page_reports_an_unreachable_backend_rather_than_raising(
                 passages=UNREACHABLE,
                 facts=UNREACHABLE,
                 fact_quality=UNREACHABLE,
+                questions=UNREACHABLE,
+                question_quality=UNREACHABLE,
                 document_names=UNREACHABLE,
                 passage_types=UNREACHABLE,
                 topics=UNREACHABLE,
@@ -188,3 +229,78 @@ def test_the_upload_page_offers_a_file_picker(run_view) -> None:
 
     assert not app.exception
     assert app.get("file_uploader"), "no file picker on the upload page"
+
+
+def test_the_questions_page_lists_what_the_backend_returns(run_view) -> None:
+    """The listing and the gate table are drawn from one answer each."""
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={"total": 1, "questions": [QUESTION]},
+            question_quality=QUESTION_QUALITY,
+            question={"question": QUESTION, "sources": []},
+            document_names=[],
+            stage_status={
+                "stage": "questions",
+                "working": False,
+                "rows": {"generated": 1, "new": 1},
+            },
+        ),
+    )
+
+    assert not app.exception, app.exception
+    assert app.dataframe, "nothing was tabled"
+
+
+def test_the_questions_page_says_when_a_cited_fact_no_longer_holds(run_view) -> None:
+    """A question resting on a rejected fact is the quiet kind of wrong."""
+    moved = {
+        "fact_id": 9,
+        "statement": "A standard request is answered within 48 hours.",
+        "evidence_text": "Standard requests are answered within 48 hours.",
+        "validated": False,
+        "passage_id": 4,
+        "doc_sha256": "a" * 64,
+        "ordinal": 2,
+    }
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={"total": 1, "questions": [QUESTION]},
+            question_quality=QUESTION_QUALITY,
+            question={"question": QUESTION, "sources": [moved]},
+            document_names=[],
+            stage_status={"stage": "questions", "working": False, "rows": {}},
+        ),
+    )
+
+    assert not app.exception, app.exception
+    assert "questions-reverify" in text_of(app)
+
+
+def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> None:
+    """The one control on this page that changes a row."""
+    client = Answers(
+        questions={
+            "total": 1,
+            "questions": [
+                {**QUESTION, "status": "rejected", "rejected_reason": "duplicate"}
+            ],
+        },
+        question_quality={
+            **QUESTION_QUALITY,
+            "accepted": 0,
+            "rejected": {"duplicate": 1},
+        },
+        question={"question": {**QUESTION, "status": "rejected"}, "sources": []},
+        decide_question={},
+        document_names=[],
+        stage_status={"stage": "questions", "working": False, "rows": {}},
+    )
+    app = run_view("questions", catalog_api=client)
+
+    accepting = [one for one in app.button if one.label == "Accept"]
+    assert accepting, "no accept control on the page"
+    accepting[0].click().run()
+
+    assert ("decide_question", (1, "accepted"), {}) in client.asked

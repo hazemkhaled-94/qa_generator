@@ -93,6 +93,7 @@ COPY backend/ingestion/ ./ingestion/
 COPY backend/preprocessing/ ./preprocessing/
 COPY backend/extraction/ ./extraction/
 COPY backend/topic_modelling/ ./topic_modelling/
+COPY backend/question_generation/ ./question_generation/
 COPY backend/nlp/ ./nlp/
 COPY backend/llm/ ./llm/
 COPY telemetry/ /shared/telemetry/

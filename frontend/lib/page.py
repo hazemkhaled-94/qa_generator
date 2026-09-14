@@ -37,6 +37,8 @@ STATUS_HELP = {
     "chunked": "Split into passages, each with its sentences and lemmas read.",
     "extracted": "Read for facts. Facts that failed a check are stored too.",
     "modelled": "Fitted into the topic model currently stored.",
+    "generated": "Questions have been written for this topic. Questions a "
+    "gate rejected are stored too.",
 }
 
 

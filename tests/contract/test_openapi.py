@@ -131,7 +131,7 @@ def test_every_path_the_frontend_calls_exists(published) -> None:
 
 #: The stages the frontend names when it composes a queue path, and the
 #: scopes it narrows them with.
-STAGES = ("parsing", "chunking", "extraction", "topics")
+STAGES = ("parsing", "chunking", "extraction", "topics", "questions")
 SCOPES = ("", "/document/{}", "/passage/{}")
 
 
@@ -143,7 +143,7 @@ def test_every_stage_the_frontend_names_answers_for_its_queue(published, stage) 
     assert f"/{stage}/status" in served, sorted(served)
 
 
-@pytest.mark.parametrize("stage", ("parsing", "chunking", "extraction"))
+@pytest.mark.parametrize("stage", ("parsing", "chunking", "extraction", "questions"))
 @pytest.mark.parametrize("scope", SCOPES)
 def test_every_narrowed_stage_path_the_frontend_builds_exists(
     published, stage, scope

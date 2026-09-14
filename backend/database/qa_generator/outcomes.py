@@ -26,6 +26,34 @@ class QuestionStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class Difficulty(StrEnum):
+    """How far a question's evidence is spread.
+
+    Read off the facts a question was written from rather than judged, so
+    two people reading the same question agree on it and a report can
+    stratify on it without anybody's opinion in the way.
+    """
+
+    SINGLE_PASSAGE = "single_passage"
+    CROSS_PASSAGE = "cross_passage"
+    CROSS_DOCUMENT = "cross_document"
+
+
+class QuestionRejection(StrEnum):
+    """Why a generated question was not accepted.
+
+    Stored in questions.rejected_reason. A code and no message, unlike a
+    fact's: no gate here measures anything, so there is nothing a message
+    would carry that the code does not.
+    """
+
+    MALFORMED = "malformed"
+    NOT_RECOVERABLE = "not_recoverable"
+    DUPLICATE = "duplicate"
+    ANSWERABLE_AFTER_ALL = "answerable_after_all"
+    SOURCE_CHANGED = "source_changed"
+
+
 class Rejection(StrEnum):
     """Why a candidate fact was not accepted.
 

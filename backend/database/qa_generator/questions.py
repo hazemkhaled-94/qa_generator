@@ -21,7 +21,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
-from database.qa_generator.outcomes import QuestionStatus, one_of
+from database.qa_generator.outcomes import (
+    Difficulty,
+    QuestionRejection,
+    QuestionStatus,
+    one_of,
+)
 
 if TYPE_CHECKING:
     from database.qa_generator.question_facts import QuestionFact
@@ -50,6 +55,9 @@ class Question(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # The dedup probe filters to the accepted questions before it orders
+        # by distance, and the quality report groups on the same column.
+        Index("ix_questions_status", "status"),
         # Shape, not policy, as on documents.language.
         CheckConstraint(
             "language ~ '^[a-z]{2}$'", name="questions_language_is_iso_639_1"
@@ -58,6 +66,17 @@ class Question(Base):
         CheckConstraint(
             "answerable OR target_answer IS NULL",
             name="questions_unanswerable_has_no_target",
+        ),
+        CheckConstraint(
+            f"difficulty IS NULL OR {one_of('difficulty', Difficulty)}",
+            name="questions_difficulty_valid",
+        ),
+        # A person rejecting a question from the page names no gate, so a
+        # rejected question may carry no reason; a reason that is not a gate
+        # is what this refuses.
+        CheckConstraint(
+            f"rejected_reason IS NULL OR {one_of('rejected_reason', QuestionRejection)}",
+            name="questions_rejected_reason_valid",
         ),
         {
             "comment": "The test questions themselves. Append-only and never "
@@ -85,7 +104,11 @@ class Question(Base):
         "recognises the limits of its knowledge.",
     )
     difficulty: Mapped[str | None] = mapped_column(
-        Text, comment="Difficulty band, used to stratify the review sample."
+        Text,
+        comment="single_passage | cross_passage | cross_document, enforced by a "
+        "CHECK constraint. Read off how far the facts the question was written "
+        "from are spread rather than judged, so it is measurable and two readers "
+        "cannot disagree about it. Used to stratify the review sample.",
     )
     language: Mapped[str] = mapped_column(
         CHAR(2),
@@ -114,7 +137,10 @@ class Question(Base):
         "the coverage report.",
     )
     rejected_reason: Mapped[str | None] = mapped_column(
-        Text, comment="Which gate rejected the question."
+        Text,
+        comment="Which gate rejected the question, enforced by a CHECK "
+        "constraint. NULL on a question a person rejected from the page, which "
+        "names no gate.",
     )
     holdout_set_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,

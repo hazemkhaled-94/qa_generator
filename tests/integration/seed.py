@@ -14,6 +14,7 @@ from database.qa_generator import (
     Fact,
     IngestEvent,
     Passage,
+    PassageTopic,
     Question,
     QuestionFact,
     Topic,
@@ -90,6 +91,26 @@ def link(question_id: int, fact_id: int) -> QuestionFact:
 def topic(**columns: Any) -> Topic:
     """A request row, which is what a topic table starts as."""
     return Topic(top_terms=columns.pop("top_terms", []), **columns)
+
+
+def fitted(topic_index: int = 0, **columns: Any) -> Topic:
+    """A topic a fit produced, rather than a request for one.
+
+    The distinction is the whole reason question generation carries a base
+    predicate: both live in this table and only one of them is a subject.
+    """
+    return Topic(
+        topic_index=topic_index,
+        language=columns.pop("language", "en"),
+        top_terms=columns.pop("top_terms", ["device", "weight"]),
+        status=columns.pop("status", "modelled"),
+        **columns,
+    )
+
+
+def membership(passage_id: int, topic_id: int, weight: float = 0.9) -> PassageTopic:
+    """How strongly one passage belongs to one topic."""
+    return PassageTopic(passage_id=passage_id, topic_id=topic_id, weight=weight)
 
 
 def event(**columns: Any) -> IngestEvent:

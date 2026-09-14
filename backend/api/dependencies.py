@@ -18,6 +18,7 @@ from ingestion.factory import build_removal, build_service
 from ingestion.repository import DocumentRepository
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from preprocessing.parsing.repository import ParseQueue
+from question_generation.repository import QuestionCatalog, QuestionQueue
 from topic_modelling.repository import TopicCatalog, TopicQueue
 
 settings = Settings.load()
@@ -34,12 +35,14 @@ parsing_queue = ParseQueue()
 chunking_queue = ChunkQueue()
 extraction_queue = PassageQueue()
 topics_queue = TopicQueue()
+questions_queue = QuestionQueue()
 
 #: One catalogue per thing the pipeline produced, for the routes that read it.
 ingestion_repository = DocumentRepository()
 passage_catalog = PassageCatalog()
 fact_catalog = FactCatalog()
 topic_catalog = TopicCatalog()
+question_catalog = QuestionCatalog()
 
 #: Generated artefacts a route serves back, such as the topic visualisations.
 export_bucket = ExportBucket()
@@ -66,6 +69,9 @@ status_service = StatusService(
         ),
         "topic_modelling": Counter(
             "Topic runs by status, and topics held.", topics_queue.counts
+        ),
+        "question_generation": Counter(
+            "Topics by question status, and questions held.", questions_queue.counts
         ),
     }
 )

@@ -11,7 +11,7 @@ name: qa_generator
 #                         seaweedfs-s3, seaweedfs-ui
 #   backend:              every service; no host access, no outbound
 #     internal: true
-#   egress: {}            the four workers only
+#   egress: {}            the five workers only
 #
 # Then drop `ports:` from postgres, seaweedfs-volume and seaweedfs-volume2.
 # Postgres is then reached through adminer, and the seaweedfs master and
@@ -29,7 +29,7 @@ x-logging: &logging
 # ── Environment ────────────────────────────────────────────────────────────
 #
 # Every tuning value the backend reads is in configs/env/backend.env, which
-# the five backend services take with env_file and the Makefile sources for
+# the six backend services take with env_file and the Makefile sources for
 # the host commands, so one value reaches both.
 #
 # What stays here is what an env file cannot express: a value composed out of
@@ -42,11 +42,18 @@ x-logging: &logging
 # it is here and not in .env: it names the shared `logs` volume that filebeat
 # reads. Set it to nothing and the process logs to stdout only, which is what
 # every host command does.
+#
+# HF_HOME is where the Hugging Face cache goes, and it is a path inside the
+# container for the same reason. EMBEDDING_MODEL is fetched on first use -
+# chunking wants its tokenizer, question generation wants its weights - and
+# the `models` volume below is what stops every restart fetching it again.
+# The api names it too and downloads nothing: it loads neither.
 x-service-env: &service-env
   TZ: UTC
   DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
   LOG_LEVEL: ${LOG_LEVEL}
   LOG_DIR: /var/log/qa
+  HF_HOME: /home/app/.cache/huggingface
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
   OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
 
@@ -57,20 +64,24 @@ x-store-env: &store-env
   S3_SECRET_KEY: ${S3_SECRET_KEY}
 
 # The stages that call a served model: extraction reads passages with it,
-# topic modelling names topics with it. Its mode, temperature, timeout and attempt count are in
+# topic modelling names topics with it, question generation writes and checks
+# questions with it. Its mode, temperature, timeout and attempt count are in
 # backend.env; which model and where it is served stay here, because that is
 # one deployment's choice rather than a project default.
 x-model-env: &model-env
   LLM_MODEL: ${LLM_MODEL}
   # Container's view of the model, not the host's.
   LLM_BASE_URL: ${LLM_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
+  # The second model, which checks what the first wrote. Optional, and its
+  # absence means something: the writer then marks its own work.
+  QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_MODEL:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
 # ── Workers ────────────────────────────────────────────────────────────────
 
 x-worker: &worker
-  # Shared with api; one build for all five services.
+  # Shared with api; one build for all six services.
   image: qa_generator-backend:latest
   build:
     context: .
@@ -93,8 +104,10 @@ x-worker: &worker
     - ./backend/topic_modelling:/app/topic_modelling:ro
     - ./backend/nlp:/app/nlp:ro
     - ./backend/llm:/app/llm:ro
+    - ./backend/question_generation:/app/question_generation:ro
     - ./telemetry:/shared/telemetry:ro
     - logs:/var/log/qa
+    - models:/home/app/.cache/huggingface
   depends_on:
     postgres:      { condition: service_healthy }
     seaweedfs-s3:  { condition: service_healthy }
@@ -442,6 +455,23 @@ services:
       resources:
         limits: { cpus: "2.0", memory: 2G }
 
+  # Writes the test questions, one topic at a time. Scalable, though there is
+  # far less to divide than in the stages before it: the queue is one row per
+  # topic, so a corpus with twelve topics per language has two dozen rows and
+  # a thirteenth worker would have nothing to claim.
+  #
+  # The memory limit is what EMBEDDING_MODEL needs. It is a 560M-parameter
+  # model held in float32, which is about 2.2 GB of weights before torch's
+  # own allocator; the other workers load no weights at all.
+  question-worker:
+    <<: *worker
+    command: ["python", "-m", "question_generation.run", "--watch"]
+    environment:
+      <<: [*service-env, *model-env]
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 6G }
+
   streamlit:
     build:
       context: .
@@ -592,7 +622,7 @@ services:
       resources:
         limits: { cpus: "0.25", memory: 256M }
 
-  # Reads the JSON lines the api, the four workers and the frontend write to
+  # Reads the JSON lines the api, the five workers and the frontend write to
   # the shared volume, and puts each one in Elasticsearch. Runs as root, which
   # is how it reads a volume the app user owns; --strict.perms=false is what
   # lets it accept a config file owned by whoever cloned the repository.
@@ -687,8 +717,15 @@ volumes:
   redis_data:
   grafana_data:
   filebeat_data:
-  #: Written by the api, the four workers and the frontend; read by filebeat.
+  #: Written by the api, the five workers and the frontend; read by filebeat.
   #: A volume rather than the engine's own log store, because that store is
   #: in a different place under Docker and Podman and, on macOS, inside a
   #: virtual machine.
   logs:
+  #: The Hugging Face cache, holding EMBEDDING_MODEL: its tokenizer, which
+  #: chunking sizes a passage with, and its weights, which question
+  #: generation embeds with. A volume rather than a layer of the image,
+  #: because one image serves the api and all five workers and 2.2 GB of
+  #: weights would ship into the four processes that never load them - and
+  #: into every CI build of that image. Fetched once, on first use.
+  models:

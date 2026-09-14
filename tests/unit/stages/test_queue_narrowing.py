@@ -15,14 +15,13 @@ from sqlalchemy.dialects import postgresql
 from database.qa_generator import Status
 from extraction.repository import PassageQueue
 from preprocessing.parsing.repository import ParseQueue
-from stages.queue import _also
 
 
 def where(queue: Any, within: Any) -> str:
     """Compiles the WHERE one operation would run with."""
     return str(
         update(queue.columns.entity)
-        .where(*_also(queue.columns.status == Status.PENDING, within))
+        .where(*queue._where(queue.columns.status == Status.PENDING, within))
         .values({queue.columns.status: Status.NEW})
         .compile(dialect=postgresql.dialect())
     )
@@ -30,8 +29,24 @@ def where(queue: Any, within: Any) -> str:
 
 def test_a_narrowing_nobody_gave_drops_out() -> None:
     """`where()` takes no None."""
-    assert _also(None) == ()
-    assert _also("a", None, "b") == ("a", "b")
+    queue = ParseQueue()
+
+    assert queue._where(None) == ()
+    assert queue._where("a", None, "b") == ("a", "b")
+
+
+def test_a_queue_over_part_of_a_table_carries_that_condition_everywhere() -> None:
+    """`topics` holds the fit requests and the topics; only one is a subject.
+
+    Without this every inherited verb would reach the request row, and
+    `start` would queue the asking as though it were a topic.
+    """
+    from question_generation.repository import QuestionQueue
+
+    narrowed = where(QuestionQueue(), None)
+
+    assert "topic_index IS NOT NULL" in narrowed, narrowed
+    assert "question_status" in narrowed, narrowed
 
 
 def test_a_narrowing_reaches_the_sql_beside_the_status() -> None:

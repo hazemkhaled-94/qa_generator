@@ -21,6 +21,7 @@ class Status(StrEnum):
     CHUNKED = "chunked"
     EXTRACTED = "extracted"
     MODELLED = "modelled"
+    GENERATED = "generated"
 
 
 #: The states shared by every stage. A stage's own set is these plus its done
