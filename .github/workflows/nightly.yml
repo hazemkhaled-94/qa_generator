@@ -1,0 +1,60 @@
+name: Nightly
+
+# What is worth knowing but not worth blocking a merge on: advisories
+# against the locks, and how the served model is reading. Neither can fail
+# a pull request, and neither should.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      # Reported, never gated: an advisory with no fixed version yet is not
+      # a reason to stop merging. torch is held out of the backend lock
+      # here; see the comment on the target.
+      - run: make audit
+
+  # The whole suite including the image builds, so a dependency that broke
+  # overnight is found before somebody opens a pull request into it.
+  everything:
+    name: Every layer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make room for the images
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+      - uses: ./.github/actions/setup
+      - name: Cache the chunker's tokenizer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-multilingual-e5-large
+      - run: poetry run pytest -m "not eval"
+
+  # Skips itself unless a model is reachable, which no hosted runner has.
+  # Here so that pointing LLM_BASE_URL at one is all it takes.
+  evaluate:
+    name: Model quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Score the golden passages
+        env:
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_STRUCTURED_MODE: JSON_SCHEMA
+          LLM_TEMPERATURE: "0"
+          LLM_TIMEOUT_SECONDS: "900"
+          LLM_MAX_ATTEMPTS: "3"
+        run: poetry run pytest -m eval -s

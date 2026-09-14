@@ -1,0 +1,45 @@
+name: Set up the project
+description: Python, poetry, and the dependencies every job needs, from cache.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      id: python
+      with:
+        # Below 3.14: gensim builds against CPython internals removed there,
+        # which is why pyproject stops short of it. Both images are 3.13.
+        python-version: "3.13"
+
+    - name: Install poetry
+      shell: bash
+      run: pipx install poetry
+
+    # In the workspace rather than in poetry's own directory, so one cache
+    # entry covers the environment and the spaCy pipelines installed into it.
+    - name: Keep the virtualenv in the workspace
+      shell: bash
+      run: echo "POETRY_VIRTUALENVS_IN_PROJECT=true" >> "$GITHUB_ENV"
+
+    # Keyed on the lock and on the Makefile, which is where the spaCy model
+    # names live. A miss costs the full install, torch included.
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock', 'Makefile') }}
+
+    - name: Install dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: make install
+
+    # A restored virtualenv carries absolute paths, so it is only usable
+    # where it was built. The key holds the full patch version for that
+    # reason; this is what says so out loud if it ever stops being true.
+    - name: Check the environment is usable
+      shell: bash
+      run: |
+        poetry run python --version
+        poetry run python -c "import spacy, gensim, sqlalchemy, fastapi, docling"
+        poetry run python -c "import de_core_news_md, en_core_web_md"

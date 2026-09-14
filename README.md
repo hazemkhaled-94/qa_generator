@@ -97,9 +97,14 @@ make logs            # follow all logs
 make logs-api        # follow the API log
 make logs-frontend   # follow the frontend log
 make logs-shipper    # follow the log shipper, when Grafana shows nothing
-make test            # run the test suite; no database, no served model
-make test-fast       # the same, without the tests that load a spaCy pipeline
+make test            # everything that gates; starts containers of its own
+make test-fast       # only the fast layers: no spaCy, no pyright, no containers
+make test-smoke      # build both images and look inside them
+make test-eval       # score the served model against the golden passages
+make test-coverage   # the gating layers, with a coverage report
 make lint            # ruff check and format check
+make typecheck       # pyright over backend, frontend and telemetry
+make audit           # known advisories against the two locks
 make format          # apply every fix ruff can make
 make lock            # rewrite backend/api/requirements.lock
 make certs           # generate the TLS certificates Elasticsearch needs
@@ -443,6 +448,52 @@ Two deliberate gaps: figures become no passage of their own, which needs a
 vision model to be worth anything, and key-value form regions are not modelled,
 because no document in the corpus has any.
 
+## Tests
+
+Seven layers, each a directory and a marker. `make test` runs everything that
+gates a merge; the two that do not are excluded from it.
+
+| Directory | What it covers | Needs |
+|---|---|---|
+| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, and pyright at zero | nothing |
+| `tests/unit/` | One module at a time, no I/O | spaCy, for some |
+| `tests/property/` | Invariants over generated input, with hypothesis | spaCy, for some |
+| `tests/contract/` | The OpenAPI surface, the paths the frontend builds, and the refusals each route declares | a container |
+| `tests/integration/` | The database, the object store and the HTTP surface, against the images compose runs | a container |
+| `tests/e2e/` | One document through every stage in this process, with the converter and the model stood in for | a container |
+| `tests/frontend/` | Each Streamlit page against a scripted backend | nothing |
+| `tests/smoke/` | Both images built and looked inside, and the compose file resolved | a container engine |
+| `tests/eval/` | How a real served model reads the golden passages | a served model |
+
+The integration layers start a PostgreSQL and a SeaweedFS of their own through
+testcontainers and skip, with a reason, where no container engine answers.
+Nothing they do touches a running stack.
+
+`tests/eval/` never gates: a model's answers move between versions and between
+runs at the same temperature, so a threshold there would fail on somebody
+else's Tuesday rather than on a regression. It prints its numbers.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on every push to
+`main`, as four jobs that together are the whole suite: `static`, `unit`,
+`integration`, and `smoke`. A fifth, `gate`, waits for the rest and is the one
+thing a branch protection rule needs to require.
+
+`smoke` builds both images, so it does not run on every pull request — pushes
+to `main` always, and a pull request when it carries the `smoke` label.
+
+`.github/workflows/nightly.yml` runs what is worth knowing but not worth
+blocking on: advisories against both locks, every layer including the images,
+and the model evaluation, which skips itself unless `LLM_MODEL` and
+`LLM_BASE_URL` are set as repository variables.
+
+The first run of any job installs the dependencies and caches the virtualenv
+against `poetry.lock` and the Makefile. That install pulls the CUDA build of
+torch, which nothing here uses: the images install a CPU-only build from
+PyTorch's own index, and poetry has no equivalent without a source declared in
+`pyproject.toml`.
+
 ## Layout
 
 | Path | Contents |
@@ -459,7 +510,8 @@ because no document in the corpus has any.
 | `backend/topic_modelling/` | Each language becomes topics over its own vocabulary |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
 | `backend/settings/` | Reading configuration out of the environment, and nowhere else |
-| `tests/` | The test suite: `unit/` per package, `static/` over the repository itself |
+| `tests/` | The test suite, one directory per layer; see Tests below |
+| `.github/workflows/` | What CI runs, and when |
 | `telemetry/` | Logging and OpenTelemetry configuration |
 | `configs/filebeat/` | What the log shipper reads and where it puts it |
 | `configs/grafana/` | The log datasource and dashboard, provisioned |

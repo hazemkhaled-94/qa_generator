@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run per branch. A push over a push cancels the older one, which is
+# otherwise twenty minutes of a runner testing a commit nobody has now.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Ruff, pyright and the drift gates: the settings every module reads
+  # against the files that declare them, the migration chain, the extensions
+  # the schema needs, and the locks against what they are built from.
+  static:
+    name: Static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: make lint
+      - run: poetry run pytest tests/static
+
+  # Everything that needs neither a container nor a served model: the unit
+  # layers, the properties, the contract shapes and the Streamlit pages.
+  unit:
+    name: Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Cache the chunker's tokenizer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-multilingual-e5-large
+      - run: >-
+          poetry run pytest -m "not integration and not smoke and not eval"
+          --ignore=tests/static
+
+  # Postgres and SeaweedFS, started by testcontainers against the runner's
+  # own Docker. Includes the API, the contract and the end-to-end layers,
+  # all of which are marked integration.
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Cache the chunker's tokenizer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-multilingual-e5-large
+      - name: Pull the images the fixtures start
+        run: |
+          docker pull pgvector/pgvector:pg18
+          docker pull chrislusf/seaweedfs:4.44
+      - run: poetry run pytest -m integration
+
+  # Builds both images and looks inside them. Minutes rather than seconds,
+  # because the backend image installs torch, so it does not run on every
+  # pull request: pushes to main always, and a pull request when it carries
+  # the `smoke` label or somebody asks for one.
+  smoke:
+    name: Smoke
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'smoke')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The backend image is torch-sized and a runner has about 14 GB free.
+      - name: Make room for the images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - uses: ./.github/actions/setup
+      - run: make test-smoke
+
+  # One job for a branch protection rule to require, so adding a job above
+  # does not mean editing the rule.
+  gate:
+    name: All gates
+    if: always()
+    needs: [static, unit, integration, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report which gates did not pass
+        run: |
+          echo "static:      ${{ needs.static.result }}"
+          echo "unit:        ${{ needs.unit.result }}"
+          echo "integration: ${{ needs.integration.result }}"
+          echo "smoke:       ${{ needs.smoke.result }}"
+          # A skipped smoke is a pull request without the label, which is
+          # the normal case; a failed or cancelled one is not.
+          [ "${{ needs.static.result }}" = "success" ] \
+            && [ "${{ needs.unit.result }}" = "success" ] \
+            && [ "${{ needs.integration.result }}" = "success" ] \
+            && [ "${{ needs.smoke.result }}" != "failure" ] \
+            && [ "${{ needs.smoke.result }}" != "cancelled" ]

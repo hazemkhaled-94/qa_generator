@@ -20,9 +20,13 @@ from preprocessing.chunking.passages import NoPassages
 #: The setting the parser properties read and write.
 NAME = "QA_PROPERTY_SETTING"
 
-#: Anything a person could put in a settings file. No NUL: os.environ
-#: refuses one before the reader ever sees it.
-SETTING = st.text(alphabet=st.characters(exclude_characters="\x00"), max_size=20)
+#: Anything a settings file can actually carry. The environment holds
+#: UTF-8 bytes, so os.environ refuses a NUL or a lone surrogate before the
+#: reader ever sees one.
+SETTING = st.text(
+    alphabet=st.characters(exclude_characters="\x00", exclude_categories=("Cs",)),
+    max_size=20,
+)
 
 #: Prose-shaped text: printable, and not only whitespace.
 PROSE = st.text(
