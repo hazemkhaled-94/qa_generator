@@ -9,6 +9,7 @@ COMPOSE ?= podman compose
 CONTAINER ?= podman
 
 LOCK_TMP := backend/api/requirements.lock.new
+AUDIT_TMP := backend/api/requirements.lock.audit
 
 # What every host command reads, and in the same order the containers do: the
 # tuning values from configs/env/backend.env, then .env for the credentials,
@@ -45,7 +46,9 @@ ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSA
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         documents delete delete-derived \
-        test test-fast check typecheck lint format lock certs dagster-dev
+        test test-fast test-unit test-integration test-e2e test-smoke \
+        test-eval test-coverage check typecheck audit lint format lock \
+        certs dagster-dev
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -346,15 +349,41 @@ delete-derived:
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 
-# The whole suite. No database and no served model, so it runs before
-# anything is started; it does load the spaCy pipelines. Configuration lives
-# in [tool.pytest.ini_options] in pyproject.toml.
+# Everything that gates: the unit layers, the static gates, and the
+# integration layers, which start a Postgres and a SeaweedFS of their own
+# and are skipped where no container engine answers. Configuration lives in
+# [tool.pytest.ini_options] in pyproject.toml.
 test:
-	poetry run pytest
+	poetry run pytest -m "not smoke and not eval"
 
-# Without the tests that load a spaCy pipeline or run pyright.
+# Without the slow ones: no spaCy pipelines, no pyright, no containers.
 test-fast:
-	poetry run pytest -m "not nlp and not types"
+	poetry run pytest -m "not nlp and not types and not integration"
+
+# The layers on their own, for working on one of them.
+test-unit:
+	poetry run pytest -m "not integration and not smoke and not eval"
+
+test-integration:
+	poetry run pytest -m "integration and not e2e"
+
+test-e2e:
+	poetry run pytest -m e2e
+
+# Builds both images and reads the compose file. Minutes, not seconds, and
+# it starts no stack: compose.yaml binds its ports from .env, so a second
+# copy would collide with a running one rather than run beside it.
+test-smoke:
+	poetry run pytest -m smoke
+
+# Scores the served model LLM_MODEL names against the golden passages.
+# Never a gate: a model's answers move between versions and between runs.
+test-eval:
+	$(LOADENV) && poetry run pytest -m eval -s
+
+test-coverage:
+	poetry run pytest -m "not smoke and not eval" \
+	  --cov=backend --cov=telemetry --cov-report=term-missing:skip-covered
 
 check: test
 
@@ -366,6 +395,23 @@ check: test
 # [tool.pyright] in pyproject.toml.
 typecheck:
 	poetry run pyright
+
+# Known advisories against what the images install. Reported, not gated:
+# an advisory with no fixed version yet is not a reason to stop merging.
+#
+# --no-deps because both locks already pin every transitive dependency.
+#
+# torch and torchvision are held out: they are pinned to +cpu builds, which
+# is a local version PyPI does not carry and PyTorch's own index publishes
+# only for linux. Resolving them anywhere else fails, so their advisories
+# are not covered here - `pip-audit -r` inside the built image is what
+# would cover them.
+audit:
+	@grep -viE "^(torch|torchvision)==" backend/api/requirements.lock > $(AUDIT_TMP)
+	poetry run pip-audit --no-deps --progress-spinner off -r $(AUDIT_TMP) || true
+	@rm -f $(AUDIT_TMP)
+	poetry run pip-audit --no-deps --progress-spinner off \
+	  -r frontend/requirements.lock || true
 
 # Configuration lives in [tool.ruff] in pyproject.toml.
 lint:

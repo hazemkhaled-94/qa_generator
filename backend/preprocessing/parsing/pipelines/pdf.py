@@ -76,7 +76,7 @@ _BROKEN_WORD = re.compile(
 #: text rejects an evidence quote that is correct in every visible respect -
 #: eight of this corpus's seventeen rejected facts differed from their
 #: passage by one U+00A0 and nothing else.
-_SPACES = re.compile(r"[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")
+_SPACES = re.compile(r"[\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]")
 
 
 class PdfPipeline(Pipeline):

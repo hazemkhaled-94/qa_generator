@@ -95,6 +95,7 @@ dev = [
     "pytest-cov (>=7.0.0,<8.0.0)",
     "pyright (>=1.1.400,<2.0.0)",
     "testcontainers[postgres] (>=4.0.0,<5.0.0)",
+    "pip-audit (>=2.7.0,<3.0.0)",
 ]
 
 
@@ -120,13 +121,17 @@ ignore = [
 convention = "google"
 
 [tool.pytest.ini_options]
-pythonpath = [".", "backend", "tests", "tests/integration"]
+pythonpath = [".", "backend", "frontend", "tests", "tests/integration", "tests/frontend"]
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
     "nlp: loads a spaCy pipeline",
     "types: shells out to pyright",
     "integration: needs a container runtime",
+    "frontend: runs a Streamlit view",
+    "e2e: drives the whole pipeline in this process",
+    "smoke: builds images and reads the compose file",
+    "eval: scores a real served model; never gates",
 ]
 
 [build-system]

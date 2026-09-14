@@ -115,9 +115,8 @@ def overview(
     not.
     """
 
-    @st.fragment(run_every=POLL_SECONDS)
-    def _draw() -> None:
-        """Draws the figures, and goes on drawing them."""
+    def _figures() -> None:
+        """Draws the figures once."""
         counts = {
             queue.name: client.stage_status(queue.name, scope)["rows"]
             for queue in queues
@@ -131,6 +130,14 @@ def overview(
                     rows.get(queue.done, 0) / total,
                     text=f"{queue.label}: {queue.describe(rows)}",
                 )
+
+    # Through page.render, because a fragment reruns on its own and so
+    # outside the guard the view was called under: an unreachable backend
+    # replaced this panel with a stack trace.
+    @st.fragment(run_every=POLL_SECONDS)
+    def _draw() -> None:
+        """Draws the figures, and goes on drawing them."""
+        page.render(_figures)
 
     _draw()
 
