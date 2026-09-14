@@ -45,7 +45,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),$(if $(PASSAGE),--only passage=$(PASSA
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         documents delete delete-derived \
-        test test-fast check lint format lock certs dagster-dev
+        test test-fast check typecheck lint format lock certs dagster-dev
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -352,13 +352,20 @@ delete-derived:
 test:
 	poetry run pytest
 
-# Without the tests that load a spaCy pipeline.
+# Without the tests that load a spaCy pipeline or run pyright.
 test-fast:
-	poetry run pytest -m "not nlp"
+	poetry run pytest -m "not nlp and not types"
 
 check: test
 
 # ── Static checks ──────────────────────────────────────────────────────────
+
+# Every type error, not just the ones above the recorded baseline. What the
+# suite enforces is tests/static/pyright_baseline.json; this is the list to
+# work from when bringing a file's count down. Configuration lives in
+# [tool.pyright] in pyproject.toml.
+typecheck:
+	poetry run pyright
 
 # Configuration lives in [tool.ruff] in pyproject.toml.
 lint:

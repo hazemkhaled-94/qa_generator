@@ -93,6 +93,7 @@ dev = [
     "hypothesis>=6.165.10,<7.0.0",
     "ruff (>=0.16.0,<1.0.0)",
     "pytest-cov (>=7.0.0,<8.0.0)",
+    "pyright (>=1.1.400,<2.0.0)",
 ]
 
 
@@ -121,7 +122,10 @@ convention = "google"
 pythonpath = [".", "backend", "tests"]
 testpaths = ["tests"]
 addopts = "--strict-markers"
-markers = ["nlp: loads a spaCy pipeline"]
+markers = [
+    "nlp: loads a spaCy pipeline",
+    "types: shells out to pyright",
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
