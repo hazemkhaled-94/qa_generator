@@ -27,11 +27,16 @@ def groups(facts: Iterable[SourceFact], *, wanted: int, size: int) -> list[FactG
     A corpus holding one document still yields groups - of two facts from
     that document, which is a cross-passage question when they come from
     different passages.
+
+    A size below one is read as one rather than refused. Nothing downstream
+    can do anything with an empty group - it has no language to write in and
+    no spread to read a difficulty off - so the one thing this must not do
+    is hand one out.
     """
+    held = max(size, 1)
     dealt = _interleaved(facts)
     return [
-        FactGroup(tuple(dealt[at : at + size]))
-        for at in range(0, len(dealt), max(size, 1))
+        FactGroup(tuple(dealt[at : at + held])) for at in range(0, len(dealt), held)
     ][:wanted]
 
 

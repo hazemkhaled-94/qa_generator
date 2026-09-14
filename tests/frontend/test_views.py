@@ -304,3 +304,98 @@ def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> No
     accepting[0].click().run()
 
     assert ("decide_question", (1, "accepted"), {}) in client.asked
+
+
+def test_starting_generation_queues_the_topics(run_view) -> None:
+    """The Start control on the Questions page, which acts on every topic.
+
+    Generation queues over topics rather than documents, so this page has no
+    per-item controls: the four verbs act on the whole corpus, and Start is
+    the one that makes a fitted topic claimable.
+    """
+    client = Answers(
+        questions={"total": 1, "questions": [QUESTION]},
+        question_quality=QUESTION_QUALITY,
+        question={"question": QUESTION, "sources": []},
+        stage_action={"detail": "24 row(s) queued."},
+        document_names=[],
+        stage_status={"stage": "questions", "working": False, "rows": {"new": 24}},
+    )
+    app = run_view("questions", catalog_api=client)
+
+    starting = [one for one in app.button if one.label == "Start"]
+    assert starting, "no Start control on the page"
+    starting[0].click().run()
+
+    assert ("stage_action", ("questions", "start", None), {}) in client.asked
+
+
+def test_the_start_control_is_dead_when_every_topic_is_already_queued(run_view) -> None:
+    """A control that would do nothing is greyed rather than hidden."""
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={"total": 1, "questions": [QUESTION]},
+            question_quality=QUESTION_QUALITY,
+            question={"question": QUESTION, "sources": []},
+            document_names=[],
+            stage_status={
+                "stage": "questions",
+                "working": True,
+                "rows": {"pending": 24},
+            },
+        ),
+    )
+
+    starting = [one for one in app.button if one.label == "Start"]
+    assert starting and starting[0].disabled
+
+
+def test_the_page_survives_a_rejection_code_it_has_never_heard_of(run_view) -> None:
+    """A gate added in the backend must not blank the page that reports it."""
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={
+                "total": 1,
+                "questions": [
+                    {**QUESTION, "status": "rejected", "rejected_reason": "invented"}
+                ],
+            },
+            question_quality={**QUESTION_QUALITY, "rejected": {"invented": 1}},
+            question={"question": QUESTION, "sources": []},
+            document_names=[],
+            stage_status={"stage": "questions", "working": False, "rows": {}},
+        ),
+    )
+
+    assert not app.exception, app.exception
+    # The gate table is a dataframe, so its rows are not in text_of().
+    tabled = " ".join(str(one.value) for one in app.dataframe)
+    assert "invented" in tabled, "the unknown gate was not listed"
+    assert "no description" in tabled, "it was listed without saying what it is"
+
+
+def test_a_question_with_no_difficulty_or_answer_still_renders(run_view) -> None:
+    """Both columns are nullable, and a page that assumes otherwise breaks."""
+    bare = {
+        **QUESTION,
+        "target_answer": None,
+        "answerable": False,
+        "difficulty": None,
+        "documents": [],
+        "topics": [],
+        "facts": 0,
+    }
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={"total": 1, "questions": [bare]},
+            question_quality={**QUESTION_QUALITY, "difficulty": {}},
+            question={"question": bare, "sources": []},
+            document_names=[],
+            stage_status={"stage": "questions", "working": False, "rows": {}},
+        ),
+    )
+
+    assert not app.exception, app.exception

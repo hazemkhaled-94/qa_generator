@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,7 @@ from llm.client import Client
 from nlp.analysis import claim, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
-from question_generation.models import Candidate, CheckedQuestion
+from question_generation.models import Candidate, CheckedQuestion, Neighbour
 
 log = logging.getLogger(__name__)
 
@@ -72,15 +71,6 @@ class _Recovered(BaseModel):
 def _bare(text: str) -> str:
     """Folds a string for comparison, sentence punctuation and all."""
     return normalised(text).rstrip("?.!")
-
-
-@dataclass(frozen=True)
-class Neighbour:
-    """The nearest already-accepted question to the one being checked."""
-
-    question_text: str
-    answerable: bool
-    similarity: float
 
 
 def structural(

@@ -13,7 +13,7 @@ from seed import digest, document, fact, fitted, membership, passage, question, 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from database.qa_generator import Status
+from database.qa_generator import QuestionFact, Status
 from question_generation.repository import QuestionCatalog, QuestionQueue
 from topic_modelling.repository import TopicQueue
 
@@ -403,3 +403,165 @@ def test_the_probe_can_be_told_to_look_only_at_earlier_questions(
     assert catalog.nearest([1.0] + [0.0] * 1023, before=ids[0]) is None
     found = catalog.nearest([1.0] + [0.0] * 1023, before=ids[1])
     assert found is not None and found.question_text == "first"
+
+
+# ── Edges the outer joins and the empty cases leave ────────────────────────
+
+
+def test_a_question_with_no_facts_is_still_read_back(engine, database) -> None:
+    """The trigger deletes one when its LAST link goes, not when it has none.
+
+    A question written with no citation is never deleted by anything, so an
+    inner join would hide a row that is really there and a count taken over
+    it would disagree with the table.
+    """
+    with Session(engine) as session:
+        session.add(question(question_text="Adrift?"))
+        session.commit()
+
+    total, rows = QuestionCatalog().page()
+
+    assert total == 1
+    assert rows[0].facts == 0
+    assert rows[0].documents == []
+    assert rows[0].topics == []
+
+
+def test_a_question_whose_passage_has_no_topic_lists_no_topic(engine, database) -> None:
+    """Not a list holding a null, which is what the aggregate returns."""
+    with Session(engine) as session:
+        session.add(document(digest("a")))
+        session.flush()
+        at = passage(digest("a"), ordinal=1, language="en")
+        session.add(at)
+        session.flush()
+        drawn = fact(at.id)
+        session.add(drawn)
+        asked = question()
+        session.add(asked)
+        session.flush()
+        session.add(QuestionFact(question_id=asked.id, fact_id=drawn.id))
+        session.commit()
+
+    _, rows = QuestionCatalog().page()
+
+    assert rows[0].topics == []
+    assert rows[0].documents == [digest("a")]
+
+
+def test_a_topic_with_no_memberships_has_no_facts_to_ask_about(corpus) -> None:
+    """A fit that placed no passage in a topic leaves it with nothing."""
+    written = corpus(topics=1, facts_per_topic=0)
+
+    assert QuestionQueue().facts(written["topics"][0]) == []
+
+
+def test_finishing_a_topic_that_produced_nothing_still_marks_it_done(
+    corpus, engine
+) -> None:
+    """A topic out of coverage yields no questions and is not still to do.
+
+    Left `new` it would read as work outstanding forever, and a queue that
+    never empties says nothing about whether the stage has run.
+    """
+    written = corpus(topics=1)
+    topic_id = written["topics"][0]
+    QuestionQueue().start()
+    QuestionQueue().claim()
+
+    assert QuestionQueue().store(topic_id, []) == 0
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT question_status FROM topics WHERE id = :id"),
+                {"id": topic_id},
+            ).scalar()
+            == Status.GENERATED
+        )
+
+
+def test_the_probe_answers_nothing_when_no_question_is_accepted(
+    engine, database
+) -> None:
+    """The first question of the first run has nothing to be near."""
+    with Session(engine) as session:
+        session.add(
+            question(
+                question_text="rejected",
+                embedding=[1.0] + [0.0] * 1023,
+                status="rejected",
+                rejected_reason="duplicate",
+            )
+        )
+        session.commit()
+
+    assert QuestionCatalog().nearest([1.0] + [0.0] * 1023) is None
+
+
+def test_the_probe_ignores_a_question_with_no_embedding(engine, database) -> None:
+    """A malformed question is rejected before it is ever embedded."""
+    with Session(engine) as session:
+        session.add(question(question_text="never embedded", status="accepted"))
+        session.commit()
+
+    assert QuestionCatalog().nearest([1.0] + [0.0] * 1023) is None
+
+
+def test_deciding_a_question_that_does_not_exist_answers_nothing(
+    engine, database
+) -> None:
+    """Which is what the route turns into a 404 rather than a silent success."""
+    assert QuestionCatalog().decide(999_999, "accepted") is None
+
+
+def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) -> None:
+    """A cross-document question that lost a citation is not deleted.
+
+    The trigger takes a question only when its last fact goes, so this one
+    survives with a difficulty that stopped being true - which is quieter
+    than a deletion and worse.
+    """
+    from question_generation.config import Settings
+    from question_generation.service import reverify
+
+    with Session(engine) as session:
+        session.add_all([document(digest("a")), document(digest("b"))])
+        session.flush()
+        here = passage(digest("a"), ordinal=1, language="en")
+        there = passage(digest("b"), ordinal=1, language="en")
+        session.add_all([here, there])
+        session.flush()
+        facts = [fact(here.id), fact(there.id, statement="Reviewed yearly.")]
+        session.add_all(facts)
+        asked = question(
+            question_text="What is it and how often is it reviewed?",
+            target_answer="4 kg, yearly",
+            status="accepted",
+            difficulty="cross_document",
+        )
+        session.add(asked)
+        session.flush()
+        session.add_all(QuestionFact(question_id=asked.id, fact_id=f.id) for f in facts)
+        session.commit()
+        asked_id, lost = asked.id, facts[1].id
+
+    settings = Settings(
+        per_topic=4,
+        group_size=2,
+        unanswerable_share=0.25,
+        duplicate_cosine=0.93,
+        embedding_model="stub",
+        max_tokens=512,
+        verifier_model=None,
+    )
+    # Re-extracting one document deletes its facts; the other citation stays.
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM facts WHERE id = :id"), {"id": lost})
+
+    assert reverify(QuestionCatalog(), settings) == 1
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT status, rejected_reason FROM questions WHERE id = :id"),
+            {"id": asked_id},
+        ).one()
+    assert (row.status, row.rejected_reason) == ("rejected", "source_changed")

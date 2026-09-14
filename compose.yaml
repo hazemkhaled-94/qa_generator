@@ -390,6 +390,7 @@ services:
       - ./backend/preprocessing:/app/preprocessing:ro
       - ./backend/extraction:/app/extraction:ro
       - ./backend/topic_modelling:/app/topic_modelling:ro
+      - ./backend/question_generation:/app/question_generation:ro
       - ./backend/nlp:/app/nlp:ro
       - ./backend/llm:/app/llm:ro
       - ./telemetry:/shared/telemetry:ro

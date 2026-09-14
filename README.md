@@ -282,6 +282,15 @@ point: a fit is one request row, and only one worker can claim it.
 one row per topic, so twelve topics per language is two dozen rows for the
 whole corpus, and a worker past that has nothing to claim.
 
+Its first start is slow and looks like nothing happening: it downloads
+`EMBEDDING_MODEL` before it claims anything, which is 2.2 GB into the `models`
+volume. The topics sit `pending` until that finishes, and `make logs` is where
+it says so. Later starts read the volume and claim immediately.
+
+A stage added since a stack came up has no container until `make up` creates
+one. The queue fills, `/questions/status` reports it, and nothing drains it —
+which reads exactly like a broken worker rather than an absent one.
+
 ```bash
 podman compose up -d --scale extract-worker=4
 ```

@@ -126,6 +126,21 @@ class CheckedQuestion:
 
 
 @dataclass(frozen=True)
+class Neighbour:
+    """The nearest already-accepted question to the one being checked.
+
+    Declared here rather than beside the gates that read it, because the
+    catalogue is what produces one and the catalogue is what the API holds:
+    a value object in the module that loads torch would drag torch into the
+    process that serves JSON.
+    """
+
+    question_text: str
+    answerable: bool
+    similarity: float
+
+
+@dataclass(frozen=True)
 class JudgedQuestion:
     """A stored question and everything a re-check needs, read in one query.
 

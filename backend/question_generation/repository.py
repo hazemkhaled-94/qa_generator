@@ -23,6 +23,7 @@ from database.qa_generator.repository import Repository, matching
 from question_generation.models import (
     CheckedQuestion,
     JudgedQuestion,
+    Neighbour,
     QuestionDetail,
     QuestionQuality,
     QuestionSource,
@@ -30,7 +31,6 @@ from question_generation.models import (
     StoredQuestion,
     TopicToCover,
 )
-from question_generation.verification import Neighbour
 from stages import Columns, RowQueue
 
 #: A topic rather than a request to refit. `topics` carries both queues, and

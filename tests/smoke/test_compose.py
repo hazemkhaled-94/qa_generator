@@ -174,3 +174,77 @@ def test_the_stages_wait_for_the_stores_they_write_to(resolved) -> None:
     ):
         waits_for = set(services[worker].get("depends_on", {}))
         assert "postgres" in waits_for, f"{worker} waits for {sorted(waits_for)}"
+
+
+#: The services built from the backend image. One image, one PYTHONPATH, and
+#: one working tree bind-mounted over it.
+BACKEND_SERVICES = (
+    "api",
+    "parse-worker",
+    "chunk-worker",
+    "extract-worker",
+    "topic-worker",
+    "question-worker",
+)
+
+
+def backend_packages() -> set[str]:
+    """Every importable package under backend/, as the image lays them out."""
+    return {
+        found.name
+        for found in (ROOT / "backend").iterdir()
+        if found.is_dir() and (found / "__init__.py").exists()
+    }
+
+
+def mounted_packages(service: dict) -> set[str]:
+    """Which backend packages one service bind-mounts over its image."""
+    return {
+        Path(volume["source"]).name
+        for volume in service.get("volumes", [])
+        if volume.get("type") == "bind" and "/backend/" in str(volume.get("source", ""))
+    }
+
+
+@pytest.mark.parametrize("service", BACKEND_SERVICES)
+def test_every_backend_service_mounts_every_backend_package(resolved, service) -> None:
+    """One image serves all six, so one of them mounting less runs a mix.
+
+    The failure this catches is not a missing file. The package is in the
+    image, so a container whose mount list has fallen behind runs today's
+    source for the packages it mounts and the image's for the rest, and the
+    symptom is a route that 404s or a function that is two versions old.
+
+    The api is the one that gets forgotten, because it is the only backend
+    service that does not take the `x-worker` anchor: it has ports, a
+    healthcheck and a volume list of its own.
+    """
+    missing = backend_packages() - mounted_packages(resolved["services"][service])
+
+    assert not missing, (
+        f"{service} does not mount {', '.join(sorted(missing))}. It runs the "
+        f"image's copy of those and the working tree's copy of the rest."
+    )
+
+
+def test_the_backend_services_all_mount_the_same_packages(resolved) -> None:
+    """Whichever list is right, they have to agree on it.
+
+    Two lists that differ is the shape of the bug above; this says so
+    without having to know which of them is correct.
+    """
+    mounts = {
+        service: mounted_packages(resolved["services"][service])
+        for service in BACKEND_SERVICES
+    }
+    odd = {name: sorted(held) for name, held in mounts.items() if held != mounts["api"]}
+
+    assert not odd, f"api mounts {sorted(mounts['api'])}, but {odd}"
+
+
+def test_the_scan_finds_the_packages_it_is_meant_to_guard(resolved) -> None:
+    """A refactor that moved the packages would otherwise pass silently."""
+    found = backend_packages()
+
+    assert {"api", "question_generation", "extraction"} <= found, sorted(found)
+    assert mounted_packages(resolved["services"]["api"]), "no bind mounts were read"
