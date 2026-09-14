@@ -66,14 +66,11 @@ jobs:
       - run: poetry run pytest -m integration
 
   # Builds both images and looks inside them. Minutes rather than seconds,
-  # because the backend image installs torch, so it does not run on every
-  # pull request: pushes to main always, and a pull request when it carries
-  # the `smoke` label or somebody asks for one.
+  # because the backend image installs torch - but it is the only layer that
+  # can see what an image contains, and a lock that does not install is not
+  # worth finding out about after the merge.
   smoke:
     name: Smoke
-    if: >-
-      github.event_name != 'pull_request'
-      || contains(github.event.pull_request.labels.*.name, 'smoke')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

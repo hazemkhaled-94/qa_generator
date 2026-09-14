@@ -480,8 +480,9 @@ else's Tuesday rather than on a regression. It prints its numbers.
 `integration`, and `smoke`. A fifth, `gate`, waits for the rest and is the one
 thing a branch protection rule needs to require.
 
-`smoke` builds both images, so it does not run on every pull request — pushes
-to `main` always, and a pull request when it carries the `smoke` label.
+`smoke` builds both images, so it is the slow one: it is also the only layer
+that can see what an image contains, and a lock that does not install is not
+worth finding out about after the merge.
 
 `.github/workflows/nightly.yml` runs what is worth knowing but not worth
 blocking on: advisories against both locks, every layer including the images,
@@ -489,10 +490,14 @@ and the model evaluation, which skips itself unless `LLM_MODEL` and
 `LLM_BASE_URL` are set as repository variables.
 
 The first run of any job installs the dependencies and caches the virtualenv
-against `poetry.lock` and the Makefile. That install pulls the CUDA build of
-torch, which nothing here uses: the images install a CPU-only build from
-PyTorch's own index, and poetry has no equivalent without a source declared in
-`pyproject.toml`.
+against `poetry.lock` and the Makefile. Later runs restore it.
+
+torch arrives through docling and nothing here uses a GPU, so `pyproject.toml`
+declares PyTorch's CPU index as an explicit source and names torch and
+torchvision against it for Linux. Without that, the wheel PyPI serves on Linux
+brings the whole CUDA runtime with it — eighteen packages and some three
+gigabytes, downloaded on every cache miss and shipped in nothing. macOS keeps
+PyPI's build, which has no CUDA variant to avoid.
 
 ## Layout
 

@@ -34,6 +34,10 @@ nlp = [
     "rapidfuzz>=3.14.5,<4.0.0",
     "docling>=2.121.0,<3.0.0",
     "pymupdf>=1.28.2,<2.0.0",
+    # Transitive through docling, named here so the source below can be
+    # attached to it. See that block.
+    "torch",
+    "torchvision",
 ]
 
 data = [
@@ -98,6 +102,29 @@ dev = [
     "pip-audit (>=2.7.0,<3.0.0)",
 ]
 
+
+# PyTorch's CPU builds. torch arrives through docling and nothing here uses
+# a GPU, but the wheel PyPI serves on Linux carries the whole CUDA runtime -
+# eighteen nvidia-* packages and some three gigabytes. This is the index the
+# image already installs from by hand; explicit, so nothing else is taken
+# from it.
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+# Enriching the nlp group declared above: a PEP 735 dependency is a plain
+# requirement string and has nowhere to name a source. The split is the
+# index's: it serves Linux as `+cpu` and macOS as the plain version.
+[tool.poetry.group.nlp.dependencies]
+torch = [
+    { version = "*", source = "pytorch-cpu", markers = "sys_platform == 'linux'" },
+    { version = "*", markers = "sys_platform != 'linux'" },
+]
+torchvision = [
+    { version = "*", source = "pytorch-cpu", markers = "sys_platform == 'linux'" },
+    { version = "*", markers = "sys_platform != 'linux'" },
+]
 
 [tool.ruff]
 target-version = "py312"
