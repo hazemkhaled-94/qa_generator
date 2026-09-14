@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
@@ -80,11 +81,13 @@ class TopicQueue(StageQueue):
                 .returning(Topic.id)
             )
 
-    def stop(self) -> int:
+    def stop(self, within: Any = None) -> int:
         """Withdraws a fit that has been asked for but not started.
 
         Deletes the request rather than parking it: a request row is only ever
         the asking, so one nobody is going to run is not a state worth keeping.
+
+        `within` is the base's; this stage declares no scope to narrow to.
         """
         with self._session.begin() as session:
             return session.execute(

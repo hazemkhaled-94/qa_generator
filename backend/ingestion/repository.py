@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import ScalarSelect, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from database.qa_generator import (
@@ -32,7 +32,7 @@ _FIRST_EVENT = (
 )
 
 
-def _passages(*where) -> object:
+def _passages(*where) -> ScalarSelect[int]:
     """Counts one document's passages, as a scalar subquery.
 
     Correlated rather than a grouped join: the join grouped every passage in

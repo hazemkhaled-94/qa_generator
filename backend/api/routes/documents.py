@@ -25,7 +25,10 @@ _REFUSALS = {code: {"model": ErrorBody} for code in (400, 404, 413, 415)}
 
 #: Ingest outcomes that are refusals. Anything absent answers 200; a
 #: duplicate is an answer, not an error.
-_ERROR_STATUS = {Outcome.TOO_LARGE: 413, Outcome.UNSUPPORTED_TYPE: 415}
+_ERROR_STATUS: dict[str, int] = {
+    Outcome.TOO_LARGE: 413,
+    Outcome.UNSUPPORTED_TYPE: 415,
+}
 
 #: What a digest looks like. Checked before a path parameter becomes part of
 #: an object key.

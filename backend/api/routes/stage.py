@@ -17,7 +17,7 @@ one does not.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from fastapi import APIRouter
 
@@ -46,15 +46,16 @@ _DONE = {
 }
 
 
-class StageRepository(Protocol):
-    """What a stage's queue must be able to report and repair.
+class StageQueueState(Protocol):
+    """What a stage's queue must be able to report.
 
-    Every operation takes an optional `within`, which narrows it to the rows
-    a condition selects instead of the whole queue.
+    Separate from :class:`StageRepository` because topic modelling answers
+    /status without answering the four verbs: it has no row until a fit is
+    asked for, so it has nothing to start or to reset.
     """
 
     #: Which columns this stage may be narrowed to, by the name a route takes.
-    scopes: dict[str, Any]
+    scopes: ClassVar[dict[str, Any]]
 
     def narrowed(self, scope: str, value: str) -> Any:
         """Builds the condition one scope's value selects, refusing either."""
@@ -63,6 +64,14 @@ class StageRepository(Protocol):
     def queue_state(self, within: Any = None) -> QueueState:
         """Reports the depth of this queue and whether a worker is on it."""
         ...
+
+
+class StageRepository(StageQueueState, Protocol):
+    """What a stage's queue must be able to report and repair.
+
+    Every operation takes an optional `within`, which narrows it to the rows
+    a condition selects instead of the whole queue.
+    """
 
     def start(self, within: Any = None) -> int:
         """Queues the rows never asked for."""
@@ -118,7 +127,7 @@ class StageAction:
 
 def status_of(
     name: str,
-    repository: StageRepository,
+    repository: StageQueueState,
     *,
     scope: str | None = None,
     value: str | None = None,
@@ -139,7 +148,7 @@ def status_of(
     )
 
 
-def _narrowed(repository: StageRepository, scope: str, value: str):
+def _narrowed(repository: StageQueueState, scope: str, value: str):
     """Builds the condition one scope and value select, refusing either.
 
     The wording is the queue's; this only chooses the status it answers with.
@@ -210,7 +219,9 @@ def acted(
 def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
     """Builds the five corpus-wide routes and their narrowed pair."""
     router = APIRouter(prefix=f"/{name}", tags=[name])
-    refusals = {code: {"model": ErrorBody} for code in (400, 404)}
+    refusals: dict[int | str, dict[str, Any]] = {
+        code: {"model": ErrorBody} for code in (400, 404)
+    }
 
     @router.get("/status")
     def status() -> StageStatus:

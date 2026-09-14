@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import ClassVar
+from typing import ClassVar, cast
 
-from sqlalchemy import Select, bindparam, delete, func, insert, select, update
+from sqlalchemy import Select, Table, bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Fact, Passage, Status
@@ -45,7 +45,7 @@ DEFAULT_FIELD = "both"
 _BATCH = 500
 
 #: The facts table itself, for the bulk update a re-judgement writes.
-_FACTS = Fact.__table__
+_FACTS = cast("Table", Fact.__table__)
 
 
 def _filtered(query, document, search, method, field):

@@ -1,20 +1,16 @@
-"""Pyright, held to a baseline rather than to zero.
+"""Pyright, at zero.
 
-The type errors already here are not this suite's to fix, and a gate that is
-red on arrival gates nothing. So the count per file is recorded in
-pyright_baseline.json and only a rise fails: new code is checked from the
-start, and the existing errors can come down a file at a time.
+Configuration lives in [tool.pyright] in pyproject.toml. `make typecheck`
+runs the same check and prints the errors themselves.
 
-Fixing some? Regenerate the baseline downwards:
-
-    poetry run pyright --outputjson | poetry run python -c '...'
-
-or just edit the number. A file that reaches zero comes out of the file.
+Three of these are `# pyright: ignore` on a call that is correct at run time
+and mistyped by the library: gensim annotates `prune_at` and `keep_n` as int
+where None is what disables them, and docling's backend options carry
+defaults pyright cannot see.
 """
 
 from __future__ import annotations
 
-import collections
 import json
 import subprocess
 from pathlib import Path
@@ -22,14 +18,13 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-BASELINE = Path(__file__).parent / "pyright_baseline.json"
 
 pytestmark = pytest.mark.types
 
 
 @pytest.fixture(scope="module")
-def errors() -> dict[str, int]:
-    """Runs pyright and counts its errors per file."""
+def report() -> dict:
+    """Runs pyright over everything [tool.pyright] includes."""
     finished = subprocess.run(
         ["pyright", "--outputjson"],
         cwd=ROOT,
@@ -39,40 +34,22 @@ def errors() -> dict[str, int]:
     )
     if not finished.stdout.strip():
         pytest.fail(f"pyright produced no report: {finished.stderr[-2000:]}")
+    return json.loads(finished.stdout)
 
-    reported = json.loads(finished.stdout)["generalDiagnostics"]
-    return collections.Counter(
-        str(Path(item["file"]).resolve().relative_to(ROOT))
-        for item in reported
+
+def test_there_are_no_type_errors(report: dict) -> None:
+    """Every error, named with the line it is on."""
+    errors = [
+        f"{Path(item['file']).resolve().relative_to(ROOT)}"
+        f":{item['range']['start']['line'] + 1} "
+        f"[{item.get('rule')}] {' '.join(item['message'].split())[:160]}"
+        for item in report["generalDiagnostics"]
         if item["severity"] == "error"
-    )
+    ]
+
+    assert not errors, "\n".join(errors)
 
 
-@pytest.fixture(scope="module")
-def baseline() -> dict[str, int]:
-    """The recorded count per file."""
-    return json.loads(BASELINE.read_text())
-
-
-def test_no_file_has_more_type_errors_than_it_did(errors, baseline) -> None:
-    """New code is type-checked from the start."""
-    worse = {
-        path: (count, baseline.get(path, 0))
-        for path, count in errors.items()
-        if count > baseline.get(path, 0)
-    }
-
-    assert not worse, "\n".join(
-        f"{path}: {now} type error(s), was {before}. Run `make typecheck`."
-        for path, (now, before) in sorted(worse.items())
-    )
-
-
-def test_the_baseline_names_no_file_that_is_already_clean(errors, baseline) -> None:
-    """A file that has been fixed comes out, so the gate keeps tightening."""
-    clean = sorted(path for path, count in baseline.items() if not errors.get(path))
-
-    assert not clean, (
-        f"these are clean now and must be removed from {BASELINE.name}: "
-        f"{', '.join(clean)}"
-    )
+def test_the_whole_project_was_checked(report: dict) -> None:
+    """An include path that stops matching would otherwise pass as clean."""
+    assert report["summary"]["filesAnalyzed"] > 100, report["summary"]

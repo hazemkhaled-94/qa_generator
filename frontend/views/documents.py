@@ -9,7 +9,7 @@ import streamlit as st
 from lib import backend, catalog, page, stage
 
 #: What the polling fragment hands a page, and what the page returns for it.
-Figures = Callable[[dict[str, dict[str, int]]], dict[str, tuple[object, str]]]
+Figures = Callable[[dict[str, dict[str, int]]], dict[str, tuple]]
 
 #: The stages a document passes through, in order. Parsing and chunking queue
 #: over the document itself; extraction queues over its passages, which is why
@@ -100,12 +100,13 @@ def view() -> None:
         "and the deletions - applies to this document alone and to nothing "
         "else in the corpus.",
     )
-    _detail(client, chosen)
+    if chosen is not None:
+        _detail(client, chosen)
 
 
 def _corpus_figures(
     counts: dict[str, dict[str, int]],
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, tuple]:
     """Names the corpus-wide figures the top of this page carries."""
     documents = sum(counts["parsing"].values())
     passages = sum(counts["extraction"].values())
@@ -224,7 +225,7 @@ def _document_figures(document: dict) -> Figures:
     fetched.
     """
 
-    def figures(counts: dict[str, dict[str, int]]) -> dict[str, tuple[object, str]]:
+    def figures(counts: dict[str, dict[str, int]]) -> dict[str, tuple]:
         """Names the per-document figures."""
         passages = sum(counts["extraction"].values())
         oversized = document.get("oversized") or 0

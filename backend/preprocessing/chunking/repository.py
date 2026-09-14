@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import ClassVar
+from typing import ClassVar, cast
 
-from sqlalchemy import bindparam, delete, func, insert, select, update
+from sqlalchemy import Table, bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Passage, Status
@@ -41,7 +41,7 @@ SEARCH_FIELDS = {
 DEFAULT_FIELD = "text"
 
 #: The passages table itself, for the bulk update a re-read writes.
-_PASSAGES = Passage.__table__
+_PASSAGES = cast("Table", Passage.__table__)
 
 
 def _filtered(query, document, search, block_type, field):

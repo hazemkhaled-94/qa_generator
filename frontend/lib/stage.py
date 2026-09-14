@@ -100,7 +100,7 @@ class Queue:
 def overview(
     client,
     queues: list[Queue],
-    figures: Callable[[dict[str, dict[str, int]]], dict[str, tuple[object, str]]],
+    figures: Callable[[dict[str, dict[str, int]]], dict[str, tuple]],
     *,
     scope: tuple[str, str] | None = None,
 ) -> None:

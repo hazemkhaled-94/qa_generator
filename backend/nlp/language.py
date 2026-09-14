@@ -42,7 +42,9 @@ def _detector() -> LanguageDetector:
             f"NLP_MODELS names {', '.join(missing)}, which lingua has no "
             f"language for, so nothing could be detected as one."
         )
-    return LanguageDetectorBuilder.from_languages(*known.values()).build()
+    return LanguageDetectorBuilder.from_languages(
+        *(language for language in known.values() if language is not None)
+    ).build()
 
 
 def detect(text: str) -> str | None:

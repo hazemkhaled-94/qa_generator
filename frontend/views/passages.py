@@ -103,12 +103,13 @@ def view() -> None:
         help="Everything below this point - the figures, the text and the "
         "extraction controls - applies to this passage alone.",
     )
-    _detail(client, chosen)
+    if chosen is not None:
+        _detail(client, chosen)
 
 
 def _corpus_figures(
     counts: dict[str, dict[str, int]],
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, tuple]:
     """Names the corpus-wide figures the top of this page carries."""
     passages = sum(counts["extraction"].values())
     documents = sum(counts["chunking"].values())
@@ -156,7 +157,7 @@ def _corpus_figures(
 
 def _filtered_figures(
     total: int, rows: list[dict], lengths: list[int]
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, tuple]:
     """Names the figures for whatever the filters currently select."""
     sentences = sum(row["sentence_count"] for row in rows)
     tables = sum(1 for row in rows if row["table_count"])

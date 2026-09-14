@@ -123,7 +123,7 @@ def field_name(fields: dict[str, str], field: str | None) -> str:
 def paged(
     key: str,
     into: DeltaGenerator,
-    fetch: Callable[[int, int], tuple[int, list[Any]]],
+    fetch: Callable[[int, int], dict[str, Any]],
     rows_key: str,
 ) -> tuple[int, list[Any]]:
     """Fetches one page, draws the pager into its slot, and returns both.

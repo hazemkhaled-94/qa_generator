@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Iterator
 from functools import lru_cache
+from importlib.metadata import version
 
-import spacy
 from spacy.tokens import Doc, Span
 
 from nlp.language import URL
@@ -69,12 +69,12 @@ def normalised(text: str) -> str:
 
 #: Recorded on every fact, beside the model and the prompt: the parser
 #: decides the verdicts, so two parsers are two datasets.
-VERSION = spacy.__version__
+VERSION = version("spacy")
 
 
 def _predicates(span: Doc | Span) -> int:
     """Counts finite verbs, which is how many claims a span makes."""
-    return sum(1 for token in span if "Fin" in token.morph.get("VerbForm"))
+    return sum(1 for token in span if "Fin" in token.morph.get("VerbForm", []))
 
 
 def _units(span: Doc | Span) -> tuple[str, ...]:

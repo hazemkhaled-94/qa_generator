@@ -43,7 +43,7 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
     written = 0
     for language, group in groupby(sorted(spoken, key=_spoken), key=_spoken):
         batch = list(group)
-        found = [
+        found: list[tuple[int, str | None, list[str]]] = [
             (passage_id, language, terms)
             for (passage_id, _, _), (_, terms) in zip(
                 batch, read([text for _, text, _ in batch], language), strict=True

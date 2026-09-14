@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from sqlalchemy import inspect
@@ -34,7 +34,7 @@ class Component:
 
     ok: bool
     detail: str
-    metrics: dict[str, int | None] = field(default_factory=dict)
+    metrics: Mapping[str, int | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class Counter:
     """
 
     detail: str
-    counts: Callable[[], dict[str, int | None]]
+    counts: Callable[[], Mapping[str, int | None]]
 
 
 class StatusService:

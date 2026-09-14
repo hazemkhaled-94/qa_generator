@@ -179,12 +179,13 @@ def view() -> None:
         help="Everything below this point applies to this fact and to the "
         "passage it was drawn from.",
     )
-    _detail(client, chosen)
+    if chosen is not None:
+        _detail(client, chosen)
 
 
 def _corpus_figures(
     counts: dict[str, dict[str, int]],
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, tuple]:
     """Names the corpus-wide extraction figures at the top of this page."""
     passages = sum(counts["extraction"].values())
     return {
@@ -221,7 +222,7 @@ def _corpus_figures(
     }
 
 
-def _quality_figures(quality: dict) -> dict[str, tuple[object, str]]:
+def _quality_figures(quality: dict) -> dict[str, tuple]:
     """Names the headline quality figures for the filtered set."""
     total = quality["total"]
     rejected = sum(quality["rejected"].values())
@@ -271,7 +272,7 @@ def _quality_figures(quality: dict) -> dict[str, tuple[object, str]]:
     }
 
 
-def _shape_figures(quality: dict) -> dict[str, tuple[object, str]]:
+def _shape_figures(quality: dict) -> dict[str, tuple]:
     """Names the figures describing the shape of a statement."""
     statement = quality["mean_statement_chars"]
     evidence = quality["mean_evidence_chars"]

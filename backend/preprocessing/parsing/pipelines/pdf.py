@@ -185,7 +185,7 @@ class PdfPipeline(Pipeline):
                         # No backend=: Docling's own is the one that reports
                         # the font style heading levels are ranked by and the
                         # word cells table structure is matched against.
-                        backend_options=ThreadedDoclingParseBackendOptions(
+                        backend_options=ThreadedDoclingParseBackendOptions(  # pyright: ignore[reportCallIssue]
                             enforce_same_font=False
                         ),
                     )

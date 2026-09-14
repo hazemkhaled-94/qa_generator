@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Iterator
 from itertools import batched
+from typing import cast
 
 from gensim import corpora
 from gensim.models import Nmf, TfidfModel
@@ -46,7 +47,9 @@ class _BagsOfWords:
     def __iter__(self) -> Iterator[list[tuple[int, int]]]:
         """Walks the corpus once."""
         for passage in self._corpus():
-            yield self._dictionary.doc2bow(passage.lemmas)
+            yield cast(
+                "list[tuple[int, int]]", self._dictionary.doc2bow(passage.lemmas)
+            )
 
 
 class TopicFitter:
@@ -106,7 +109,7 @@ class TopicFitter:
         dictionary = corpora.Dictionary()
         counted = 0
         for batch in batched((p.lemmas for p in corpus()), _BATCH):
-            dictionary.add_documents(batch, prune_at=None)
+            dictionary.add_documents(batch, prune_at=None)  # pyright: ignore[reportArgumentType]
             counted += len(batch)
 
         if not counted:
@@ -116,7 +119,9 @@ class TopicFitter:
 
         before = len(dictionary)
         dictionary.filter_extremes(
-            no_below=self._no_below, no_above=self._no_above, keep_n=None
+            no_below=self._no_below,
+            no_above=self._no_above,
+            keep_n=None,  # pyright: ignore[reportArgumentType]
         )
         if not dictionary:
             raise NoVocabulary(
@@ -193,7 +198,7 @@ class TopicFitter:
         doc_lengths: list[int] = []
         without = 0
         for passage in corpus():
-            bow = dictionary.doc2bow(passage.lemmas)
+            bow = cast("list[tuple[int, int]]", dictionary.doc2bow(passage.lemmas))
             found = model.get_document_topics(weighting[bow], minimum_probability=0)
             if found:
                 row = [0.0] * model.num_topics

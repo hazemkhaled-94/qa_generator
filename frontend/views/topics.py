@@ -105,7 +105,7 @@ def view() -> None:
     _removal(client, bool(topics))
 
 
-def _model_figures(fit: dict, topics: list[dict]) -> dict[str, tuple[object, str]]:
+def _model_figures(fit: dict, topics: list[dict]) -> dict[str, tuple]:
     """Names the figures describing the stored model as a whole."""
     languages = fit["languages"]
     memberships = sum(one["memberships"] for one in languages)
