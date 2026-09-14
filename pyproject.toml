@@ -94,6 +94,7 @@ dev = [
     "ruff (>=0.16.0,<1.0.0)",
     "pytest-cov (>=7.0.0,<8.0.0)",
     "pyright (>=1.1.400,<2.0.0)",
+    "testcontainers[postgres] (>=4.0.0,<5.0.0)",
 ]
 
 
@@ -119,12 +120,13 @@ ignore = [
 convention = "google"
 
 [tool.pytest.ini_options]
-pythonpath = [".", "backend", "tests"]
+pythonpath = [".", "backend", "tests", "tests/integration"]
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
     "nlp: loads a spaCy pipeline",
     "types: shells out to pyright",
+    "integration: needs a container runtime",
 ]
 
 [build-system]
