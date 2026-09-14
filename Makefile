@@ -64,10 +64,23 @@ dev: install certs
 # The spaCy pipelines are downloaded, not resolved: they are not on PyPI
 # under a version range. The same names go into the image; see
 # SPACY_MODELS in backend/api/Dockerfile.
+#
+# Retried, because they come from GitHub's release downloads rather than
+# from an index: a 504 there fails the whole install, and did.
+SPACY_MODELS := de_core_news_md en_core_web_md
+
 install:
 	poetry install --with llm,nlp,data,storage,api,pipeline,viz,observability,dev
-	poetry run python -m spacy download de_core_news_md
-	poetry run python -m spacy download en_core_web_md
+	@for model in $(SPACY_MODELS); do \
+	  attempt=1; \
+	  until poetry run python -m spacy download $$model; do \
+	    attempt=$$((attempt + 1)); \
+	    if [ $$attempt -gt 3 ]; then \
+	      echo "could not download $$model after 3 attempts" >&2; exit 1; \
+	    fi; \
+	    echo "spacy download $$model failed; retrying in 15s"; sleep 15; \
+	  done; \
+	done
 
 # ── Services ───────────────────────────────────────────────────────────────
 

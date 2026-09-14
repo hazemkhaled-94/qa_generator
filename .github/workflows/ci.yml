@@ -16,11 +16,25 @@ permissions:
   contents: read
 
 jobs:
+  # Installs once and fills the cache the rest restore. Without it all four
+  # jobs below install in parallel on a cold cache, each pulling the same
+  # 77 MB of spaCy pipelines from GitHub's release downloads at the same
+  # moment - which answered 504 to two of them on the first run - and then
+  # three of the four throw their work away, because only one save of a
+  # given key wins.
+  setup:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
   # Ruff, pyright and the drift gates: the settings every module reads
   # against the files that declare them, the migration chain, the extensions
   # the schema needs, and the locks against what they are built from.
   static:
     name: Static
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +46,7 @@ jobs:
   # layers, the properties, the contract shapes and the Streamlit pages.
   unit:
     name: Unit
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +65,7 @@ jobs:
   # all of which are marked integration.
   integration:
     name: Integration
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +87,7 @@ jobs:
   # worth finding out about after the merge.
   smoke:
     name: Smoke
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,19 +106,18 @@ jobs:
   gate:
     name: All gates
     if: always()
-    needs: [static, unit, integration, smoke]
+    needs: [setup, static, unit, integration, smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Report which gates did not pass
         run: |
+          echo "setup:       ${{ needs.setup.result }}"
           echo "static:      ${{ needs.static.result }}"
           echo "unit:        ${{ needs.unit.result }}"
           echo "integration: ${{ needs.integration.result }}"
           echo "smoke:       ${{ needs.smoke.result }}"
-          # A skipped smoke is a pull request without the label, which is
-          # the normal case; a failed or cancelled one is not.
-          [ "${{ needs.static.result }}" = "success" ] \
+          [ "${{ needs.setup.result }}" = "success" ] \
+            && [ "${{ needs.static.result }}" = "success" ] \
             && [ "${{ needs.unit.result }}" = "success" ] \
             && [ "${{ needs.integration.result }}" = "success" ] \
-            && [ "${{ needs.smoke.result }}" != "failure" ] \
-            && [ "${{ needs.smoke.result }}" != "cancelled" ]
+            && [ "${{ needs.smoke.result }}" = "success" ]

@@ -12,8 +12,18 @@ permissions:
   contents: read
 
 jobs:
+  # As in ci.yml: one install fills the cache the rest restore, rather than
+  # three in parallel each fetching the same pipelines.
+  setup:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
   audit:
     name: Advisories
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +38,7 @@ jobs:
   # overnight is found before somebody opens a pull request into it.
   everything:
     name: Every layer
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +56,7 @@ jobs:
   # Here so that pointing LLM_BASE_URL at one is all it takes.
   evaluate:
     name: Model quality
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
