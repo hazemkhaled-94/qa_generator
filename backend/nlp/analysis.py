@@ -214,6 +214,18 @@ def vocabulary(text: str, language: str | None) -> frozenset[str]:
     )
 
 
+def content(text: str, language: str | None) -> frozenset[str]:
+    """The content lemmas of a text: what it is about, and nothing else.
+
+    The nouns, proper nouns and adjectives, lemmatised, which is the same
+    reading the topic model is fitted over. Verbs and grammar are left out,
+    so two inflections of one answer give the same set - which is what makes
+    it possible to ask whether two phrasings say the same thing without
+    asking whether they are spelled the same.
+    """
+    return frozenset(_lemmas(pipeline(language)(text)))
+
+
 def claim(text: str, language: str | None) -> Claim:
     """Reads what one written statement asserts."""
     document = pipeline(language)(text)

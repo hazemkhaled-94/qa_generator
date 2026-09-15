@@ -174,10 +174,99 @@ def test_the_verifier_disagrees_on_a_different_number() -> None:
     assert not agrees("4 hours", "48 hours", "en")
 
 
-def test_a_target_with_no_units_falls_back_to_containment() -> None:
-    """Not every answer is a number or a name."""
-    assert agrees("The board is responsible.", "the board", "en")
-    assert not agrees("The auditor is responsible.", "the board", "en")
+# Every pair below is one the verifier really produced. The four marked SAME
+# were all refused by the string containment this replaced, which is what
+# made `not_recoverable` the largest bucket of rejections.
+
+
+@pytest.mark.parametrize(
+    ("recovered", "target"),
+    [
+        (
+            "Die Darstellung der zukünftigen Entwicklung und der Risiken.",
+            "zukünftige Entwicklung und Risiken",
+        ),
+        (
+            (
+                "kapitalbildende Lebensversicherungen, die einen angemessenen "
+                "Kundennutzen aufweisen."
+            ),
+            "kapitalbildend und einen angemessenen Kundennutzen",
+        ),
+        (
+            "Digitalisierung, Nachhaltigkeit, geopolitische Umbrüche",
+            "Digitalisierung und Nachhaltigkeit",
+        ),
+    ],
+)
+def test_an_inflection_is_not_a_disagreement(recovered, target) -> None:
+    """German declines, and a declension is not a different answer.
+
+    Compared on content lemmas for that reason. Containment refused all
+    three, and a person reading either column calls them the same.
+    """
+    assert agrees(recovered, target, "de")
+
+
+@pytest.mark.parametrize(
+    ("recovered", "target"),
+    [
+        ("die qualitative Aufsicht in Deutschland", "Regelungsrahmen"),
+        (
+            "Konditionen- und Strukturbeitrag im Zinsbuch",
+            "Abgrenzung der Erfolgsquellen",
+        ),
+        (
+            "die Art der vergebenen Kredite und die Kreditvergabepraxis der Fonds",
+            "langer Anlagehorizont",
+        ),
+        (
+            (
+                "einfacheren Verschuldungsquote und deutlich über dem "
+                "Basel-III-Mindestwert von 3 Prozent"
+            ),
+            "kleinere und nicht-komplexe Banken",
+        ),
+    ],
+)
+def test_a_different_answer_is_still_refused(recovered, target) -> None:
+    """Loosening the comparison must not accept a wrong answer.
+
+    These are the pairs where the verifier answered something else, and none
+    of them may pass: a question scored against an answer the material does
+    not give marks a chatbot wrong for being right.
+    """
+    assert not agrees(recovered, target, "de")
+
+
+def test_an_answer_claiming_more_than_was_found_is_refused() -> None:
+    """Five things asked for and three recovered is not agreement."""
+    assert not agrees(
+        "Genauigkeit, Stabilität und Konsistenz der Verfahren",
+        "die Qualität der Modellergebnisse, die Genauigkeit, die Stabilität, "
+        "die Konsistenz und die Erklärbarkeit",
+        "de",
+    )
+
+
+def test_a_lemma_the_pipeline_gets_wrong_is_a_known_miss() -> None:
+    """`de_core_news_md` leaves `Umbrüchen` alone and lemmatises `Umbrüche`.
+
+    So these two, which are the same answer, do not meet. Recorded rather
+    than fixed: stemming would close it and would open false accepts, and
+    twelve pairs is not enough evidence to take that trade.
+    """
+    assert not agrees(
+        "geopolitische Umbrüchen und fortschreitender Digitalisierung",
+        "geopolitische Umbrüche und fortschreitende Digitalisierung",
+        "de",
+    )
+
+
+def test_a_target_with_no_content_word_falls_back_to_containment() -> None:
+    """A bare yes has no lemma to compare, so containment is all there is."""
+    assert agrees("ja, das ist zulässig", "ja", "de")
+    assert not agrees("nein", "ja", "de")
 
 
 # ── The gates in order ─────────────────────────────────────────────────────
@@ -647,7 +736,7 @@ def test_a_follow_up_is_not_judged_on_standing_alone() -> None:
     Leaning on the thread is what makes a follow-up a follow-up, so judging
     one as though it had been asked cold would reject every one of them.
     """
-    recording = Recording(recovers="4 kg", stands_alone=False)
+    recording = Recording(recovers="4 hours", stands_alone=False)
 
     result = build(recording).check(
         candidate(
@@ -880,3 +969,14 @@ def test_a_one_word_answer_is_never_read_as_an_action(answer) -> None:
     this gate was written for was several words long.
     """
     assert checked(target_answer=answer, language="de") is None
+
+
+def test_a_shared_number_is_not_agreement_on_its_own() -> None:
+    """`4 kg` answered a question whose target was `4 hours`, and passed.
+
+    The units check ran first and returned on its own, so a recovered answer
+    sharing one number with the target was accepted whatever else it said.
+    Both halves have to pass now.
+    """
+    assert not agrees("4 kg", "4 hours", "en")
+    assert agrees("4 hours", "4 hours", "en")

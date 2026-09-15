@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from database.qa_generator import QuestionRejection, QuestionStatus
 from llm.client import Client
-from nlp.analysis import claim, normalised, vocabulary
+from nlp.analysis import claim, content, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
 from question_generation.models import (
@@ -400,19 +400,38 @@ class Verifier:
 def agrees(recovered: str, target: str, language: str | None) -> bool:
     """Whether what the verifier got back says what the target answer says.
 
-    The same test extraction uses for `unsupported_addition`, pointed the
-    other way: every number, name and date the target asserts has to occur in
-    what was recovered. Comparing the strings would fail on a verifier that
-    wrote `48 hours` where the target says `within 48 hours`, and an
-    embedding would pass one that wrote `4 hours`.
+    Two tests, both of which have to pass.
 
-    A target carrying no such unit - a duty, a yes - has nothing to check
-    that way, so those fall back to containment either way round.
+    Every number and name the target asserts has to occur in what came back.
+    That is extraction's `unsupported_addition` check pointed the other way,
+    and it is what stops `4 hours` passing for `48 hours` - no measure of
+    likeness would, because the two are as alike as two answers get.
+
+    And what the target is ABOUT has to occur in what came back, compared on
+    content lemmas. That half replaced string containment, which was refusing
+    answers the verifier had found: `geopolitische Umbrüchen und
+    fortschreitender Digitalisierung` is the same answer as `geopolitische
+    Umbrüche und fortschreitende Digitalisierung` and shares not one inflected
+    form with it. Measured over the twelve pairs one run produced, containment
+    agreed with a person on 8 and lemmas on 11, with nothing newly accepted
+    that a person called different.
+
+    The one it still misses is morphology the pipeline gets wrong:
+    `de_core_news_md` lemmatises `Umbrüche` to `Umbruch` and leaves
+    `Umbrüchen` alone, so the two do not meet. Stemming would close it and is
+    not worth the false accepts it would open on twelve pairs of evidence.
+
+    A target with nothing to compare either way - a bare `yes` - falls back to
+    containment, which is all that is left.
     """
     units = claim(target, language).units
-    if units:
-        found = vocabulary(recovered, language)
-        return all(unit in found for unit in units)
+    if units and not all(unit in vocabulary(recovered, language) for unit in units):
+        return False
+
+    wanted = content(target, language)
+    if wanted:
+        return wanted <= content(recovered, language)
+
     left, right = normalised(recovered), normalised(target)
     return bool(left) and (left in right or right in left)
 
