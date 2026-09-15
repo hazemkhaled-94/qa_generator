@@ -530,3 +530,74 @@ def test_the_phrasing_judgement_is_made_before_the_answer_is() -> None:
     result = build(recording).check(candidate())
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
+
+
+def test_a_writer_marking_its_own_work_cannot_reject_on_phrasing() -> None:
+    """The only gate here that is an opinion, and opinions need a holder.
+
+    A 4B model judging its own questions rejected `According to the ECB and
+    NCAs, who conducts the due diligence check for an outsourcing
+    arrangement?` for naming nothing. A gate losing questions that good is
+    worse than no gate, so without an independent verifier the verdict is
+    logged and the question kept.
+    """
+    recording = Recording(recovers="4 kg", stands_alone=False)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    result = checker.check(candidate())
+
+    assert result.accepted, "a self-judged opinion rejected a question"
+
+
+def test_recoverability_is_judged_even_when_phrasing_is_not() -> None:
+    """One is an opinion; the other is checkable against the passage.
+
+    Turning the subjective gate off must not turn off the gate that reads
+    the evidence, which is the one that matters most.
+    """
+    recording = Recording(recovers=None, stands_alone=False)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    result = checker.check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+
+
+def test_the_free_gates_are_unaffected_by_who_is_verifying() -> None:
+    """A measurement does not need a second opinion to be worth making."""
+    recording = Recording()
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    result = checker.check(
+        candidate(
+            question_text="Was schüren geopolitische Konflikte?",
+            target_answer="Unsicherheit",
+            facts=group(
+                source(
+                    1,
+                    statement="Geopolitische Konflikte schüren Unsicherheit.",
+                    language="de",
+                ),
+            ),
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.RESTATES_FACT

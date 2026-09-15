@@ -58,6 +58,12 @@ def build_service(
             verifier=Verifier(Client(verifier_model)),
             nearest=catalog.nearest,
             threshold=settings.duplicate_cosine,
+            # Only an independent model's opinion of a question may reject
+            # it. A writer marking its own work rejected `According to the
+            # ECB and NCAs, who conducts the due diligence check?` for
+            # naming nothing, which is the kind of loss a gate must not
+            # cause. Recoverability is unaffected: that one is checkable.
+            judge_phrasing=bool(settings.verifier_model),
         ),
         settings=settings,
     )

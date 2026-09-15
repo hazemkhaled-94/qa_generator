@@ -64,20 +64,27 @@ work out counts either: if the passages do not state it, it is not there.
 Saying it is not in the passages is a correct answer and is the one we are
 looking for whenever it is true. Guessing is the failure.
 
-SECOND, judge the question itself, as a question. Imagine somebody who has
-never seen these passages and is searching a corpus of thousands of pages.
+SECOND, answer one narrow question about the question itself.
 
-- `stands_alone` is true only if that person could have typed this question
-  and would know what it is about. It names its subject: the institution, the
-  document, the rule, the period, the thing being regulated.
+- `stands_alone`: does the question NAME something specific - an institution,
+  a named document or rule, a period, a defined term - rather than relying on
+  the reader already having the passage open?
 
-  It is FALSE when the question only makes sense with the passage in front of
-  you - when it opens with a bare "What" or "Which" and names nothing, or
-  refers to "the requirements", "the report", "this circular" without saying
-  which, or reads like a sentence from the passage with one part removed.
+  TRUE:  "According to the ECB and NCAs, who conducts the due diligence check
+          for an outsourcing arrangement?"     (names the ECB and the NCAs)
+  TRUE:  "How long does the MaRisk allow for a risk report?"
+                                               (names the document)
+  FALSE: "What specific components are included?"
+                                               (names nothing at all)
+  FALSE: "For which models do the requirements apply?"
+                                               (which requirements?)
 
-Judge these two independently. A question can be perfectly answerable by the
-passages and still be one nobody would ever ask.
+  Judge only that. Do not mark it false for being broad, for being easy, for
+  being oddly worded, or for being one you would not have asked. A question
+  that names something specific is TRUE even if you dislike it.
+
+These two judgements are independent. A question can be perfectly answerable
+by the passages and still name nothing.
 """
 
 
@@ -332,16 +339,27 @@ class QuestionChecker:
         verifier: Verifier,
         nearest,
         threshold: float,
+        judge_phrasing: bool = True,
     ) -> None:
         """Initialises the checker with its collaborators.
 
         `nearest` is a callable rather than the catalogue itself: what this
         needs of the database is one probe, and taking the whole repository
         for it would let a gate read anything.
+
+        `judge_phrasing` is whether the verifier's opinion of the question
+        may reject one. It is the only gate here that is an opinion rather
+        than a measurement, and an opinion needs an independent holder: a
+        writer marking its own work rejected `According to the ECB and NCAs,
+        who conducts the due diligence check?` for naming nothing. The
+        factory turns it off when QUESTIONS_VERIFIER_MODEL is unset, and the
+        verdict is logged either way. Recoverability stays on regardless,
+        because that one is checkable against the passage.
         """
         self._embedder = embedder
         self._verifier = verifier
         self._nearest = nearest
+        self._judge_phrasing = judge_phrasing
         self._threshold = threshold
 
     def check(
@@ -386,12 +404,18 @@ class QuestionChecker:
         # unanswerable question nobody would ask is as useless as an
         # answerable one, and a chatbot declining it proves nothing.
         if not read.stands_alone:
-            return (
-                QuestionRejection.UNANCHORED,
-                (
-                    "the verifier could not have asked this without the passage in "
-                    "front of it: it names nothing a person searching would know"
-                ),
+            reason = (
+                "the verifier says it names nothing a person searching would "
+                "know, so it could not have been asked without the passage"
+            )
+            if self._judge_phrasing:
+                return QuestionRejection.UNANCHORED, reason
+            # Logged and kept. An opinion needs an independent holder, and
+            # there is none when the writer is marking its own work.
+            log.info(
+                "keeping %r: %s, but the writer judged itself",
+                candidate.question_text,
+                reason,
             )
 
         if candidate.answerable:

@@ -43,6 +43,11 @@ Rules, all of them mandatory:
   with a bare "What" or "Which" and no such anchor is not a question anybody
   could type into a corpus of thousands of pages.
 
+- NAME IT, DO NOT POINT AT IT. "According to the material", "according to the
+  notice", "in this circular", "the requirements", "the report" - none of
+  these is an anchor. A searcher does not know which material you mean. Use
+  the name the passage uses: the authority, the regulation, the year.
+
 - DO NOT TURN THE FACT INTO A QUESTION. Taking the sentence and replacing one
   part with a question word is the failure this whole task is about. If your
   question is the fact's own words in the fact's own order, throw it away and

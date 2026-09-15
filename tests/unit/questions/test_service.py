@@ -291,3 +291,37 @@ def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
     held = SETTINGS.lease(call).total_seconds()
 
     assert held == call * SETTINGS.per_topic * 2
+
+
+def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
+    """The factory decides it, from the one setting that says so."""
+    from dataclasses import replace
+
+    from llm.config import Settings as ModelSettings
+    from question_generation.verification import QuestionChecker
+
+    model = ModelSettings(
+        model="ollama/writer",
+        base_url=None,
+        structured_mode="JSON_SCHEMA",
+        temperature=0.0,
+        timeout_seconds=900.0,
+        max_attempts=3,
+    )
+
+    def built(verifier: str | None) -> bool:
+        """Whether a checker wired for this verifier may judge phrasing."""
+        checker = QuestionChecker(
+            embedder=object(),
+            verifier=object(),
+            nearest=lambda embedding: None,
+            threshold=0.93,
+            judge_phrasing=bool(
+                replace(SETTINGS, verifier_model=verifier).verifier_model
+            ),
+        )
+        return checker._judge_phrasing
+
+    assert built("ollama/verifier") is True
+    assert built(None) is False
+    assert model.model == "ollama/writer"
