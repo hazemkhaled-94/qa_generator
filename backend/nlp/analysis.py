@@ -77,6 +77,11 @@ def _predicates(span: Doc | Span) -> int:
     return sum(1 for token in span if "Fin" in token.morph.get("VerbForm", []))
 
 
+def _verbs(span: Doc | Span) -> int:
+    """Counts verbs of any form, which is how an action is told from a thing."""
+    return sum(1 for token in span if token.pos_ in ("VERB", "AUX"))
+
+
 def _units(span: Doc | Span) -> tuple[str, ...]:
     """Collects the values a statement may not introduce on its own.
 
@@ -209,6 +214,17 @@ def vocabulary(text: str, language: str | None) -> frozenset[str]:
     )
 
 
+def content(text: str, language: str | None) -> frozenset[str]:
+    """The content lemmas of a text: what it is about, and nothing else.
+
+    The nouns, proper nouns and adjectives, which is the same reading the
+    topic model is fitted over. Verbs and grammar are left out, so two
+    phrasings of one subject give the same set and a question can be
+    compared against the fact it came from by what each is about.
+    """
+    return frozenset(_lemmas(pipeline(language)(text)))
+
+
 def claim(text: str, language: str | None) -> Claim:
     """Reads what one written statement asserts."""
     document = pipeline(language)(text)
@@ -216,6 +232,7 @@ def claim(text: str, language: str | None) -> Claim:
         predicates=_predicates(document),
         units=_units(document),
         references=_references(document),
+        verbs=_verbs(document),
     )
 
 

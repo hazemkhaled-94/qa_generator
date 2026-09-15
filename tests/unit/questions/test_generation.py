@@ -18,7 +18,7 @@ class StubModel:
     model = "ollama/stub"
     temperature = 0.0
 
-    def __init__(self, **fields: str) -> None:
+    def __init__(self, **fields) -> None:
         """Initialises the model with the fields it answers with."""
         self._fields = fields
         self.asked: list[tuple[str, str]] = []
@@ -104,13 +104,86 @@ def test_every_fact_of_a_group_reaches_the_model_numbered() -> None:
     assert "[2] The device runs for 12 hours." in model.user
 
 
-def test_the_model_never_sees_the_passage_a_fact_came_from() -> None:
-    """A fact already stands on its own; a passage would be a summary task."""
+def test_the_model_is_shown_the_passage_each_fact_came_from() -> None:
+    """Without it there is nothing to write a question out of but the fact.
+
+    A single atomic statement is one triple, so the only question available
+    is that statement with one part replaced by a question word. This test
+    asserted the opposite when the stage shipped, and locked the defect in.
+    """
     model = StubModel(question="Q?", answer="A")
 
     QuestionWriter(model).write(group(source(1, statement="A claim.")), answerable=True)
 
-    assert "It ships from Hamburg." not in model.user
+    assert "It ships from Hamburg." in model.user, "the passage was withheld"
+    assert "PASSAGE" in model.user, "and it was not labelled as context"
+
+
+def test_the_heading_a_passage_sits_under_reaches_the_model() -> None:
+    """Most of what says whose rule or which year a question is about."""
+    model = StubModel(question="Q?", answer="A")
+    under = group(source(1, section_path="MaRisk > BTO 1.2 > Kreditentscheidung"))
+
+    QuestionWriter(model).write(under, answerable=True)
+
+    assert "MaRisk > BTO 1.2 > Kreditentscheidung" in model.user
+
+
+def test_the_facts_are_marked_as_what_the_answer_must_come_from() -> None:
+    """The passage is for phrasing; the facts are what may be asked about.
+
+    A model shown both unlabelled asks about whatever it finds in the
+    passage, and the answer stops resting on a checked claim.
+    """
+    model = StubModel(question="Q?", answer="A")
+
+    QuestionWriter(model).write(group(), answerable=True)
+
+    facts_at = model.user.index("FACTS")
+    passage_at = model.user.index("PASSAGE")
+    assert facts_at < passage_at, "the facts must be stated before the context"
+
+
+def test_the_question_cites_only_the_facts_the_model_said_it_used() -> None:
+    """A sample is an offer; the citation is what the question needs.
+
+    Recording the whole sample gave a question written from one fact a
+    `cross_document` difficulty earned by a fact it never used.
+    """
+    model = StubModel(question="Q?", answer="A", facts=[2])
+    sample = group(
+        source(1, document="a", passage_id=1),
+        source(2, document="b", passage_id=2),
+    )
+
+    written = QuestionWriter(model).write(sample, answerable=True)
+
+    assert [one.id for one in written.group.facts] == [2]
+    assert written.group.difficulty == "single_passage"
+
+
+def test_naming_no_facts_falls_back_to_the_first() -> None:
+    """The answer still has to rest on something.
+
+    A candidate with no citation is one the orphan trigger never reaches, so
+    it would sit in the table forever with nothing to trace it to.
+    """
+    model = StubModel(question="Q?", answer="A", facts=[])
+    sample = group(source(1, document="a"), source(2, document="b"))
+
+    written = QuestionWriter(model).write(sample, answerable=True)
+
+    assert [one.id for one in written.group.facts] == [1]
+
+
+def test_a_fact_number_the_sample_does_not_have_is_dropped() -> None:
+    """A model counting past the list must not index into another topic."""
+    model = StubModel(question="Q?", answer="A", facts=[1, 7, 0, -3])
+    sample = group(source(1), source(2))
+
+    written = QuestionWriter(model).write(sample, answerable=True)
+
+    assert [one.id for one in written.group.facts] == [1]
 
 
 def test_a_blank_answer_is_no_answer_rather_than_an_empty_one() -> None:

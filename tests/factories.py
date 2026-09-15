@@ -40,11 +40,12 @@ def source(
     statement: str = "The device weighs 4 kg.",
     language: str = "en",
     passage_text: str | None = None,
+    section_path: str | None = None,
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
-    The passage is what the verifier is shown, so a test about whether an
-    answer is recoverable sets it and one about grouping does not.
+    The passage and its heading are what the writer is shown, so a test
+    about phrasing sets them and one about sampling does not.
     """
     return SourceFact(
         id=fact_id,
@@ -53,6 +54,7 @@ def source(
         passage_text=passage_text or f"{statement} It ships from Hamburg.",
         doc_sha256=document,
         language=language,
+        section_path=section_path,
     )
 
 
@@ -62,12 +64,19 @@ def group(*facts: SourceFact) -> FactGroup:
 
 
 def candidate(
-    question_text: str = "What does the device weigh?",
+    question_text: str = "How heavy is the device built at the Hamburg plant?",
     target_answer: str | None = "4 kg",
     answerable: bool = True,
     facts: FactGroup | None = None,
 ) -> Candidate:
-    """A question as the model wrote it, before any gate has read it."""
+    """A question as the model wrote it, before any gate has read it.
+
+    The default clears every free gate, so a test about a later one is not
+    stopped by an earlier one. In particular it names something its fact
+    does not - the plant, from the passage - because a question that is
+    about only what its fact is about is the defect `restates_fact` exists
+    to catch, and `What does the device weigh?` was one.
+    """
     return Candidate(
         question_text=question_text,
         target_answer=target_answer,

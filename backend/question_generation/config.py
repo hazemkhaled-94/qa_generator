@@ -18,7 +18,7 @@ class Settings:
     """
 
     per_topic: int
-    group_size: int
+    sample_size: int
     unanswerable_share: float
     duplicate_cosine: float
     embedding_model: str
@@ -45,7 +45,7 @@ class Settings:
         """
         return cls(
             per_topic=integer("QUESTIONS_PER_TOPIC"),
-            group_size=integer("QUESTIONS_GROUP_SIZE"),
+            sample_size=integer("QUESTIONS_FACT_SAMPLE"),
             unanswerable_share=decimal("QUESTIONS_UNANSWERABLE_SHARE"),
             duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE"),
             # The one embedding model, as chunking reads it: a question

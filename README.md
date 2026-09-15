@@ -425,10 +425,18 @@ apply to a written sentence are applied to a composed one.
 
 ## What a question is
 
-A question is written from one or more **facts**, never from a passage. A fact
-is already one claim standing on its own — which is what `not_atomic` and
-`unresolved_reference` are for — so it is something to ask about rather than
-something to summarise.
+A question is written from one or more **facts**, and the writer is shown the
+**passages** they came from as well. The facts are what the answer must rest
+on; the passage is what the question can be phrased from.
+
+Both halves are load-bearing, and the first version of this stage had only
+one. Shown a single atomic statement and nothing else, a model has one triple
+to work with, so the only question available is that statement with one part
+replaced by a question word — `Geopolitische Konflikte schüren Unsicherheit`
+asked as `Was schüren geopolitische Konflikte?`. Nobody searching a corpus of
+thousands of pages types that. The passage and its heading trail are where the
+institution, the document and the period come from, which is what a question
+has to name to be one somebody could have asked.
 
 The unit of work is a **topic**, because a question's subject is one. The facts
 a topic may be asked about are the facts of the passages that topic is
@@ -437,12 +445,20 @@ for every one of them asks the same thing under a dozen subjects. A topic with
 `include_in_coverage = false` is skipped, which is the neutral switch for "this
 is not a subject" — nothing in the code decides that.
 
-Within a topic the facts are dealt **one document at a time in turn** rather
-than taken in order. Reading straight down the list fills every group from one
-document; dealing them round-robin makes a group span two wherever the topic
-has two, and a question needing two documents is a question a retriever
-actually has to retrieve for. `difficulty` is then read off the result rather
-than judged:
+Within a topic the writer is offered a **sample** of facts, filled a whole
+passage at a time and taking passages one document at a time in turn. Whole
+passages because every fact of a passage is about the same material, so the
+writer sees a subject rather than a list of unrelated claims; one document at
+a time so a sample spans the corpus wherever the topic does and a
+cross-document question is there to be written.
+
+Which facts a question actually cites is the **writer's** answer, not the
+sample's. That distinction was missing at first and produced a measurable lie:
+facts paired only because they came from different documents had nothing to do
+with each other, the writer answered one and ignored the rest as its prompt
+told it to, and the row was stored with a `cross_document` difficulty earned
+by a fact the question never used — 91 of the first 140 rows. `difficulty` is
+now read off the citations the writer reported:
 
 | | |
 |---|---|
@@ -466,15 +482,31 @@ judged, so it belongs in the data and not in a log.
 
 | Gate | Rejects a question that | Costs |
 |---|---|---|
-| `malformed` | is not a question, carries no target answer when it claims one, is in the wrong language, or is one of its own facts handed back | nothing |
+| `malformed` | is not a question, asks two things, carries no target answer when it claims one, answers with an action rather than a thing, is in the wrong language, or is one of its own facts handed back | nothing |
+| `restates_fact` | is about exactly what its fact is about and nothing more | nothing |
 | `duplicate` | is a near twin of one already accepted | one index probe |
 | `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
-| `not_recoverable` | cites evidence its own answer is not in | one model call |
+| `unanchored` | nobody could have asked without the passage in front of them | the round trip |
+| `not_recoverable` | cites evidence its own answer is not in | the round trip |
 
-The last is the one no similarity measure makes. A second model is shown **only
-the cited passages** and asked to answer; the question survives if what comes
-back carries every number, name and date the target answer asserts. That is the
-same test extraction uses for `unsupported_addition`, pointed the other way.
+`restates_fact` is the one that catches the cloze. It compares what the
+question is about — its content lemmas, the same reading the topic model is
+fitted over — against what its facts are about. A question that adds no lemma
+of its own carries nothing a searcher would have had to know in order to ask
+it. Reusing the subject's own words is fine and normal; adding *nothing at all*
+is the failure.
+
+`not_recoverable` is the one no similarity measure makes. A second model is
+shown **only the cited passages** and asked to answer; the question survives if
+what comes back carries every number, name and date the target answer asserts.
+That is the same test extraction uses for `unsupported_addition`, pointed the
+other way.
+
+`unanchored` rides on that same call, for nothing extra. Whether a question
+reads like one a person would type is a judgement rather than a measurement,
+and no structural check makes it — but a model already looking at the question
+and the material can. It is the half of quality `restates_fact` cannot reach: a
+question can add a word its fact lacks and still be one nobody would ask.
 
 Three things about it are load-bearing. The verifier is a **different** model,
 named by `QUESTIONS_VERIFIER_MODEL`, because a model marking its own work
@@ -789,6 +821,7 @@ The values most likely to need changing:
 | `LLM_BASE_URL` | `.env` | — | Where that model is served |
 | `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Unset means the writer marks its own work, which it will always pass; the worker warns on every start |
 | `QUESTIONS_PER_TOPIC` | `backend.env` | 10 | How many questions to aim for per topic. This times the topic count is what a full run costs |
+| `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, filled a whole passage at a time. The writer picks which of them one question needs |
 | `QUESTIONS_UNANSWERABLE_SHARE` | `backend.env` | 0.25 | What share of questions are written to have no answer in the corpus |
 | `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |

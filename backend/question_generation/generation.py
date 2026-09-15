@@ -1,8 +1,17 @@
-"""Writing one question from a group of facts, answerable or deliberately not.
+"""Writing one question from a sample of facts, answerable or deliberately not.
 
-Both kinds come from here because both are one call against one group with
+Both kinds come from here because both are one call against one sample with
 one shape back, and splitting them would duplicate the rendering, the client
 and the provenance to change the system prompt.
+
+The writer is shown the passage each fact came from, and says which facts its
+question needs. Neither was true of the first version of this module, and both
+failures had the same cause: a single atomic statement is one triple, so the
+only question that can be built out of it is that statement with one part
+replaced by a question word. `Geopolitische Konflikte schüren Unsicherheit`
+became `Was schüren geopolitische Konflikte?`, over and over. The passage is
+what a question can be phrased from; the fact is what it has to be answered
+by.
 """
 
 from __future__ import annotations
@@ -15,42 +24,73 @@ from question_generation.models import Candidate, FactGroup
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
-_ASK = """You write one test question from the facts you are given.
+_ASK = """You write one test question for measuring a document-search chatbot.
 
-The question measures whether a chatbot can find these facts in the corpus it
-was given, so it has to be a question those facts - and only those facts -
-answer.
+You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
+from. The question must be answered by the facts. The passage is there so you
+know what the material is about and what it calls things - use it to phrase
+the question, never as something to ask about.
+
+Write the question somebody who needs this information would actually type.
+They have not read the passage. They are searching a corpus for an answer.
 
 Rules, all of them mandatory:
-- ONE question, ending in a question mark.
-- Answerable from the facts below and from nothing else. Never ask for
-  something they do not state.
-- The answer is SHORT: the value, the name, the date, the duty. Not a
-  sentence restating the fact.
-- NAME THE SUBJECT. A reader who cannot see the facts must be able to tell
-  what is being asked about. Never "it", "this", or "the company" where the
-  fact says which company.
-- Do not hand the answer back in the question. A question answerable by yes
-  tests nothing.
-- Given SEVERAL facts, write the one question that needs ALL of them. If no
-  such question exists, write one for the first fact and ignore the rest.
+
+- NAME WHAT YOU ARE ASKING ABOUT, as a searcher would have to. Say which
+  institution, which document, which rule, which year. A question that opens
+  with a bare "What" or "Which" and no such anchor is not a question anybody
+  could type into a corpus of thousands of pages.
+
+- DO NOT TURN THE FACT INTO A QUESTION. Taking the sentence and replacing one
+  part with a question word is the failure this whole task is about. If your
+  question is the fact's own words in the fact's own order, throw it away and
+  ask what a person would ask instead.
+
+- THE ANSWER IS A THING, NOT AN ACTION: a value, an amount, a date, a name, a
+  limit, a duty. Write it as it would be said on its own, not as the fragment
+  the sentence happened to contain. Never a verb phrase.
+
+- NEVER PUT THE ANSWER IN THE QUESTION, or the word the answer is a kind of.
+  Asking "For which models do the requirements apply?" when the answer is
+  "automated models" tests nothing.
+
+- ONE question, ending in a question mark. One thing asked.
+
 - Write in the language of the facts.
 
-Worked example, from two facts:
+- `facts` is the NUMBERS of the facts your question needs. Use several only
+  when the question genuinely cannot be answered without all of them - two
+  facts about different subjects are two questions, not one. Most questions
+  need one fact, and saying so is correct.
+
+Worked example. Facts, under the heading "Support > Response times":
 
   [1] A standard support request is answered within 48 hours.
   [2] An urgent support request is answered within 4 hours.
 
-  WRONG  question: "What are the response times?"
-         (needs neither fact in particular, and no short answer is right)
-  WRONG  question: "Is a standard support request answered within 48 hours?"
-         (answerable by yes, without reading anything)
+  PASSAGE: Standard requests are answered within 48 hours on working days.
+  Urgent requests are answered within 4 hours and may be raised by phone.
+  These times are set out in the service agreement.
 
-  RIGHT  question: "Within how many hours is a standard support request
-                    answered, and within how many an urgent one?"
+  WRONG  question: "Within how many hours is a standard request answered?"
+         (the fact with its number deleted; nobody types this)
+  WRONG  question: "What are the response times?"
+         (names nothing, and no short answer is right)
+  WRONG  question: "How quickly must support respond?"
+         answer:   "must respond within 48 hours"
+         (the answer is an action, not a thing)
+
+  RIGHT  question: "How long does the service agreement allow for answering a
+                    standard support request?"
+         answer:   "48 hours"
+         facts:    [1]
+
+  RIGHT  question: "Under the service agreement, what are the answer times
+                    for standard and for urgent support requests?"
          answer:   "48 hours and 4 hours"
+         facts:    [1, 2]
 """
 
 _PERTURB = """You write one test question that the material does NOT answer.
@@ -59,33 +99,37 @@ These measure whether a chatbot says it does not know instead of inventing an
 answer. So the question has to be a plausible thing to ask of this material
 and have no answer anywhere in it.
 
-Take the fact below and move it just out of reach. Make ONE change:
-- ask about a neighbouring thing the fact does not cover,
-- ask for a detail of the same subject the fact does not state, or
+You are given one FACT and the PASSAGE it came from. Take the fact and move it
+just out of reach. Make ONE change:
+- ask about a neighbouring thing the material does not cover,
+- ask for a detail of the same subject it does not state, or
 - ask about a different party, place, period or category.
 
 Rules, all of them mandatory:
 - ONE question, ending in a question mark.
-- It must READ as though it belongs to this document. A question about an
-  unrelated subject tests nothing, because any chatbot declines that one.
-- It must NOT be answerable from the fact. If reading the fact answers your
-  question, you have written the wrong question.
+- NAME WHAT YOU ARE ASKING ABOUT, as a searcher would: the institution, the
+  document, the rule, the year. It must read as though it belongs to this
+  material, because a question about an unrelated subject tests nothing - any
+  chatbot declines that one.
+- It must NOT be answerable from the fact or the passage. If reading either
+  answers your question, you have written the wrong question.
 - Do not ask something absurd and do not invent a thing that does not exist.
   Both are too easy to decline.
-- Keep the subject named, as the fact names it.
 - Write in the language of the fact.
 
 Worked example:
 
-  Fact: "A standard support request is answered within 48 hours."
+  FACT: A standard support request is answered within 48 hours.
+  PASSAGE: Standard requests are answered within 48 hours on working days.
+  These times are set out in the service agreement.
 
   WRONG  "How long does a standard support request take to answer?"
          (that is the fact itself, and it is answered)
   WRONG  "What is the top speed of a swallow?"
          (nothing to do with this material; declining it tests nothing)
 
-  RIGHT  "Within how many hours is a standard support request answered on a
-          public holiday?"
+  RIGHT  "What answer time does the service agreement set for a standard
+          support request raised on a public holiday?"
          (same subject, same shape, a condition the material does not cover)
 """
 
@@ -94,31 +138,31 @@ class _Answered(BaseModel):
     """A question the facts answer, as the model is asked to return it."""
 
     question: str = Field(
-        description="ONE question, ending in a question mark, answerable from "
-        "the facts and naming what it asks about."
+        description="ONE question, ending in a question mark, naming what it "
+        "asks about the way a searcher would have to."
     )
     answer: str = Field(
-        description="The short answer: the value, the name, the date or the "
-        "duty. Not a sentence restating the fact."
+        description="The answer as a thing: a value, an amount, a date, a "
+        "name, a limit or a duty. Never a verb phrase."
+    )
+    facts: list[int] = Field(
+        default_factory=list,
+        description="The NUMBERS of the facts this question needs. Usually "
+        "one. Several only when it cannot be answered without all of them.",
     )
 
 
 class _Unanswered(BaseModel):
-    """A question the facts do not answer."""
+    """A question the material does not answer."""
 
     question: str = Field(
         description="ONE question, ending in a question mark, that reads as if "
-        "it belongs to this material and that the fact does not answer."
+        "it belongs to this material and that it does not answer."
     )
 
 
 class QuestionWriter:
-    """Writes one question per fact group with a served model.
-
-    The model never sees the corpus, only the facts: a fact is already one
-    claim standing on its own, which is what makes it something to write a
-    question from rather than a passage to summarise.
-    """
+    """Writes one question per sample of facts with a served model."""
 
     def __init__(self, client: Client) -> None:
         """Initialises the writer with the model it asks."""
@@ -129,12 +173,17 @@ class QuestionWriter:
         """The model writing the questions."""
         return self._client.model
 
-    def write(self, group: FactGroup, *, answerable: bool) -> Candidate:
+    def write(self, sample: FactGroup, *, answerable: bool) -> Candidate:
         """Asks the model for one question, with or without an answer.
 
         Returns whatever came back, unjudged. An empty question is a
         candidate like any other: the gates reject it and the rejection is
         what the drop rate is measured from.
+
+        The returned candidate carries the facts the model said it used, not
+        the whole sample. A sample is an offer; a question that needed one
+        fact of three is a single-passage question, and recording it as
+        anything else is a difficulty nobody can reproduce.
 
         Raises:
             ModelUnavailable: If the model could not be reached or would not
@@ -142,19 +191,19 @@ class QuestionWriter:
         """
         if answerable:
             written = self._client.answer(
-                system=_ASK, user=self._prompt(group), shape=_Answered
+                system=_ASK, user=self._prompt(sample), shape=_Answered
             )
             return Candidate(
                 question_text=written.question.strip(),
                 target_answer=written.answer.strip() or None,
                 answerable=True,
-                group=group,
+                group=self._used(sample, written.facts),
             )
 
-        # Perturbed from one fact, not from the group: moving a claim just
+        # Perturbed from one fact, not from the sample: moving a claim just
         # out of reach is a change to one claim, and a reader given two would
         # have two ways to notice.
-        first = FactGroup(group.facts[:1])
+        first = FactGroup(sample.facts[:1])
         written = self._client.answer(
             system=_PERTURB, user=self._prompt(first), shape=_Unanswered
         )
@@ -168,10 +217,40 @@ class QuestionWriter:
         )
 
     @staticmethod
-    def _prompt(group: FactGroup) -> str:
-        """Renders one group's facts, numbered from one."""
+    def _used(sample: FactGroup, numbered: list[int]) -> FactGroup:
+        """The facts the model said its question needs, in citation order.
+
+        A number the sample does not have is dropped rather than refused, and
+        naming none is read as the first: the answer still has to rest on
+        something, and a candidate with no facts is one the orphan trigger
+        would never reach.
+        """
+        chosen = tuple(
+            sample.facts[one - 1]
+            for one in dict.fromkeys(numbered)
+            if 1 <= one <= len(sample.facts)
+        )
+        return FactGroup(chosen or sample.facts[:1])
+
+    @staticmethod
+    def _prompt(sample: FactGroup) -> str:
+        """Renders one sample: the facts numbered, then their passages.
+
+        The passages are fenced and labelled, as extraction fences a heading
+        trail, because a model shown them unlabelled asks about them instead
+        of about the facts.
+        """
         numbered = "\n".join(
             f"[{position}] {fact.statement}"
-            for position, fact in enumerate(group.facts, 1)
+            for position, fact in enumerate(sample.facts, 1)
         )
-        return f"Facts:\n{numbered}"
+        context = "\n\n".join(
+            f"[{position}] {heading}{text}"
+            for position, (heading, text) in enumerate(sample.context, 1)
+        )
+        return (
+            f"FACTS - your question must be answered by these:\n{numbered}\n\n"
+            f"PASSAGE(S) - what the material says and what it calls things. "
+            f"Phrase the question from these; do not ask about anything here "
+            f"that the facts above do not state:\n{context}"
+        )

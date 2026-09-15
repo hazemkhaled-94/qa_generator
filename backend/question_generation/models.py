@@ -51,6 +51,10 @@ class SourceFact:
     #: chunking could read, because a question has to be written in one and
     #: the column holding it is NOT NULL.
     language: str
+    #: The heading trail the passage sits under, which is most of what says
+    #: whose rule or which year a question is about. NULL on a passage the
+    #: parser found no heading above.
+    section_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,25 @@ class FactGroup:
         for fact in self.facts:
             seen.setdefault(fact.passage_id, fact.passage_text)
         return tuple(seen.values())
+
+    @property
+    def context(self) -> tuple[tuple[str, str], ...]:
+        """Each distinct passage with its heading trail, for the writer.
+
+        The heading is carried separately and labelled, rather than run
+        together with the text, for the reason extraction fences one: a model
+        shown the two as one block asks about the heading.
+        """
+        seen: dict[int, tuple[str, str]] = {}
+        for fact in self.facts:
+            heading = f"Under: {fact.section_path}\n" if fact.section_path else ""
+            seen.setdefault(fact.passage_id, (heading, fact.passage_text))
+        return tuple(seen.values())
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        """What each fact of this group asserts, for the free gates."""
+        return tuple(fact.statement for fact in self.facts)
 
 
 @dataclass(frozen=True)

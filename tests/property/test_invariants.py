@@ -165,11 +165,11 @@ def _sources(rows):
 @settings(max_examples=200, deadline=None)
 def test_a_fact_is_never_written_about_twice_in_one_deal(rows, wanted, size) -> None:
     """A fact in two groups is the same claim tested twice."""
-    from question_generation.selection import groups
+    from question_generation.selection import samples
 
     used = [
         fact.id
-        for one in groups(_sources(rows), wanted=wanted, size=size)
+        for one in samples(_sources(rows), wanted=wanted, size=size)
         for fact in one.facts
     ]
 
@@ -178,16 +178,23 @@ def test_a_fact_is_never_written_about_twice_in_one_deal(rows, wanted, size) -> 
 
 @given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
 @settings(max_examples=200, deadline=None)
-def test_every_group_holds_between_one_fact_and_the_size_asked_for(
-    rows, wanted, size
-) -> None:
-    """An empty group has no language and no difficulty to read off it."""
-    from question_generation.selection import groups
+def test_every_sample_holds_whole_passages_and_never_none(rows, wanted, size) -> None:
+    """An empty sample has no language and no difficulty to read off it.
 
-    formed = groups(_sources(rows), wanted=wanted, size=size)
+    The cap is on the offer, and a passage is added whole or not at all, so
+    a single passage carrying more facts than the cap is offered alone
+    rather than cut in half or dropped. Anything over the cap is therefore
+    exactly one passage.
+    """
+    from question_generation.selection import samples
+
+    formed = samples(_sources(rows), wanted=wanted, size=size)
 
     assert len(formed) <= wanted
-    assert all(1 <= len(one.facts) <= size for one in formed)
+    for one in formed:
+        assert one.facts, "an empty sample was offered"
+        if len(one.facts) > size:
+            assert len({fact.passage_id for fact in one.facts}) == 1
 
 
 @given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
@@ -197,9 +204,9 @@ def test_difficulty_always_matches_the_spread_it_is_read_from(
 ) -> None:
     """The property the re-check relies on to notice evidence that moved."""
     from question_generation.models import difficulty_of
-    from question_generation.selection import groups
+    from question_generation.selection import samples
 
-    for one in groups(_sources(rows), wanted=wanted, size=size):
+    for one in samples(_sources(rows), wanted=wanted, size=size):
         assert one.difficulty == difficulty_of(
             documents=len({fact.doc_sha256 for fact in one.facts}),
             passages=len({fact.passage_id for fact in one.facts}),

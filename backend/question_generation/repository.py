@@ -243,6 +243,7 @@ class QuestionQueue(RowQueue):
                     Passage.text,
                     Passage.doc_sha256,
                     Passage.language,
+                    Passage.section_path,
                 )
                 .select_from(Fact)
                 .join(Passage, Passage.id == Fact.passage_id)
@@ -266,6 +267,7 @@ class QuestionQueue(RowQueue):
                 passage_text=row.text,
                 doc_sha256=row.doc_sha256,
                 language=row.language,
+                section_path=row.section_path,
             )
             for row in rows
         ]

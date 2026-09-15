@@ -17,7 +17,7 @@ from question_generation.models import (
     difficulty_of,
 )
 from question_generation.repository import QuestionCatalog, QuestionQueue
-from question_generation.selection import groups, perturbed
+from question_generation.selection import perturbed, samples
 from question_generation.verification import (
     QuestionChecker,
     near_verdict,
@@ -181,18 +181,18 @@ class QuestionGenerationService(StageService):
             current.set_attribute("questions.skipped", "no facts left to ask about")
             return []
 
-        formed = groups(
+        formed = samples(
             facts,
             wanted=self._settings.per_topic,
-            size=self._settings.group_size,
+            size=self._settings.sample_size,
         )
-        current.set_attribute("questions.groups", len(formed))
+        current.set_attribute("questions.samples", len(formed))
 
         written: list[CheckedQuestion] = []
         accepted: list[CheckedQuestion] = []
-        for index, group in enumerate(formed):
+        for index, sample in enumerate(formed):
             candidate = self._writer.write(
-                group,
+                sample,
                 answerable=not perturbed(index, self._settings.unanswerable_share),
             )
             # Against what this run has accepted as well as what the database

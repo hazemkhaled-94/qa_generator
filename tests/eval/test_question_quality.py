@@ -120,7 +120,7 @@ def checker():
         )
     )
     try:
-        verifier.recover("Is this on?", ["This is on."])
+        verifier.read("Is this on?", ["This is on."])
     except ModelUnavailable as exc:
         pytest.skip(f"the verifier is not answering: {exc}")
 

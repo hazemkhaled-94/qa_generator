@@ -34,6 +34,35 @@ _GATES = {
             "prompt."
         ),
     ),
+    "restates_fact": (
+        "Asks more than its fact",
+        (
+            "The question names something its fact does not - the institution, "
+            "the document, the period - so a person searching could have asked "
+            "it."
+        ),
+        (
+            "The question is its own fact with one part replaced by a question "
+            "word: `Geopolitische Konflikte schüren Unsicherheit` asked as `Was "
+            "schüren geopolitische Konflikte?`. Nobody searching a corpus types "
+            "that. A high share means the writer is ignoring its prompt - check "
+            "QUESTIONS_FACT_SAMPLE and the prompt version."
+        ),
+    ),
+    "unanchored": (
+        "Could be asked cold",
+        (
+            "A reader who has never seen the passage could have typed this "
+            "question and would know what it is about."
+        ),
+        (
+            "Questions that only make sense with the passage in front of you: "
+            "naming no institution or period, or referring to `the requirements` "
+            "without saying which. The verifier judges this on the call it was "
+            "already making, so it costs nothing - but it is a model's opinion "
+            "and not a measurement."
+        ),
+    ),
     "duplicate": (
         "Not already asked",
         (

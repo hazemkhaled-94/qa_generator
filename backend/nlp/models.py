@@ -27,3 +27,9 @@ class Claim:
     predicates: int
     units: tuple[str, ...]
     references: tuple[str, ...]
+    #: Verbs of any form, finite or not. `predicates` counts the finite ones,
+    #: which is how many claims a statement makes; this counts all of them,
+    #: which is how a phrase that names a thing is told from one that
+    #: describes an action. An infinitive makes no claim and is still not an
+    #: answer: `Verwarnungen aussprechen` has no predicate and one verb.
+    verbs: int = 0

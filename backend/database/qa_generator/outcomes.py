@@ -48,6 +48,8 @@ class QuestionRejection(StrEnum):
     """
 
     MALFORMED = "malformed"
+    RESTATES_FACT = "restates_fact"
+    UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"
     DUPLICATE = "duplicate"
     ANSWERABLE_AFTER_ALL = "answerable_after_all"

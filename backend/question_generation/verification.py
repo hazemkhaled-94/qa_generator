@@ -1,23 +1,33 @@
 """The gates a written question has to pass.
 
-Four of them, applied cheapest first, because each one that fires saves the
-cost of the ones behind it:
+Applied cheapest first, because each one that fires saves the cost of those
+behind it:
 
-  malformed     structural, free
-  duplicate     one index probe against the questions already accepted
-  answerable    the same probe, when an unanswerable question has a twin
-                the corpus does answer
-  recoverable   one call to a second model, given only the cited passages
+  malformed       structural, free
+  restates_fact   structural, free: the question is about what its fact is
+                  about and nothing more
+  duplicate       one index probe against the questions already accepted
+  answerable      the same probe, when an unanswerable question has a twin
+                  the corpus does answer
+  unanchored      a question nobody could have asked without the passage
+  recoverable     the answer is not in the evidence the question cites
 
-The last is the one no similarity measure makes. It asks whether the answer
-can be got back out of the passages, which is what a question is for; a
-paraphrase, a decomposition and a resolved pronoun all survive it, and a
-question whose answer is nowhere in its evidence does not, however much it
-looks like one that is.
+The last three come out of one model call. Recoverability is the one no
+similarity measure makes: it asks whether the answer can be got back out of
+the passages, which is what a question is for, and a paraphrase, a
+decomposition and a resolved pronoun all survive it where a threshold would
+not.
 
-Two things about it are load-bearing. The verifier is a different model from
-the writer, because a model marking its own work agrees with itself. And it
-sees only the cited passages, never the corpus: what is being measured is the
+`unanchored` rides on the same call. Whether a question reads like one a
+person would type is a judgement, not a measurement, and no structural check
+makes it - but a model already looking at the question and the material can,
+and asking costs nothing extra. It is the half of quality `restates_fact`
+cannot reach: a question can add a word its fact lacks and still be one
+nobody would ask.
+
+Two things are load-bearing. The verifier is a different model from the
+writer, because a model marking its own work agrees with itself. And it sees
+only the cited passages, never the corpus: what is being measured is the
 dataset, not a retriever.
 """
 
@@ -25,25 +35,27 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
 from database.qa_generator import QuestionRejection, QuestionStatus
 from llm.client import Client
-from nlp.analysis import claim, normalised, vocabulary
+from nlp.analysis import claim, content, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
 from question_generation.models import Candidate, CheckedQuestion, Neighbour
 
 log = logging.getLogger(__name__)
 
-_VERIFY = """You answer a question using ONLY the passages you are given.
+_VERIFY = """You check one test question for a document-search chatbot.
 
-You have no other knowledge. Nothing you know from anywhere else counts, and
-nothing you can work out counts either: if the passages do not state it, it is
-not there.
+You are given some PASSAGES and a QUESTION. Do two separate things.
 
-Answer in two parts:
+FIRST, answer the question using ONLY those passages. You have no other
+knowledge. Nothing you know from anywhere else counts, and nothing you can
+work out counts either: if the passages do not state it, it is not there.
+
 - `in_passage` is true ONLY when the passages state the answer outright. If
   you are completing, inferring, rounding or assuming, it is false.
 - `answer` is the answer, taken from the passages, when in_passage is true.
@@ -51,11 +63,26 @@ Answer in two parts:
 
 Saying it is not in the passages is a correct answer and is the one we are
 looking for whenever it is true. Guessing is the failure.
+
+SECOND, judge the question itself, as a question. Imagine somebody who has
+never seen these passages and is searching a corpus of thousands of pages.
+
+- `stands_alone` is true only if that person could have typed this question
+  and would know what it is about. It names its subject: the institution, the
+  document, the rule, the period, the thing being regulated.
+
+  It is FALSE when the question only makes sense with the passage in front of
+  you - when it opens with a bare "What" or "Which" and names nothing, or
+  refers to "the requirements", "the report", "this circular" without saying
+  which, or reads like a sentence from the passage with one part removed.
+
+Judge these two independently. A question can be perfectly answerable by the
+passages and still be one nobody would ever ask.
 """
 
 
 class _Recovered(BaseModel):
-    """What the verifier got back out of the passages."""
+    """What the verifier got back, and what it made of the question."""
 
     in_passage: bool = Field(
         description="True only when the passages state the answer outright. "
@@ -65,6 +92,14 @@ class _Recovered(BaseModel):
         default="",
         description="The answer, taken from the passages. Empty when "
         "in_passage is false.",
+    )
+    stands_alone: bool = Field(
+        default=True,
+        description="True only if somebody who has never read the passages "
+        "could have typed this question and would know what it is about. "
+        "False if it names nothing, refers to `the requirements` or `this "
+        "circular` without saying which, or is a passage sentence with one "
+        "part removed.",
     )
 
 
@@ -83,16 +118,26 @@ def structural(
 ) -> tuple[str, str] | None:
     """The gates that need neither a model nor an index, or None if it passes.
 
-    Returns the code to store and the reason to log: five ways of being
-    malformed share one code, because none of them measures anything a
-    report would group on, and the reason belongs where a person debugging
-    reads it.
+    Returns the code to store and the reason to log. The several ways of
+    being malformed share one code, because none of them measures anything a
+    report would group on and the reason belongs where a person debugging
+    reads it. Restating the fact gets a code of its own: it is how a writer
+    fails when the prompt is right and the model ignores it, which is worth
+    counting apart from a missing question mark.
     """
     asked = question_text.strip()
     if not asked:
         return QuestionRejection.MALFORMED, "the model returned no question"
     if not asked.endswith("?"):
         return QuestionRejection.MALFORMED, "it does not end in a question mark"
+    if asked.count("?") > 1:
+        return (
+            QuestionRejection.MALFORMED,
+            (
+                f"it asks {asked.count('?')} things; a chatbot answering one of "
+                f"them is neither right nor wrong"
+            ),
+        )
     if answerable and not (target_answer or "").strip():
         return (
             QuestionRejection.MALFORMED,
@@ -120,6 +165,50 @@ def structural(
                 "written from one"
             ),
         )
+
+    # An answer carrying a verb is a fragment of the sentence rather than the
+    # thing asked for: `Verwarnungen aussprechen`, `nachvollziehbar zu
+    # begründen`, `nahmen Produkte vom Markt`. Any verb and not only a finite
+    # one, because two of those three are infinitives and make no claim - a
+    # phrase can describe an action without asserting it.
+    #
+    # Nothing narrower is checked here. `48 hours` answering `within how many
+    # hours ...` shares its head noun with the question and is a perfectly
+    # ordinary pair, so overlap between the two is not evidence of anything.
+    answer = (target_answer or "").strip()
+    if answer and claim(answer, language).verbs:
+        return (
+            QuestionRejection.MALFORMED,
+            (
+                f"the target answer {answer!r} describes an action rather than "
+                f"naming a thing; what can be scored is a value, an amount, a "
+                f"date, a name or a duty"
+            ),
+        )
+
+    # The defect this stage was first shipped with, made measurable. A
+    # question built by taking its fact and replacing one part with a
+    # question word is about exactly what the fact is about and nothing more:
+    # `Geopolitische Konflikte schüren Unsicherheit` becomes `Was schüren
+    # geopolitische Konflikte?`, which nobody searching a corpus would type.
+    #
+    # Compared on content lemmas - what each is about - rather than on words,
+    # so an inflection or a rephrasing is not mistaken for added meaning. A
+    # question that names its document, its institution or its year adds a
+    # lemma the fact does not have and passes; one that permutes the fact has
+    # nothing of its own to show.
+    if statements and answerable:
+        asking = content(asked, language)
+        told = set().union(*(content(one, language) for one in statements))
+        if asking and not asking - told:
+            return (
+                QuestionRejection.RESTATES_FACT,
+                (
+                    f"it is about {', '.join(sorted(asking))} and so is its fact, "
+                    f"so it adds nothing a person searching for this would have "
+                    f"to know to ask it"
+                ),
+            )
 
     # Read on the question and its answer together, and only believed when it
     # answers: lingua returns nothing below forty characters of prose, and
@@ -160,6 +249,19 @@ def near_verdict(
     )
 
 
+@dataclass(frozen=True)
+class Reading:
+    """What the verifier made of one question and its passages.
+
+    `recovered` is the answer it got back out of them, or None for NOT IN
+    PASSAGE. `stands_alone` is whether somebody who has not read them could
+    have asked the question at all.
+    """
+
+    recovered: str | None
+    stands_alone: bool
+
+
 class Verifier:
     """A second model, asked to get the answer back out of the passages."""
 
@@ -172,8 +274,13 @@ class Verifier:
         """The model doing the verifying."""
         return self._client.model
 
-    def recover(self, question: str, passages: Sequence[str]) -> str | None:
-        """Answers one question from these passages, or None if they do not.
+    def read(self, question: str, passages: Sequence[str]) -> Reading:
+        """Answers one question from these passages, and judges the question.
+
+        Two verdicts out of one call. The phrasing judgement is a model's to
+        make and a structural check cannot make it, and asking for it here
+        costs nothing: the call is happening anyway and the model is already
+        looking at both the question and the material.
 
         Raises:
             ModelUnavailable: If the model could not be reached or would not
@@ -187,7 +294,12 @@ class Verifier:
             user=f"Passages:\n{numbered}\n\nQuestion: {question}",
             shape=_Recovered,
         )
-        return got.answer.strip() if got.in_passage and got.answer.strip() else None
+        return Reading(
+            recovered=(
+                got.answer.strip() if got.in_passage and got.answer.strip() else None
+            ),
+            stands_alone=got.stands_alone,
+        )
 
 
 def agrees(recovered: str, target: str, language: str | None) -> bool:
@@ -250,7 +362,7 @@ class QuestionChecker:
             target_answer=candidate.target_answer,
             answerable=candidate.answerable,
             language=candidate.group.language,
-            statements=[fact.statement for fact in candidate.group.facts],
+            statements=candidate.group.statements,
         )
         if failed:
             return self._verdict(candidate, failed, None)
@@ -267,31 +379,42 @@ class QuestionChecker:
         return self._verdict(candidate, self._round_trip(candidate), embedding)
 
     def _round_trip(self, candidate: Candidate) -> tuple[str, str] | None:
-        """Asks whether the cited passages give the answer back."""
-        recovered = self._verifier.recover(
-            candidate.question_text, candidate.group.passages
-        )
+        """Asks whether the passages give the answer back, and how it reads."""
+        read = self._verifier.read(candidate.question_text, candidate.group.passages)
+
+        # Judged before the answer is, and for both kinds of question: an
+        # unanswerable question nobody would ask is as useless as an
+        # answerable one, and a chatbot declining it proves nothing.
+        if not read.stands_alone:
+            return (
+                QuestionRejection.UNANCHORED,
+                (
+                    "the verifier could not have asked this without the passage in "
+                    "front of it: it names nothing a person searching would know"
+                ),
+            )
+
         if candidate.answerable:
             target = candidate.target_answer or ""
-            if recovered is None:
+            if read.recovered is None:
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
                     "the verifier could not find the answer in the cited passages",
                 )
-            if not agrees(recovered, target, candidate.group.language):
+            if not agrees(read.recovered, target, candidate.group.language):
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
                     (
-                        f"the verifier recovered {recovered!r} where the target "
-                        f"answer is {target!r}"
+                        f"the verifier recovered {read.recovered!r} where the "
+                        f"target answer is {target!r}"
                     ),
                 )
             return None
 
-        if recovered is not None:
+        if read.recovered is not None:
             return (
                 QuestionRejection.ANSWERABLE_AFTER_ALL,
-                f"the cited passages answer it after all, with {recovered!r}",
+                f"the cited passages answer it after all, with {read.recovered!r}",
             )
         return None
 

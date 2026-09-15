@@ -547,7 +547,7 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
 
     settings = Settings(
         per_topic=4,
-        group_size=2,
+        sample_size=2,
         unanswerable_share=0.25,
         duplicate_cosine=0.93,
         embedding_model="stub",

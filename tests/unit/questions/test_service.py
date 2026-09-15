@@ -20,7 +20,7 @@ from question_generation.service import QuestionGenerationService
 
 SETTINGS = Settings(
     per_topic=4,
-    group_size=2,
+    sample_size=2,
     unanswerable_share=0.25,
     duplicate_cosine=0.93,
     embedding_model="stub",
@@ -254,9 +254,9 @@ def test_a_group_size_below_one_never_yields_an_empty_group(size) -> None:
     thing selection must not do with a silly one is hand back a group
     nothing downstream can use.
     """
-    from question_generation.selection import groups
+    from question_generation.selection import samples
 
-    formed = groups([source(n) for n in range(3)], wanted=5, size=size)
+    formed = samples([source(n) for n in range(3)], wanted=5, size=size)
 
     assert formed, "every fact was dropped"
     assert all(one.facts for one in formed)

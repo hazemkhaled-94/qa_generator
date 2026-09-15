@@ -11,9 +11,10 @@ import pytest
 from factories import candidate, group, source
 
 from database.qa_generator import QuestionRejection, QuestionStatus
+from question_generation.models import Neighbour
 from question_generation.verification import (
-    Neighbour,
     QuestionChecker,
+    Reading,
     agrees,
     near_verdict,
     structural,
@@ -184,11 +185,15 @@ class Recording:
     """An embedder and a verifier that count how often they were asked."""
 
     def __init__(
-        self, vector: list[float] | None = None, recovers: str | None = "4 kg"
+        self,
+        vector: list[float] | None = None,
+        recovers: str | None = "4 kg",
+        stands_alone: bool = True,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
+        self.stands_alone = stands_alone
         self.embedded = 0
         self.verified = 0
 
@@ -197,10 +202,10 @@ class Recording:
         self.embedded += 1
         return self.vector
 
-    def recover(self, question: str, passages) -> str | None:
-        """Answers with the scripted recovery, and counts the ask."""
+    def read(self, question: str, passages) -> Reading:
+        """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
-        return self.recovers
+        return Reading(recovered=self.recovers, stands_alone=self.stands_alone)
 
 
 def build(recording: Recording, near: Neighbour | None = None) -> QuestionChecker:
@@ -318,10 +323,10 @@ def test_the_verifier_is_shown_the_cited_passages_and_nothing_else() -> None:
     class Watching(Recording):
         """Records what the verifier was shown."""
 
-        def recover(self, question: str, passages) -> str | None:
+        def read(self, question: str, passages) -> Reading:
             """Keeps the passages and answers as scripted."""
             seen.append(list(passages))
-            return super().recover(question, passages)
+            return super().read(question, passages)
 
     pair = group(
         source(1, document="a", passage_id=1, statement="The device weighs 4 kg."),
@@ -342,3 +347,186 @@ def test_the_difficulty_is_read_off_the_group_rather_than_judged() -> None:
 
     assert result.difficulty == "cross_document"
     assert result.fact_ids == (1, 2)
+
+
+# ── The gates that judge it as a question ──────────────────────────────────
+#
+# Every example below is a row this stage actually wrote, before the prompt
+# was given the passage and these gates were added.
+
+
+@pytest.mark.parametrize(
+    ("question", "fact"),
+    [
+        (
+            "Was schüren geopolitische Konflikte?",
+            "Geopolitische Konflikte schüren Unsicherheit.",
+        ),
+        (
+            "Was umfasst Kreditgeschäfte?",
+            "Kreditgeschäfte umfassen Bilanzaktiva und außerbilanzielle Geschäfte.",
+        ),
+        (
+            "Was prägt das Umfeld des Finanzsektors?",
+            "Das Umfeld des Finanzsektors ist geprägt von geopolitischen Umbrüchen.",
+        ),
+    ],
+)
+def test_a_question_that_only_permutes_its_fact_is_refused(question, fact) -> None:
+    """The defect this stage shipped with, one real row at a time.
+
+    Each is the fact with one part replaced by a question word. Nobody
+    searching a corpus of thousands of pages types any of them.
+    """
+    failed = checked(
+        question_text=question,
+        target_answer="Unsicherheit",
+        language="de",
+        statements=(fact,),
+    )
+
+    assert code(failed) == QuestionRejection.RESTATES_FACT
+
+
+def test_a_question_naming_something_its_fact_does_not_is_kept() -> None:
+    """The gate has to let a real question through or it is just a filter.
+
+    `Bundesbank` and `Vorschlag` are in the passage and not in the fact, so
+    the question carries something a searcher would have had to know.
+    """
+    failed = checked(
+        question_text=(
+            "Welchen Vorschlag haben Bafin und Bundesbank für kleine Banken gemacht?"
+        ),
+        target_answer="eine Bilanzsumme unter 10 Milliarden Euro",
+        language="de",
+        statements=("Die kleinen Banken müssen eine Bilanzsumme haben.",),
+    )
+
+    assert failed is None
+
+
+def test_a_question_sharing_its_subject_with_its_fact_is_not_a_restatement() -> None:
+    """Reusing the subject's words is how a question is about the subject.
+
+    Only adding *nothing at all* is the failure, so a question that names
+    the document its rule comes from passes on that word alone.
+    """
+    failed = checked(
+        question_text="Wie oft verlangt die MaRisk einen Risikobericht?",
+        target_answer="vierteljährlich",
+        language="de",
+        statements=("Ein Risikobericht muss vierteljährlich erstellt werden.",),
+    )
+
+    assert failed is None
+
+
+def test_the_restatement_gate_leaves_unanswerable_questions_alone() -> None:
+    """A perturbation is meant to depart from its fact, not to restate it.
+
+    It is written from the fact and deliberately not answered by it, so
+    comparing the two for overlap says nothing about whether it is good.
+    """
+    failed = checked(
+        question_text="Was schüren geopolitische Konflikte im Jahr 2030?",
+        target_answer=None,
+        answerable=False,
+        language="de",
+        statements=("Geopolitische Konflikte schüren Unsicherheit.",),
+    )
+
+    assert failed is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Verwarnungen aussprechen",
+        "nachvollziehbar zu begründen",
+        "nahmen Produkte vom Markt",
+    ],
+)
+def test_an_answer_that_describes_an_action_is_refused(answer) -> None:
+    """Three real target answers, none of them a thing anyone asked for.
+
+    Any verb and not only a finite one: two of these are infinitives, so
+    they make no claim and are still not answers.
+    """
+    failed = checked(
+        question_text="Welche Maßnahme hat die Bafin 2025 ergriffen?",
+        target_answer=answer,
+        language="de",
+        statements=("Die Bafin sprach Verwarnungen aus.",),
+    )
+
+    assert code(failed) == QuestionRejection.MALFORMED
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["48 Stunden", "2025", "1.033", "der Vorstand", "vierteljährlich", "Hamburg"],
+)
+def test_an_answer_that_names_a_thing_is_kept(answer) -> None:
+    """A value, a date, an amount, a name, a period, a place."""
+    failed = checked(
+        question_text="Welchen Wert nennt die Gebührenverordnung der Bafin?",
+        target_answer=answer,
+        language="de",
+        statements=("Die Verordnung nennt einen Wert.",),
+    )
+
+    assert failed is None
+
+
+def test_a_question_asking_two_things_is_refused() -> None:
+    """A chatbot answering one of them is neither right nor wrong."""
+    failed = checked(
+        question_text="Wie hoch ist die Gebühr? Und wer erhebt sie?",
+        target_answer="1.033 Euro",
+        language="de",
+    )
+
+    assert code(failed) == QuestionRejection.MALFORMED
+
+
+def test_a_question_nobody_could_have_asked_cold_is_refused() -> None:
+    """The verifier's judgement, on the call it was already making.
+
+    A question can be perfectly answerable by the passages it cites and
+    still be one nobody would type, which no structural check can see.
+    """
+    recording = Recording(recovers="4 kg", stands_alone=False)
+
+    result = build(recording).check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED
+    assert recording.verified == 1, "it must not cost a second call"
+
+
+def test_an_unanchored_unanswerable_question_is_refused_too() -> None:
+    """A chatbot declining a question nobody would ask proves nothing."""
+    recording = Recording(recovers=None, stands_alone=False)
+
+    result = build(recording).check(
+        candidate(
+            question_text="Wie schwer ist es auf dem Mars?",
+            target_answer=None,
+            answerable=False,
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED
+
+
+def test_the_phrasing_judgement_is_made_before_the_answer_is() -> None:
+    """A question nobody would ask is refused whatever its answer does.
+
+    Reported as `unanchored` rather than `not_recoverable`, because those
+    say different things about what to change.
+    """
+    recording = Recording(recovers=None, stands_alone=False)
+
+    result = build(recording).check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED

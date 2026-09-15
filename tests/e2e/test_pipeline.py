@@ -115,7 +115,7 @@ class StubModel:
 #: loaded: these are the run's settings, not the deployment's.
 QUESTIONS = QuestionSettings(
     per_topic=4,
-    group_size=2,
+    sample_size=2,
     unanswerable_share=0.25,
     duplicate_cosine=0.93,
     embedding_model="stub",
@@ -158,7 +158,9 @@ class StubVerifier:
         """Recovers 4 kg unless the question was perturbed onto Mars."""
         self.calls += 1
         found = "Mars" not in user
-        return shape(in_passage=found, answer="4 kg" if found else "")
+        return shape(
+            in_passage=found, answer="4 kg" if found else "", stands_alone=True
+        )
 
 
 class StubEmbedder:
