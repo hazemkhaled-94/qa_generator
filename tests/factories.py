@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from database.qa_generator import Difficulty, QuestionType
 from extraction.models import PassageToExtract
 from preprocessing.chunking.models import Chunking
 from preprocessing.chunking.passages import chunking_of
 from question_generation.models import Candidate, FactGroup, SourceFact
+from question_generation.planning import Plan
+from question_generation.selection import Shape
+from question_generation.types import SPECS
 
 #: Two sentences, the first carrying two claims and the second a reference.
 TEXT = (
@@ -43,11 +47,16 @@ def source(
     section_path: str | None = None,
     topic_id: int | None = None,
     document_title: str | None = None,
+    ordinal: int = 0,
+    lemmas: tuple[str, ...] = (),
+    units: tuple[str, ...] = (),
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
     The passage and its heading are what the writer is shown, so a test
-    about phrasing sets them and one about sampling does not.
+    about phrasing sets them and one about sampling does not. `lemmas` and
+    `ordinal` are what pairs two passages, so a test about the deal sets
+    those.
     """
     return SourceFact(
         id=fact_id,
@@ -59,6 +68,9 @@ def source(
         section_path=section_path,
         topic_id=topic_id,
         document_title=document_title,
+        ordinal=ordinal or passage_id,
+        lemmas=lemmas,
+        units=units,
     )
 
 
@@ -73,6 +85,8 @@ def candidate(
     answerable: bool = True,
     facts: FactGroup | None = None,
     thread: tuple[tuple[str, str | None], ...] = (),
+    question_type: str = QuestionType.FACTOID,
+    planned_difficulty: str = Difficulty.EASY,
 ) -> Candidate:
     """A question as the model wrote it, before any gate has read it.
 
@@ -81,6 +95,9 @@ def candidate(
     does not - the plant, from the passage - because a question that is
     about only what its fact is about is the defect `restates_fact` exists
     to catch, and `What does the device weigh?` was one.
+
+    `question_type` decides which gates read the answer how: a factoid's is
+    a value and may carry no verb, a reason's is an explanation and must.
     """
     return Candidate(
         question_text=question_text,
@@ -88,6 +105,20 @@ def candidate(
         answerable=answerable,
         group=facts if facts is not None else group(),
         thread=thread,
+        spec=SPECS[question_type],
+        planned_difficulty=planned_difficulty,
+    )
+
+
+def plan(
+    question_type: str = QuestionType.FACTOID,
+    band: str = Difficulty.EASY,
+    shape: str = Shape.SINGLE,
+    answerable: bool = True,
+) -> Plan:
+    """One slot of a topic's plan, as the writer is handed it."""
+    return Plan(
+        spec=SPECS[question_type], band=band, shape=shape, answerable=answerable
     )
 
 

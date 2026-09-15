@@ -1,127 +1,52 @@
 """Turning one topic's facts into the samples a question is written from.
 
-Two decisions, both deterministic: which facts are offered together, and
-which of the resulting questions is asked of the corpus rather than answered
-by it. Neither draws a random number. The same corpus and the same settings
-give the same questions twice, for the reason TOPIC_RANDOM_STATE exists - a
-reference dataset whose contents move between runs is not a reference.
+Deterministic throughout: nothing draws a random number, so the same corpus
+and the same settings give the same samples twice. A reference dataset whose
+contents move between runs is not a reference.
 
-What this does not decide is which facts a question is *written from*. A
-sample is an offer of several related facts; the writer says which of them it
-used, and the difficulty is read off those. Deciding here instead was wrong
-in a way worth recording: facts dealt one document at a time in turn are
-spread across the corpus but are not about the same thing, so pairing them
-produced a question about the first fact carrying a `cross_document` label
-earned by the second.
+A sample is an OFFER. Which facts a question is written from is the writer's
+answer, not this module's: it is handed a sample and reports which facts one
+question needed, and the difficulty is read off those.
+
+Three things decide what is offered. The plan asks for a shape - one passage,
+a neighbouring one, or one in another document. `size` caps the facts, and it
+caps them per passage rather than by dropping a passage whole: the cap used to
+flush a group and then add the next passage entire, so a corpus whose median
+passage carries ten facts never produced a sample of two passages at all.
+Passages are dealt strided over the whole topic rather than from its start, so
+a topic of eighty passages is asked about across all of it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from enum import StrEnum
 from itertools import zip_longest
 
 from question_generation.models import FactGroup, SourceFact
 
 
-def bridged(
-    formed: list[FactGroup],
-    bridges: Iterable[SourceFact],
-    *,
-    share: float,
-    size: int,
-) -> list[FactGroup]:
-    """Adds a bridging passage to a share of the samples.
+class Shape(StrEnum):
+    """How wide a sample is.
 
-    A bridge is a passage whose strongest topic is not the one being worked,
-    but which carries it above the weight floor. Adding one to a sample is
-    what makes a multi-topic question available: the two passages are about
-    different subjects and the corpus itself says they are related, which is
-    a far better reason to pair them than that they came from different
-    files.
+    Each is one more scope above one, and so one more point of difficulty,
+    which is what makes a band reachable at all: a question drawn from one
+    passage cannot be cross-document however it is phrased.
 
-    Only a share, by position, and only where the sample has room. A bridge
-    on every sample would make `single_topic` unreachable, and the scope is
-    worth measuring in both directions.
+      single  one passage                                       0 points
+      cross   a passage in another document                     2 points
+      bridge  one in another document AND another subject       3 points
+
+    `cross` is two points and not one because a cross-document question is a
+    multi-passage question by construction. A topic that cannot supply a
+    shape gets the widest one it can: a topic sitting in one document has no
+    cross-document question in it, and writing nothing about that subject is
+    the worse answer.
     """
-    available = _by_passage(bridges)
-    if not available:
-        return formed
 
-    widened: list[FactGroup] = []
-    taken = 0
-    for index, sample in enumerate(formed):
-        if not spread(index, share) or taken >= len(available):
-            widened.append(sample)
-            continue
-        passage = available[taken]
-        taken += 1
-        # Room for the whole passage or none of it, as when a sample is
-        # filled: half a passage's facts is the incoherence to avoid.
-        if len(sample.facts) + len(passage) > max(size, 1):
-            widened.append(sample)
-            continue
-        widened.append(FactGroup((*sample.facts, *passage)))
-    return widened
-
-
-def samples(facts: Iterable[SourceFact], *, wanted: int, size: int) -> list[FactGroup]:
-    """Forms up to `wanted` samples of at most `size` facts to offer.
-
-    A sample is filled a whole passage at a time, not a fact at a time. That
-    is what gives the writer something to write a meaningful question from:
-    every fact of a passage is about the same material, so the writer sees a
-    subject rather than a list of unrelated claims and can ask about the
-    subject. Filling fact by fact across documents - which this did first -
-    offered claims that had nothing to do with each other, and the writer
-    correctly answered one and ignored the rest.
-
-    Passages are taken one document at a time in turn, so a sample spans the
-    corpus wherever the topic does and a cross-document question is there to
-    be written. Whether one is written is the writer's: it is handed the
-    sample and says which facts a single question needs.
-
-    `size` caps the facts offered, not the passages. A passage is added whole
-    or not at all, because half a passage's facts is the incoherence this
-    exists to avoid; one passage carrying more facts than the cap is offered
-    alone rather than dropped.
-    """
-    held = max(size, 1)
-    formed: list[FactGroup] = []
-    current: list[SourceFact] = []
-
-    for passage in _by_passage(facts):
-        if current and len(current) + len(passage) > held:
-            formed.append(FactGroup(tuple(current)))
-            current = []
-            if len(formed) >= wanted:
-                return formed
-        current.extend(passage)
-
-    if current:
-        formed.append(FactGroup(tuple(current)))
-    return formed[:wanted]
-
-
-def _by_passage(facts: Iterable[SourceFact]) -> list[list[SourceFact]]:
-    """Each passage's facts, the passages taken one document at a time in turn.
-
-    Sorted throughout - by document, then passage, then fact id - so the deal
-    is the same deal on the same rows whatever order the database returned
-    them in.
-    """
-    passages: dict[tuple[str, int], list[SourceFact]] = {}
-    for fact in sorted(facts, key=lambda one: (one.doc_sha256, one.passage_id, one.id)):
-        passages.setdefault((fact.doc_sha256, fact.passage_id), []).append(fact)
-
-    by_document: dict[str, list[list[SourceFact]]] = {}
-    for (document, _), held in passages.items():
-        by_document.setdefault(document, []).append(held)
-    return [
-        held
-        for row in zip_longest(*by_document.values())
-        for held in row
-        if held is not None
-    ]
+    SINGLE = "single"
+    CROSS = "cross"
+    BRIDGE = "bridge"
 
 
 def spread(index: int, share: float) -> bool:
@@ -129,12 +54,220 @@ def spread(index: int, share: float) -> bool:
 
     Spread across the run by position instead of drawn at random, so a share
     of 0.25 picks exactly one in every four and picks the same four twice. 0
-    never picks and 1 always does, without either needing a branch of its
-    own.
-
-    Three decisions read it: which samples are perturbed into unanswerable
-    questions, which get a bridging passage, and which accepted questions
-    get a follow-up. All three want an exact, reproducible share of a run,
-    which is the same want.
+    never picks and 1 always does, without either needing a branch of its own.
     """
     return int((index + 1) * share) > int(index * share)
+
+
+def overlap(left: Sequence[SourceFact], right: Sequence[SourceFact]) -> float:
+    """How much vocabulary two passages share, in [0, 1].
+
+    Jaccard over the content lemmas chunking stored, which is the same
+    vocabulary the topics were fitted over. It is what makes a pair of
+    passages related rather than merely distant: pairing two passages because
+    they came from different files produced questions about the first that
+    carried a spread earned by the second.
+    """
+    first, second = set(left[0].lemmas), set(right[0].lemmas)
+    if not first or not second:
+        return 0.0
+    return len(first & second) / len(first | second)
+
+
+def ranked(facts: Iterable[SourceFact]) -> list[SourceFact]:
+    """One passage's facts, the ones asserting a value first.
+
+    A fact carrying a number, a date or an amount is what a checkable question
+    is written from, so it is offered before one that carries none.
+    """
+    return sorted(facts, key=lambda one: (not one.units, one.id))
+
+
+def by_passage(facts: Iterable[SourceFact]) -> list[list[SourceFact]]:
+    """Each passage's facts, ranked, the passages in corpus order."""
+    held: dict[int, list[SourceFact]] = {}
+    ordered = sorted(
+        facts, key=lambda one: (one.doc_sha256, one.ordinal, one.passage_id, one.id)
+    )
+    for fact in ordered:
+        held.setdefault(fact.passage_id, []).append(fact)
+    return [ranked(group) for group in held.values()]
+
+
+def interleaved(passages: list[list[SourceFact]]) -> list[list[SourceFact]]:
+    """The passages, taken one document at a time in turn.
+
+    So a run over a topic reaches every document the topic sits in before it
+    reaches any document twice.
+    """
+    by_document: dict[str, list[list[SourceFact]]] = {}
+    for passage in passages:
+        by_document.setdefault(passage[0].doc_sha256, []).append(passage)
+    return [
+        passage
+        for row in zip_longest(*by_document.values())
+        for passage in row
+        if passage is not None
+    ]
+
+
+def strided(items: list, wanted: int) -> list:
+    """The items reordered so the first `wanted` are spread over all of them.
+
+    Nothing is dropped: the rest follow in their own order, so asking for more
+    than were spread still reaches them.
+    """
+    if wanted <= 0 or wanted >= len(items):
+        return items
+    step = len(items) / wanted
+    picked = sorted({int(position * step) for position in range(wanted)})
+    rest = [index for index in range(len(items)) if index not in set(picked)]
+    return [items[index] for index in picked + rest]
+
+
+class Deal:
+    """One topic's passages, handed out as samples without repeating one.
+
+    A passage is offered once per run. Two questions written from one passage
+    are two questions about the same few sentences, and the dedup gate pays
+    for both before throwing one away.
+    """
+
+    def __init__(
+        self,
+        facts: Iterable[SourceFact],
+        bridges: Iterable[SourceFact] = (),
+        *,
+        wanted: int,
+        size: int,
+    ) -> None:
+        """Deals one topic's facts, strided over the whole of it."""
+        self._order = strided(interleaved(by_passage(facts)), wanted)
+        self._bridges = interleaved(by_passage(bridges))
+        self._size = max(size, 1)
+        self._used: set[int] = set()
+
+    @property
+    def passages(self) -> int:
+        """How many passages are left to offer."""
+        return sum(1 for passage in self._order if not self._taken(passage))
+
+    def sample(self, shape: str = Shape.SINGLE) -> FactGroup | None:
+        """The next sample of the shape asked for, or None when none is left.
+
+        A shape the topic cannot supply falls back to a narrower one rather
+        than yielding nothing: a topic sitting in one document has no
+        cross-document question in it, and refusing to write anything about it
+        would leave the subject uncovered.
+        """
+        head = self._next()
+        if head is None:
+            return None
+        if shape == Shape.SINGLE:
+            return self._group([head])
+
+        partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
+        return self._group([head, partner] if partner else [head])
+
+    def _taken(self, passage: list[SourceFact]) -> bool:
+        """Whether this passage has already been offered."""
+        return passage[0].passage_id in self._used
+
+    def _next(self) -> list[SourceFact] | None:
+        """The next passage nothing has been written from."""
+        for passage in self._order:
+            if not self._taken(passage):
+                return passage
+        return None
+
+    def _cross(self, head: list[SourceFact]) -> list[SourceFact] | None:
+        """A passage in another document, or the nearest one in this document.
+
+        Ranked by shared vocabulary, so the pair is two passages the corpus
+        itself says are about related things. Pairing two passages because
+        they came from different files produced questions about the first
+        carrying a spread earned by the second.
+
+        The fallback is the closest passage of the same document, by ordinal:
+        passages are numbered in reading order, so a neighbour is the rest of
+        the same section rather than an unrelated part of the same file. It is
+        one point rather than two, and it is what a topic sitting in one
+        document has.
+        """
+        return self._best(head, self._free(head, elsewhere=True)) or self._neighbour(
+            head
+        )
+
+    def _bridge(self, head: list[SourceFact]) -> list[SourceFact] | None:
+        """A bridging passage, preferably in another document.
+
+        A bridge belongs to some other topic more strongly than to this one
+        but carries this one above the weight floor, so the corpus itself says
+        the two subjects meet there. One in another document is in another
+        document AND another subject, which is every scope above one at once.
+        """
+        return (
+            self._best(head, self._free(head, elsewhere=True, bridging=True))
+            or self._best(head, self._free(head, bridging=True))
+            or self._cross(head)
+        )
+
+    def _free(
+        self,
+        head: list[SourceFact],
+        *,
+        elsewhere: bool = False,
+        bridging: bool = False,
+    ) -> list[list[SourceFact]]:
+        """The passages still to be had, narrowed to what a shape wants."""
+        return [
+            passage
+            for passage in (self._bridges if bridging else self._order)
+            if not self._taken(passage)
+            and passage[0].passage_id != head[0].passage_id
+            and (not elsewhere or passage[0].doc_sha256 != head[0].doc_sha256)
+        ]
+
+    @staticmethod
+    def _best(
+        head: list[SourceFact], candidates: list[list[SourceFact]]
+    ) -> list[SourceFact] | None:
+        """Whichever candidate shares most vocabulary with the head, or None.
+
+        Ties go to the lower passage id, so the same corpus deals the same
+        pair twice.
+        """
+        if not candidates:
+            return None
+        return max(candidates, key=lambda one: (overlap(head, one), -one[0].passage_id))
+
+    def _neighbour(self, head: list[SourceFact]) -> list[SourceFact] | None:
+        """The closest unused passage of the same document, by ordinal."""
+        candidates = [
+            passage
+            for passage in self._free(head)
+            if passage[0].doc_sha256 == head[0].doc_sha256
+        ]
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda one: (
+                abs(one[0].ordinal - head[0].ordinal),
+                one[0].passage_id,
+            ),
+        )
+
+    def _group(self, passages: list[list[SourceFact]]) -> FactGroup:
+        """Marks these passages used and offers a capped share of each.
+
+        The cap is divided between the passages rather than applied to the
+        sample, so a wide sample offers both sides of what it is asking about
+        instead of filling itself from the first passage.
+        """
+        each = max(1, self._size // len(passages))
+        facts: list[SourceFact] = []
+        for passage in passages:
+            self._used.add(passage[0].passage_id)
+            facts.extend(passage[:each])
+        return FactGroup(tuple(facts))

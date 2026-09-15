@@ -116,11 +116,14 @@ class StubModel:
 QUESTIONS = QuestionSettings(
     per_topic=4,
     sample_size=4,
+    type_mix={"factoid": 3, "reason": 1},
+    difficulty_mix={"easy": 1, "medium": 1},
+    followup_types=("condition",),
     unanswerable_share=0.25,
-    bridge_share=0.5,
     followup_share=0.5,
     max_followups=2,
-    min_answer_chars=0,
+    answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+    answer_overlap=0.6,
     long_answer_chars=60,
     duplicate_cosine=0.93,
     embedding_model="stub",
@@ -164,7 +167,10 @@ class StubVerifier:
         self.calls += 1
         found = "Mars" not in user
         return shape(
-            in_passage=found, answer="4 kg" if found else "", stands_alone=True
+            in_passage=found,
+            answer="4 kg" if found else "",
+            subject="the device",
+            matches_intent=True,
         )
 
 

@@ -64,7 +64,8 @@ def build_service(
             # naming nothing, which is the kind of loss a gate must not
             # cause. Recoverability is unaffected: that one is checkable.
             judge_phrasing=bool(settings.verifier_model),
-            min_answer_chars=settings.min_answer_chars,
+            bounds=settings.answer_chars,
+            overlap=settings.answer_overlap,
             long_answer_chars=settings.long_answer_chars,
         ),
         settings=settings,

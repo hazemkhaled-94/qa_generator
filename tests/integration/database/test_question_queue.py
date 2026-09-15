@@ -560,11 +560,14 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
     settings = Settings(
         per_topic=4,
         sample_size=4,
+        type_mix={"factoid": 1},
+        difficulty_mix={"easy": 1},
+        followup_types=("condition",),
         unanswerable_share=0.25,
-        bridge_share=0.5,
         followup_share=0.5,
         max_followups=2,
-        min_answer_chars=0,
+        answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+        answer_overlap=0.6,
         long_answer_chars=60,
         duplicate_cosine=0.93,
         embedding_model="stub",
@@ -582,3 +585,97 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
             {"id": asked_id},
         ).one()
     assert (row.status, row.rejected_reason) == ("rejected", "source_changed")
+
+
+# ── The kind a question was asked to be ────────────────────────────────────
+
+
+def test_a_question_keeps_the_kind_the_form_and_the_band_it_was_planned_as(
+    corpus,
+) -> None:
+    """Three columns, and the CHECK constraints behind each.
+
+    Without them a set cannot be filtered to its reasons, and a run cannot
+    say whether the mix it was asked for is the mix it produced.
+    """
+    from question_generation.models import CheckedQuestion, criteria_of
+    from question_generation.repository import QuestionCatalog
+
+    written = corpus(topics=1, facts_per_topic=2)
+    topic_id = written["topics"][0]
+    QuestionQueue().store(
+        topic_id,
+        [
+            [
+                CheckedQuestion(
+                    question_text="Why is a request confirmed in writing?",
+                    target_answer="so the agreed response time can be evidenced",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=1, documents=1, topics=1, answer_chars=44
+                    ),
+                    language="en",
+                    status="accepted",
+                    rejected_reason=None,
+                    fact_ids=(written["facts"][topic_id][0],),
+                    question_type="reason",
+                    answer_form="explanation",
+                    planned_difficulty="medium",
+                )
+            ]
+        ],
+    )
+
+    total, rows = QuestionCatalog().page(question_type="reason")
+
+    assert total == 1
+    assert rows[0].question_type == "reason"
+    assert rows[0].answer_form == "explanation"
+    assert rows[0].planned_difficulty == "medium"
+    assert QuestionCatalog().page(question_type="factoid")[0] == 0
+
+
+def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
+    corpus,
+) -> None:
+    """The realised mix beside the planned one is the whole measurement."""
+    from question_generation.models import CheckedQuestion, criteria_of
+    from question_generation.repository import QuestionCatalog
+
+    written = corpus(topics=1, facts_per_topic=2)
+    topic_id = written["topics"][0]
+    facts = written["facts"][topic_id]
+    QuestionQueue().store(
+        topic_id,
+        [
+            [
+                CheckedQuestion(
+                    question_text=f"Question {position}?",
+                    target_answer="4 kg",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=1, documents=1, topics=1, answer_chars=4
+                    ),
+                    language="en",
+                    status="accepted",
+                    rejected_reason=None,
+                    fact_ids=(fact_id,),
+                    question_type=kind,
+                    answer_form="value",
+                    # The first got the band it was planned as; the second
+                    # was planned harder than it came out.
+                    planned_difficulty="easy" if position == 0 else "hard",
+                )
+            ]
+            for position, (fact_id, kind) in enumerate(
+                zip(facts, ("factoid", "entity"), strict=False)
+            )
+        ],
+    )
+
+    quality = QuestionCatalog().quality()
+
+    assert quality.question_type == {"factoid": 1, "entity": 1}
+    assert quality.answer_form == {"value": 2}
+    assert quality.planned_difficulty == {"easy": 1, "hard": 1}
+    assert quality.planned_met == 1

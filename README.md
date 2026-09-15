@@ -445,27 +445,78 @@ for every one of them asks the same thing under a dozen subjects. A topic with
 `include_in_coverage = false` is skipped, which is the neutral switch for "this
 is not a subject" — nothing in the code decides that.
 
-Within a topic the writer is offered a **sample** of facts, filled a whole
-passage at a time and taking passages one document at a time in turn. Whole
-passages because every fact of a passage is about the same material, so the
-writer sees a subject rather than a list of unrelated claims; one document at
-a time so a sample spans the corpus wherever the topic does.
+### The plan comes first
 
-A share of samples also gets a **bridge passage** — a passage whose strongest
-topic is a different one, but which carries the claimed topic above the weight
-floor. That is what makes a question about two subjects available, and the
-corpus itself is what says the two meet there, which is a far better reason to
-pair two passages than that they came from different files. 703 of this
-corpus's 831 placed passages sit in more than one topic, so bridges are
-plentiful. `QUESTIONS_BRIDGE_SHARE` sets how many samples get one; not all of
-them, because `single_topic` is worth measuring too.
+Before anything is written, a topic gets a **plan**: one slot per question,
+each carrying the kind of question to write, the difficulty band to aim for,
+and whether it is meant to have an answer at all. Two settings decide it, and
+both are proportions rather than counts:
 
-Which facts a question actually cites is the **writer's** answer, not the
-sample's. That distinction was missing at first and produced a measurable lie:
-facts paired only because they came from different documents had nothing to do
-with each other, the writer answered one and ignored the rest as its prompt
-told it to, and the row was stored with a `cross_document` label earned by a
-fact the question never used — 91 of the first 140 rows.
+```
+QUESTIONS_TYPE_MIX=factoid:3,reason:2,procedure:2,...
+QUESTIONS_DIFFICULTY_MIX=easy:2,medium:2,hard:1
+```
+
+The weights are spread over the slots by **highest averages**, so the counts
+are exact over a whole run and interleaved along it rather than run in blocks.
+That second property matters: the unanswerable share and the follow-up share
+are both taken by position, so a mix run in blocks would always perturb the
+same kind of question.
+
+A weight of `0`, or a name left out, is never written. That is the switch for
+choosing what a run produces.
+
+### The eleven kinds
+
+Every one of them is a question **form**, never a subject, so the same list
+applies to a manual, a contract, a policy or a report. Nothing in any prompt
+names a domain.
+
+| Kind | Asks for | Answer | Passages |
+|---|---|---|---|
+| `factoid` | one checkable value — how many, how much, by when | value | 1 |
+| `definition` | what a named thing or status is, as the material defines it | explanation | 1 |
+| `entity` | who does, decides, owns or must be told something | value | 1 |
+| `enumeration` | which things belong to a named set | list | 1 |
+| `condition` | when, or under what circumstances, something applies | list | 1 |
+| `reason` | why something is required, done, or the way it is | explanation | 1 |
+| `procedure` | how something is done, or in what order | explanation | 1 |
+| `consequence` | what happens when something is or is not done | explanation | 1 |
+| `comparison` | how two named things differ | list | 2 |
+| `aggregation` | a total no single fact states on its own | value | 2 |
+| `temporal` | what changed between two periods | list | 2 |
+
+The last three need facts from two passages and are never planned `easy`: a
+comparison drawn from one passage is a question about one thing.
+
+One shared rule block holds what is true of every question — do not name the
+source, name the subject, one question, the language of the facts — and each
+kind adds what it asks for, what its answer looks like, and one worked example.
+Two prompts for one rule is how the two come to disagree.
+
+### The answer form, and why it is a column
+
+`answer_form` is `value`, `list` or `explanation`, declared by the kind. Every
+gate that reads an answer reads it against that form.
+
+This is the column the old set did not have, and not having it is why every
+question in it was a lookup. One prompt demanded *"a short noun phrase, a few
+words at most … never anything with a verb in it"*, and one structural gate
+enforced it on every answer. Measured against six realistic answers, five were
+refused as malformed:
+
+```
+'weil die Risiken im Bankensektor gestiegen sind'                   -> malformed
+'because risks in the banking sector increased'                     -> malformed
+'by notifying the authority within four hours through the portal'   -> malformed
+'submit the application, provide the business plan, and pay the fee' -> malformed
+'EUR 15,000'                                                        -> accepted
+```
+
+Why, how, what-happens-if and which-things were not badly written. They were
+**unwritable**. The verb rule now applies to a `value` alone; an `explanation`
+is refused for carrying *no* verb, which is the opposite failure; and each form
+has its own length bounds in `QUESTIONS_ANSWER_CHARS`.
 
 ### The three criteria, and the band they feed
 
@@ -487,16 +538,78 @@ the total: 0–1 `easy`, 2 `medium`, 3+ `hard`.
 Three and not four, because `cross_document` implies `multi_passage`: two
 documents are two passages, so the three scopes total at most three. A
 threshold of four would have made a question spanning two documents and two
-subjects — the hardest thing a retriever faces — only medium, reachable as
-hard only by having a long answer or a parent. Nothing is weighted, because a
-weighting is an opinion and the point of deriving difficulty rather than
-judging it is that nobody has to hold one.
+subjects — the hardest thing a retriever faces — only medium. Nothing is
+weighted, because a weighting is an opinion and the point of deriving
+difficulty rather than judging it is that nobody has to hold one.
+
+### How a band is asked for without being judged
+
+`QUESTIONS_DIFFICULTY_MIX` asks for a band. Nothing judges one. What the plan
+actually chooses is the **shape of the sample** the writer is offered, and the
+shape is what makes a band reachable at all — a question drawn from one passage
+cannot be cross-document however it is phrased:
+
+| Band | Shape | What the deal offers | Worth |
+|---|---|---|---|
+| `easy` | `single` | one passage | 0 |
+| `medium` | `cross` | a passage in another document, ranked by shared vocabulary | 2 |
+| `hard` | `bridge` | a bridging passage in another document — another file *and* another subject | 3 |
+
+The band the plan asked for is stored as `planned_difficulty` beside the
+`difficulty` the question turned out to be. The two disagree when the writer
+cited fewer facts than it was offered, and the share that agree is on the
+Questions page: it is a measurement of the plan, not a fault in the row.
+
+A topic sitting in one document has no cross-document question in it. The deal
+falls back to the widest sample it can give — the nearest passage of the same
+document, by ordinal — rather than writing nothing about that subject.
+
+### What the deal offers, and what it used to
+
+Within a topic the writer is offered a **sample** of facts. `QUESTIONS_FACT_SAMPLE`
+caps how many, **divided between the passages the sample holds**, so a wide
+sample offers both sides of what it is asking about.
+
+That cap is the second defect the old set had, and it is worth recording
+because nothing about it looked broken. The cap used to *flush* a group and
+then add the next passage **whole**. On a corpus whose median passage carries
+ten validated facts and whose cap was six, that meant every sample was exactly
+one passage. Measured over the 24 topics of this corpus, 214 samples:
+
+| | before | after |
+|---|---|---|
+| multi-passage | 5 (2%) | 183 (50%) |
+| cross-document | 3 (1%) | 122 (33%) |
+| multi-topic | 2 (1%) | 52 (14%) |
+| facts per sample | 1–54 | 1–6 |
+
+`QUESTIONS_BRIDGE_SHARE` asked for a bridge on 35% of samples and landed two,
+for the same reason: a bridge was refused when it would take the sample over
+the cap, and the sample was already over it. The multi-topic scope existed and
+was unreachable. There is no bridge share now — the `hard` shape reaches for
+one directly.
+
+Passages are dealt **strided over the whole topic** rather than from its start,
+and each is offered once. Ten questions used to mean the first ten passages in
+document order, so two thirds of a large topic was never asked about at all.
+
+Which facts a question actually cites is the **writer's** answer, not the
+sample's. That distinction was missing at first and produced a measurable lie:
+facts paired only because they came from different documents had nothing to do
+with each other, the writer answered one and ignored the rest as its prompt
+told it to, and the row was stored with a `cross_document` label earned by a
+fact the question never used — 91 of the first 140 rows. A sample wider than
+one passage now also carries an instruction to use both halves.
 
 ### Follow-up threads
 
 A share of accepted questions get a **thread**: the question somebody would
 ask next, up to `QUESTIONS_MAX_FOLLOWUPS` deep. `follows_id` and
 `thread_position` carry it.
+
+Each turn takes the next kind in `QUESTIONS_FOLLOWUP_TYPES`, cycled, so a
+conversation moves from a value to the circumstances it applies in to the
+reason behind it rather than asking the same kind of thing three times.
 
 A follow-up **may lean on the conversation** — *"And for an urgent one?"* — and
 that is the point: a chatbot answering one has to carry the thread, which is a
@@ -515,75 +628,85 @@ any other, but a third turn after a discarded second is a conversation with a
 hole in it.
 
 Each follow-up is another writer call and another verifier call, so a thread
-multiplies what a topic costs. At the defaults a topic of ten questions costs
-about sixteen.
+multiplies what a topic costs. At the defaults a topic of twenty questions
+costs about thirty-two.
 
 Some questions are written to have **no answer in the corpus**, by perturbing a
 verified fact just out of reach. These test whether a chatbot says it does not
 know instead of inventing something, which is half of what this dataset is for.
 `QUESTIONS_UNANSWERABLE_SHARE` sets how many are attempted, spread by position
 rather than drawn at random, so a share of 0.25 is exactly one in four and is
-the same one in four on a re-run.
+the same one in four on a re-run. An unanswerable question is always planned
+`easy` and from one passage: it is written by moving one fact out of reach, so
+a second passage has nothing to do with it.
 
 ### The gates
 
-Four, applied cheapest first, because each one that fires saves the cost of
-those behind it. A question that fails one is stored with the gate's name
-rather than dropped: the rate at which that happens is how the writer is
-judged, so it belongs in the data and not in a log.
+Applied cheapest first, because each one that fires saves the cost of those
+behind it. A question that fails one is stored with the gate's name rather than
+dropped: the rate at which that happens is how the writer is judged, so it
+belongs in the data and not in a log.
 
 | Gate | Rejects a question that | Costs |
 |---|---|---|
-| `malformed` | is not a question, asks two things, carries no target answer when it claims one, answers with an action rather than a thing, is in the wrong language, or is one of its own facts handed back | nothing |
-| `answer_too_short` | is scored against an answer below `QUESTIONS_MIN_ANSWER_CHARS` | nothing |
-| `restates_fact` | is about exactly what its fact is about and nothing more | nothing |
+| `malformed` | is not a question, asks two things, carries no target answer when it claims one, is in the wrong language, or is one of its own facts handed back | nothing |
+| `answer_too_short` | is scored against an answer below its form's floor | nothing |
+| `answer_too_long` | answers past its form's ceiling — a value answered with a paragraph | nothing |
+| `wrong_form` | answers in the wrong shape: a value describing an action, an explanation explaining nothing | nothing |
+| `leaks_source` | quotes the title of the document its answer is in | nothing, or the round trip |
 | `duplicate` | is a near twin of one already accepted | one index probe |
 | `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
 | `unanchored` | nobody could have asked without the passage in front of them | the round trip |
+| `wrong_type` | is not the kind of question it was asked to be | the round trip |
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
 
-`answer_too_short` is a blunt instrument and the cost is measured rather than
-guessed: at 15 characters it refuses 41% of the answers this corpus had
-accepted — `70%`, `2025` and `Bafin` among them, which are the most
-unambiguously scoreable answers there are. It also refuses `7`, `8%` and
-`Nein`, which are not. One line in `backend.env` changes it, and the share it
+The length bounds are per form and measured rather than guessed: a floor of 15
+on values refused 41% of the answers this corpus had accepted — `70%`, `2025`
+and `Bafin` among them, which are the most unambiguously scoreable answers
+there are. One line in `backend.env` changes any of them, and the share each
 refuses is on the Questions page either way.
 
-`restates_fact` is the one that catches the cloze. It compares what the
-question is about — its content lemmas, the same reading the topic model is
-fitted over — against what its facts are about. A question that adds no lemma
-of its own carries nothing a searcher would have had to know in order to ask
-it. Reusing the subject's own words is fine and normal; adding *nothing at all*
-is the failure.
+There is **no gate for "the question is its own fact rearranged"**, and that is
+a finding rather than an omission. One was written, in two formulations, and
+measured against 61 real rows: both refused questions like *"Wie hoch war die
+Arbeitslosenquote im August 2025?"* → `6,4 Prozent`, which is as good as a
+benchmark question gets. For a single atomic fact, a good question *is* the
+fact minus its answer — that is what asking about a fact means. What separates
+a good one from a bad one is whether the answer is determinate, and that is not
+lexical either. `not_recoverable` already carries the judgement where it can be
+made.
 
 `not_recoverable` is the one no similarity measure makes. A second model is
 shown **only the cited passages** and asked to answer; the question survives if
-what comes back carries every number, name and date the target answer asserts.
-That is the same test extraction uses for `unsupported_addition`, pointed the
-other way.
+what comes back carries every number, name and date the target answer asserts,
+and enough of what it is about. How much is enough depends on the form: a
+`value` is compared whole, because every word of one is the answer, while a
+`list` or an `explanation` is compared by overlap — `QUESTIONS_ANSWER_OVERLAP`
+— because demanding that every lemma of prose survive a paraphrase refuses
+answers the verifier plainly found. Numbers are always exact whatever the form,
+so `4 hours` never passes for `48 hours`.
 
-`unanchored` rides on that same call, for nothing extra. Whether a question
-reads like one a person would type is a judgement rather than a measurement,
-and no structural check makes it — but a model already looking at the question
-and the material can. It is the half of quality `restates_fact` cannot reach: a
-question can add a word its fact lacks and still be one nobody would ask.
+`unanchored`, `leaks_source` and `wrong_type` ride on that same call, for
+nothing extra. Each is a judgement rather than a measurement, and no structural
+check makes any of them — but a model already looking at the question and the
+material can.
 
-It is also the only gate here that is an **opinion**, and an opinion needs an
-independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks its
-own work, and one measured run rejected *"According to the ECB and NCAs, who
-can conduct the due diligence check for an outsourcing arrangement?"* for
+They are also the only gates here that are **opinions**, and an opinion needs
+an independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks
+its own work, and one measured run rejected *"According to the ECB and NCAs,
+who can conduct the due diligence check for an outsourcing arrangement?"* for
 naming nothing — three of four rejections in that topic were false positives.
-So the factory turns this one gate off when no second model is named, and logs
+So the factory turns those three off when no second model is named, and logs
 the verdict instead. Recoverability stays on regardless, because that one is
 checkable against the passage rather than a matter of taste.
 
-Three things about it are load-bearing. The verifier is a **different** model,
-named by `QUESTIONS_VERIFIER_MODEL`, because a model marking its own work
-recovers what it just wrote and the gate then passes everything. The escape
-hatch is explicit — the verifier answers whether the passage states it at all,
-not just what it says — or the model confabulates rather than declining. And it
-sees only the cited passages, never the corpus: what is being measured is the
-dataset, not a retriever.
+Three things about the round trip are load-bearing. The verifier is a
+**different** model, because a model marking its own work recovers what it just
+wrote and the gate then passes everything. The escape hatch is explicit — the
+verifier answers whether the passage states it at all, not just what it says —
+or the model confabulates rather than declining. And it sees only the cited
+passages, never the corpus: what is being measured is the dataset, not a
+retriever.
 
 It catches what nothing else did. *"Ein Liquiditätsmanagementtool ist eine
 einjährige Rückgabefrist"* survived an NLI model, an LLM judge and a structural
@@ -606,7 +729,9 @@ and a trigger deletes a question once its last citation is gone, so
 `extract-rerun` over the corpus takes the questions with it. Re-extracting a
 *single* document is quieter and worse: a cross-document question that loses one
 of its two citations is not deleted, and its stored difficulty stops being true.
-That is what `questions-reverify` exists to find.
+That is what `questions-reverify` exists to find — it re-reads the stored form
+and bounds, so a question is never re-judged under a kind it was not written
+as.
 
 ## Topic modelling
 
@@ -889,13 +1014,16 @@ The values most likely to need changing:
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | — | Where that model is served |
 | `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Unset means the writer marks its own work, which it will always pass; the worker warns on every start |
-| `QUESTIONS_PER_TOPIC` | `backend.env` | 10 | How many questions to aim for per topic. This times the topic count is what a full run costs |
-| `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, filled a whole passage at a time. The writer picks which of them one question needs |
+| `QUESTIONS_PER_TOPIC` | `backend.env` | 20 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
+| `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, divided between the passages the sample holds. The writer picks which of them one question needs |
+| `QUESTIONS_TYPE_MIX` | `backend.env` | eleven kinds | Which kinds of question are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
+| `QUESTIONS_DIFFICULTY_MIX` | `backend.env` | `easy:2,medium:2,hard:1` | Which bands the plan aims for, as `band:weight`. A request for a shape of sample; the band itself stays derived |
+| `QUESTIONS_ANSWER_CHARS` | `backend.env` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form, as `form:min:max` |
+| `QUESTIONS_ANSWER_OVERLAP` | `backend.env` | 0.6 | How much of a list or an explanation has to come back for the verifier to have recovered it. Numbers are always exact |
 | `QUESTIONS_UNANSWERABLE_SHARE` | `backend.env` | 0.25 | What share of questions are written to have no answer in the corpus |
-| `QUESTIONS_BRIDGE_SHARE` | `backend.env` | 0.35 | What share of samples get a bridge passage, which is what makes a `multi_topic` question available |
 | `QUESTIONS_FOLLOWUP_SHARE` | `backend.env` | 0.3 | What share of accepted questions get a follow-up thread |
 | `QUESTIONS_MAX_FOLLOWUPS` | `backend.env` | 2 | How far a thread may run past its root |
-| `QUESTIONS_MIN_ANSWER_CHARS` | `backend.env` | 15 | The shortest target answer worth scoring against. At 15 this refuses dates and percentages; see the note under the gates |
+| `QUESTIONS_FOLLOWUP_TYPES` | `backend.env` | `condition,reason,comparison` | The kinds the turns of a thread take, cycled |
 | `QUESTIONS_LONG_ANSWER_CHARS` | `backend.env` | 60 | Where an answer starts counting towards the difficulty band. Not a gate |
 | `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |

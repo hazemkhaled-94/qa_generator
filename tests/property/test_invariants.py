@@ -161,52 +161,90 @@ def _sources(rows):
     ]
 
 
-@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
-@settings(max_examples=200, deadline=None)
-def test_a_fact_is_never_written_about_twice_in_one_deal(rows, wanted, size) -> None:
-    """A fact in two groups is the same claim tested twice."""
-    from question_generation.selection import samples
+#: Every shape a plan may ask a deal for.
+SHAPES = st.sampled_from(["single", "cross", "bridge"])
 
-    used = [
-        fact.id
-        for one in samples(_sources(rows), wanted=wanted, size=size)
-        for fact in one.facts
-    ]
+
+def _dealt(rows, wanted, size, shape):
+    """Every sample one deal produces, for the shape asked for."""
+    from question_generation.selection import Deal
+
+    deal = Deal(_sources(rows), wanted=wanted, size=size)
+    formed = []
+    while (one := deal.sample(shape)) is not None:
+        formed.append(one)
+    return formed
+
+
+@given(
+    rows=FACTS,
+    wanted=st.integers(1, 12),
+    size=st.integers(1, 4),
+    shape=SHAPES,
+)
+@settings(max_examples=200, deadline=None)
+def test_a_fact_is_never_written_about_twice_in_one_deal(
+    rows, wanted, size, shape
+) -> None:
+    """A fact in two samples is the same claim asked about twice."""
+    used = [fact.id for one in _dealt(rows, wanted, size, shape) for fact in one.facts]
 
     assert len(used) == len(set(used))
 
 
-@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
+@given(
+    rows=FACTS,
+    wanted=st.integers(1, 12),
+    size=st.integers(1, 4),
+    shape=SHAPES,
+)
 @settings(max_examples=200, deadline=None)
-def test_every_sample_holds_whole_passages_and_never_none(rows, wanted, size) -> None:
+def test_no_sample_is_empty_or_over_the_cap(rows, wanted, size, shape) -> None:
     """An empty sample has no language and no difficulty to read off it.
 
-    The cap is on the offer, and a passage is added whole or not at all, so
-    a single passage carrying more facts than the cap is offered alone
-    rather than cut in half or dropped. Anything over the cap is therefore
-    exactly one passage.
+    The cap is the whole offer and not a per-passage allowance: it used to
+    flush a group and then add the next passage entire, so a passage of
+    thirty-seven facts was offered whole and nothing fitted beside it.
     """
-    from question_generation.selection import samples
-
-    formed = samples(_sources(rows), wanted=wanted, size=size)
-
-    assert len(formed) <= wanted
-    for one in formed:
+    for one in _dealt(rows, wanted, size, shape):
         assert one.facts, "an empty sample was offered"
-        if len(one.facts) > size:
-            assert len({fact.passage_id for fact in one.facts}) == 1
+        assert len(one.facts) <= max(size, len({f.passage_id for f in one.facts}))
 
 
-@given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
+@given(
+    rows=FACTS,
+    wanted=st.integers(1, 12),
+    size=st.integers(1, 4),
+    shape=SHAPES,
+)
+@settings(max_examples=200, deadline=None)
+def test_a_sample_never_spans_more_passages_than_its_shape_asked_for(
+    rows, wanted, size, shape
+) -> None:
+    """One passage for `single`, at most two for anything wider.
+
+    A shape a topic cannot supply falls back to a narrower one, so this is a
+    ceiling and never a floor.
+    """
+    for one in _dealt(rows, wanted, size, shape):
+        reached = len({fact.passage_id for fact in one.facts})
+        assert reached == 1 if shape == "single" else reached <= 2
+
+
+@given(
+    rows=FACTS,
+    wanted=st.integers(1, 12),
+    size=st.integers(1, 4),
+    shape=SHAPES,
+)
 @settings(max_examples=200, deadline=None)
 def test_every_scope_always_matches_the_spread_it_is_read_from(
-    rows, wanted, size
+    rows, wanted, size, shape
 ) -> None:
     """The property the re-check relies on to notice evidence that moved."""
     from question_generation.models import criteria_of
-    from question_generation.selection import samples
 
-    for one in samples(_sources(rows), wanted=wanted, size=size):
+    for one in _dealt(rows, wanted, size, shape):
         assert one.criteria() == criteria_of(
             passages=len({fact.passage_id for fact in one.facts}),
             documents=len({fact.doc_sha256 for fact in one.facts}),
@@ -268,6 +306,84 @@ def test_a_wider_scope_is_never_easier(passages, documents, topics) -> None:
     )
 
     assert order[wide.difficulty] >= order[narrow.difficulty]
+
+
+#: A mix of types, as QUESTIONS_TYPE_MIX carries one.
+MIX = st.dictionaries(
+    st.sampled_from(["factoid", "reason", "comparison", "procedure", "condition"]),
+    st.integers(0, 6),
+    min_size=1,
+    max_size=5,
+).filter(lambda one: any(weight > 0 for weight in one.values()))
+
+
+@given(mix=MIX, slots=st.integers(0, 60))
+@settings(max_examples=300, deadline=None)
+def test_a_kind_with_no_weight_is_never_written(mix, slots) -> None:
+    """Which is the switch for choosing what a run produces.
+
+    Everything else here is a proportion; this one is absolute, and a type
+    leaking into a run that turned it off is a set nobody asked for.
+    """
+    from question_generation.planning import allocate
+
+    chosen = allocate(mix, slots)
+
+    assert all(mix.get(name, 0) > 0 for name in chosen)
+
+
+@given(mix=MIX, slots=st.integers(0, 60))
+@settings(max_examples=300, deadline=None)
+def test_the_slots_allocated_are_the_slots_asked_for(mix, slots) -> None:
+    """A mix decides the proportions, never how many questions there are."""
+    from question_generation.planning import allocate
+
+    assert len(allocate(mix, slots)) == slots
+
+
+@given(mix=MIX, slots=st.integers(1, 60))
+@settings(max_examples=300, deadline=None)
+def test_a_heavier_weight_never_takes_fewer_slots_than_a_lighter_one(
+    mix, slots
+) -> None:
+    """The one thing a mix has to mean.
+
+    Not that every count is its exact quota: highest averages is quota-free
+    and a very uneven mix can run a slot past it. What it must never do is
+    invert the order somebody wrote down.
+    """
+    from collections import Counter
+
+    from question_generation.planning import allocate
+
+    counts = Counter(allocate(mix, slots))
+
+    for name, weight in mix.items():
+        for other, lighter in mix.items():
+            if weight > lighter > 0:
+                assert counts[name] >= counts[other]
+
+
+@given(
+    wanted=st.integers(0, 40),
+    mix=MIX,
+    share=st.floats(0.0, 1.0),
+)
+@settings(max_examples=200, deadline=None)
+def test_a_plan_never_asks_for_a_shape_its_type_cannot_use(wanted, mix, share) -> None:
+    """A comparison drawn from one passage is a question about one thing."""
+    from question_generation.planning import plans
+
+    for one in plans(
+        wanted=wanted,
+        types=mix,
+        bands={"easy": 1, "medium": 1, "hard": 1},
+        unanswerable_share=share,
+    ):
+        if one.spec.spans and one.answerable:
+            assert one.shape != "single"
+        if not one.answerable:
+            assert one.shape == "single"
 
 
 @given(count=st.integers(1, 40), share=st.floats(0.0, 1.0))

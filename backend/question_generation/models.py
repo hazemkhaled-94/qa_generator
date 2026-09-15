@@ -10,6 +10,7 @@ from database.qa_generator import (
     PassageScope,
     TopicScope,
 )
+from question_generation.types import TypeSpec, spec
 
 #: A long answer, in characters. Above it a question counts as harder: a
 #: chatbot has to produce more of the right thing, and a grader has more to
@@ -157,6 +158,16 @@ class SourceFact:
     #: a question that quotes it: naming where the answer lives is the one
     #: thing a question must not do.
     document_title: str | None = None
+    #: Where the passage sits in its document. Passages are numbered in
+    #: reading order, so two close ordinals are two parts of one section.
+    ordinal: int = 0
+    #: The passage's content lemmas, which is what says whether two passages
+    #: are about related things. The same vocabulary the topics were fitted
+    #: over, so nothing here re-reads any text.
+    lemmas: tuple[str, ...] = ()
+    #: The numbers, dates and amounts this fact asserts, as extraction read
+    #: them. A fact carrying one is what a checkable question is written from.
+    units: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -255,6 +266,13 @@ class Candidate:
     #: front of the model and judged with them in front of the verifier,
     #: because relying on them is what makes it a follow-up.
     thread: tuple[tuple[str, str | None], ...] = ()
+    #: What this was asked to be. The gates read the form off it, and the row
+    #: records the type, so a set can be filtered to the reasons or the
+    #: comparisons.
+    spec: TypeSpec = field(default_factory=lambda: spec(None))
+    #: The band the plan aimed for, stored beside the one the question turned
+    #: out to be.
+    planned_difficulty: str = Difficulty.EASY
 
     @property
     def follows(self) -> bool:
@@ -281,6 +299,9 @@ class CheckedQuestion:
     fact_ids: tuple[int, ...]
     embedding: list[float] | None = None
     thread_position: int = 1
+    question_type: str | None = None
+    answer_form: str | None = None
+    planned_difficulty: str | None = None
 
     @property
     def accepted(self) -> bool:
@@ -336,6 +357,8 @@ class JudgedQuestion:
     passages: int
     topics: int
     follows_id: int | None
+    question_type: str | None = None
+    answer_form: str | None = None
 
 
 @dataclass(frozen=True)
@@ -362,6 +385,10 @@ class StoredQuestion:
     #: Where it sits in its thread, and what it follows. 1 and None on a root.
     thread_position: int = 1
     follows_id: int | None = None
+    #: What it was asked to be, and what shape of answer that wanted.
+    question_type: str | None = None
+    answer_form: str | None = None
+    planned_difficulty: str | None = None
 
 
 @dataclass(frozen=True)
@@ -419,3 +446,10 @@ class QuestionQuality:
     passage_scope: dict[str, int]
     document_scope: dict[str, int]
     topic_scope: dict[str, int]
+    #: What was asked for and what came out. `planned_difficulty` beside
+    #: `difficulty` says how often a band the plan aimed for was reached.
+    question_type: dict[str, int]
+    answer_form: dict[str, int]
+    planned_difficulty: dict[str, int]
+    #: Questions whose band is the one the plan asked for.
+    planned_met: int

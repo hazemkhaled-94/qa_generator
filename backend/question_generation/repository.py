@@ -98,12 +98,17 @@ def _joined(query: Select) -> Select:
     )
 
 
-#: The scope columns a caller may narrow to, by the name the API takes.
+#: The columns a caller may narrow to, by the name the API takes. Every one is
+#: also a column of the quality report, so a reader can ask for the reasons,
+#: the cross-document ones or the hard ones alone.
 SCOPES = {
     "passage_scope": Question.passage_scope,
     "document_scope": Question.document_scope,
     "topic_scope": Question.topic_scope,
     "difficulty": Question.difficulty,
+    "planned_difficulty": Question.planned_difficulty,
+    "question_type": Question.question_type,
+    "answer_form": Question.answer_form,
 }
 
 
@@ -179,6 +184,9 @@ def _listing() -> Select:
                 Question.created_at,
                 Question.thread_position,
                 Question.follows_id,
+                Question.question_type,
+                Question.answer_form,
+                Question.planned_difficulty,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
                 func.array_agg(func.distinct(Passage.doc_sha256)).label("documents"),
                 func.array_agg(func.distinct(Topic.label)).label("topics"),
@@ -197,6 +205,49 @@ def _when(moment: datetime | None) -> str | None:
 def _present(values: Sequence[Any] | None) -> list[str]:
     """Drops the NULLs an outer join left in an aggregate."""
     return sorted({str(value) for value in values or () if value is not None})
+
+
+#: One validated fact with everything selection and the writer read off it.
+#: Written once because two queries select it: a topic's own facts and the
+#: facts of the passages that bridge it to another topic.
+_SOURCE = (
+    select(
+        Fact.id,
+        Fact.statement,
+        Fact.units_statement,
+        Passage.id.label("passage_id"),
+        Passage.text,
+        Passage.doc_sha256,
+        Passage.language,
+        Passage.section_path,
+        Passage.ordinal,
+        Passage.lemmas,
+        DOMINANT.c.topic_id,
+        Document.title,
+    )
+    .select_from(Fact)
+    .join(Passage, Passage.id == Fact.passage_id)
+    .join(Document, Document.sha256 == Passage.doc_sha256)
+    .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
+)
+
+
+def _fact(row: Any) -> SourceFact:
+    """Reads one row of the query above back as a fact to write from."""
+    return SourceFact(
+        id=row.id,
+        statement=row.statement,
+        passage_id=row.passage_id,
+        passage_text=row.text,
+        doc_sha256=row.doc_sha256,
+        language=row.language,
+        section_path=row.section_path,
+        topic_id=row.topic_id,
+        document_title=row.title,
+        ordinal=row.ordinal,
+        lemmas=tuple(row.lemmas or ()),
+        units=tuple(row.units_statement or ()),
+    )
 
 
 def _stored(row: Any) -> StoredQuestion:
@@ -220,6 +271,9 @@ def _stored(row: Any) -> StoredQuestion:
         topics=_present(row.topics),
         thread_position=row.thread_position,
         follows_id=row.follows_id,
+        question_type=row.question_type,
+        answer_form=row.answer_form,
+        planned_difficulty=row.planned_difficulty,
     )
 
 
@@ -269,22 +323,7 @@ class QuestionQueue(RowQueue):
         """
         with self._session() as session:
             rows = session.execute(
-                select(
-                    Fact.id,
-                    Fact.statement,
-                    Passage.id.label("passage_id"),
-                    Passage.text,
-                    Passage.doc_sha256,
-                    Passage.language,
-                    Passage.section_path,
-                    DOMINANT.c.topic_id,
-                    Document.title,
-                )
-                .select_from(Fact)
-                .join(Passage, Passage.id == Fact.passage_id)
-                .join(Document, Document.sha256 == Passage.doc_sha256)
-                .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
-                .where(
+                _SOURCE.where(
                     DOMINANT.c.topic_id == topic_id,
                     Fact.validated,
                     # A question is written in a language, and the column
@@ -292,23 +331,9 @@ class QuestionQueue(RowQueue):
                     # detector has no language to write one in.
                     Passage.language.is_not(None),
                     ~_ALREADY_ASKED,
-                )
-                .order_by(Fact.id)
+                ).order_by(Fact.id)
             ).all()
-        return [
-            SourceFact(
-                id=row.id,
-                statement=row.statement,
-                passage_id=row.passage_id,
-                passage_text=row.text,
-                doc_sha256=row.doc_sha256,
-                language=row.language,
-                section_path=row.section_path,
-                topic_id=row.topic_id,
-                document_title=row.title,
-            )
-            for row in rows
-        ]
+        return [_fact(row) for row in rows]
 
     def bridging(self, topic_id: int) -> list[SourceFact]:
         """The facts of passages that bridge this topic to another.
@@ -325,22 +350,7 @@ class QuestionQueue(RowQueue):
         """
         with self._session() as session:
             rows = session.execute(
-                select(
-                    Fact.id,
-                    Fact.statement,
-                    Passage.id.label("passage_id"),
-                    Passage.text,
-                    Passage.doc_sha256,
-                    Passage.language,
-                    Passage.section_path,
-                    DOMINANT.c.topic_id,
-                    Document.title,
-                )
-                .select_from(Fact)
-                .join(Passage, Passage.id == Fact.passage_id)
-                .join(Document, Document.sha256 == Passage.doc_sha256)
-                .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
-                .join(PassageTopic, PassageTopic.passage_id == Passage.id)
+                _SOURCE.join(PassageTopic, PassageTopic.passage_id == Passage.id)
                 .where(
                     # Carries this topic, but is not strongest in it.
                     PassageTopic.topic_id == topic_id,
@@ -351,20 +361,7 @@ class QuestionQueue(RowQueue):
                 )
                 .order_by(Fact.id)
             ).all()
-        return [
-            SourceFact(
-                id=row.id,
-                statement=row.statement,
-                passage_id=row.passage_id,
-                passage_text=row.text,
-                doc_sha256=row.doc_sha256,
-                language=row.language,
-                section_path=row.section_path,
-                topic_id=row.topic_id,
-                document_title=row.title,
-            )
-            for row in rows
-        ]
+        return [_fact(row) for row in rows]
 
     def store(self, topic_id: int, threads: list[list[CheckedQuestion]]) -> int:
         """Writes one topic's threads and finishes it, in one transaction.
@@ -392,6 +389,9 @@ class QuestionQueue(RowQueue):
                             target_answer=question.target_answer,
                             answerable=question.answerable,
                             difficulty=question.criteria.difficulty,
+                            planned_difficulty=question.planned_difficulty,
+                            question_type=question.question_type,
+                            answer_form=question.answer_form,
                             passage_scope=question.criteria.passage_scope,
                             document_scope=question.criteria.document_scope,
                             topic_scope=question.criteria.topic_scope,
@@ -498,6 +498,8 @@ class QuestionCatalog(Repository):
                     Question.language,
                     Question.status,
                     Question.embedding,
+                    Question.question_type,
+                    Question.answer_form,
                     func.coalesce(func.bool_and(Fact.validated), False).label("holds"),
                     func.count(func.distinct(Passage.doc_sha256)).label("documents"),
                     func.count(func.distinct(Fact.passage_id)).label("passages"),
@@ -535,6 +537,8 @@ class QuestionCatalog(Repository):
                     documents=row.documents,
                     passages=row.passages,
                     topics=row.topics,
+                    question_type=row.question_type,
+                    answer_form=row.answer_form,
                 )
 
     def reject(self, verdicts: list[tuple[int, str]]) -> int:
@@ -704,6 +708,9 @@ class QuestionCatalog(Repository):
             func.count().filter(Question.status == QuestionStatus.DRAFT).label("draft"),
             func.count().filter(~Question.answerable).label("unanswerable"),
             func.count().filter(Question.follows_id.is_not(None)).label("followups"),
+            func.count()
+            .filter(Question.difficulty == Question.planned_difficulty)
+            .label("planned_met"),
             func.coalesce(func.avg(Question.answer_chars), 0.0).label("answer"),
             func.coalesce(func.avg(func.length(Question.question_text)), 0.0).label(
                 "chars"
@@ -712,6 +719,9 @@ class QuestionCatalog(Repository):
         grouped = {
             "rejected": Question.rejected_reason,
             "difficulty": Question.difficulty,
+            "planned_difficulty": Question.planned_difficulty,
+            "question_type": Question.question_type,
+            "answer_form": Question.answer_form,
             "passage_scope": Question.passage_scope,
             "document_scope": Question.document_scope,
             "topic_scope": Question.topic_scope,
@@ -768,4 +778,8 @@ class QuestionCatalog(Repository):
             passage_scope=spread["passage_scope"],
             document_scope=spread["document_scope"],
             topic_scope=spread["topic_scope"],
+            question_type=spread["question_type"],
+            answer_form=spread["answer_form"],
+            planned_difficulty=spread["planned_difficulty"],
+            planned_met=row.planned_met,
         )

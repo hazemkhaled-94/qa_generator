@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from factories import candidate, group, source
 
-from database.qa_generator import QuestionRejection, QuestionStatus
+from database.qa_generator import AnswerForm, QuestionRejection, QuestionStatus
 from question_generation.models import Neighbour
 from question_generation.verification import (
     QuestionChecker,
@@ -28,6 +28,12 @@ def code(failed) -> str | None:
     return failed[0] if failed else None
 
 
+#: What each form is held to unless a test says otherwise. The value floor is
+#: 1, as the setting ships: a floor of 15 refused 41% of the answers one
+#: corpus had accepted.
+BOUNDS = {"value": (1, 80), "list": (3, 300), "explanation": (20, 600)}
+
+
 def checked(**kwargs):
     """Runs the free gates over one candidate's fields."""
     return structural(
@@ -37,7 +43,8 @@ def checked(**kwargs):
             "answerable": True,
             "language": "en",
             "statements": (),
-            "min_answer_chars": 0,
+            "form": AnswerForm.VALUE,
+            "bounds": BOUNDS,
             "titles": (),
             **kwargs,
         }
@@ -281,13 +288,16 @@ class Recording:
         recovers: str | None = "4 kg",
         stands_alone: bool = True,
         names_its_source: bool = False,
+        matches_intent: bool = True,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
         self.names_its_source = names_its_source
+        self.matches_intent = matches_intent
         self.threaded: tuple = ()
+        self.asked: str = ""
         self.embedded = 0
         self.verified = 0
 
@@ -296,14 +306,16 @@ class Recording:
         self.embedded += 1
         return self.vector
 
-    def read(self, question: str, passages, thread=()) -> Reading:
+    def read(self, question: str, passages, thread=(), asks="") -> Reading:
         """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
         self.threaded = tuple(thread)
+        self.asked = asks
         return Reading(
             recovered=self.recovers,
             stands_alone=self.stands_alone,
             names_its_source=self.names_its_source,
+            matches_intent=self.matches_intent,
         )
 
 
@@ -422,10 +434,10 @@ def test_the_verifier_is_shown_the_cited_passages_and_nothing_else() -> None:
     class Watching(Recording):
         """Records what the verifier was shown."""
 
-        def read(self, question: str, passages, thread=()) -> Reading:
+        def read(self, question: str, passages, thread=(), asks="") -> Reading:
             """Keeps the passages and answers as scripted."""
             seen.append(list(passages))
-            return super().read(question, passages, thread)
+            return super().read(question, passages, thread, asks)
 
     pair = group(
         source(1, document="a", passage_id=1, statement="The device weighs 4 kg."),
@@ -540,20 +552,25 @@ def test_a_fact_handed_back_with_a_question_mark_is_still_refused() -> None:
         "nahmen Produkte vom Markt",
     ],
 )
-def test_an_answer_that_describes_an_action_is_refused(answer) -> None:
+def test_an_answer_that_describes_an_action_is_refused_for_a_value(answer) -> None:
     """Three real target answers, none of them a thing anyone asked for.
 
     Any verb and not only a finite one: two of these are infinitives, so
     they make no claim and are still not answers.
+
+    Only where a value was asked for. The same rule applied to every answer
+    is what made `why` and `how` unwritable: their answers are supposed to
+    carry a verb.
     """
     failed = checked(
         question_text="Welche Maßnahme hat die Bafin 2025 ergriffen?",
         target_answer=answer,
         language="de",
+        form=AnswerForm.VALUE,
         statements=("Die Bafin sprach Verwarnungen aus.",),
     )
 
-    assert code(failed) == QuestionRejection.MALFORMED
+    assert code(failed) == QuestionRejection.WRONG_FORM
 
 
 @pytest.mark.parametrize(
@@ -707,7 +724,7 @@ def test_an_answer_under_the_floor_is_refused(answer) -> None:
     `Nein` - measured on one corpus, 41% of the answers that had been
     accepted. QUESTIONS_MIN_ANSWER_CHARS is where that is decided.
     """
-    failed = checked(target_answer=answer, min_answer_chars=15)
+    failed = checked(target_answer=answer, bounds={**BOUNDS, "value": (15, 80)})
 
     assert code(failed) == QuestionRejection.ANSWER_TOO_SHORT
 
@@ -717,17 +734,22 @@ def test_an_answer_under_the_floor_is_refused(answer) -> None:
 )
 def test_an_answer_over_the_floor_is_kept(answer) -> None:
     """A name, a date and a citation, all of them scoreable."""
-    assert checked(target_answer=answer, min_answer_chars=15) is None
+    assert checked(target_answer=answer, bounds={**BOUNDS, "value": (15, 80)}) is None
 
 
 def test_a_floor_of_zero_refuses_nothing_for_length() -> None:
     """Which is what keeps the bare values a corpus of numbers needs."""
-    assert checked(target_answer="70%", min_answer_chars=0) is None
+    assert checked(target_answer="70%", bounds=BOUNDS) is None
 
 
 def test_an_unanswerable_question_is_never_too_short() -> None:
     """It has no answer to measure, and is scored on behaviour."""
-    assert checked(answerable=False, target_answer=None, min_answer_chars=15) is None
+    assert (
+        checked(
+            answerable=False, target_answer=None, bounds={**BOUNDS, "value": (15, 80)}
+        )
+        is None
+    )
 
 
 def test_a_follow_up_is_not_judged_on_standing_alone() -> None:
@@ -993,3 +1015,207 @@ def test_a_number_is_the_same_number_in_either_locale(recovered, target) -> None
     not `48`.
     """
     assert agrees(recovered, target, "de")
+
+
+# ── The form each type's answer takes, which decides who reads it how ──────
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "weil die Risiken im Bankensektor gestiegen sind",
+        "because risks in the banking sector increased",
+        "by notifying the authority within four hours through the portal",
+    ],
+)
+def test_an_explanation_carrying_a_verb_is_kept(answer) -> None:
+    """The questions the one verb rule made unwritable.
+
+    Measured before this existed: five of six realistic why, how and
+    procedure answers were refused as malformed, and only a bare value like
+    `EUR 15,000` survived. Every question in the set was a lookup because
+    nothing else could be stored.
+    """
+    german = answer.startswith("weil")
+    assert (
+        checked(
+            question_text=(
+                "Warum wurde die Anforderung angehoben?"
+                if german
+                else "Why was the requirement raised?"
+            ),
+            target_answer=answer,
+            language="de" if german else "en",
+            form=AnswerForm.EXPLANATION,
+        )
+        is None
+    )
+
+
+def test_an_explanation_that_explains_nothing_is_refused() -> None:
+    """A why answered with a noun phrase has not been answered."""
+    failed = checked(
+        question_text="Why was the requirement raised?",
+        target_answer="the capital requirement of the banking sector",
+        form=AnswerForm.EXPLANATION,
+    )
+
+    assert code(failed) == QuestionRejection.WRONG_FORM
+
+
+def test_a_list_is_held_to_neither_verb_rule() -> None:
+    """Items may be actions or things, and both are a list."""
+    assert (
+        checked(
+            question_text="Which ways can a request be raised?",
+            target_answer="by phone, through the web form and by email",
+            form=AnswerForm.LIST,
+        )
+        is None
+    )
+
+
+def test_an_answer_over_the_ceiling_of_its_form_is_refused() -> None:
+    """A value answered with a paragraph is the too-broad question again."""
+    failed = checked(
+        target_answer="4 kg, " * 30,
+        form=AnswerForm.VALUE,
+    )
+
+    assert code(failed) == QuestionRejection.ANSWER_TOO_LONG
+
+
+def test_the_same_answer_passes_for_one_form_and_fails_for_another() -> None:
+    """Which is the whole point of the column: one rule fitted neither."""
+    prose = "it is raised through the web form and confirmed by email"
+
+    assert code(checked(target_answer=prose, form=AnswerForm.VALUE)) == (
+        QuestionRejection.WRONG_FORM
+    )
+    assert checked(target_answer=prose, form=AnswerForm.EXPLANATION) is None
+
+
+# ── Agreeing about an answer that is longer than a value ──────────────────
+
+
+def test_a_paraphrased_explanation_is_recovered() -> None:
+    """Demanding every word of prose survives a paraphrase refuses answers.
+
+    The verifier plainly found this one; requiring a subset of lemmas, which
+    is right for a value, threw it away.
+    """
+    assert agrees(
+        "raised through the web form and confirmed by email",
+        "it is raised through the web form, and confirmed by email before work begins",
+        "en",
+        AnswerForm.EXPLANATION,
+        0.6,
+    )
+
+
+def test_an_explanation_about_something_else_is_not_recovered() -> None:
+    """The floor still has to reject an answer that shares a few words."""
+    assert not agrees(
+        "the office is open on working days",
+        "because the risk of a cyber incident rose sharply during the period",
+        "en",
+        AnswerForm.EXPLANATION,
+        0.6,
+    )
+
+
+def test_a_number_still_has_to_match_exactly_whatever_the_form() -> None:
+    """`4 hours` for `48 hours` is the failure the gate exists for."""
+    assert not agrees(
+        "answered within 4 hours on working days",
+        "answered within 48 hours on working days",
+        "en",
+        AnswerForm.EXPLANATION,
+        0.6,
+    )
+
+
+def test_a_value_is_still_compared_whole() -> None:
+    """Every word of a value is the answer, so a share of it is not."""
+    assert not agrees(
+        "the supervisory authority", "the federal supervisory authority", "en"
+    )
+
+
+# ── The kind of question it was asked to be ───────────────────────────────
+
+
+def test_a_question_that_is_not_the_kind_it_was_asked_for_is_refused() -> None:
+    """A `reason` slot answered with a value is not a reason question.
+
+    Counting it as one would report a mix nobody got, which is what the
+    planned and realised columns exist to make visible.
+    """
+    recording = Recording(recovers="4 kg", matches_intent=False)
+
+    result = build(recording).check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.WRONG_TYPE
+    assert recording.verified == 1, "it must not cost a second call"
+
+
+def test_the_verifier_is_told_what_kind_of_question_it_is_reading() -> None:
+    """It cannot judge the kind without being told which kind was asked."""
+    recording = Recording(recovers="because the plant was rebuilt in March")
+
+    build(recording).check(
+        candidate(
+            question_text="Why was the device rebuilt at the Hamburg plant?",
+            target_answer="because the plant was rebuilt in March",
+            question_type="reason",
+        )
+    )
+
+    assert "why" in recording.asked
+
+
+def test_a_writer_marking_its_own_work_cannot_reject_on_the_kind() -> None:
+    """An opinion needs an independent holder, as with the phrasing gates."""
+    recording = Recording(recovers="4 kg", matches_intent=False)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    assert checker.check(candidate()).accepted
+
+
+def test_the_type_and_the_form_are_stored_on_the_question() -> None:
+    """A set cannot be filtered to its reasons unless each row says so."""
+    result = build(Recording(recovers="4 kg")).check(candidate())
+
+    assert result.question_type == "factoid"
+    assert result.answer_form == "value"
+    assert result.planned_difficulty == "easy"
+
+
+def test_an_unanswerable_question_carries_no_answer_form() -> None:
+    """It has no answer, so there is no shape for one to take."""
+    result = build(Recording(recovers=None)).check(
+        candidate(target_answer=None, answerable=False)
+    )
+
+    assert result.question_type == "factoid"
+    assert result.answer_form is None
+
+
+def test_the_verifier_is_told_to_answer_in_the_language_of_the_passages() -> None:
+    """A translated answer agrees with nothing.
+
+    Measured on one run: an 8B verifier answered a German question with `to
+    extract confidential information from the training data` where the target
+    was `Extraktion vertraulicher Informationen`. The two say the same thing
+    and share not one lemma, so a correct question was rejected as
+    not_recoverable.
+    """
+    from question_generation.verification import _VERIFY
+
+    assert "language" in _VERIFY

@@ -46,6 +46,9 @@ QUESTION = {
     "answer_chars": 8,
     "thread_position": 1,
     "follows_id": None,
+    "question_type": "comparison",
+    "answer_form": "list",
+    "planned_difficulty": "hard",
     "language": "en",
     "status": "accepted",
     "rejected_reason": None,
@@ -71,6 +74,22 @@ QUESTION_QUALITY = {
     "passage_scope": {"multi_passage": 1},
     "document_scope": {"cross_document": 1},
     "topic_scope": {"multi_topic": 1},
+    "question_type": {"comparison": 1},
+    "answer_form": {"list": 1},
+    "planned_difficulty": {"hard": 1},
+    "planned_met": 1,
+}
+
+#: What /questions/plan returns: the mix that was asked for.
+QUESTION_PLAN = {
+    "types": {"factoid": 3, "comparison": 1},
+    "difficulty": {"easy": 2, "hard": 1},
+    "followup_types": ["condition", "reason"],
+    "per_topic": 20,
+    "unanswerable_share": 0.25,
+    "followup_share": 0.3,
+    "max_followups": 2,
+    "answer_chars": {"value": [1, 80], "list": [3, 300], "explanation": [20, 600]},
 }
 
 
@@ -155,6 +174,7 @@ def test_a_listing_page_renders_when_the_corpus_is_empty(
                 fact_quality={},
                 questions=EMPTY_PAGE,
                 question_quality=QUESTION_QUALITY,
+                question_plan=QUESTION_PLAN,
                 document_names=[],
                 passage_types=[],
                 stage_status={"stage": view, "working": False, "rows": {}},
@@ -190,6 +210,7 @@ def test_a_page_reports_an_unreachable_backend_rather_than_raising(
                 fact_quality=UNREACHABLE,
                 questions=UNREACHABLE,
                 question_quality=UNREACHABLE,
+                question_plan=UNREACHABLE,
                 document_names=UNREACHABLE,
                 passage_types=UNREACHABLE,
                 topics=UNREACHABLE,
@@ -249,6 +270,7 @@ def test_the_questions_page_lists_what_the_backend_returns(run_view) -> None:
         catalog_api=Answers(
             questions={"total": 1, "questions": [QUESTION]},
             question_quality=QUESTION_QUALITY,
+            question_plan=QUESTION_PLAN,
             question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
             document_names=[],
             stage_status={
@@ -279,6 +301,7 @@ def test_the_questions_page_says_when_a_cited_fact_no_longer_holds(run_view) -> 
         catalog_api=Answers(
             questions={"total": 1, "questions": [QUESTION]},
             question_quality=QUESTION_QUALITY,
+            question_plan=QUESTION_PLAN,
             question={"question": QUESTION, "sources": [moved], "thread": [QUESTION]},
             document_names=[],
             stage_status={"stage": "questions", "working": False, "rows": {}},
@@ -303,6 +326,7 @@ def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> No
             "accepted": 0,
             "rejected": {"duplicate": 1},
         },
+        question_plan=QUESTION_PLAN,
         question={"question": {**QUESTION, "status": "rejected"}, "sources": []},
         decide_question={},
         document_names=[],
@@ -327,6 +351,7 @@ def test_starting_generation_queues_the_topics(run_view) -> None:
     client = Answers(
         questions={"total": 1, "questions": [QUESTION]},
         question_quality=QUESTION_QUALITY,
+        question_plan=QUESTION_PLAN,
         question={"question": QUESTION, "sources": []},
         stage_action={"detail": "24 row(s) queued."},
         document_names=[],
@@ -348,6 +373,7 @@ def test_the_start_control_is_dead_when_every_topic_is_already_queued(run_view) 
         catalog_api=Answers(
             questions={"total": 1, "questions": [QUESTION]},
             question_quality=QUESTION_QUALITY,
+            question_plan=QUESTION_PLAN,
             question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
             document_names=[],
             stage_status={
@@ -374,6 +400,7 @@ def test_the_page_survives_a_rejection_code_it_has_never_heard_of(run_view) -> N
                 ],
             },
             question_quality={**QUESTION_QUALITY, "rejected": {"invented": 1}},
+            question_plan=QUESTION_PLAN,
             question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
             document_names=[],
             stage_status={"stage": "questions", "working": False, "rows": {}},
@@ -420,3 +447,29 @@ def test_a_question_with_no_difficulty_or_answer_still_renders(run_view) -> None
     )
 
     assert not app.exception, app.exception
+
+
+def test_the_questions_page_says_which_kinds_were_asked_for_and_written(
+    run_view,
+) -> None:
+    """A mix nobody got must be visible as a mix nobody got.
+
+    The plan decides what a run writes; the page is where somebody reads
+    whether the corpus supported it.
+    """
+    app = run_view(
+        "questions",
+        catalog_api=Answers(
+            questions={"total": 1, "questions": [QUESTION]},
+            question_quality=QUESTION_QUALITY,
+            question_plan=QUESTION_PLAN,
+            question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
+            document_names=[],
+            stage_status={"stage": "questions", "working": False, "rows": {}},
+        ),
+    )
+
+    assert not app.exception, app.exception
+    tabled = " ".join(str(one.value) for one in app.dataframe)
+    assert "comparison" in tabled, "the kind written was not listed"
+    assert "factoid" in tabled, "a kind asked for and never written was not listed"

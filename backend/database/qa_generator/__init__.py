@@ -10,12 +10,14 @@ from database.qa_generator.engine import engine, sessions
 from database.qa_generator.facts import Fact
 from database.qa_generator.ingest_events import IngestEvent
 from database.qa_generator.outcomes import (
+    AnswerForm,
     Difficulty,
     DocumentScope,
     Outcome,
     PassageScope,
     QuestionRejection,
     QuestionStatus,
+    QuestionType,
     Rejection,
     TopicScope,
     one_of,
@@ -28,6 +30,7 @@ from database.qa_generator.status import Status, check, queued
 from database.qa_generator.topics import Topic
 
 __all__ = [
+    "AnswerForm",
     "Base",
     "Difficulty",
     "Document",
@@ -42,6 +45,7 @@ __all__ = [
     "QuestionFact",
     "QuestionRejection",
     "QuestionStatus",
+    "QuestionType",
     "Rejection",
     "Status",
     "Topic",

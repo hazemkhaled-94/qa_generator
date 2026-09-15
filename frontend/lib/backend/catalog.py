@@ -128,6 +128,10 @@ class CatalogApi(Endpoint):
         """Fetches how well generation is doing, under the same filter."""
         return self._query("/questions/quality", filters)
 
+    def question_plan(self) -> dict:
+        """Fetches what generation is configured to write."""
+        return self._request("GET", "/questions/plan").json()
+
     def decide_question(self, question_id: int, status: str) -> dict:
         """Accepts or rejects one question."""
         return self._request(

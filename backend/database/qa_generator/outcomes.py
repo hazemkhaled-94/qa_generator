@@ -70,6 +70,38 @@ class Difficulty(StrEnum):
     HARD = "hard"
 
 
+class QuestionType(StrEnum):
+    """What kind of thing a question asks for.
+
+    Question form, not subject matter: every one of these is askable of any
+    corpus. QUESTIONS_TYPE_MIX says which are written and in what proportion.
+    """
+
+    FACTOID = "factoid"
+    DEFINITION = "definition"
+    ENTITY = "entity"
+    ENUMERATION = "enumeration"
+    CONDITION = "condition"
+    REASON = "reason"
+    PROCEDURE = "procedure"
+    CONSEQUENCE = "consequence"
+    COMPARISON = "comparison"
+    AGGREGATION = "aggregation"
+    TEMPORAL = "temporal"
+
+
+class AnswerForm(StrEnum):
+    """The shape the target answer takes.
+
+    Each question type declares one. The gates read it: a value may carry no
+    verb, an explanation must, and each has its own length bounds.
+    """
+
+    VALUE = "value"
+    LIST = "list"
+    EXPLANATION = "explanation"
+
+
 class QuestionRejection(StrEnum):
     """Why a generated question was not accepted.
 
@@ -80,6 +112,9 @@ class QuestionRejection(StrEnum):
 
     MALFORMED = "malformed"
     ANSWER_TOO_SHORT = "answer_too_short"
+    ANSWER_TOO_LONG = "answer_too_long"
+    WRONG_FORM = "wrong_form"
+    WRONG_TYPE = "wrong_type"
     LEAKS_SOURCE = "leaks_source"
     UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"

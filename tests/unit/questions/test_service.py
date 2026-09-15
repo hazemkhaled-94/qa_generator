@@ -14,7 +14,7 @@ from dataclasses import replace
 import pytest
 from factories import source
 
-from database.qa_generator import Status
+from database.qa_generator import Difficulty, QuestionType, Status
 from llm.client import ModelUnavailable
 from question_generation.config import Settings
 from question_generation.models import CheckedQuestion, TopicToCover
@@ -23,11 +23,14 @@ from question_generation.service import QuestionGenerationService
 SETTINGS = Settings(
     per_topic=4,
     sample_size=4,
+    type_mix={QuestionType.FACTOID: 3, QuestionType.REASON: 1},
+    difficulty_mix={Difficulty.EASY: 1, Difficulty.MEDIUM: 1},
+    followup_types=(QuestionType.CONDITION, QuestionType.REASON),
     unanswerable_share=0.25,
-    bridge_share=0.5,
     followup_share=0.5,
     max_followups=2,
-    min_answer_chars=0,
+    answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+    answer_overlap=0.6,
     long_answer_chars=60,
     duplicate_cosine=0.93,
     embedding_model="stub",
@@ -90,29 +93,34 @@ class StubWriter:
         """Initialises the writer with what it will do when asked."""
         self._raises = raises
         self.calls = 0
+        self.plans: list = []
 
     @property
     def model(self) -> str:
         """The model this writer would call."""
         return "ollama/stub"
 
-    def write(self, group, *, answerable: bool):
-        """Writes one question, or refuses."""
+    def write(self, group, plan):
+        """Writes one question of the kind the plan asked for, or refuses."""
         self.calls += 1
+        self.plans.append(plan)
         if self._raises:
             raise self._raises
         from factories import candidate
 
         return candidate(
             question_text=f"Question {self.calls}?",
-            target_answer=None if not answerable else "4 kg",
-            answerable=answerable,
+            target_answer=None if not plan.answerable else "4 kg",
+            answerable=plan.answerable,
             facts=group,
+            question_type=plan.spec.name,
+            planned_difficulty=plan.band,
         )
 
-    def follow_up(self, group, thread):
+    def follow_up(self, group, thread, plan):
         """Writes the next question in a thread."""
         self.calls += 1
+        self.plans.append(plan)
         if self._raises:
             raise self._raises
         from factories import candidate
@@ -123,6 +131,8 @@ class StubWriter:
             answerable=True,
             facts=group,
             thread=thread,
+            question_type=plan.spec.name,
+            planned_difficulty=plan.band,
         )
 
 
@@ -149,6 +159,9 @@ class StubChecker:
             rejected_reason=None,
             fact_ids=tuple(one.id for one in candidate.group.facts),
             thread_position=candidate.thread_position,
+            question_type=candidate.spec.name,
+            answer_form=candidate.spec.form if candidate.answerable else None,
+            planned_difficulty=candidate.planned_difficulty,
         )
 
 
@@ -287,20 +300,21 @@ def test_a_drain_works_the_queue_until_it_is_empty() -> None:
 
 
 @pytest.mark.parametrize("size", [0, -1])
-def test_a_group_size_below_one_never_yields_an_empty_group(size) -> None:
+def test_a_sample_size_below_one_never_yields_an_empty_group(size) -> None:
     """An empty group has no language to write in and no spread to read.
 
-    QUESTIONS_GROUP_SIZE is a number out of a settings file, and the one
-    thing selection must not do with a silly one is hand back a group
-    nothing downstream can use.
+    QUESTIONS_FACT_SAMPLE is a number out of a settings file, and the one
+    thing the deal must not do with a silly one is hand back a group nothing
+    downstream can use.
     """
-    from question_generation.selection import samples
+    from question_generation.selection import Deal
 
-    formed = samples([source(n) for n in range(3)], wanted=5, size=size)
+    deal = Deal([source(n, passage_id=n) for n in range(3)], wanted=5, size=size)
+    formed = [deal.sample() for _ in range(3)]
 
-    assert formed, "every fact was dropped"
-    assert all(one.facts for one in formed)
-    assert all(one.language == "en" for one in formed)
+    assert all(one is not None for one in formed), "every fact was dropped"
+    assert all(one.facts for one in formed if one)
+    assert all(one.language == "en" for one in formed if one)
 
 
 def test_a_topics_lease_covers_every_call_it_will_make() -> None:
@@ -347,6 +361,8 @@ def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
         temperature=0.0,
         timeout_seconds=900.0,
         max_attempts=3,
+        num_ctx=None,
+        reasoning_effort=None,
     )
 
     def built(verifier: str | None) -> bool:
@@ -456,10 +472,10 @@ def test_a_follow_up_is_shown_what_was_already_asked() -> None:
     class Watching(StubWriter):
         """Records the conversation each follow-up was written from."""
 
-        def follow_up(self, group, thread):
+        def follow_up(self, group, thread, plan):
             """Keeps the thread and writes as scripted."""
             seen.append(tuple(thread))
-            return super().follow_up(group, thread)
+            return super().follow_up(group, thread, plan)
 
     facts = [source(n, document="a", passage_id=n) for n in range(8)]
     service, _ = build(topic(), facts, writer=Watching())
@@ -469,3 +485,69 @@ def test_a_follow_up_is_shown_what_was_already_asked() -> None:
     assert seen, "no follow-up was written"
     assert all(turns for turns in seen), "a follow-up was written with no thread"
     assert any(len(turns) > 1 for turns in seen), "no second follow-up saw two turns"
+
+
+def test_the_turns_of_a_thread_take_the_kinds_they_were_configured_to() -> None:
+    """A conversation that asks the same kind three times is one question.
+
+    QUESTIONS_FOLLOWUP_TYPES is cycled down the thread, so it moves from a
+    value to the circumstances it applies in to the reason behind it.
+    """
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    writer = StubWriter()
+    service, queue = build(topic(), facts, writer=writer)
+
+    service.process_next()
+
+    followed = next(one for one in queue.stored[0] if len(one) > 2)
+    assert [one.question_type for one in followed[1:]] == list(SETTINGS.followup_types)
+
+
+# ── The plan, which is what makes the set configurable ────────────────────
+
+
+def test_every_question_is_written_to_a_plan() -> None:
+    """The kind and the band are decided before anything is written."""
+    facts = [source(n, document="ab"[n % 2], passage_id=n) for n in range(20)]
+    writer = StubWriter()
+    service, _ = build(topic(), facts, writer=writer)
+
+    service.process_next()
+
+    assert writer.plans
+    assert {one.spec.name for one in writer.plans} <= set(SETTINGS.type_mix) | set(
+        SETTINGS.followup_types
+    )
+
+
+def test_the_kinds_written_are_the_kinds_that_were_asked_for() -> None:
+    """A type with no weight is never written, which is the switch."""
+    facts = [source(n, document="ab"[n % 2], passage_id=n) for n in range(20)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    roots = [thread[0] for thread in queue.stored[0]]
+    assert {one.question_type for one in roots} <= set(SETTINGS.type_mix)
+
+
+def test_what_the_plan_asked_for_is_stored_beside_what_came_out() -> None:
+    """Two runs of one corpus have to be comparable on the same terms."""
+    facts = [source(n, document="ab"[n % 2], passage_id=n) for n in range(20)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    roots = [thread[0] for thread in queue.stored[0]]
+    assert all(one.planned_difficulty in set(SETTINGS.difficulty_mix) for one in roots)
+
+
+def test_a_topic_that_runs_out_of_passages_stops_rather_than_repeating() -> None:
+    """A passage is asked about once, so a small topic yields few questions."""
+    facts = [source(1, document="a", passage_id=1)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    assert len(queue.stored[0]) == 1
+    assert queue.finished == [7]

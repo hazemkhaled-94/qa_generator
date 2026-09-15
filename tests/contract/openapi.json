@@ -289,6 +289,7 @@
   "/questions": {
     "get": {
       "parameters": [
+        "answer_form",
         "answerable",
         "difficulty",
         "document",
@@ -298,7 +299,9 @@
         "limit",
         "offset",
         "passage_scope",
+        "planned_difficulty",
         "q",
+        "question_type",
         "status",
         "topic",
         "topic_scope"
@@ -309,9 +312,18 @@
       ]
     }
   },
+  "/questions/plan": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
   "/questions/quality": {
     "get": {
       "parameters": [
+        "answer_form",
         "answerable",
         "difficulty",
         "document",
@@ -319,7 +331,9 @@
         "field",
         "follows",
         "passage_scope",
+        "planned_difficulty",
         "q",
+        "question_type",
         "status",
         "topic",
         "topic_scope"

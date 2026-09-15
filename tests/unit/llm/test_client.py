@@ -31,6 +31,8 @@ def settings(**overrides) -> Settings:
             "temperature": 0.0,
             "timeout_seconds": 1.0,
             "max_attempts": 2,
+            "num_ctx": None,
+            "reasoning_effort": None,
             **overrides,
         }
     )
@@ -148,3 +150,52 @@ def test_the_lease_outlasts_every_attempt() -> None:
     lease = settings(timeout_seconds=900, max_attempts=3).lease
 
     assert lease.total_seconds() >= 900 * 3
+
+
+# ── What reaches the runtime, and what is left out ────────────────────────
+
+
+def sent(**overrides) -> dict:
+    """The keywords one call passes to the completion, with the model stubbed."""
+    client = Client(settings(**overrides))
+    seen: dict = {}
+
+    def record(**kwargs):
+        """Keeps the call and answers in the shape asked for."""
+        seen.update(kwargs)
+        return Shape()
+
+    client._client.chat.completions.create = record
+    client._attempt = lambda system, user, shape: client._ask(system, user, shape)
+    client.answer(system="s", user="u", shape=Shape)
+    return seen
+
+
+def test_a_context_window_reaches_the_runtime_when_one_is_set() -> None:
+    """A self-hosted runtime reserves the whole window before it reads.
+
+    A model advertising 131,072 tokens holds gigabytes of key-value cache for
+    a prompt of two thousand, which on one machine was the difference between
+    generating and swapping.
+    """
+    assert sent(num_ctx=8192)["num_ctx"] == 8192
+
+
+def test_nothing_is_sent_about_the_window_when_none_is_set() -> None:
+    """A hosted provider has no such parameter and sizes its own."""
+    assert "num_ctx" not in sent(num_ctx=None)
+
+
+def test_the_reasoning_effort_reaches_the_runtime_when_one_is_set() -> None:
+    """A thinking model asked for a structured answer answers with nothing.
+
+    Measured on a 12B model: 7,469 tokens of reasoning, the length limit, and
+    an empty string back after 307 seconds. The same call with thinking off
+    took 9 seconds. Ollama reads this parameter as `think`.
+    """
+    assert sent(reasoning_effort="off")["reasoning_effort"] == "off"
+
+
+def test_nothing_is_sent_about_thinking_when_none_is_set() -> None:
+    """Which leaves a model its own default."""
+    assert "reasoning_effort" not in sent(reasoning_effort=None)

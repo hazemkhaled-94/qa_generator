@@ -25,11 +25,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
 from database.qa_generator.outcomes import (
+    AnswerForm,
     Difficulty,
     DocumentScope,
     PassageScope,
     QuestionRejection,
     QuestionStatus,
+    QuestionType,
     TopicScope,
     one_of,
 )
@@ -77,6 +79,20 @@ class Question(Base):
             f"difficulty IS NULL OR {one_of('difficulty', Difficulty)}",
             name="questions_difficulty_valid",
         ),
+        CheckConstraint(
+            f"planned_difficulty IS NULL OR {one_of('planned_difficulty', Difficulty)}",
+            name="questions_planned_difficulty_valid",
+        ),
+        CheckConstraint(
+            f"question_type IS NULL OR {one_of('question_type', QuestionType)}",
+            name="questions_question_type_valid",
+        ),
+        CheckConstraint(
+            f"answer_form IS NULL OR {one_of('answer_form', AnswerForm)}",
+            name="questions_answer_form_valid",
+        ),
+        # The listing filters on the type and the quality report groups on it.
+        Index("ix_questions_question_type", "question_type"),
         *(
             CheckConstraint(
                 f"{column} IS NULL OR {one_of(column, values)}",
@@ -136,6 +152,28 @@ class Question(Base):
         "rather than judged: the three scope columns, a long answer and being a "
         "follow-up are each worth a point, and the band is the total. Two readers "
         "cannot disagree about it, and a review sample can stratify on it.",
+    )
+    question_type: Mapped[str | None] = mapped_column(
+        Text,
+        comment="What the question asks for, enforced by a CHECK constraint: "
+        "factoid, definition, entity, enumeration, condition, reason, procedure, "
+        "consequence, comparison, aggregation or temporal. Requested by the plan "
+        "before the question is written, not read off it afterwards. "
+        "QUESTIONS_TYPE_MIX sets which are written and in what proportion.",
+    )
+    answer_form: Mapped[str | None] = mapped_column(
+        Text,
+        comment="value | list | explanation, enforced by a CHECK constraint. The "
+        "shape the target answer takes, declared by the question type. The gates "
+        "read it: a value carries no verb, an explanation does, and each form has "
+        "its own length bounds in QUESTIONS_ANSWER_CHARS.",
+    )
+    planned_difficulty: Mapped[str | None] = mapped_column(
+        Text,
+        comment="The band QUESTIONS_DIFFICULTY_MIX asked for, enforced by a CHECK "
+        "constraint. `difficulty` beside it is what the question turned out to be. "
+        "The two disagree when the writer cited fewer facts than it was offered, "
+        "which is a measurement of the plan rather than a fault in the row.",
     )
     passage_scope: Mapped[str | None] = mapped_column(
         Text,

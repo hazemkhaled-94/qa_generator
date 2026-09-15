@@ -23,9 +23,9 @@ from __future__ import annotations
 import os
 
 import pytest
-from factories import group, source
+from factories import group, plan, source
 
-from database.qa_generator import QuestionRejection
+from database.qa_generator import QuestionRejection, QuestionType
 
 pytestmark = [pytest.mark.eval, pytest.mark.nlp]
 
@@ -91,6 +91,68 @@ GOLDEN = (
         "language": "en",
         "recoverable": False,
     },
+    # The kinds that could not be written at all before the answer form was a
+    # column. Each of these was refused as malformed by the one verb rule.
+    {
+        "name": "a reason the material gives",
+        "question": "Why does a support request have to be confirmed in writing?",
+        "passage": (
+            "Requests are confirmed in writing so that the agreed response "
+            "time can be evidenced later. The confirmation is sent by email."
+        ),
+        "target": "so that the agreed response time can be evidenced later",
+        "language": "en",
+        "type": QuestionType.REASON,
+        "recoverable": True,
+    },
+    {
+        "name": "a reason the material does not give",
+        "question": "Why is the reply time set at 48 hours rather than 24?",
+        "passage": "Standard requests are answered within 48 hours on working days.",
+        "target": "because two working days allow for a weekend backlog",
+        "language": "en",
+        "type": QuestionType.REASON,
+        "recoverable": False,
+    },
+    {
+        "name": "a procedure stated in order",
+        "question": "How is a support request raised and confirmed?",
+        "passage": (
+            "A request is raised through the web form. The form is confirmed "
+            "by email before any work begins."
+        ),
+        "target": (
+            "it is raised through the web form and confirmed by email before "
+            "work begins"
+        ),
+        "language": "en",
+        "type": QuestionType.PROCEDURE,
+        "recoverable": True,
+    },
+    {
+        "name": "the items of a set",
+        "question": "Which ways can a support request be raised?",
+        "passage": (
+            "A request may be raised by phone, through the web form or by "
+            "email. Requests raised by phone are confirmed in writing."
+        ),
+        "target": "by phone, through the web form and by email",
+        "language": "en",
+        "type": QuestionType.ENUMERATION,
+        "recoverable": True,
+    },
+    {
+        "name": "a condition the material states",
+        "question": "When does the four-hour reply time apply?",
+        "passage": (
+            "The four-hour reply time applies only to requests marked urgent, "
+            "and only on working days."
+        ),
+        "target": "to requests marked urgent, and only on working days",
+        "language": "en",
+        "type": QuestionType.CONDITION,
+        "recoverable": True,
+    },
 )
 
 
@@ -131,12 +193,15 @@ def checker():
         # eval layer does not have would only add a way for them to fail.
         nearest=lambda embedding: None,
         threshold=questions.duplicate_cosine,
+        bounds=questions.answer_chars,
+        overlap=questions.answer_overlap,
     )
 
 
 def candidate_for(example: dict):
     """Builds the candidate one golden case describes."""
     from question_generation.models import Candidate
+    from question_generation.types import SPECS
 
     return Candidate(
         question_text=example["question"],
@@ -150,6 +215,7 @@ def candidate_for(example: dict):
                 passage_text=example["passage"],
             )
         ),
+        spec=SPECS[example.get("type", QuestionType.FACTOID)],
     )
 
 
@@ -200,9 +266,58 @@ def test_the_writer_produces_a_usable_question_from_a_fact(checker) -> None:
                 language="en",
             )
         ),
-        answerable=True,
+        plan(),
     )
 
     print(f"\nwritten: {written.question_text!r} -> {written.target_answer!r}")
 
     assert written.question_text, "the model wrote nothing"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        QuestionType.FACTOID,
+        QuestionType.REASON,
+        QuestionType.PROCEDURE,
+        QuestionType.ENUMERATION,
+        QuestionType.CONDITION,
+        QuestionType.CONSEQUENCE,
+    ],
+)
+def test_the_writer_produces_each_kind_it_is_asked_for(checker, kind) -> None:
+    """Printed rather than asserted: whether a kind lands is the model's.
+
+    What is asserted is that something came back for every kind, because a
+    kind that silently writes nothing is a mix nobody gets.
+    """
+    from llm.client import Client
+    from llm.config import Settings
+    from question_generation.generation import QuestionWriter
+
+    written = QuestionWriter(Client(Settings.load())).write(
+        group(
+            source(
+                1,
+                statement=(
+                    "A support request is confirmed in writing so the agreed "
+                    "response time can be evidenced."
+                ),
+                language="en",
+                passage_text=(
+                    "A request is raised through the web form and confirmed in "
+                    "writing so the agreed response time can be evidenced. "
+                    "Unconfirmed requests are closed after five working days."
+                ),
+            )
+        ),
+        plan(question_type=kind),
+    )
+    checked = checker.check(written)
+
+    print(
+        f"\n{kind}: {written.question_text!r} -> {written.target_answer!r} "
+        f"[{checked.status} {checked.rejected_reason or ''}]"
+    )
+
+    assert written.question_text, f"the model wrote nothing for {kind}"

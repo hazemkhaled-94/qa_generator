@@ -358,6 +358,15 @@ topics-retry:
 # QUESTIONS_VERIFIER_MODEL served beside it, and EMBEDDING_MODEL downloaded -
 # the first run fetches it into the Hugging Face cache and later runs read it
 # from there.
+#
+# What is written is QUESTIONS_TYPE_MIX and QUESTIONS_DIFFICULTY_MIX, both in
+# configs/env/backend.env, and both proportions rather than counts. A kind
+# with a weight of 0 is never written. The Questions page puts the mix that
+# was asked for beside the mix that came out.
+#
+# Both models are served locally here, so LLM_NUM_CTX and
+# LLM_REASONING_EFFORT matter: a thinking model asked for a structured answer
+# spends its window reasoning and returns an empty string.
 
 # Drain the question queue here, in the foreground.
 questions:

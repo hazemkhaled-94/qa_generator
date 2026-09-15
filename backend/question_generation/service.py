@@ -12,12 +12,15 @@ from question_generation.config import Settings
 from question_generation.generation import QuestionWriter
 from question_generation.models import (
     CheckedQuestion,
+    FactGroup,
     JudgedQuestion,
     TopicToCover,
     criteria_of,
 )
+from question_generation.planning import Plan, plans
 from question_generation.repository import QuestionCatalog, QuestionQueue
-from question_generation.selection import bridged, samples, spread
+from question_generation.selection import Deal, spread
+from question_generation.types import SPECS, spec
 from question_generation.verification import (
     QuestionChecker,
     near_verdict,
@@ -111,7 +114,11 @@ def _recheck(
         answerable=question.answerable,
         language=question.language,
         statements=question.statements,
-        min_answer_chars=settings.min_answer_chars,
+        # The form the row was written under, not the one its type asks for
+        # today: a type whose answer form was changed under a stored question
+        # would otherwise reject every question written before the change.
+        form=question.answer_form or spec(question.question_type).form,
+        bounds=settings.answer_chars,
     )
     if failed:
         return failed
@@ -190,7 +197,15 @@ class QuestionGenerationService(StageService):
         return topic.id
 
     def _topic(self, topic: TopicToCover, current: Span) -> list[list[CheckedQuestion]]:
-        """Writes and gates every question one topic is still missing."""
+        """Writes and gates every question one topic is still missing.
+
+        The plan comes first and the material second. Each slot says what kind
+        of question to write and how wide a sample that needs; the deal
+        supplies the widest sample the topic can actually offer, and the
+        question is written to whatever came back. A topic sitting in one
+        document has no cross-document question in it, and asking for one is
+        not a reason to write nothing about that topic.
+        """
         if not topic.include_in_coverage:
             # Finished with nothing written, not left `new`: somebody said
             # this topic is not a subject, which is an answer and not work
@@ -203,25 +218,30 @@ class QuestionGenerationService(StageService):
             current.set_attribute("questions.skipped", "no facts left to ask about")
             return []
 
-        formed = bridged(
-            samples(
-                facts,
-                wanted=self._settings.per_topic,
-                size=self._settings.sample_size,
-            ),
+        deal = Deal(
+            facts,
             self._repository.bridging(topic.id),
-            share=self._settings.bridge_share,
+            wanted=self._settings.per_topic,
             size=self._settings.sample_size,
         )
-        current.set_attribute("questions.samples", len(formed))
+        planned = plans(
+            wanted=self._settings.per_topic,
+            types=self._settings.type_mix,
+            bands=self._settings.difficulty_mix,
+            unanswerable_share=self._settings.unanswerable_share,
+        )
 
         threads: list[list[CheckedQuestion]] = []
         accepted: list[CheckedQuestion] = []
-        for index, sample in enumerate(formed):
-            candidate = self._writer.write(
-                sample,
-                answerable=not spread(index, self._settings.unanswerable_share),
-            )
+        written = 0
+        for index, plan in enumerate(planned):
+            sample = deal.sample(plan.shape)
+            if sample is None:
+                # The topic ran out of passages before the plan ran out of
+                # slots. Everything it had has been asked about once.
+                break
+            written += 1
+            candidate = self._writer.write(sample, plan)
             # Against what this run has accepted as well as what the database
             # holds: nothing is stored until the topic is finished, so
             # without it a topic would happily write the same question twice.
@@ -230,17 +250,23 @@ class QuestionGenerationService(StageService):
             if checked.accepted:
                 accepted.append(checked)
                 if spread(index, self._settings.followup_share):
-                    thread += self._followups(sample, checked, accepted)
+                    thread += self._followups(sample, plan, checked, accepted)
             threads.append(thread)
+        current.set_attribute("questions.samples", written)
         return threads
 
     def _followups(
         self,
-        sample,
+        sample: FactGroup,
+        plan: Plan,
         root: CheckedQuestion,
         accepted: list[CheckedQuestion],
     ) -> list[CheckedQuestion]:
         """Writes the questions somebody would ask after this one.
+
+        Each turn takes the next type in QUESTIONS_FOLLOWUP_TYPES, so a thread
+        moves from a value to the circumstances it applies in to the reason
+        behind it rather than asking the same kind of thing three times.
 
         Only after an accepted, answerable root. A thread whose first turn
         has no answer has nothing to follow on from - the chatbot was
@@ -252,13 +278,23 @@ class QuestionGenerationService(StageService):
         is written after it: a third turn following a second that was thrown
         out is a conversation with a hole in it.
         """
-        if not root.answerable:
+        if not root.answerable or not self._settings.followup_types:
             return []
 
         turns: list[tuple[str, str | None]] = [(root.question_text, root.target_answer)]
         written: list[CheckedQuestion] = []
-        for _ in range(self._settings.max_followups):
-            candidate = self._writer.follow_up(sample, tuple(turns))
+        for turn in range(self._settings.max_followups):
+            names = self._settings.followup_types
+            candidate = self._writer.follow_up(
+                sample,
+                tuple(turns),
+                Plan(
+                    spec=SPECS[names[turn % len(names)]],
+                    band=plan.band,
+                    shape=plan.shape,
+                    answerable=True,
+                ),
+            )
             checked = self._checker.check(candidate, accepted)
             written.append(checked)
             if not checked.accepted:

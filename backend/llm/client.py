@@ -108,6 +108,19 @@ class Client:
             **(
                 {"api_base": self._settings.base_url} if self._settings.base_url else {}
             ),
+            # Also omitted when unset: a hosted provider has no such parameter
+            # and sizes its own window.
+            **({"num_ctx": self._settings.num_ctx} if self._settings.num_ctx else {}),
+            # A thinking model asked for a structured answer spends its whole
+            # window thinking and returns nothing: one 12B model produced 7,469
+            # tokens of reasoning, hit the length limit and answered with an
+            # empty string, in 307 seconds. With thinking off the same call
+            # took 9 seconds. Ollama reads this as `think`.
+            **(
+                {"reasoning_effort": self._settings.reasoning_effort}
+                if self._settings.reasoning_effort
+                else {}
+            ),
             temperature=self._settings.temperature,
             timeout=self._settings.timeout_seconds,
             response_model=shape,

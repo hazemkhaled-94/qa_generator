@@ -1,8 +1,13 @@
-"""Which facts go together, and which questions get no answer.
+"""What the deal offers the writer, and how wide it is.
 
-Both decisions are deterministic on purpose. A reference dataset whose
+Every decision here is deterministic on purpose. A reference dataset whose
 contents move between runs of the same corpus is not a reference, which is
 the same reason TOPIC_RANDOM_STATE is fixed.
+
+The measurement these exist to hold: on the corpus this was written against,
+the deal that preceded them offered two passages in 5 of 214 samples, because
+`size` flushed a group and then added the next passage whole. Almost every
+question was single-passage, and `hard` was unreachable.
 """
 
 from __future__ import annotations
@@ -10,109 +15,252 @@ from __future__ import annotations
 from factories import source
 
 from database.qa_generator import DocumentScope, PassageScope, TopicScope
-from question_generation.selection import bridged, samples, spread
+from question_generation.selection import (
+    Deal,
+    Shape,
+    by_passage,
+    ranked,
+    spread,
+    strided,
+)
 
 
-def test_a_group_spans_two_documents_when_the_topic_has_two() -> None:
-    """Which is what a cross-document question is, and what it is for."""
-    facts = [
-        source(1, document="a", passage_id=1),
-        source(2, document="a", passage_id=2),
-        source(3, document="b", passage_id=3),
-        source(4, document="b", passage_id=4),
+def facts_of(passage_id: int, document: str, count: int = 2, **kwargs) -> list:
+    """One passage's worth of facts, numbered so no two collide."""
+    return [
+        source(passage_id * 100 + n, document=document, passage_id=passage_id, **kwargs)
+        for n in range(count)
     ]
 
-    formed = samples(facts, wanted=10, size=2)
 
-    assert [one.criteria().document_scope for one in formed] == [
-        DocumentScope.CROSS
-    ] * 2
+# ── The cap, which is what was broken ─────────────────────────────────────
 
 
-def test_reading_straight_down_the_list_would_never_cross_a_document() -> None:
-    """The failure the interleaving exists to prevent.
+def test_a_sample_never_offers_more_facts_than_the_cap() -> None:
+    """The defect that made every sample one passage.
 
-    The facts arrive sorted by document, so a group taken in order is one
-    document's facts every time.
+    `size` used to flush the group and then add the next passage entire, so a
+    passage of 37 facts was offered whole and nothing else fitted beside it.
     """
-    facts = [source(n, document="a" if n < 2 else "b", passage_id=n) for n in range(4)]
+    deal = Deal(facts_of(1, "a", count=37), wanted=1, size=6)
 
-    straight = [facts[0:2], facts[2:4]]
+    sample = deal.sample()
 
-    assert all(len({one.doc_sha256 for one in pair}) == 1 for pair in straight)
-    assert [
-        one.criteria().document_scope for one in samples(facts, wanted=4, size=2)
-    ] == [DocumentScope.CROSS] * 2
+    assert sample is not None
+    assert len(sample.facts) == 6
 
 
-def test_one_document_still_yields_samples() -> None:
-    """A corpus of one document has no cross-document question to write.
-
-    It still has multi-passage ones, which is the scope that separates
-    "reach two chunks" from "reach two files".
-    """
-    facts = [source(n, document="a", passage_id=n) for n in range(4)]
-
-    formed = samples(facts, wanted=10, size=2)
-
-    assert [one.criteria().passage_scope for one in formed] == [PassageScope.MULTI] * 2
-    assert [one.criteria().document_scope for one in formed] == [
-        DocumentScope.SINGLE
-    ] * 2
-
-
-def test_two_facts_of_one_passage_are_a_single_passage_question() -> None:
-    """Difficulty is the spread of the evidence, not the count of it."""
-    formed = samples(
-        [source(1, document="a", passage_id=7), source(2, document="a", passage_id=7)],
-        wanted=1,
-        size=2,
+def test_a_wide_sample_offers_both_passages_rather_than_filling_from_one() -> None:
+    """The cap is divided, so what is being compared is both there."""
+    deal = Deal(
+        facts_of(1, "a", count=10) + facts_of(2, "b", count=10), wanted=2, size=6
     )
 
-    assert formed[0].criteria().passage_scope == PassageScope.SINGLE
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert {fact.passage_id for fact in sample.facts} == {1, 2}
+    assert len(sample.facts) == 6
 
 
-def test_a_group_of_one_is_an_ordinary_question() -> None:
-    """QUESTIONS_GROUP_SIZE=1 turns cross-document questions off."""
-    facts = [source(n, document="a" if n % 2 else "b", passage_id=n) for n in range(4)]
+def test_a_passage_with_one_fact_still_offers_it() -> None:
+    """Dividing the cap never rounds a passage down to nothing."""
+    deal = Deal(facts_of(1, "a", count=1) + facts_of(2, "b", count=1), wanted=2, size=1)
 
-    formed = samples(facts, wanted=10, size=1)
+    sample = deal.sample(Shape.CROSS)
 
-    assert all(len(one.facts) == 1 for one in formed)
-    assert {one.criteria().passage_scope for one in formed} == {PassageScope.SINGLE}
-
-
-def test_no_more_groups_than_were_wanted() -> None:
-    """QUESTIONS_PER_TOPIC is what a run costs, so it has to be the ceiling."""
-    facts = [source(n, document="a", passage_id=n) for n in range(20)]
-
-    assert len(samples(facts, wanted=3, size=2)) == 3
+    assert sample is not None
+    assert len(sample.facts) == 2
 
 
-def test_no_facts_is_no_groups_rather_than_an_empty_one() -> None:
-    """An empty group has no language and no difficulty to read."""
-    assert samples([], wanted=5, size=2) == []
+# ── The shapes, and what each is worth ────────────────────────────────────
 
 
-def test_the_same_facts_deal_the_same_groups_whatever_order_they_arrive_in() -> None:
+def test_a_single_sample_is_one_passage() -> None:
+    """Which is the easy band: nothing above one."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4)
+
+    sample = deal.sample(Shape.SINGLE)
+
+    assert sample is not None
+    assert sample.criteria().passage_scope == PassageScope.SINGLE
+    assert sample.criteria().document_scope == DocumentScope.SINGLE
+
+
+def test_a_cross_sample_reaches_another_document() -> None:
+    """Two points: a cross-document question is multi-passage by construction."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4)
+
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert sample.criteria().document_scope == DocumentScope.CROSS
+    assert sample.criteria().passage_scope == PassageScope.MULTI
+
+
+def test_a_bridge_sample_reaches_another_document_and_another_subject() -> None:
+    """Three points, which is the only way `hard` is reached by evidence."""
+    deal = Deal(
+        facts_of(1, "a", topic_id=7),
+        facts_of(2, "b", topic_id=8),
+        wanted=1,
+        size=4,
+    )
+
+    sample = deal.sample(Shape.BRIDGE)
+
+    assert sample is not None
+    assert sample.criteria().topic_scope == TopicScope.MULTI
+    assert sample.criteria().document_scope == DocumentScope.CROSS
+    assert sample.criteria().difficulty == "hard"
+
+
+def test_a_topic_in_one_document_falls_back_rather_than_writing_nothing() -> None:
+    """A subject with no cross-document question in it is still a subject."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "a"), wanted=2, size=4)
+
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert sample.criteria().passage_scope == PassageScope.MULTI
+    assert sample.criteria().document_scope == DocumentScope.SINGLE
+
+
+def test_a_topic_of_one_passage_offers_it_alone() -> None:
+    """Asking for a shape nothing can supply is not a reason to yield none."""
+    deal = Deal(facts_of(1, "a"), wanted=1, size=4)
+
+    sample = deal.sample(Shape.BRIDGE)
+
+    assert sample is not None
+    assert {fact.passage_id for fact in sample.facts} == {1}
+
+
+def test_the_nearest_passage_of_a_document_is_the_one_paired() -> None:
+    """Passages are numbered in reading order, so a neighbour is related."""
+    deal = Deal(
+        facts_of(1, "a", ordinal=1)
+        + facts_of(2, "a", ordinal=2)
+        + facts_of(9, "a", ordinal=40),
+        wanted=1,
+        size=4,
+    )
+
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert {fact.passage_id for fact in sample.facts} == {1, 2}
+
+
+def test_the_passage_sharing_most_vocabulary_is_the_one_paired() -> None:
+    """Two passages about related things, as the corpus itself says."""
+    deal = Deal(
+        facts_of(1, "a", lemmas=("fee", "licence", "bank"))
+        + facts_of(2, "b", lemmas=("weather", "rainfall"))
+        + facts_of(3, "c", lemmas=("fee", "licence", "insurer")),
+        wanted=1,
+        size=6,
+    )
+
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert {fact.passage_id for fact in sample.facts} == {1, 3}
+
+
+# ── Coverage: what a run reaches ──────────────────────────────────────────
+
+
+def test_a_passage_is_offered_once() -> None:
+    """Two questions from one passage are two questions about one thing."""
+    deal = Deal([f for p in range(6) for f in facts_of(p, "a")], wanted=6, size=4)
+
+    seen = []
+    while (sample := deal.sample()) is not None:
+        seen.extend({fact.passage_id for fact in sample.facts})
+
+    assert len(seen) == len(set(seen))
+
+
+def test_a_pairing_never_offers_a_passage_a_later_sample_would_get() -> None:
+    """A partner is used, so it is not dealt again as a head."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4)
+
+    first = deal.sample(Shape.CROSS)
+
+    assert first is not None
+    assert deal.sample() is None
+
+
+def test_the_deal_runs_out_rather_than_repeating() -> None:
+    """A topic of three passages yields three questions, not twenty."""
+    deal = Deal([f for p in range(3) for f in facts_of(p, "a")], wanted=20, size=4)
+
+    dealt = [deal.sample() for _ in range(5)]
+
+    assert [one is not None for one in dealt] == [True, True, True, False, False]
+
+
+def test_passages_are_strided_over_the_whole_topic() -> None:
+    """A topic of eighty passages asked about across all of it, not its start.
+
+    Ten questions used to mean the first ten passages in document order, so
+    two thirds of a big topic was never asked about at all.
+    """
+    reordered = strided(list(range(20)), 4)
+
+    assert reordered[:4] == [0, 5, 10, 15]
+    assert sorted(reordered) == list(range(20))
+
+
+def test_striding_keeps_everything_when_more_is_wanted_than_there_is() -> None:
+    """Nothing is dropped; the rest follow in their own order."""
+    assert strided([1, 2, 3], 10) == [1, 2, 3]
+
+
+# ── Determinism ───────────────────────────────────────────────────────────
+
+
+def test_the_same_facts_deal_the_same_samples_whatever_order_they_arrive() -> None:
     """The dataset must not depend on what the database returned first."""
-    facts = [source(n, document="ab"[n % 2], passage_id=n) for n in range(8)]
+    facts = [f for p in range(6) for f in facts_of(p, "ab"[p % 2])]
 
-    forwards = samples(facts, wanted=4, size=2)
-    backwards = samples(list(reversed(facts)), wanted=4, size=2)
+    def dealt(rows):
+        """Every sample one deal produces, as fact ids."""
+        deal = Deal(rows, wanted=6, size=4)
+        got = []
+        while (sample := deal.sample(Shape.CROSS)) is not None:
+            got.append([fact.id for fact in sample.facts])
+        return got
 
-    assert [[f.id for f in one.facts] for one in forwards] == [
-        [f.id for f in one.facts] for one in backwards
+    assert dealt(facts) == dealt(list(reversed(facts)))
+
+
+def test_a_fact_carrying_a_value_is_offered_first() -> None:
+    """A checkable question is written from a number, a date or an amount."""
+    facts = [
+        source(1, passage_id=1, statement="It is reviewed regularly."),
+        source(
+            2, passage_id=1, statement="It is reviewed every 4 years.", units=("4",)
+        ),
     ]
 
+    assert [fact.id for fact in ranked(facts)] == [2, 1]
 
-def test_every_fact_is_used_at_most_once() -> None:
-    """A fact in two groups is the same claim tested twice."""
-    facts = [source(n, document="abc"[n % 3], passage_id=n) for n in range(9)]
 
-    used = [fact.id for one in samples(facts, wanted=9, size=2) for fact in one.facts]
+def test_facts_are_grouped_by_the_passage_they_came_from() -> None:
+    """A passage is the unit dealt, because its facts share a subject."""
+    grouped = by_passage(facts_of(1, "a") + facts_of(2, "a"))
 
-    assert len(used) == len(set(used))
+    assert [{fact.passage_id for fact in one} for one in grouped] == [{1}, {2}]
+
+
+def test_no_facts_is_no_samples_rather_than_an_empty_one() -> None:
+    """An empty group has no language and no difficulty to read."""
+    assert Deal([], wanted=5, size=2).sample() is None
+
+
+# ── The share spread every position-taken decision reads ──────────────────
 
 
 def test_the_unanswerable_share_is_exact_and_spread_out() -> None:
@@ -127,63 +275,3 @@ def test_a_share_of_zero_perturbs_nothing_and_a_share_of_one_perturbs_all() -> N
     """Both ends without a branch of their own."""
     assert not any(spread(index, 0.0) for index in range(10))
     assert all(spread(index, 1.0) for index in range(10))
-
-
-# ── Bridges, which is what makes a multi-topic question available ──────────
-
-
-def test_a_bridge_passage_turns_a_sample_multi_topic() -> None:
-    """The scope that was impossible before.
-
-    A sample was drawn from one claimed topic's facts, so every question was
-    single-topic by construction. A bridge is a passage whose strongest
-    topic is a different one but which carries the claimed one above the
-    weight floor, so the corpus itself says the two subjects meet there.
-    """
-    own = [source(n, document="a", passage_id=1, topic_id=7) for n in range(2)]
-    bridge = [source(9, document="b", passage_id=2, topic_id=8)]
-
-    formed = bridged(samples(own, wanted=1, size=4), bridge, share=1.0, size=4)
-
-    assert formed[0].criteria().topic_scope == TopicScope.MULTI
-    assert formed[0].criteria().document_scope == DocumentScope.CROSS
-
-
-def test_only_a_share_of_samples_is_bridged() -> None:
-    """A bridge on every sample would make single_topic unreachable.
-
-    The scope is worth measuring in both directions, so a corpus where
-    everything crosses two subjects measures nothing about either.
-    """
-    own = [source(n, document="a", passage_id=n, topic_id=7) for n in range(4)]
-    bridges = [
-        source(50 + n, document="b", passage_id=50 + n, topic_id=8) for n in range(4)
-    ]
-
-    formed = bridged(samples(own, wanted=4, size=2), bridges, share=0.5, size=4)
-
-    scopes = [one.criteria().topic_scope for one in formed]
-    assert TopicScope.MULTI in scopes
-    assert TopicScope.SINGLE in scopes
-
-
-def test_a_bridge_that_would_overflow_the_sample_is_left_out() -> None:
-    """Whole passages or none, as when a sample is filled.
-
-    Half a passage's facts is the incoherence the whole design avoids.
-    """
-    own = [source(n, document="a", passage_id=1, topic_id=7) for n in range(3)]
-    bridge = [source(50 + n, document="b", passage_id=2, topic_id=8) for n in range(3)]
-
-    formed = bridged(samples(own, wanted=1, size=4), bridge, share=1.0, size=4)
-
-    assert formed[0].criteria().topic_scope == TopicScope.SINGLE
-    assert len(formed[0].facts) == 3
-
-
-def test_no_bridges_leaves_every_sample_as_it_was() -> None:
-    """A topic no passage bridges is a topic with its own subject alone."""
-    own = [source(n, document="a", passage_id=n, topic_id=7) for n in range(4)]
-    formed = samples(own, wanted=4, size=2)
-
-    assert bridged(formed, [], share=1.0, size=2) == formed

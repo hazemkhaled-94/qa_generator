@@ -18,10 +18,16 @@ from ingestion.factory import build_removal, build_service
 from ingestion.repository import DocumentRepository
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from preprocessing.parsing.repository import ParseQueue
+from question_generation.config import Settings as QuestionSettings
 from question_generation.repository import QuestionCatalog, QuestionQueue
 from topic_modelling.repository import TopicCatalog, TopicQueue
 
 settings = Settings.load()
+
+#: What generation was asked to write. Read here so a bad mix stops the API at
+#: start-up naming itself, as every other setting does, and so the page can
+#: put what was asked for beside what came out.
+question_settings = QuestionSettings.load()
 
 # Before anything else: a line logged earlier carries no trace id.
 telemetry.configure("api")

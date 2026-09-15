@@ -34,6 +34,69 @@ _GATES = {
             "prompt."
         ),
     ),
+    "answer_too_short": (
+        "Answer is worth scoring",
+        (
+            "The target answer is at least as long as its form is held to by "
+            "QUESTIONS_ANSWER_CHARS."
+        ),
+        (
+            "Answers too thin to score a chatbot against. Lower the floor for "
+            "that form if the answers being refused are bare values like `70%` "
+            "or `2025`, which are the most scoreable answers there are."
+        ),
+    ),
+    "answer_too_long": (
+        "Answer is the size asked for",
+        (
+            "The target answer is within the ceiling its form is held to by "
+            "QUESTIONS_ANSWER_CHARS."
+        ),
+        (
+            "Answers longer than the form allows - usually a value question "
+            "answered with a paragraph. The question was probably too broad "
+            "for its kind."
+        ),
+    ),
+    "wrong_form": (
+        "Answer has the right shape",
+        (
+            "A value names a thing, an explanation explains one. Read off the "
+            "answer's parse, not judged."
+        ),
+        (
+            "Answers of the wrong shape for the kind of question asked: a "
+            "value that describes an action, or an explanation that names a "
+            "thing without explaining anything. A high share for one kind "
+            "means that kind's prompt is not landing."
+        ),
+    ),
+    "wrong_type": (
+        "Asks what it was asked to ask",
+        (
+            "The verifier says the question asks for the kind of thing its "
+            "type asks for."
+        ),
+        (
+            "Questions written into a `reason` or `comparison` slot that ask "
+            "something else. They are not bad questions, but counting them as "
+            "their slot would report a mix nobody got. Only an independent "
+            "verifier may reject one."
+        ),
+    ),
+    "unanchored": (
+        "Could have been asked cold",
+        (
+            "The verifier says somebody who never read the passage could tell "
+            "what is being asked."
+        ),
+        (
+            "Questions naming nothing a searcher would know - `What specific "
+            "components are included?`. Nobody could have typed them without "
+            "the passage in front of them. Not applied to a follow-up, which "
+            "is supposed to lean on its thread."
+        ),
+    ),
     "leaks_source": (
         "Does not name its source",
         (
@@ -151,6 +214,31 @@ _DIFFICULTY = {
     "hard": "Four or five of them.",
 }
 
+#: Every kind of question that can be asked, and what each one asks for. All
+#: of them are question FORMS rather than subjects, so the same list applies
+#: to any corpus. QUESTIONS_TYPE_MIX decides which are written.
+_TYPES = {
+    "factoid": "One checkable value: how many, how much, by when, what limit.",
+    "definition": "What a named thing or status is, as the material defines it.",
+    "entity": "Who does, decides, owns or must be told something.",
+    "enumeration": "Which things belong to a named set.",
+    "condition": "When, or under what circumstances, something applies.",
+    "reason": "Why something is required, done, or the way it is.",
+    "procedure": "How something is done, or in what order the steps go.",
+    "consequence": "What happens when something is or is not done.",
+    "comparison": "How two named things differ. Needs two passages.",
+    "aggregation": "A total no single fact states. Needs two passages.",
+    "temporal": "What changed between two periods. Needs two passages.",
+}
+
+#: What each answer form is, which is what the length bounds and the shape
+#: gates are applied against.
+_FORMS = {
+    "value": "A short noun phrase: a value, an amount, a date, a name.",
+    "list": "Several short items.",
+    "explanation": "One or two sentences of prose.",
+}
+
 #: What a healthy unanswerable share looks like. Too few and nothing tests
 #: whether a chatbot admits ignorance; too many and the benchmark is mostly
 #: about refusing.
@@ -191,6 +279,7 @@ def view() -> None:
         "q": bar.search,
         "field": bar.field,
         "status": bar.block_type,
+        **_narrowing(),
     }
     total, rows = catalog.paged(
         "questions",
@@ -210,6 +299,17 @@ def view() -> None:
         return
 
     quality = client.question_quality(**where)
+    page.findings(
+        "Every kind of question, asked for and written",
+        "One row per kind. `Asked for` is the weight QUESTIONS_TYPE_MIX gives "
+        "it as a share of the run; `Written` is the share of this filtered "
+        "set that came out as that kind, rejected questions included. A kind "
+        "the corpus does not support - a reason, where the material states "
+        "rules and never says why - comes out below its weight whatever the "
+        "weight says.",
+        _kinds(quality, client.question_plan()),
+    )
+
     page.section(
         "Quality of the questions these filters select",
         "Measured over every question matching the search, the document and "
@@ -237,8 +337,11 @@ def view() -> None:
                 "Failed gate": _GATES.get(row["rejected_reason"], ("—",))[0]
                 if row["rejected_reason"]
                 else "—",
+                "Kind": row["question_type"] or "—",
+                "Answer shape": row["answer_form"] or "—",
                 "Answerable": "yes" if row["answerable"] else "no",
                 "Difficulty": row["difficulty"] or "—",
+                "Planned": row["planned_difficulty"] or "—",
                 "Passages": "1" if row["passage_scope"] == "single_passage" else "2+",
                 "Documents": "1"
                 if row["document_scope"] == "single_document"
@@ -269,6 +372,70 @@ def view() -> None:
     )
     if chosen is not None:
         _detail(client, chosen)
+
+
+def _narrowing() -> dict[str, str | bool | None]:
+    """Draws the four pickers the toolbar has no slot for, and reads them.
+
+    A second row rather than more slots on the shared toolbar: every listing
+    page draws that one, and these four are this page's alone.
+    """
+    kind_slot, form_slot, band_slot, turn_slot = st.columns(4)
+    kind = kind_slot.selectbox(
+        "Kind",
+        ["All kinds", *_TYPES],
+        key="questions-kind",
+        help="What the question asks for. "
+        + " ".join(f"`{name}`: {what}" for name, what in _TYPES.items()),
+    )
+    form = form_slot.selectbox(
+        "Answer shape",
+        ["All shapes", *_FORMS],
+        key="questions-form",
+        help="The shape the answer takes, which is what its length bounds and "
+        "the shape gate are applied against. "
+        + " ".join(f"`{name}`: {what}" for name, what in _FORMS.items()),
+    )
+    band = band_slot.selectbox(
+        "Difficulty",
+        ["All difficulties", *_DIFFICULTY],
+        key="questions-band",
+        help="The band the question turned out to be, derived from how far "
+        "its evidence is spread, how long its answer is and whether it "
+        "follows another.",
+    )
+    turn = turn_slot.selectbox(
+        "Turn",
+        ["All turns", "Opening questions", "Follow-ups"],
+        key="questions-turn",
+        help="A follow-up is a question asked after another in a thread. It "
+        "may lean on the conversation, which is what it is for.",
+    )
+    return {
+        "question_type": kind if kind in _TYPES else None,
+        "answer_form": form if form in _FORMS else None,
+        "difficulty": band if band in _DIFFICULTY else None,
+        "follows": {"Opening questions": False, "Follow-ups": True}.get(turn),
+    }
+
+
+def _kinds(quality: dict, plan: dict) -> list[dict[str, str]]:
+    """One row per kind of question: what it was asked for, what came out."""
+    written = quality["question_type"]
+    total = sum(written.values())
+    weights = plan.get("types", {})
+    asked = sum(weights.values()) or 1
+    return [
+        {
+            "Kind": name,
+            "Asked for": f"{weights.get(name, 0) / asked:.0%}",
+            "Written": page.share(written.get(name, 0), total),
+            "Count": f"{written.get(name, 0):,}",
+            "What it asks for": what,
+        }
+        for name, what in _TYPES.items()
+        if weights.get(name) or written.get(name)
+    ]
 
 
 def _corpus_figures(counts: dict[str, dict[str, int]]) -> dict[str, tuple]:
@@ -414,6 +581,17 @@ def _difficulty_figures(quality: dict) -> dict[str, tuple]:
                 "Mean length of the questions in this set. A long mean usually "
                 "means the model is restating its facts rather than asking "
                 "about them."
+            ),
+        ),
+        "Band as planned": (
+            *page.portion(quality["planned_met"], quality["total"]),
+            (
+                "Questions whose band is the one QUESTIONS_DIFFICULTY_MIX "
+                "asked for. The plan decides how wide a sample the writer is "
+                "offered; the band is still read off what the question turned "
+                "out to cite, so a writer that answered one passage of two "
+                "lands below the band it was given. A low share means the "
+                "material does not support the spread being asked for."
             ),
         ),
         "Not yet judged": (
@@ -569,9 +747,17 @@ def _detail(client, question: dict) -> None:
                     "than on what it answers."
                 ),
             ),
+            "Kind": (
+                question["question_type"] or "—",
+                _TYPES.get(
+                    question["question_type"] or "",
+                    "What this question was asked to ask for.",
+                ),
+            ),
             "Difficulty": (
                 question["difficulty"] or "—",
-                _DIFFICULTY.get(
+                f"The plan asked for {question['planned_difficulty'] or '—'}. "
+                + _DIFFICULTY.get(
                     question["difficulty"] or "",
                     "Read off how far the facts behind this question are spread.",
                 ),

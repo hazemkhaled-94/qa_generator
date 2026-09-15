@@ -249,3 +249,50 @@ def test_a_thread_is_deleted_rather_than_orphaned_on_the_way_back(spare: str) ->
     engine.dispose()
 
     assert left == ["Root?"], "the follow-up outlived the column linking it"
+
+
+def test_the_type_columns_arrive_empty_and_the_topics_are_queued_again(
+    spare: str,
+) -> None:
+    """Nothing written before the plan knew what it was asked for.
+
+    The columns cannot be backfilled honestly - a question written under one
+    prompt for every kind is not a factoid, it is a question nobody chose the
+    kind of - so the rows go and the topics return to `new`. Regenerating is
+    what makes the columns true.
+    """
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    types = "3f7b21d9e4a5"
+    config = alembic(spare)
+    command.upgrade(config, f"{types}-1")
+
+    engine = create_engine(spare)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO questions (question_text, target_answer, answerable, "
+                "language, status, difficulty) VALUES "
+                "('Written before the plan?', '48 hours', true, 'en', 'accepted', "
+                "'easy')"
+            )
+        )
+
+    command.upgrade(config, types)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM questions")).scalar() == 0
+        columns = (
+            connection.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'questions'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    engine.dispose()
+
+    assert {"question_type", "answer_form", "planned_difficulty"} <= set(columns)

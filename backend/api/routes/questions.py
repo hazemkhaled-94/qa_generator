@@ -16,7 +16,7 @@ from typing import Literal
 from fastapi import Query
 from pydantic import BaseModel
 
-from api.dependencies import question_catalog, questions_queue
+from api.dependencies import question_catalog, question_settings, questions_queue
 from api.errors import ApiError, ErrorBody
 from api.routes.stage import stage_router
 from database.qa_generator import QuestionStatus
@@ -40,7 +40,43 @@ DocumentScope = Literal["single_document", "cross_document"]
 TopicScope = Literal["single_topic", "multi_topic"]
 Band = Literal["easy", "medium", "hard"]
 
+#: What a question asks for, and what shape of answer that wants. Requested
+#: before the question is written, so a reader can ask for the reasons or the
+#: comparisons alone and a report can say which kinds came out.
+QuestionType = Literal[
+    "factoid",
+    "definition",
+    "entity",
+    "enumeration",
+    "condition",
+    "reason",
+    "procedure",
+    "consequence",
+    "comparison",
+    "aggregation",
+    "temporal",
+]
+AnswerForm = Literal["value", "list", "explanation"]
+
 router = stage_router(name="questions", repository=questions_queue)
+
+
+@dataclass(frozen=True)
+class GenerationPlan:
+    """What generation was asked to write, as the settings say.
+
+    Served so a reader can put the mix that was asked for beside the mix that
+    came out. Every figure here is a setting, not a measurement.
+    """
+
+    types: dict[str, int]
+    difficulty: dict[str, int]
+    followup_types: list[str]
+    per_topic: int
+    unanswerable_share: float
+    followup_share: float
+    max_followups: int
+    answer_chars: dict[str, list[int]]
 
 
 @dataclass(frozen=True)
@@ -74,6 +110,9 @@ def questions(
     document_scope: DocumentScope | None = None,
     topic_scope: TopicScope | None = None,
     difficulty: Band | None = None,
+    planned_difficulty: Band | None = None,
+    question_type: QuestionType | None = None,
+    answer_form: AnswerForm | None = None,
     follows: bool | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -82,6 +121,10 @@ def questions(
 
     `follows` narrows to the follow-ups or to the roots: true for questions
     asked after another, false for the ones that start a thread.
+
+    `difficulty` is the band the question turned out to be and
+    `planned_difficulty` is the one the plan asked for; the two disagreeing is
+    what says how often a wide sample produced a wide question.
     """
     total, rows = question_catalog.page(
         document,
@@ -96,9 +139,35 @@ def questions(
         document_scope=document_scope,
         topic_scope=topic_scope,
         difficulty=difficulty,
+        planned_difficulty=planned_difficulty,
+        question_type=question_type,
+        answer_form=answer_form,
         follows=follows,
     )
     return QuestionPage(total=total, questions=rows)
+
+
+@router.get("/plan")
+def plan() -> GenerationPlan:
+    """Reports what generation is configured to write.
+
+    The mix of types and bands, the shares, and the answer bounds each form is
+    held to. Read from the environment at start-up, so this is what the next
+    run will do rather than what the last one did.
+    """
+    return GenerationPlan(
+        types=question_settings.type_mix,
+        difficulty=question_settings.difficulty_mix,
+        followup_types=list(question_settings.followup_types),
+        per_topic=question_settings.per_topic,
+        unanswerable_share=question_settings.unanswerable_share,
+        followup_share=question_settings.followup_share,
+        max_followups=question_settings.max_followups,
+        answer_chars={
+            form: list(bounds)
+            for form, bounds in question_settings.answer_chars.items()
+        },
+    )
 
 
 @router.get("/quality")
@@ -113,14 +182,17 @@ def quality(
     document_scope: DocumentScope | None = None,
     topic_scope: TopicScope | None = None,
     difficulty: Band | None = None,
+    planned_difficulty: Band | None = None,
+    question_type: QuestionType | None = None,
+    answer_form: AnswerForm | None = None,
     follows: bool | None = None,
 ) -> QuestionQuality:
     """Reports how generation is doing, under the same filter.
 
     The numbers that say whether the questions are questions: how many
-    cleared every gate, which gate stopped the rest, how the three criteria
-    are spread, and how much of the corpus's subject matter is covered at
-    all.
+    cleared every gate, which gate stopped the rest, which kinds were written,
+    how the three criteria are spread, and how much of the corpus's subject
+    matter is covered at all.
     """
     return question_catalog.quality(
         document,
@@ -133,6 +205,9 @@ def quality(
         document_scope=document_scope,
         topic_scope=topic_scope,
         difficulty=difficulty,
+        planned_difficulty=planned_difficulty,
+        question_type=question_type,
+        answer_form=answer_form,
         follows=follows,
     )
 

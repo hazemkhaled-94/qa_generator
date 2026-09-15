@@ -23,6 +23,15 @@ class Settings:
     temperature: float
     timeout_seconds: float
     max_attempts: int
+    #: The context window to ask the runtime for, or None to take its default.
+    #: A self-hosted runtime reserves the whole window as key-value cache
+    #: before it reads anything, so a model advertising 131,072 tokens holds
+    #: gigabytes for a prompt of two thousand.
+    num_ctx: int | None
+    #: How much a thinking model may think before answering, or None to leave
+    #: it to the model. `low`, `medium` and `high` let it think; anything else
+    #: turns thinking off, which is what a structured answer wants.
+    reasoning_effort: str | None
 
     @property
     def lease(self) -> timedelta:
@@ -44,4 +53,6 @@ class Settings:
             temperature=decimal("LLM_TEMPERATURE"),
             timeout_seconds=decimal("LLM_TIMEOUT_SECONDS"),
             max_attempts=integer("LLM_MAX_ATTEMPTS"),
+            num_ctx=int(window) if (window := optional("LLM_NUM_CTX")) else None,
+            reasoning_effort=optional("LLM_REASONING_EFFORT"),
         )

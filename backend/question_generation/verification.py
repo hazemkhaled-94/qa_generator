@@ -5,24 +5,26 @@ behind it:
 
   malformed       structural, free
   answer_too_short  free: nothing worth scoring against
+  answer_too_long   free: not the form of answer that was asked for
+  wrong_form        free: a value carrying a verb, an explanation with none
   leaks_source    free where the title is quoted, the verifier's otherwise
   duplicate       one index probe against the questions already accepted
   answerable      the same probe, when an unanswerable question has a twin
                   the corpus does answer
   unanchored      a question nobody could have asked without the passage
+  wrong_type      it is not the kind of question it was asked to be
   recoverable     the answer is not in the evidence the question cites
 
-The last three come out of one model call. Recoverability is the one no
+The last four come out of one model call. Recoverability is the one no
 similarity measure makes: it asks whether the answer can be got back out of
 the passages, which is what a question is for, and a paraphrase, a
 decomposition and a resolved pronoun all survive it where a threshold would
 not.
 
-`unanchored` and `leaks_source` ride on the same call. Whether a question
-names its subject, and whether it gives away which document answers it, are
-judgements rather than measurements; no structural check makes either, but a
-model already looking at the question and the material can, and asking costs
-nothing extra.
+Every gate that reads an answer reads it against the FORM the question's type
+asked for. One rule for all of them was what made the set what it was: a value
+may carry no verb, so applied to every answer that rule refused every why,
+how, procedure and consequence question ever written.
 
 Two things are load-bearing. The verifier is a different model from the
 writer, because a model marking its own work agrees with itself. And it sees
@@ -33,12 +35,12 @@ dataset, not a retriever.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
-from database.qa_generator import QuestionRejection, QuestionStatus
+from database.qa_generator import AnswerForm, QuestionRejection, QuestionStatus
 from llm.client import Client
 from nlp.analysis import claim, content, normalised, vocabulary
 from nlp.language import detect
@@ -49,6 +51,20 @@ from question_generation.models import (
     CheckedQuestion,
     Neighbour,
 )
+
+#: Length bounds per answer form, as QUESTIONS_ANSWER_CHARS sets them. This is
+#: the fallback for a re-check reading a row whose settings are not to hand,
+#: as LONG_ANSWER_CHARS is.
+BOUNDS: dict[str, tuple[int, int]] = {
+    AnswerForm.VALUE: (1, 80),
+    AnswerForm.LIST: (3, 300),
+    AnswerForm.EXPLANATION: (20, 600),
+}
+
+#: How much of what the target answer is about has to occur in what the
+#: verifier recovered, for a list or an explanation. A value is compared
+#: whole, because every word of one is the answer.
+OVERLAP = 0.6
 
 log = logging.getLogger(__name__)
 
@@ -63,13 +79,15 @@ work out counts either: if the passages do not state it, it is not there.
 - `in_passage` is true ONLY when the passages state the answer outright. If
   you are completing, inferring, rounding or assuming, it is false.
 - `answer` is the answer, taken from the passages, when in_passage is true.
-  Leave it empty otherwise.
+  Leave it empty otherwise. IN THE WORDS OF THE PASSAGES, and so in their
+  language: an answer translated into English is compared against a German
+  target and agrees with nothing.
 
 Saying it is not in the passages is a correct answer and is the one we are
 looking for whenever it is true. Guessing is the failure.
 
-SECOND, answer two narrow questions about the question itself. They are about
-different things and are easy to confuse, so read both.
+SECOND, three narrow readings of the question itself. They are about
+different things and are easy to confuse, so read all three.
 
 - `names_its_source`: does the question say WHERE the answer is - naming or
   quoting a document, a report, a circular, a regulation by name, a section or
@@ -87,19 +105,36 @@ different things and are easy to confuse, so read both.
   Naming a party, a duty, a period or a thing being regulated is NOT naming a
   source. Only saying which material holds the answer is.
 
-- `stands_alone`: could somebody who has never read the passage tell what is
-  being asked? Is there a subject in the question at all?
+- `subject`: COPY the thing the question is about, word for word out of the
+  question. Not what it asks for - what it asks ABOUT.
 
-  TRUE:  "What fee applies to a banking licence application?"
-  FALSE: "What specific components are included?"      (nothing named)
-  FALSE: "For which models do the requirements apply?" (which requirements?)
+  "What fee applies to a banking licence application?"  -> "banking licence
+                                                            application"
+  "How many incidents were reported in 2025?"           -> "incidents
+                                                            reported in 2025"
+  "What specific components are included?"              -> ""
+  "For which models do the requirements apply?"         -> ""
 
-  Judge only that. Do not mark it false for being broad, for being easy, for
-  being oddly worded, or for being one you would not have asked. And do not
-  mark it false for failing to name a document - a question is SUPPOSED not
-  to name one.
+  Leave it EMPTY only when the question names nothing at all - when every
+  noun in it is a bare word like "components", "requirements" or "criteria"
+  with nothing saying whose or which. If you can copy anything more specific
+  than that out of the question, copy it.
 
-All three judgements are independent. A question can be answerable by the
+  A question you could not answer still has a subject. Not finding the answer
+  in the passages says nothing about this, and the two are constantly
+  confused: answer this one by reading the QUESTION, not the passages.
+
+- `matches_intent`: the question was written to ask for one particular kind of
+  thing, named under WAS ASKED TO ASK FOR below. Does it ask for that kind of
+  thing?
+
+  Judge the KIND, not the quality. A question asking why something is required
+  matches "why something is required", whether or not it is a good question.
+  One asking how much something costs does not.
+
+  If nothing is named below, answer true.
+
+All the judgements are independent. A question can be answerable by the
 passages, name no source, and still name no subject either.
 """
 
@@ -113,8 +148,8 @@ class _Recovered(BaseModel):
     )
     answer: str = Field(
         default="",
-        description="The answer, taken from the passages. Empty when "
-        "in_passage is false.",
+        description="The answer, taken from the passages and in their "
+        "language. Empty when in_passage is false.",
     )
     names_its_source: bool = Field(
         default=False,
@@ -123,12 +158,18 @@ class _Recovered(BaseModel):
         "heading. Naming a party, duty, period or regulated thing is not "
         "naming a source.",
     )
-    stands_alone: bool = Field(
+    subject: str = Field(
+        default="",
+        description="The thing the question is ABOUT, copied word for word "
+        "out of the question. Empty only when it names nothing at all. Read "
+        "the question, not the passages: a question you could not answer "
+        "still has a subject.",
+    )
+    matches_intent: bool = Field(
         default=True,
-        description="True if somebody who has never read the passages could "
-        "tell what is being asked. False only if the question names no "
-        "subject at all. Not false for failing to name a document: a question "
-        "is supposed not to name one.",
+        description="True if the question asks for the kind of thing it was "
+        "asked to ask for. Judge the kind, not the quality. True when no kind "
+        "was named.",
     )
 
 
@@ -159,7 +200,8 @@ def structural(
     answerable: bool,
     language: str | None,
     statements: Sequence[str] = (),
-    min_answer_chars: int = 0,
+    form: str = AnswerForm.VALUE,
+    bounds: Mapping[str, tuple[int, int]] | None = None,
     titles: Sequence[str] = (),
 ) -> tuple[str, str] | None:
     """The gates that need neither a model nor an index, or None if it passes.
@@ -167,10 +209,14 @@ def structural(
     Returns the code to store and the reason to log. The several ways of
     being malformed share one code, because none of them measures anything a
     report would group on and the reason belongs where a person debugging
-    reads it. The two that do get a code of their own - an answer too short
-    to score, and a question quoting the title of its own source - are the
-    two a report should be able to count.
+    reads it. The ones that do get a code of their own - an answer outside the
+    bounds of its form, an answer of the wrong form, and a question quoting
+    the title of its own source - are the ones a report should count.
+
+    `form` is the shape the question's type asked its answer to take, and
+    every check on the answer reads it.
     """
+    low, high = (bounds or BOUNDS).get(form, BOUNDS[AnswerForm.VALUE])
     asked = question_text.strip()
     if not asked:
         return QuestionRejection.MALFORMED, "the model returned no question"
@@ -212,44 +258,56 @@ def structural(
             ),
         )
 
-    # An answer carrying a verb is a fragment of the sentence rather than the
-    # thing asked for: `Verwarnungen aussprechen`, `nachvollziehbar zu
-    # begründen`, `nahmen Produkte vom Markt`. Any verb and not only a finite
-    # one, because two of those three are infinitives and make no claim - a
-    # phrase can describe an action without asserting it.
-    #
-    # Nothing narrower is checked here. `48 hours` answering `within how many
-    # hours ...` shares its head noun with the question and is a perfectly
-    # ordinary pair, so overlap between the two is not evidence of anything.
-    # A floor on the answer, so a question is not scored against something
-    # too thin to be worth scoring: `7`, `8%`, `Nein`. It is a blunt
-    # instrument and QUESTIONS_MIN_ANSWER_CHARS is where it is set, because
-    # the cost is real - on one corpus a floor of 15 refused 41% of the
-    # accepted answers, `70%` and `2025` among them. Raise it to force
-    # substance, lower it to keep bare values.
+    # Bounds per form, so a question is not scored against something too thin
+    # to be worth scoring - `7`, `8%`, `Nein` - nor against an essay where a
+    # value was asked for. QUESTIONS_ANSWER_CHARS sets both ends of each form.
     answer = (target_answer or "").strip()
-    if answer and len(answer) < min_answer_chars:
+    if answer and len(answer) < low:
         return (
             QuestionRejection.ANSWER_TOO_SHORT,
             (
-                f"the target answer {answer!r} is {len(answer)} characters and "
-                f"QUESTIONS_MIN_ANSWER_CHARS is {min_answer_chars}"
+                f"the target answer {answer!r} is {len(answer)} characters and a "
+                f"{form} answer is held to at least {low}"
+            ),
+        )
+    if answer and len(answer) > high:
+        return (
+            QuestionRejection.ANSWER_TOO_LONG,
+            (
+                f"the target answer {answer!r} is {len(answer)} characters and a "
+                f"{form} answer is held to at most {high}"
             ),
         )
 
-    # Only for an answer of more than one word. `Verwarnungen aussprechen`,
-    # `nachvollziehbar zu begründen` and `nahmen Produkte vom Markt` - the
-    # three real failures - are all several. A single word is a thing by
-    # construction, and `de_core_news_md` tags `dreihundert` as a verb, so
-    # checking one refuses a good answer to catch a rare bad one. Losing
-    # data is the worse error, as with the phrasing gate.
-    if answer and len(answer.split()) > 1 and claim(answer, language).verbs:
+    # The form the type asked for, read off the answer's parse.
+    #
+    # A value carrying a verb is a fragment of the sentence rather than the
+    # thing asked for: `Verwarnungen aussprechen`, `nachvollziehbar zu
+    # begründen`. Any verb and not only a finite one, because those two are
+    # infinitives and make no claim - a phrase can describe an action without
+    # asserting it. Only for an answer of more than one word: a single word is
+    # a thing by construction, and `de_core_news_md` tags `dreihundert` as a
+    # verb.
+    #
+    # An explanation carrying none is the opposite failure: a why or a how
+    # answered with a noun phrase has not been answered.
+    if answer and form == AnswerForm.VALUE:
+        if len(answer.split()) > 1 and claim(answer, language).verbs:
+            return (
+                QuestionRejection.WRONG_FORM,
+                (
+                    f"the target answer {answer!r} describes an action rather "
+                    f"than naming a thing, and this question asked for a value"
+                ),
+            )
+    elif (
+        answer and form == AnswerForm.EXPLANATION and not claim(answer, language).verbs
+    ):
         return (
-            QuestionRejection.MALFORMED,
+            QuestionRejection.WRONG_FORM,
             (
-                f"the target answer {answer!r} describes an action rather than "
-                f"naming a thing; what can be scored is a value, an amount, a "
-                f"date, a name or a duty"
+                f"the target answer {answer!r} names a thing rather than "
+                f"explaining anything, and this question asked for an explanation"
             ),
         )
 
@@ -350,6 +408,8 @@ class Reading:
     recovered: str | None
     stands_alone: bool
     names_its_source: bool = False
+    #: Whether it asks for the kind of thing its type asked for.
+    matches_intent: bool = True
 
 
 class Verifier:
@@ -369,6 +429,7 @@ class Verifier:
         question: str,
         passages: Sequence[str],
         thread: Sequence[tuple[str, str | None]] = (),
+        asks: str = "",
     ) -> Reading:
         """Answers one question from these passages, and judges the question.
 
@@ -392,24 +453,48 @@ class Verifier:
             if thread
             else f"Question: {question}"
         )
+        intent = f"\n\nWAS ASKED TO ASK FOR: {asks}" if asks else ""
         got = self._client.answer(
             system=_VERIFY,
-            user=f"Passages:\n{numbered}\n\n{asked}",
+            user=f"Passages:\n{numbered}\n\n{asked}{intent}",
             shape=_Recovered,
         )
         return Reading(
             recovered=(
                 got.answer.strip() if got.in_passage and got.answer.strip() else None
             ),
-            stands_alone=got.stands_alone,
+            # Whether it names a subject, read off the subject it named. Asked
+            # as a yes or no it was answered `no` for questions naming a party,
+            # a period and a duty apiece - six of ten rejections in one topic,
+            # four of them on unanswerable questions, where a model that could
+            # not find the answer says the question named nothing. Copying a
+            # span out of the question is a task a small model does not
+            # confuse with reading the passages.
+            stands_alone=bool(got.subject.strip()),
             names_its_source=got.names_its_source,
+            matches_intent=got.matches_intent,
         )
 
 
-def agrees(recovered: str, target: str, language: str | None) -> bool:
+def agrees(
+    recovered: str,
+    target: str,
+    language: str | None,
+    form: str = AnswerForm.VALUE,
+    overlap: float = OVERLAP,
+) -> bool:
     """Whether what the verifier got back says what the target answer says.
 
     Two tests, both of which have to pass.
+
+    How the second is applied depends on the FORM the answer was asked to
+    take. A value is compared whole, because every word of one is the answer.
+    A list or an explanation is compared by how much of it came back: `it is
+    raised through the web form, and confirmed by email before work begins`
+    recovered as `raised through the web form and confirmed by email` is the
+    same answer, and asking for every lemma of prose to survive a paraphrase
+    refuses answers the verifier found. QUESTIONS_ANSWER_OVERLAP is where the
+    share is set.
 
     Every number and name the target asserts has to occur in what came back.
     That is extraction's `unsupported_addition` check pointed the other way,
@@ -457,7 +542,10 @@ def agrees(recovered: str, target: str, language: str | None) -> bool:
 
     wanted = content(target, language)
     if wanted:
-        return wanted <= content(recovered, language)
+        got = content(recovered, language)
+        if form == AnswerForm.VALUE:
+            return wanted <= got
+        return len(wanted & got) / len(wanted) >= overlap
 
     left, right = normalised(recovered), normalised(target)
     return bool(left) and (left in right or right in left)
@@ -474,7 +562,8 @@ class QuestionChecker:
         nearest,
         threshold: float,
         judge_phrasing: bool = True,
-        min_answer_chars: int = 0,
+        bounds: Mapping[str, tuple[int, int]] | None = None,
+        overlap: float = OVERLAP,
         long_answer_chars: int = LONG_ANSWER_CHARS,
     ) -> None:
         """Initialises the checker with its collaborators.
@@ -484,19 +573,20 @@ class QuestionChecker:
         for it would let a gate read anything.
 
         `judge_phrasing` is whether the verifier's opinion of the question
-        may reject one. It is the only gate here that is an opinion rather
-        than a measurement, and an opinion needs an independent holder: a
-        writer marking its own work rejected `According to the ECB and NCAs,
-        who conducts the due diligence check?` for naming nothing. The
-        factory turns it off when QUESTIONS_VERIFIER_MODEL is unset, and the
-        verdict is logged either way. Recoverability stays on regardless,
-        because that one is checkable against the passage.
+        may reject one. Those gates are the only ones here that are an
+        opinion rather than a measurement, and an opinion needs an
+        independent holder: a writer marking its own work rejected `According
+        to the ECB and NCAs, who conducts the due diligence check?` for
+        naming nothing. The factory turns it off when QUESTIONS_VERIFIER_MODEL
+        is unset, and the verdict is logged either way. Recoverability stays
+        on regardless, because that one is checkable against the passage.
         """
         self._embedder = embedder
         self._verifier = verifier
         self._nearest = nearest
         self._judge_phrasing = judge_phrasing
-        self._min_answer_chars = min_answer_chars
+        self._bounds = dict(bounds or BOUNDS)
+        self._overlap = overlap
         self._long_answer_chars = long_answer_chars
         self._threshold = threshold
 
@@ -519,7 +609,8 @@ class QuestionChecker:
             answerable=candidate.answerable,
             language=candidate.group.language,
             statements=candidate.group.statements,
-            min_answer_chars=self._min_answer_chars,
+            form=candidate.spec.form,
+            bounds=self._bounds,
             titles=candidate.group.titles,
         )
         if failed:
@@ -544,7 +635,10 @@ class QuestionChecker:
     def _round_trip(self, candidate: Candidate) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back, and how it reads."""
         read = self._verifier.read(
-            candidate.question_text, candidate.group.passages, candidate.thread
+            candidate.question_text,
+            candidate.group.passages,
+            candidate.thread,
+            asks=candidate.spec.asks,
         )
 
         # Judged before the answer is, and for both kinds of question: an
@@ -590,6 +684,27 @@ class QuestionChecker:
                 reason,
             )
 
+        # The kind of question it was asked to be. A `reason` slot answered
+        # with a value is not a reason question, and counting it as one is how
+        # a mix nobody got is reported as a mix everybody got. An opinion, so
+        # it needs the same independent holder as the two above.
+        if not read.matches_intent:
+            wrong = (
+                QuestionRejection.WRONG_TYPE,
+                (
+                    f"the verifier says it does not ask for "
+                    f"{candidate.spec.asks}, which is what a "
+                    f"{candidate.spec.name} question asks for"
+                ),
+            )
+            if self._judge_phrasing:
+                return wrong
+            log.info(
+                "keeping %r: %s, but the writer judged itself",
+                candidate.question_text,
+                wrong[1],
+            )
+
         if candidate.answerable:
             target = candidate.target_answer or ""
             if read.recovered is None:
@@ -597,7 +712,13 @@ class QuestionChecker:
                     QuestionRejection.NOT_RECOVERABLE,
                     "the verifier could not find the answer in the cited passages",
                 )
-            if not agrees(read.recovered, target, candidate.group.language):
+            if not agrees(
+                read.recovered,
+                target,
+                candidate.group.language,
+                candidate.spec.form,
+                self._overlap,
+            ):
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
                     (
@@ -653,4 +774,9 @@ class QuestionChecker:
             fact_ids=tuple(fact.id for fact in candidate.group.facts),
             embedding=embedding,
             thread_position=candidate.thread_position,
+            question_type=candidate.spec.name,
+            # An unanswerable question has no answer, so it has no form: the
+            # column says what shape the answer takes and there is none.
+            answer_form=candidate.spec.form if candidate.answerable else None,
+            planned_difficulty=candidate.planned_difficulty,
         )

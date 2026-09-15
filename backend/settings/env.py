@@ -85,3 +85,22 @@ def csv(name: str) -> tuple[str, ...]:
         KeyError: If it is unset or empty.
     """
     return tuple(part.strip() for part in required(name).split(",") if part.strip())
+
+
+def mapping(name: str) -> dict[str, str]:
+    """Reads a required comma-separated list of `key:value` pairs.
+
+    Raises:
+        KeyError: If it is unset or empty.
+        ValueError: If an entry carries no colon, naming the variable.
+    """
+    found = {}
+    for entry in csv(name):
+        key, colon, value = entry.partition(":")
+        if not colon or not key.strip():
+            raise ValueError(
+                f"{name} takes KEY:VALUE entries separated by commas; {entry!r} "
+                f"is not one"
+            )
+        found[key.strip()] = value.strip()
+    return found
