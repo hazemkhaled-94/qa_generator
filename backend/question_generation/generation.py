@@ -12,6 +12,14 @@ replaced by a question word. `Geopolitische Konflikte schüren Unsicherheit`
 became `Was schüren geopolitische Konflikte?`, over and over. The passage is
 what a question can be phrased from; the fact is what it has to be answered
 by.
+
+The correction to that overshot, and the overshoot is worth recording. Told to
+name what it was asking about, the writer named the document: `Laut den
+'Risiken im Fokus 2026', ...`, `Gemäß der MaRisk, ...` - seven of ten in one
+topic. Which is worse than vague, because a question carrying its own source
+has already done the work it was meant to test. Nobody asks a service desk a
+question while telling it which file to open. Naming the SUBJECT and naming
+the SOURCE are different things, and only the first is wanted.
 """
 
 from __future__ import annotations
@@ -24,29 +32,41 @@ from question_generation.models import Candidate, FactGroup
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
 
 _ASK = """You write one test question for measuring a document-search chatbot.
 
 You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
 from. The question must be answered by the facts. The passage is there so you
-know what the material is about and what it calls things - use it to phrase
-the question, never as something to ask about.
+know what the material is about - use it to phrase the question, never as
+something to ask about and never as something to cite.
 
 Write the question somebody who needs this information would actually type.
-They have not read the passage. They are searching a corpus for an answer.
+They have not read the passage. They do not know which document answers them -
+finding that out is the whole reason they are asking.
 
 Rules, all of them mandatory:
 
-- NAME WHAT YOU ARE ASKING ABOUT, as a searcher would have to. Say which
-  institution, which document, which rule, which year. A question that opens
-  with a bare "What" or "Which" and no such anchor is not a question anybody
-  could type into a corpus of thousands of pages.
+- NEVER SAY WHERE THE ANSWER IS. No "According to the annual report", no "Laut
+  dem Rundschreiben", no "Gemäß der MaRisk", no "in this circular", no naming
+  or quoting a document, a report, a section or a heading. Nobody asks a
+  service desk a question while telling it which file to open. A question that
+  cites its own source has already done the work it was meant to test, and it
+  is thrown away.
 
-- NAME IT, DO NOT POINT AT IT. "According to the material", "according to the
-  notice", "in this circular", "the requirements", "the report" - none of
-  these is an anchor. A searcher does not know which material you mean. Use
-  the name the passage uses: the authority, the regulation, the year.
+- NAME THE SUBJECT, NOT THE SOURCE. These are different things, and the
+  difference is the whole rule. The subject is what the question is about -
+  the thing being regulated, the duty, the party, the period. The source is
+  which document says it. Name the first, never the second.
+
+    NAME:   the supervised institution, the model type, the fee, the year the
+            figure is from, the kind of risk, the authority whose duty it is
+    NEVER:  the report it appears in, the circular that sets it, the section
+            heading above it, the title of the material
+
+- A question that opens with a bare "What" or "Which" and names nothing at
+  all is still no good. Say what you are asking about - just not where to
+  look it up.
 
 - DO NOT TURN THE FACT INTO A QUESTION. Taking the sentence and replacing one
   part with a question word is the failure this whole task is about. If your
@@ -89,24 +109,25 @@ Worked example. Facts, under the heading "Support > Response times":
   WRONG  question: "Within how many hours is a standard request answered?"
          (the fact with its number deleted; nobody types this)
   WRONG  question: "What are the response times?"
-         (names nothing, and no short answer is right)
+         (names nothing at all, and no short answer is right)
   WRONG  question: "How quickly must support respond?"
          answer:   "must respond within 48 hours"
          (the answer is an action, not a thing)
-  WRONG  question: "According to the service agreement, what answer times does
-                    it set for support requests?"
-         answer:   "Standard requests are answered within 48 hours on working
-                    days and urgent requests within 4 hours."
-         (names its subject, and still useless: the answer is a sentence, so
-          nobody can mark a chatbot right or wrong against it)
+  WRONG  question: "According to the service agreement, how long is allowed
+                    for answering a standard support request?"
+         (names its SOURCE. The person asking does not know there is a
+          service agreement - that is what they are trying to find out)
+  WRONG  question: "Under 'Support > Response times', what is the limit for a
+                    standard request?"
+         (the heading. Same failure, wearing a different hat)
 
-  RIGHT  question: "How long does the service agreement allow for answering a
-                    standard support request?"
+  RIGHT  question: "How long is allowed for answering a standard support
+                    request?"
          answer:   "48 hours"
          facts:    [1]
 
-  RIGHT  question: "Under the service agreement, what are the answer times
-                    for standard and for urgent support requests?"
+  RIGHT  question: "How long is allowed for answering a standard support
+                    request, and how long for an urgent one?"
          answer:   "48 hours and 4 hours"
          facts:    [1, 2]
 """
@@ -125,10 +146,12 @@ just out of reach. Make ONE change:
 
 Rules, all of them mandatory:
 - ONE question, ending in a question mark.
-- NAME WHAT YOU ARE ASKING ABOUT, as a searcher would: the institution, the
-  document, the rule, the year. It must read as though it belongs to this
-  material, because a question about an unrelated subject tests nothing - any
-  chatbot declines that one.
+- NAME THE SUBJECT, NEVER THE SOURCE. Say what you are asking about - the
+  party, the duty, the period, the thing being regulated - so the question
+  reads as though it belongs to this material, because a question about an
+  unrelated subject tests nothing: any chatbot declines that one. But NEVER
+  say which document, report, circular or section it would be in. Nobody asks
+  a service desk a question while telling it which file to open.
 - It must NOT be answerable from the fact or the passage. If reading either
   answers your question, you have written the wrong question.
 - Do not ask something absurd and do not invent a thing that does not exist.
@@ -145,9 +168,11 @@ Worked example:
          (that is the fact itself, and it is answered)
   WRONG  "What is the top speed of a swallow?"
          (nothing to do with this material; declining it tests nothing)
+  WRONG  "What does the service agreement say about public holidays?"
+         (names its source, which no asker would know to do)
 
-  RIGHT  "What answer time does the service agreement set for a standard
-          support request raised on a public holiday?"
+  RIGHT  "How long is allowed for answering a standard support request raised
+          on a public holiday?"
          (same subject, same shape, a condition the material does not cover)
 """
 
@@ -171,6 +196,8 @@ Rules, all of them mandatory:
   is not in the material tests nothing.
 - ASK FOR ONE CHECKABLE VALUE, and answer with a SHORT NOUN PHRASE. Never a
   sentence, never anything with a verb in it.
+- NEVER SAY WHERE THE ANSWER IS. No naming or quoting a document, a report, a
+  section or a heading, here as anywhere else.
 - DO NOT REPEAT a question already in the conversation, and do not ask one
   the last answer already gave. It has to want something new.
 - Write in the language of the facts.
@@ -354,7 +381,8 @@ class QuestionWriter:
         )
         return (
             f"FACTS - your question must be answered by these:\n{numbered}\n\n"
-            f"PASSAGE(S) - what the material says and what it calls things. "
-            f"Phrase the question from these; do not ask about anything here "
-            f"that the facts above do not state:\n{context}"
+            f"PASSAGE(S) - context only, so you know what the material is "
+            f"about. Phrase the question from these; never quote or name a "
+            f"heading or a title out of them, and never ask about anything "
+            f"here that the facts above do not state:\n{context}"
         )

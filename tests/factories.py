@@ -42,6 +42,7 @@ def source(
     passage_text: str | None = None,
     section_path: str | None = None,
     topic_id: int | None = None,
+    document_title: str | None = None,
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
@@ -57,6 +58,7 @@ def source(
         language=language,
         section_path=section_path,
         topic_id=topic_id,
+        document_title=document_title,
     )
 
 

@@ -69,27 +69,39 @@ work out counts either: if the passages do not state it, it is not there.
 Saying it is not in the passages is a correct answer and is the one we are
 looking for whenever it is true. Guessing is the failure.
 
-SECOND, answer one narrow question about the question itself.
+SECOND, answer two narrow questions about the question itself. They are about
+different things and are easy to confuse, so read both.
 
-- `stands_alone`: does the question NAME something specific - an institution,
-  a named document or rule, a period, a defined term - rather than relying on
-  the reader already having the passage open?
+- `names_its_source`: does the question say WHERE the answer is - naming or
+  quoting a document, a report, a circular, a regulation by name, a section or
+  a heading?
 
-  TRUE:  "According to the ECB and NCAs, who conducts the due diligence check
-          for an outsourcing arrangement?"     (names the ECB and the NCAs)
-  TRUE:  "How long does the MaRisk allow for a risk report?"
-                                               (names the document)
-  FALSE: "What specific components are included?"
-                                               (names nothing at all)
-  FALSE: "For which models do the requirements apply?"
-                                               (which requirements?)
+  TRUE:  "Laut den 'Risiken im Fokus 2026', wie viele Risiken werden genannt?"
+  TRUE:  "Gemäß der MaRisk, wie viele Modelltypen sind betroffen?"
+  TRUE:  "According to the annual report, what were the fees?"
+  TRUE:  "Under 'Fees > Banking', what is the charge?"
+  FALSE: "Wie viele Modelltypen unterliegen den Anforderungen?"
+  FALSE: "What fee applies to a banking licence application?"
+  FALSE: "How many cyber incidents were reported to BaFin in 2025?"
+                          (BaFin is who they were reported TO, not a source)
+
+  Naming a party, a duty, a period or a thing being regulated is NOT naming a
+  source. Only saying which material holds the answer is.
+
+- `stands_alone`: could somebody who has never read the passage tell what is
+  being asked? Is there a subject in the question at all?
+
+  TRUE:  "What fee applies to a banking licence application?"
+  FALSE: "What specific components are included?"      (nothing named)
+  FALSE: "For which models do the requirements apply?" (which requirements?)
 
   Judge only that. Do not mark it false for being broad, for being easy, for
-  being oddly worded, or for being one you would not have asked. A question
-  that names something specific is TRUE even if you dislike it.
+  being oddly worded, or for being one you would not have asked. And do not
+  mark it false for failing to name a document - a question is SUPPOSED not
+  to name one.
 
-These two judgements are independent. A question can be perfectly answerable
-by the passages and still name nothing.
+All three judgements are independent. A question can be answerable by the
+passages, name no source, and still name no subject either.
 """
 
 
@@ -105,14 +117,26 @@ class _Recovered(BaseModel):
         description="The answer, taken from the passages. Empty when "
         "in_passage is false.",
     )
+    names_its_source: bool = Field(
+        default=False,
+        description="True if the question says WHERE the answer is: naming or "
+        "quoting a document, report, circular, named regulation, section or "
+        "heading. Naming a party, duty, period or regulated thing is not "
+        "naming a source.",
+    )
     stands_alone: bool = Field(
         default=True,
-        description="True only if somebody who has never read the passages "
-        "could have typed this question and would know what it is about. "
-        "False if it names nothing, refers to `the requirements` or `this "
-        "circular` without saying which, or is a passage sentence with one "
-        "part removed.",
+        description="True if somebody who has never read the passages could "
+        "tell what is being asked. False only if the question names no "
+        "subject at all. Not false for failing to name a document: a question "
+        "is supposed not to name one.",
     )
+
+
+#: The shortest document title worth matching a question against. Below it a
+#: title is a word rather than a name - this corpus has `Contents` - and a
+#: question may contain one without citing anything.
+_TITLE_CHARS = 12
 
 
 def _bare(text: str) -> str:
@@ -128,6 +152,7 @@ def structural(
     language: str | None,
     statements: Sequence[str] = (),
     min_answer_chars: int = 0,
+    titles: Sequence[str] = (),
 ) -> tuple[str, str] | None:
     """The gates that need neither a model nor an index, or None if it passes.
 
@@ -204,13 +229,43 @@ def structural(
             ),
         )
 
-    if answer and claim(answer, language).verbs:
+    # Only for an answer of more than one word. `Verwarnungen aussprechen`,
+    # `nachvollziehbar zu begründen` and `nahmen Produkte vom Markt` - the
+    # three real failures - are all several. A single word is a thing by
+    # construction, and `de_core_news_md` tags `dreihundert` as a verb, so
+    # checking one refuses a good answer to catch a rare bad one. Losing
+    # data is the worse error, as with the phrasing gate.
+    if answer and len(answer.split()) > 1 and claim(answer, language).verbs:
         return (
             QuestionRejection.MALFORMED,
             (
                 f"the target answer {answer!r} describes an action rather than "
                 f"naming a thing; what can be scored is a value, an amount, a "
                 f"date, a name or a duty"
+            ),
+        )
+
+    # The question quotes the title of the document it came from, which is
+    # the free half of the source-leak check. Verbatim and whole, and only
+    # for a title long enough to be a title: `Contents` and `March 2018` are
+    # rows in this corpus's documents table, and a question is allowed to
+    # contain either by accident. `Risiken im Fokus 2026` it is not.
+    #
+    # The model catches the rest - `Laut dem Jahresbericht 2025` names a
+    # source without quoting `Druckversion - Jahresbericht 2025` exactly -
+    # but this half costs nothing and runs before any call.
+    folded = normalised(asked)
+    quoted = [
+        title
+        for title in titles
+        if len(title.strip()) >= _TITLE_CHARS and normalised(title) in folded
+    ]
+    if quoted:
+        return (
+            QuestionRejection.LEAKS_SOURCE,
+            (
+                f"it names the document it came from ({quoted[0]!r}); nobody asks "
+                f"a question while saying which file holds the answer"
             ),
         )
 
@@ -282,12 +337,14 @@ class Reading:
     """What the verifier made of one question and its passages.
 
     `recovered` is the answer it got back out of them, or None for NOT IN
-    PASSAGE. `stands_alone` is whether somebody who has not read them could
-    have asked the question at all.
+    PASSAGE. `stands_alone` is whether the question names a subject at all.
+    `names_its_source` is whether it says which material holds the answer,
+    which is the opposite failure and was for a while mistaken for a virtue.
     """
 
     recovered: str | None
     stands_alone: bool
+    names_its_source: bool = False
 
 
 class Verifier:
@@ -340,6 +397,7 @@ class Verifier:
                 got.answer.strip() if got.in_passage and got.answer.strip() else None
             ),
             stands_alone=got.stands_alone,
+            names_its_source=got.names_its_source,
         )
 
 
@@ -420,6 +478,7 @@ class QuestionChecker:
             language=candidate.group.language,
             statements=candidate.group.statements,
             min_answer_chars=self._min_answer_chars,
+            titles=candidate.group.titles,
         )
         if failed:
             return self._verdict(candidate, failed, None, self._long_answer_chars)
@@ -454,6 +513,26 @@ class QuestionChecker:
         # is exactly the question a person asks second; leaning on the thread
         # is what a follow-up is for, so judging it as though it had been
         # asked cold would reject every one of them.
+        # The opposite failure to the one below, and the one that matters
+        # more: a question carrying its own source has already done the work
+        # it was meant to test. Judged for a follow-up too - leaning on the
+        # conversation is allowed, naming the file is not.
+        if read.names_its_source:
+            leak = (
+                QuestionRejection.LEAKS_SOURCE,
+                (
+                    "the verifier says it names the material the answer is in, so "
+                    "it asks a question and answers half of it"
+                ),
+            )
+            if self._judge_phrasing:
+                return leak
+            log.info(
+                "keeping %r: %s, but the writer judged itself",
+                candidate.question_text,
+                leak[1],
+            )
+
         if not read.stands_alone and not candidate.follows:
             reason = (
                 "the verifier says it names nothing a person searching would "

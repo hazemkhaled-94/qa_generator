@@ -34,6 +34,21 @@ _GATES = {
             "prompt."
         ),
     ),
+    "leaks_source": (
+        "Does not name its source",
+        (
+            "The question asks what it wants to know without saying which "
+            "document, report or section holds the answer."
+        ),
+        (
+            "Questions that cite their own source: `Laut den 'Risiken im Fokus "
+            "2026', ...`, `Gemäß der MaRisk, ...`. Nobody asks a service desk "
+            "a question while telling it which file to open, and a question "
+            "carrying its own source has already done the retrieving it was "
+            "written to measure. A high share means the writer is treating the "
+            "passage as something to cite rather than as context."
+        ),
+    ),
     "restates_fact": (
         "Asks more than its fact",
         (
@@ -50,17 +65,16 @@ _GATES = {
         ),
     ),
     "unanchored": (
-        "Could be asked cold",
+        "Names a subject",
+        ("A reader who has never seen the passage can tell what is being asked about."),
         (
-            "A reader who has never seen the passage could have typed this "
-            "question and would know what it is about."
-        ),
-        (
-            "Questions that only make sense with the passage in front of you: "
-            "naming no institution or period, or referring to `the requirements` "
-            "without saying which. The verifier judges this on the call it was "
-            "already making, so it costs nothing - but it is a model's opinion "
-            "and not a measurement."
+            "Questions that name nothing at all: `What specific components are "
+            "included?`, or `the requirements` without saying which. The "
+            "opposite failure to naming a source, and the two are easy to "
+            "confuse - a question is supposed to name its subject and supposed "
+            "not to name its document. The verifier judges this on the call it "
+            "was already making, so it costs nothing, but it is a model's "
+            "opinion and not a measurement."
         ),
     ),
     "answer_too_short": (

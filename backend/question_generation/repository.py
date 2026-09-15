@@ -10,6 +10,7 @@ from sqlalchemy import Select, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import (
+    Document,
     Fact,
     Passage,
     PassageTopic,
@@ -277,9 +278,11 @@ class QuestionQueue(RowQueue):
                     Passage.language,
                     Passage.section_path,
                     DOMINANT.c.topic_id,
+                    Document.title,
                 )
                 .select_from(Fact)
                 .join(Passage, Passage.id == Fact.passage_id)
+                .join(Document, Document.sha256 == Passage.doc_sha256)
                 .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
                 .where(
                     DOMINANT.c.topic_id == topic_id,
@@ -302,6 +305,7 @@ class QuestionQueue(RowQueue):
                 language=row.language,
                 section_path=row.section_path,
                 topic_id=row.topic_id,
+                document_title=row.title,
             )
             for row in rows
         ]
@@ -330,9 +334,11 @@ class QuestionQueue(RowQueue):
                     Passage.language,
                     Passage.section_path,
                     DOMINANT.c.topic_id,
+                    Document.title,
                 )
                 .select_from(Fact)
                 .join(Passage, Passage.id == Fact.passage_id)
+                .join(Document, Document.sha256 == Passage.doc_sha256)
                 .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
                 .join(PassageTopic, PassageTopic.passage_id == Passage.id)
                 .where(
@@ -355,6 +361,7 @@ class QuestionQueue(RowQueue):
                 language=row.language,
                 section_path=row.section_path,
                 topic_id=row.topic_id,
+                document_title=row.title,
             )
             for row in rows
         ]

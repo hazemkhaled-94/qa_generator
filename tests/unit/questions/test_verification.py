@@ -38,6 +38,7 @@ def checked(**kwargs):
             "language": "en",
             "statements": (),
             "min_answer_chars": 0,
+            "titles": (),
             **kwargs,
         }
     )
@@ -190,11 +191,13 @@ class Recording:
         vector: list[float] | None = None,
         recovers: str | None = "4 kg",
         stands_alone: bool = True,
+        names_its_source: bool = False,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
+        self.names_its_source = names_its_source
         self.threaded: tuple = ()
         self.embedded = 0
         self.verified = 0
@@ -208,7 +211,11 @@ class Recording:
         """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
         self.threaded = tuple(thread)
-        return Reading(recovered=self.recovers, stands_alone=self.stands_alone)
+        return Reading(
+            recovered=self.recovers,
+            stands_alone=self.stands_alone,
+            names_its_source=self.names_its_source,
+        )
 
 
 def build(recording: Recording, near: Neighbour | None = None) -> QuestionChecker:
@@ -713,3 +720,169 @@ def test_a_follow_up_counts_towards_its_own_difficulty() -> None:
 
     assert followed.criteria.score == alone.criteria.score + 1
     assert followed.criteria.follows and not alone.criteria.follows
+
+
+# ── Naming the source, which is the one thing a question must not do ───────
+#
+# Every question below is a row this stage really wrote, under a prompt that
+# asked it to name what it was asking about. Seven of ten in one topic named
+# the document instead.
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Laut den 'Risiken im Fokus 2026', wie viele Risiken werden genannt?",
+        "Welche Themen werden in den 'Risiken im Fokus 2026' beschrieben?",
+        "In Risiken im Fokus 2026, welcher Anteil entfiel auf Phishing?",
+    ],
+)
+def test_a_question_quoting_its_own_document_title_is_refused(question) -> None:
+    """The free half of the gate, and it runs before any model call.
+
+    The titles are rows in this corpus's documents table, and the writer
+    echoed them straight back.
+    """
+    failed = checked(
+        question_text=question,
+        target_answer="drei",
+        language="de",
+        titles=("Risiken im Fokus 2026",),
+    )
+
+    assert code(failed) == QuestionRejection.LEAKS_SOURCE
+
+
+def test_a_title_too_short_to_be_a_name_is_not_matched() -> None:
+    """`Contents` and `March 2018` are titles in this corpus.
+
+    A question may contain either by accident, so matching on them would
+    refuse questions that cite nothing.
+    """
+    assert (
+        checked(
+            question_text="What are the contents of a risk report?",
+            target_answer="the exposures and the limits",
+            titles=("Contents", "March 2018"),
+        )
+        is None
+    )
+
+
+def test_a_question_naming_no_title_passes_the_free_half() -> None:
+    """Naming a party or a period is not naming a source."""
+    assert (
+        checked(
+            question_text="Wie viele Cybervorfälle wurden der Bafin 2025 gemeldet?",
+            target_answer="dreihundert",
+            language="de",
+            titles=("Risiken im Fokus 2026", "Druckversion - Jahresbericht 2025"),
+        )
+        is None
+    )
+
+
+def test_the_verifier_catches_a_source_it_named_without_quoting() -> None:
+    """`Laut dem Jahresbericht 2025` is not `Druckversion - Jahresbericht 2025`.
+
+    The free half matches a title verbatim, so a paraphrase gets past it.
+    The model half is what the paraphrase is for.
+    """
+    recording = Recording(recovers="4 kg", names_its_source=True)
+
+    result = build(recording).check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.LEAKS_SOURCE
+    assert recording.verified == 1, "it must not cost a second call"
+
+
+def test_a_follow_up_may_not_name_its_source_either() -> None:
+    """Leaning on the conversation is allowed; naming the file is not.
+
+    The two exemptions are different: a follow-up is excused from naming a
+    subject, never from hiding its source.
+    """
+    recording = Recording(recovers="4 hours", names_its_source=True)
+
+    result = build(recording).check(
+        candidate(
+            question_text="And in the annual report, what about urgent ones?",
+            target_answer="4 hours",
+            thread=(("How long for a standard one?", "48 hours"),),
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.LEAKS_SOURCE
+
+
+def test_naming_a_subject_and_naming_a_source_are_judged_separately() -> None:
+    """The conflation this gate exists to undo.
+
+    A question that names its subject and no source is what is wanted, and
+    for a while the phrasing gate asked for the opposite.
+    """
+    recording = Recording(recovers="4 kg", stands_alone=True, names_its_source=False)
+
+    result = build(recording).check(candidate())
+
+    assert result.accepted
+
+
+def test_a_self_judged_verifier_cannot_reject_for_naming_a_source() -> None:
+    """The same rule as the phrasing gate: an opinion needs a holder."""
+    recording = Recording(recovers="4 kg", names_its_source=True)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    result = checker.check(candidate())
+
+    assert result.accepted
+
+
+def test_the_free_half_of_the_gate_runs_without_a_verifier_at_all() -> None:
+    """A measurement needs no second opinion.
+
+    Quoting a title is not a matter of taste, so it is refused whoever is
+    verifying - or whether anything is.
+    """
+    recording = Recording()
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        judge_phrasing=False,
+    )
+
+    result = checker.check(
+        candidate(
+            question_text="Laut den 'Risiken im Fokus 2026', wie viele Risiken?",
+            facts=group(
+                source(
+                    1,
+                    statement="Es werden drei Risiken genannt.",
+                    language="de",
+                    document_title="Risiken im Fokus 2026",
+                )
+            ),
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.LEAKS_SOURCE
+    assert recording.verified == 0, "it must not need a call"
+
+
+@pytest.mark.parametrize("answer", ["dreihundert", "erstmals", "angespannt"])
+def test_a_one_word_answer_is_never_read_as_an_action(answer) -> None:
+    """A single word is a thing, whatever the tagger calls it.
+
+    `de_core_news_md` tags `dreihundert` as a verb, so checking a one-word
+    answer refuses a good one to catch a rare bad one. Every real failure
+    this gate was written for was several words long.
+    """
+    assert checked(target_answer=answer, language="de") is None

@@ -153,6 +153,10 @@ class SourceFact:
     #: The topic this fact's passage counts towards - its strongest, not all
     #: of them. Two facts with different ones make a multi-topic question.
     topic_id: int | None = None
+    #: The title of the document this came from. Carried so a gate can refuse
+    #: a question that quotes it: naming where the answer lives is the one
+    #: thing a question must not do.
+    document_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -223,6 +227,19 @@ class FactGroup:
     def statements(self) -> tuple[str, ...]:
         """What each fact of this group asserts, for the free gates."""
         return tuple(fact.statement for fact in self.facts)
+
+    @property
+    def titles(self) -> tuple[str, ...]:
+        """The distinct document titles behind this group.
+
+        What a question must not quote. A question naming the file its answer
+        is in has already done the retrieving it was written to measure.
+        """
+        return tuple(
+            dict.fromkeys(
+                fact.document_title for fact in self.facts if fact.document_title
+            )
+        )
 
 
 @dataclass(frozen=True)
