@@ -449,22 +449,74 @@ Within a topic the writer is offered a **sample** of facts, filled a whole
 passage at a time and taking passages one document at a time in turn. Whole
 passages because every fact of a passage is about the same material, so the
 writer sees a subject rather than a list of unrelated claims; one document at
-a time so a sample spans the corpus wherever the topic does and a
-cross-document question is there to be written.
+a time so a sample spans the corpus wherever the topic does.
+
+A share of samples also gets a **bridge passage** — a passage whose strongest
+topic is a different one, but which carries the claimed topic above the weight
+floor. That is what makes a question about two subjects available, and the
+corpus itself is what says the two meet there, which is a far better reason to
+pair two passages than that they came from different files. 703 of this
+corpus's 831 placed passages sit in more than one topic, so bridges are
+plentiful. `QUESTIONS_BRIDGE_SHARE` sets how many samples get one; not all of
+them, because `single_topic` is worth measuring too.
 
 Which facts a question actually cites is the **writer's** answer, not the
 sample's. That distinction was missing at first and produced a measurable lie:
 facts paired only because they came from different documents had nothing to do
 with each other, the writer answered one and ignored the rest as its prompt
-told it to, and the row was stored with a `cross_document` difficulty earned
-by a fact the question never used — 91 of the first 140 rows. `difficulty` is
-now read off the citations the writer reported:
+told it to, and the row was stored with a `cross_document` label earned by a
+fact the question never used — 91 of the first 140 rows.
+
+### The three criteria, and the band they feed
+
+Each is read off the facts the question reported citing. Each says something
+different about what a chatbot has to do, so they are three columns rather
+than one:
 
 | | |
 |---|---|
-| `single_passage` | Answerable from one passage |
-| `cross_passage` | Needs two passages of one document |
-| `cross_document` | Needs passages from two different documents |
+| `passage_scope` | `single_passage` or `multi_passage` — how many passages hold the answer |
+| `document_scope` | `single_document` or `cross_document` — the one a retriever cannot fake: no single chunk holds the answer |
+| `topic_scope` | `single_topic` or `multi_topic` — whether the question bridges two subjects |
+
+`difficulty` is then **derived** rather than judged. Five things each count
+one point — the three scopes above, an answer past
+`QUESTIONS_LONG_ANSWER_CHARS`, and following another question — and the band is
+the total: 0–1 `easy`, 2 `medium`, 3+ `hard`.
+
+Three and not four, because `cross_document` implies `multi_passage`: two
+documents are two passages, so the three scopes total at most three. A
+threshold of four would have made a question spanning two documents and two
+subjects — the hardest thing a retriever faces — only medium, reachable as
+hard only by having a long answer or a parent. Nothing is weighted, because a
+weighting is an opinion and the point of deriving difficulty rather than
+judging it is that nobody has to hold one.
+
+### Follow-up threads
+
+A share of accepted questions get a **thread**: the question somebody would
+ask next, up to `QUESTIONS_MAX_FOLLOWUPS` deep. `follows_id` and
+`thread_position` carry it.
+
+A follow-up **may lean on the conversation** — *"And for an urgent one?"* — and
+that is the point: a chatbot answering one has to carry the thread, which is a
+real capability and one no single-turn question tests. Two consequences follow
+from it. The phrasing gate is **not** applied to a follow-up, because not
+standing alone is what it is for; and the verifier is shown the conversation
+when it judges recoverability, because read alone *"And for an urgent one?"*
+has no answer in any passage.
+
+Only an accepted, **answerable** root is followed. A thread whose first turn
+has no answer has nothing to follow on from — the chatbot was supposed to say
+it did not know — and one whose root a gate refused would be a conversation
+starting with a question nobody would ask. A thread stops at the first
+follow-up a gate refuses: the refused one is stored as drop-rate evidence like
+any other, but a third turn after a discarded second is a conversation with a
+hole in it.
+
+Each follow-up is another writer call and another verifier call, so a thread
+multiplies what a topic costs. At the defaults a topic of ten questions costs
+about sixteen.
 
 Some questions are written to have **no answer in the corpus**, by perturbing a
 verified fact just out of reach. These test whether a chatbot says it does not
@@ -483,11 +535,19 @@ judged, so it belongs in the data and not in a log.
 | Gate | Rejects a question that | Costs |
 |---|---|---|
 | `malformed` | is not a question, asks two things, carries no target answer when it claims one, answers with an action rather than a thing, is in the wrong language, or is one of its own facts handed back | nothing |
+| `answer_too_short` | is scored against an answer below `QUESTIONS_MIN_ANSWER_CHARS` | nothing |
 | `restates_fact` | is about exactly what its fact is about and nothing more | nothing |
 | `duplicate` | is a near twin of one already accepted | one index probe |
 | `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
 | `unanchored` | nobody could have asked without the passage in front of them | the round trip |
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
+
+`answer_too_short` is a blunt instrument and the cost is measured rather than
+guessed: at 15 characters it refuses 41% of the answers this corpus had
+accepted — `70%`, `2025` and `Bafin` among them, which are the most
+unambiguously scoreable answers there are. It also refuses `7`, `8%` and
+`Nein`, which are not. One line in `backend.env` changes it, and the share it
+refuses is on the Questions page either way.
 
 `restates_fact` is the one that catches the cloze. It compares what the
 question is about — its content lemmas, the same reading the topic model is
@@ -507,6 +567,15 @@ reads like one a person would type is a judgement rather than a measurement,
 and no structural check makes it — but a model already looking at the question
 and the material can. It is the half of quality `restates_fact` cannot reach: a
 question can add a word its fact lacks and still be one nobody would ask.
+
+It is also the only gate here that is an **opinion**, and an opinion needs an
+independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks its
+own work, and one measured run rejected *"According to the ECB and NCAs, who
+can conduct the due diligence check for an outsourcing arrangement?"* for
+naming nothing — three of four rejections in that topic were false positives.
+So the factory turns this one gate off when no second model is named, and logs
+the verdict instead. Recoverability stays on regardless, because that one is
+checkable against the passage rather than a matter of taste.
 
 Three things about it are load-bearing. The verifier is a **different** model,
 named by `QUESTIONS_VERIFIER_MODEL`, because a model marking its own work
@@ -823,6 +892,11 @@ The values most likely to need changing:
 | `QUESTIONS_PER_TOPIC` | `backend.env` | 10 | How many questions to aim for per topic. This times the topic count is what a full run costs |
 | `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, filled a whole passage at a time. The writer picks which of them one question needs |
 | `QUESTIONS_UNANSWERABLE_SHARE` | `backend.env` | 0.25 | What share of questions are written to have no answer in the corpus |
+| `QUESTIONS_BRIDGE_SHARE` | `backend.env` | 0.35 | What share of samples get a bridge passage, which is what makes a `multi_topic` question available |
+| `QUESTIONS_FOLLOWUP_SHARE` | `backend.env` | 0.3 | What share of accepted questions get a follow-up thread |
+| `QUESTIONS_MAX_FOLLOWUPS` | `backend.env` | 2 | How far a thread may run past its root |
+| `QUESTIONS_MIN_ANSWER_CHARS` | `backend.env` | 15 | The shortest target answer worth scoring against. At 15 this refuses dates and percentages; see the note under the gates |
+| `QUESTIONS_LONG_ANSWER_CHARS` | `backend.env` | 60 | Where an answer starts counting towards the difficulty band. Not a gate |
 | `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector |
