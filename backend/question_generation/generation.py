@@ -24,7 +24,7 @@ from question_generation.models import Candidate, FactGroup
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 _ASK = """You write one test question for measuring a document-search chatbot.
 
@@ -48,9 +48,16 @@ Rules, all of them mandatory:
   question is the fact's own words in the fact's own order, throw it away and
   ask what a person would ask instead.
 
-- THE ANSWER IS A THING, NOT AN ACTION: a value, an amount, a date, a name, a
-  limit, a duty. Write it as it would be said on its own, not as the fragment
-  the sentence happened to contain. Never a verb phrase.
+- ASK FOR ONE CHECKABLE VALUE. Something a person could mark right or wrong at
+  a glance: how many, how much, by when, who, which one, what limit. A
+  question asking what something "must provide", "covers" or "includes" has no
+  answer anybody can score, however well it names its subject.
+
+- THE ANSWER IS A SHORT NOUN PHRASE, and a few words at most: a value, an
+  amount, a date, a name, a limit, a share. Never a sentence, never a clause,
+  never anything with a verb in it. If the answer you want to write is a
+  sentence, you asked too broad a question - ask for one of the things in that
+  sentence instead.
 
 - NEVER PUT THE ANSWER IN THE QUESTION, or the word the answer is a kind of.
   Asking "For which models do the requirements apply?" when the answer is
@@ -81,6 +88,12 @@ Worked example. Facts, under the heading "Support > Response times":
   WRONG  question: "How quickly must support respond?"
          answer:   "must respond within 48 hours"
          (the answer is an action, not a thing)
+  WRONG  question: "According to the service agreement, what answer times does
+                    it set for support requests?"
+         answer:   "Standard requests are answered within 48 hours on working
+                    days and urgent requests within 4 hours."
+         (names its subject, and still useless: the answer is a sentence, so
+          nobody can mark a chatbot right or wrong against it)
 
   RIGHT  question: "How long does the service agreement allow for answering a
                     standard support request?"
@@ -142,8 +155,9 @@ class _Answered(BaseModel):
         "asks about the way a searcher would have to."
     )
     answer: str = Field(
-        description="The answer as a thing: a value, an amount, a date, a "
-        "name, a limit or a duty. Never a verb phrase."
+        description="The answer as a short noun phrase, a few words at most: "
+        "a value, an amount, a date, a name, a limit or a share. Never a "
+        "sentence and never anything with a verb in it."
     )
     facts: list[int] = Field(
         default_factory=list,

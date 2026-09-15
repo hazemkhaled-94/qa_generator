@@ -29,11 +29,17 @@ class Settings:
         """How long one topic may go unfinished before a run sweeps it.
 
         Derived from the work rather than declared. A topic is not a passage:
-        it costs `per_topic` candidates, each a writer call and a verifier
-        call, so a lease sized for one model call fails a worker that is
-        still going. Doubled for the gates and the embedding between them.
+        it costs `per_topic` candidates and each one is two model calls, a
+        writer's and a verifier's, so a lease sized for one call fails a
+        worker that is only halfway through its first topic.
+
+        Two calls per candidate and not a round number above it. This is
+        already the worst case - every call taking its full timeout on every
+        attempt - and padding a worst case is what makes a lease long enough
+        to matter: a worker killed mid-topic leaves that row unclaimable
+        until the lease runs out, and nothing but time moves it.
         """
-        return timedelta(seconds=call_seconds * self.per_topic * 2 * 2)
+        return timedelta(seconds=call_seconds * self.per_topic * 2)
 
     @classmethod
     def load(cls) -> Settings:

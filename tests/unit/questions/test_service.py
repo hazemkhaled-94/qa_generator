@@ -261,3 +261,33 @@ def test_a_group_size_below_one_never_yields_an_empty_group(size) -> None:
     assert formed, "every fact was dropped"
     assert all(one.facts for one in formed)
     assert all(one.language == "en" for one in formed)
+
+
+def test_a_topics_lease_covers_every_call_it_will_make() -> None:
+    """A lease sized for one model call fails a live worker mid-topic.
+
+    Extraction reads one passage with one call and derives its lease from
+    that. A topic is `per_topic` candidates, each a writer call and a
+    verifier call, so the same arithmetic would sweep a worker that had
+    barely started.
+    """
+    # One call's worst case: the timeout, on every attempt.
+    call = 900.0 * 3
+
+    held = SETTINGS.lease(call).total_seconds()
+
+    assert held >= call * SETTINGS.per_topic * 2, "shorter than the work"
+
+
+def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
+    """Padding a worst case is what makes a stranded row stay stranded.
+
+    Nothing but the lease running out returns an `in_progress` row to the
+    queue: stop moves `pending` and retry moves `failed`. So every hour
+    added here is an hour a killed worker's topic cannot be picked up.
+    """
+    call = 900.0 * 3
+
+    held = SETTINGS.lease(call).total_seconds()
+
+    assert held == call * SETTINGS.per_topic * 2
