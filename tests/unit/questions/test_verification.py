@@ -980,3 +980,16 @@ def test_a_shared_number_is_not_agreement_on_its_own() -> None:
     """
     assert not agrees("4 kg", "4 hours", "en")
     assert agrees("4 hours", "4 hours", "en")
+
+
+@pytest.mark.parametrize(
+    ("recovered", "target"),
+    [("die Gebühr ist 1,033 Euro", "1.033 Euro"), ("0,3 Prozent", "0.3 Prozent")],
+)
+def test_a_number_is_the_same_number_in_either_locale(recovered, target) -> None:
+    """This corpus writes `0,3` and the verifier answers `0.3` as often.
+
+    Folded only when comparing one number against another, so `4` is still
+    not `48`.
+    """
+    assert agrees(recovered, target, "de")

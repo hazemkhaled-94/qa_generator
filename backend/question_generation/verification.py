@@ -143,6 +143,15 @@ def _bare(text: str) -> str:
     return normalised(text).rstrip("?.!")
 
 
+def _folded(token: str) -> str:
+    """Drops the separators that only say which locale wrote a number.
+
+    `0,3` and `0.3` are one value; so are `1.033` and `1,033`. Only applied
+    when comparing one number against another, so no word is affected.
+    """
+    return token.replace(",", "").replace(".", "")
+
+
 def structural(
     *,
     question_text: str,
@@ -416,16 +425,34 @@ def agrees(recovered: str, target: str, language: str | None) -> bool:
     agreed with a person on 8 and lemmas on 11, with nothing newly accepted
     that a person called different.
 
-    The one it still misses is morphology the pipeline gets wrong:
+    What it still misses is German inflection the pipeline gets wrong:
     `de_core_news_md` lemmatises `Umbrüche` to `Umbruch` and leaves
-    `Umbrüchen` alone, so the two do not meet. Stemming would close it and is
-    not worth the false accepts it would open on twelve pairs of evidence.
+    `Umbrüchen` alone, so those two do not meet, and the same happens to
+    `einfache` against `einfacheren`.
+
+    Embedding the two answers and comparing them closes both, and was
+    measured rather than assumed: over fourteen pairs, lemmas got 12 right
+    with two such refusals, and the numbers check plus a cosine of 0.92 got
+    13 with one wrong acceptance. The ranges overlap - the same answers bottom
+    out at 0.920 and different ones reach 0.942 - so no threshold separates
+    them, and `4 hours` against `48 hours` is 0.942.
+
+    Lemmas are kept because the errors are not equal. A refusal loses a good
+    question, which is costly and safe. An acceptance puts a question in the
+    benchmark whose answer the material does not give, which marks a correct
+    chatbot wrong - the failure this gate exists for.
 
     A target with nothing to compare either way - a bare `yes` - falls back to
     containment, which is all that is left.
     """
+    # Numbers compared with their separators folded away. This corpus is
+    # German and writes `0,3`; the verifier answers `0.3%` as often as not,
+    # and the two are one number written in two locales. Folding keeps the
+    # comparison that matters - `4` is still not `48` - and drops the one
+    # that never did.
+    found = {_folded(one) for one in vocabulary(recovered, language)}
     units = claim(target, language).units
-    if units and not all(unit in vocabulary(recovered, language) for unit in units):
+    if units and not all(_folded(unit) in found for unit in units):
         return False
 
     wanted = content(target, language)
