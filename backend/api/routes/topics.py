@@ -1,7 +1,7 @@
 """Routes for the topic modelling stage.
 
-Reads and writes the queue and never works it, like every other stage. Asking
-is what creates the row, so /discover replaces /start and there is no /rerun.
+Reads and writes the queue and never works it, like every other stage.
+/discover replaces /start, and there is no /rerun.
 """
 
 from __future__ import annotations
@@ -34,8 +34,7 @@ class TopicDiscovery:
 class TopicDescription(BaseModel):
     """What a person decided about one topic.
 
-    Both survive a refit by being matched on top terms, which is why they are
-    worth recording at all.
+    Both survive a refit by being matched on top terms.
     """
 
     label: str | None = Field(default=None, max_length=120)
@@ -75,8 +74,7 @@ def fit() -> TopicFit:
     """Reports the state of the topic model as a whole.
 
     Carries the live passage and membership counts beside the ones the fit
-    recorded, so a model left stale by a re-chunk is visible rather than
-    reading as healthy.
+    recorded, so a model left stale by a re-chunk reads as stale.
     """
     return topic_catalog.fit_state()
 
@@ -89,8 +87,7 @@ def fit() -> TopicFit:
 def visualisation(language: str) -> Response:
     """Serves one language's topic model as a pyLDAvis page.
 
-    Produced by a fit, so a language modelled before this route existed has
-    none until the next one.
+    Produced by a fit, so a language no fit has drawn has none.
 
     Raises:
         ApiError: 400 `invalid_language` if it is not an ISO 639-1 code, 404
@@ -115,7 +112,7 @@ def discover() -> TopicDiscovery:
 
     Returns at once. Every existing topic and membership is replaced when the
     fit succeeds, and left alone when it does not. Asking twice queues one
-    fit.
+    fit; asking while a fit runs queues one behind it.
     """
     fit_id = topics_queue.request()
     return TopicDiscovery(

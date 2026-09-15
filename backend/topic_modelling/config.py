@@ -10,15 +10,9 @@ from settings import csv, decimal, integer, optional
 
 @dataclass(frozen=True)
 class Settings:
-    """Runtime configuration, read from the environment.
+    """Runtime configuration, read from the environment."""
 
-    Connection settings are absent: database owns those. There is no stopword
-    or token-length setting: the vocabulary is the content lemmas chunking
-    stored, so grammar never reaches it.
-    """
-
-    #: The model that names a topic, or None when none is configured. Naming
-    #: is worth a call and not worth failing a fit over.
+    #: The model that names a topic, or None when none is configured.
     model: llm.config.Settings | None
     #: ISO 639-1 code to the language's name, for the naming prompt.
     languages: dict[str, str]

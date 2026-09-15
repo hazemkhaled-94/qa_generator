@@ -244,12 +244,12 @@ def corpus_controls(
 ) -> None:
     """Draws verbs that act on the whole corpus rather than on one item.
 
-    Only topic modelling uses this. LDA fits every topic jointly over one
-    vocabulary, so there is no single topic to start, stop or refit: the
-    stage has no scope to narrow to, and the page says so beside these. The
-    keys are the route's own verbs, which is why the first is `discover`
-    rather than `start`; it is coloured as a start either way, because that
-    is what it does.
+    Only topic modelling uses this. The factorisation fits every topic
+    jointly over one vocabulary, so there is no single topic to start, stop or
+    refit: the stage has no scope to narrow to, and the page says so beside
+    these. The keys are the route's own verbs, which is why the first is
+    `discover` rather than `start`; it is coloured as a start either way,
+    because that is what it does.
     """
     columns = st.columns([1.3] * len(verbs) + [CONTROLS[-1]])
     for index, (action, (label, enabled, explanation)) in enumerate(verbs.items()):

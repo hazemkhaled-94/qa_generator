@@ -735,6 +735,13 @@ as.
 
 ## Topic modelling
 
+This stage is **frozen**, and has its own full description in
+[`backend/topic_modelling/README.md`](backend/topic_modelling/README.md): the
+eleven steps a fit takes, every setting and how each default was measured, the
+tools and where each is used, and what the tests cover.
+`tests/static/test_topics_frozen.py` pins the surface. What follows is the
+summary.
+
 One model per language, fitted over the lemmas chunking stored for that
 language's passages. A gensim *document* is one passage; the *corpus* is an
 object that re-walks the database, because the fit reads it once per pass and
@@ -827,7 +834,7 @@ gates a merge; the two that do not are excluded from it.
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, and pyright at zero | nothing |
+| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the frozen surface of topic modelling, and pyright at zero | nothing |
 | `tests/unit/` | One module at a time, no I/O | spaCy, for some |
 | `tests/property/` | Invariants over generated input, with hypothesis | spaCy, for some |
 | `tests/contract/` | The OpenAPI surface, the paths the frontend builds, and the refusals each route declares | a container |
@@ -889,11 +896,11 @@ PyPI's build, which has no CUDA variant to avoid.
 | `backend/blob_store/` | Object storage clients, one module per bucket |
 | `backend/nlp/` | The spaCy pipelines, and reading sentences, claims and vocabulary out of text |
 | `backend/api/` | The HTTP surface the frontend and the orchestrator call |
-| `backend/ingestion/` | Upload validation, hashing and storage |
-| `backend/preprocessing/parsing/` | A stored file becomes a structured document |
-| `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas |
+| `backend/ingestion/` | Upload validation, hashing and storage — frozen; see [Intake](docs/intake.md) |
+| `backend/preprocessing/parsing/` | A stored file becomes a structured document — frozen; see [Intake](docs/intake.md) |
+| `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas — frozen; see [Intake](docs/intake.md) |
 | `backend/extraction/` | Those passages become facts citing a sentence |
-| `backend/topic_modelling/` | Each language becomes topics over its own vocabulary |
+| `backend/topic_modelling/` | Each language becomes topics over its own vocabulary — frozen; see its own [README](backend/topic_modelling/README.md) |
 | `backend/question_generation/` | Each topic's facts become questions with known answers |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
 | `backend/settings/` | Reading configuration out of the environment, and nowhere else |

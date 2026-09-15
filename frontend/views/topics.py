@@ -106,7 +106,7 @@ def view() -> None:
 
 
 def _model_figures(fit: dict, topics: list[dict]) -> dict[str, tuple]:
-    """Names the figures describing the stored model as a whole."""
+    """Builds the figures describing the stored model as a whole."""
     languages = fit["languages"]
     memberships = sum(one["memberships"] for one in languages)
     live = sum(one["live_passages"] for one in languages)
@@ -117,7 +117,7 @@ def _model_figures(fit: dict, topics: list[dict]) -> dict[str, tuple]:
             f"{len(topics):,}",
             (
                 "Topics currently stored, across every language model. "
-                "TOPIC_COUNT sets how many each fit produces per language."
+                "TOPIC_NUM_TOPICS sets how many each fit produces per language."
             ),
         ),
         "Language models": (
@@ -220,13 +220,15 @@ def _health(fit: dict, topics: list[dict]) -> list[dict[str, str]]:
                 "Failed": f"{unplaced:,} unplaced",
                 "Should be": "0",
                 "State": "OK" if not unplaced else "Attention",
-                "What it means": "Every passage of this language carried at "
-                "least one term the vocabulary kept."
+                "What it means": "Every passage of this language reached some "
+                "topic above the weight floor."
                 if not unplaced
-                else "Every term of these passages was filtered out of the "
-                "vocabulary, so they sit in no topic. They, and anything "
+                else "These passages sit in no topic: either every term of "
+                "theirs was filtered out of the vocabulary, or every topic "
+                "weight they got fell below the floor. They, and anything "
                 "drawn from them, are outside every topic-weighted report. "
-                "Lower TOPIC_NO_BELOW to bring them in.",
+                "Lower TOPIC_NO_BELOW to keep more terms, or TOPIC_MIN_WEIGHT "
+                "to keep weaker memberships.",
             }
         )
 
@@ -557,7 +559,9 @@ def _removal(client, has_topics: bool) -> None:
     ):
         removed = client.delete_topics()
         del st.session_state["topics-armed"]
-        st.success(
+        # A toast rather than st.success: the rerun below discards this run's
+        # output, and the Save control above reports the same way.
+        st.toast(
             f"Removed {removed['topics']} topic(s), "
             f"{removed['memberships']} membership(s) and "
             f"{removed['labels']} label(s)."

@@ -1,7 +1,7 @@
 """Rendering a fitted model as a pyLDAvis page.
 
-Built during a fit and stored, because the picture needs the weight of every
-term in every topic and the database keeps only a topic's top terms.
+Built during a fit and stored, from the whole term-topic matrix rather than
+the top terms the database keeps.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _TERMS_SHOWN = 30
 
 
 def _real_pcoa(distances):
-    """Places the topics in two dimensions, discarding imaginary residue.
+    """Places the topics in two dimensions, dropping any imaginary part.
 
     ponytail: pyLDAvis eigendecomposes a symmetric matrix with `np.linalg.eig`,
     which returns complex values that json.dumps then refuses. The upgrade is
@@ -41,8 +41,16 @@ def _asset(path: str) -> str:
 def render(space: TopicSpace, language: str) -> bytes:
     """Renders one language's model as a self-contained HTML page.
 
-    d3, the LDAvis script and its stylesheet are inlined, so the page needs
-    no network when it is opened.
+    d3, the LDAvis script and its stylesheet are inlined, so the page reaches
+    no network when it is opened. Topics keep the numbers they were fitted
+    with.
+
+    Args:
+        space: The whole fitted model.
+        language: ISO 639-1 code, used in the log line and the refusal.
+
+    Returns:
+        The page, UTF-8 encoded.
 
     Raises:
         ValueError: If the model placed no passage in any topic.
@@ -52,8 +60,8 @@ def render(space: TopicSpace, language: str) -> bytes:
             f"no {language} passage carries a topic, so there is nothing to draw"
         )
 
-    # The factorisation leaves a term at exactly zero in a topic it is absent
-    # from, and the relevance ranking takes a log of it.
+    # The relevance ranking takes a log of a term weight, and the
+    # factorisation leaves that at exactly zero for a term absent from a topic.
     with np.errstate(divide="ignore"):
         prepared = pyLDAvis.prepare(
             topic_term_dists=space.topic_term,

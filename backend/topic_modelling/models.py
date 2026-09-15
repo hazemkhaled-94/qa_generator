@@ -31,7 +31,7 @@ class TopicSpace:
     topic_term: list[list[float]]
     #: Topic weight per passage, one row per passage, summing to 1.
     doc_topic: list[list[float]]
-    #: Terms held by each passage of `doc_topic`, in the same order.
+    #: Term occurrences in each passage of `doc_topic`, in the same order.
     doc_lengths: list[int]
     #: The vocabulary, in the column order of `topic_term`.
     vocabulary: list[str]
@@ -57,16 +57,20 @@ class Fitting:
 
     language: str
     topics: list[FittedTopic]
+    #: Every membership above the weight floor.
     weights: list[PassageWeight]
+    #: How many passages were fitted over.
     passages: int
+    #: How many of them ended up in no topic.
     without_topics: int
+    #: How many terms survived the frequency filter.
     vocabulary: int
     #: The whole fitted model, for the visualisation.
     space: TopicSpace
 
     @property
-    def labels_carried(self) -> int:
-        """How many topics kept a label from a previous fit."""
+    def labelled(self) -> int:
+        """How many of these topics hold a label, whatever named them."""
         return sum(1 for topic in self.topics if topic.label)
 
 
@@ -81,15 +85,17 @@ class StoredTopic:
     label: str | None
     labelled_by: str | None
     include_in_coverage: bool
+    #: How many passages hold it with any weight.
     passages: int
     #: How many passages hold it as their highest weight.
     dominant_passages: int
+    #: Mean weight across the passages holding it.
     mean_weight: float
+    #: How many documents those passages come from.
     documents: int
-    #: How many of its passages are tables rather than prose.
+    #: How many of the passages it is dominant in are tables rather than prose.
     table_passages: int
-    #: Validated facts drawn from its passages, which is what a question can
-    #: be asked from.
+    #: Validated facts drawn from the passages it is dominant in.
     validated_facts: int
 
 
@@ -110,7 +116,10 @@ class LanguageFit:
 
     @property
     def stale(self) -> bool:
-        """Whether these topics still describe the corpus as it is."""
+        """Whether this language holds topics that no longer fit the corpus.
+
+        False when it holds none at all.
+        """
         if not self.topics:
             return False
         return self.memberships == 0 or self.corpus_passages != self.live_passages
@@ -130,7 +139,7 @@ class TopicFit:
 
     @property
     def stale(self) -> bool:
-        """Whether any language's topics have fallen behind the corpus."""
+        """Whether any language's topics no longer fit the corpus."""
         return any(fit.stale for fit in self.languages)
 
 
@@ -140,7 +149,7 @@ class TopicRemoval:
 
     topics: int
     memberships: int
-    #: How many removed topics carried a human label.
+    #: How many removed topics carried a label, whatever named them.
     labels: int = 0
     #: The languages whose topics went, for the visualisations keyed by one.
     languages: list[str] = field(default_factory=list)

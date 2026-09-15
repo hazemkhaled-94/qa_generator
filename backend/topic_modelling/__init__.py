@@ -1,15 +1,13 @@
-"""Topic modelling: the corpus becomes topics over its own vocabulary.
+"""Topic modelling: each language becomes topics over its own vocabulary.
 
 Claims a requested fit, reads the lemmas chunking stored for every passage,
-factorises a tf-idf weighted term matrix with gensim, and replaces every
-row in `topics` and
-`passage_topics`.
+factorises a tf-idf weighted term matrix with gensim, and replaces every row
+in `topics` and `passage_topics`. One fit covers every language and is always
+a full refit.
 
-A fit is always a full refit, and always every language: the factorisation
-estimates each topic relative to all the others over one vocabulary, so
-adding a document moves every topic at once. Discovery is therefore asked
-for rather than triggered.
+Nothing is re-exported: a caller names the submodule it wants.
 
-Nothing is re-exported here: a caller naming a submodule pays for that
-submodule alone, which is what keeps gensim out of the API.
+Frozen: README.md in this package describes the steps, the settings and the
+reasoning behind them, and tests/static/test_topics_frozen.py pins the
+surface this service presents.
 """

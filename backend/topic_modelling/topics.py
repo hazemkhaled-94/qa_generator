@@ -33,7 +33,7 @@ _LABEL_MATCH = 0.4
 
 
 class NoVocabulary(Exception):
-    """Raised when the frequency filter left nothing to fit a model on."""
+    """Raised when there is nothing to fit a model on."""
 
 
 class _BagsOfWords:
@@ -71,7 +71,21 @@ class TopicFitter:
         no_below: int,
         no_above: float,
     ) -> None:
-        """Initialises the fitter, refusing a setting that cannot do its job."""
+        """Initialises the fitter.
+
+        Args:
+            num_topics: Topics to fit, at least 2.
+            passes: Times the factorisation walks the corpus.
+            random_state: Seed for the factorisation.
+            top_terms: Terms kept as a topic's signature, at least 1.
+            min_weight: Smallest membership weight kept, in (0, 1].
+            no_below: Fewest passages a term must appear in.
+            no_above: Largest share of passages a term may appear in, in
+                (0, 1].
+
+        Raises:
+            ValueError: If a setting is outside the range named above.
+        """
         if num_topics < 2:
             raise ValueError(
                 f"TOPIC_NUM_TOPICS={num_topics} is not a partition of anything; "
@@ -105,6 +119,20 @@ class TopicFitter:
 
         The corpus is walked rather than held: once to build the vocabulary,
         once per pass, and once more to score.
+
+        Args:
+            corpus: Hands back a fresh walk over the passages each time it is
+                called.
+            language: The ISO 639-1 code the fit is recorded against.
+
+        Returns:
+            The topics, the memberships above the weight floor, and the whole
+            fitted space.
+
+        Raises:
+            NoVocabulary: If the corpus is empty, if the frequency filter left
+                no terms, if a second walk yields nothing, or if tf-idf weighs
+                every term zero.
         """
         dictionary = corpora.Dictionary()
         counted = 0
@@ -131,12 +159,25 @@ class TopicFitter:
             )
 
         bows = _BagsOfWords(corpus, dictionary)
-        # Catches a corpus that cannot be walked twice.
+        # A corpus that cannot be walked twice.
         if not any(bool(bow) for bow in bows):
             raise NoVocabulary(
                 f"a second walk over the corpus yielded none of the "
                 f"{len(dictionary)} terms the first one found. A fit walks it "
                 f"once per pass, so it must be re-readable."
+            )
+
+        # From the dictionary, which already holds the document frequencies.
+        weighting = TfidfModel(dictionary=dictionary)
+        # A term in every passage has an idf of zero. When every surviving term
+        # does, the whole weighted matrix is zero, and the factorisation
+        # divides by its norm and returns a model of NaN.
+        if not any(bool(weighted) for weighted in weighting[bows]):
+            raise NoVocabulary(
+                f"every one of the {len(dictionary)} terms kept appears in all "
+                f"{counted} {language} passage(s), so tf-idf weighs each of them "
+                f"zero and nothing separates one passage from another. Lower "
+                f"TOPIC_NO_ABOVE, which is {self._no_above:.0%}, to drop them."
             )
 
         log.info(
@@ -147,8 +188,6 @@ class TopicFitter:
             len(dictionary),
             before,
         )
-        # From the dictionary, which already counted the document frequencies.
-        weighting = TfidfModel(dictionary=dictionary)
         model = Nmf(
             corpus=weighting[bows],
             id2word=dictionary,
@@ -187,11 +226,11 @@ class TopicFitter:
         dictionary: corpora.Dictionary,
         weighting: TfidfModel,
     ) -> tuple[list[PassageWeight], int, TopicSpace]:
-        """Scores every passage against the fitted model.
+        """Scores every passage against the fitted model, in one walk.
 
-        Reads each passage's whole distribution and applies the weight floor
-        here, so the stored memberships and the visualisation's matrices come
-        out of one walk.
+        Returns:
+            The memberships above the weight floor, how many passages hold
+            none, and the space the visualisation is drawn from.
         """
         weights: list[PassageWeight] = []
         doc_topic: list[list[float]] = []
@@ -211,8 +250,8 @@ class TopicFitter:
             kept = [
                 (index, weight) for index, weight in found if weight > self._min_weight
             ]
-            # A passage holding none of the vocabulary, and one whose every
-            # weight fell below the floor, are both counted here.
+            # Counts both a passage holding none of the vocabulary and one
+            # whose every weight fell below the floor.
             if not kept:
                 without += 1
                 continue
@@ -220,15 +259,15 @@ class TopicFitter:
                 PassageWeight(
                     passage_id=passage.id,
                     topic_index=int(index),
-                    # Clamped to satisfy the CHECK on passage_topics.weight.
+                    # Clamped to the CHECK on passage_topics.weight.
                     weight=min(1.0, float(weight)),
                 )
                 for index, weight in kept
             )
         if without:
             log.warning(
-                "%d passage(s) came out with no topic: every one of their terms "
-                "was filtered out, so they are in no topic-weighted report",
+                "%d passage(s) came out with no topic, so they are in no "
+                "topic-weighted report",
                 without,
             )
         return (
@@ -249,8 +288,16 @@ def carry_labels(
 ) -> list[FittedTopic]:
     """Re-attaches a previous fit's labels to the topics that replaced them.
 
-    Matched on shared top terms. Each previous label is used at most once, on
-    its best match.
+    Matched on shared top terms, above a Jaccard overlap of `_LABEL_MATCH`.
+    Each previous label is used at most once, on its best match. The coverage
+    flag travels with the label.
+
+    Args:
+        fitted: The topics this run produced.
+        previous: The topics a person or an earlier run said something about.
+
+    Returns:
+        `fitted`, each topic carrying the label it matched or none.
 
     ponytail: a greedy pass, so a label can land on the second-best topic when
     two compete for it. The upgrade is to solve it as an assignment problem.
@@ -282,7 +329,7 @@ def carry_labels(
 
 
 def _jaccard(left: list[str], right: list[str]) -> float:
-    """Measures how much two term lists have in common."""
+    """Shared terms as a share of the terms either list holds, 0 for two empties."""
     first, second = set(left), set(right)
     union = first | second
     return len(first & second) / len(union) if union else 0.0

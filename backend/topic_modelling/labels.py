@@ -11,11 +11,7 @@ from topic_modelling.models import FittedTopic
 
 log = logging.getLogger(__name__)
 
-#: Recorded on every topic named with the prompt below.
-PROMPT_VERSION = "1"
-
-#: How much of a representative passage the model is shown. Enough to see
-#: what the passage is about, short enough that a dozen fit in one prompt.
+#: How much of each representative passage the model is shown.
 _EXCERPT_CHARS = 400
 
 _SYSTEM = """You name the subject a set of documents share.
@@ -45,12 +41,7 @@ class _Label(BaseModel):
 
 
 class TopicLabeller:
-    """Names a topic from its terms and the passages it holds.
-
-    The terms alone are a thin prompt - a dozen words can read as several
-    subjects at once - so a few of the passages the topic placed most
-    strongly go in with them.
-    """
+    """Names a topic from its terms and a few of the passages it holds."""
 
     def __init__(self, client: Client, languages: dict[str, str]) -> None:
         """Initialises the labeller.
@@ -70,10 +61,16 @@ class TopicLabeller:
     def label(
         self, topic: FittedTopic, language: str, excerpts: list[str]
     ) -> str | None:
-        """Names one topic, or None when the model could not or would not.
+        """Names one topic.
 
-        A failure is not raised: a topic with no name is worse than one with
-        a name, and both are better than losing the fit that produced them.
+        Args:
+            topic: The topic, read for its top terms.
+            language: ISO 639-1 code of the language to answer in.
+            excerpts: Text of the passages the topic holds most strongly.
+
+        Returns:
+            The name, stripped of quotes and trailing punctuation, or None if
+            the model was unreachable or found no shared subject.
         """
         try:
             answer = self._client.answer(
@@ -84,8 +81,8 @@ class TopicLabeller:
         except ModelUnavailable as exc:
             log.warning("could not name topic %d: %s", topic.topic_index, exc)
             return None
-        # One strip over the whole set, not one after another: a trailing
-        # full stop inside the closing quote leaves the quote behind.
+        # One strip over the whole set, so a full stop inside a closing quote
+        # takes the quote with it.
         name = answer.label.strip("\"'. \n\t")
         if not name or name.casefold() == "mixed":
             return None

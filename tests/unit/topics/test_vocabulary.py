@@ -19,6 +19,24 @@ def lemmas(text: str, language: str) -> list[str]:
     return next(iter(read([text], language)))[1]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="NLP_CAPITALISED_NOUNS keys the foreign-word rule on a token being "
+    "lower-case, so title-cased English survives into the German vocabulary. "
+    "Reproduced in the stored de figure as topic #2: market, due, "
+    "concentration, financial, with, serious, incidents, consequences, of - "
+    "9.3% of the German corpus spent on an English topic. Fixing it means a "
+    "different signal than case in backend/nlp/analysis.py, because every "
+    "German noun is capitalised; remove this marker when it is fixed.",
+)
+def test_title_cased_foreign_grammar_is_dropped_too() -> None:
+    """An English heading inside a German document is not German vocabulary."""
+    heading = lemmas("Risks In The Focus Of BaFin: Market Concentration", "de")
+
+    assert not {"the", "of"} & set(heading), heading
+    assert {"risks", "focus", "market"} <= set(heading), heading
+
+
 def test_german_grammar_is_dropped_and_its_subjects_kept() -> None:
     """Articles, auxiliaries and prepositions are not vocabulary."""
     german = lemmas("Die Lieferung wird vor dem Versand wie folgt geprueft", "de")

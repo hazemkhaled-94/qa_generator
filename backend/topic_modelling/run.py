@@ -23,8 +23,8 @@ from topic_modelling.repository import TopicCatalog, TopicQueue
 
 log = logging.getLogger(__name__)
 
-#: This stage's actions. No --start or --rerun: asking is what creates the
-#: row, so a refit and a first fit are the same request.
+#: This stage's actions. No --start or --rerun: a refit and a first fit are
+#: the same request.
 _ACTIONS = {
     "status": "report the fit queue and the topics held",
     "discover": "queue a fit over the whole corpus",
@@ -39,7 +39,14 @@ _DRAWN = Path("topics")
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Runs the topic modelling command line."""
+    """Runs the topic modelling command line.
+
+    Args:
+        argv: The arguments, defaulting to the process's own.
+
+    Returns:
+        The exit status.
+    """
     args = parser("topic_modelling.run", _ACTIONS).parse_args(
         sys.argv[1:] if argv is None else argv
     )
@@ -87,7 +94,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _visualise() -> int:
-    """Writes every stored visualisation to a file, one per language."""
+    """Writes every stored visualisation to `_DRAWN`, one file per language.
+
+    Returns:
+        1 if no topics are stored or no language had a figure, else 0.
+    """
     export = ExportBucket()
     languages = [one.language for one in TopicCatalog().fit_state().languages]
     if not languages:

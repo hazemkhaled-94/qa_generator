@@ -21,16 +21,15 @@ from topic_modelling.models import (
     TopicRemoval,
 )
 
-#: A row that is a fit rather than a topic. `topics` is both the queue and the
-#: result, and this is what separates the two.
+#: A row that is a fit request rather than a topic. `topics` is both the queue
+#: and the result, and this separates the two.
 _OUTSTANDING = Topic.topic_index.is_(None)
 
 #: How many passages to hold at once while streaming the corpus.
 _BATCH = 500
 
 #: The next fit to run. Both conditions are load-bearing: status alone would
-#: let a fitted topic that somehow reached `pending` be claimed as a request,
-#: and running it would replace the whole table.
+#: let a fitted topic that somehow reached `pending` be claimed as a request.
 _NEXT_PENDING = (
     select(Topic.id)
     .where(_OUTSTANDING, Topic.status == Status.PENDING)
@@ -45,7 +44,8 @@ class TopicQueue(StageQueue):
     """Reads the topic modelling queue and stores what each fit produced.
 
     Extends :class:`StageQueue` rather than :class:`RowQueue`: there is no row
-    to start, because asking is what creates one.
+    to start, because asking is what creates one, so this stage answers no
+    `start` and no `reset`.
     """
 
     columns = Columns(
@@ -61,12 +61,18 @@ class TopicQueue(StageQueue):
     def request(self) -> int:
         """Asks for a fit by putting a request row on the queue.
 
-        Replaces any outstanding request rather than adding to it, so asking
-        twice queues one fit and asking after a failure clears that failure.
-        The topics themselves stay readable until a fit succeeds.
+        Deletes any request no worker holds first, so asking twice queues one
+        fit and asking after a failure clears that failure. A request made
+        while a fit is running is queued behind it. The topics themselves stay
+        readable until a fit succeeds.
+
+        Returns:
+            The id of the new request row.
         """
         with self._session.begin() as session:
-            session.execute(delete(Topic).where(_OUTSTANDING))
+            session.execute(
+                delete(Topic).where(_OUTSTANDING, Topic.status != Status.IN_PROGRESS)
+            )
             return session.scalar(
                 insert(Topic)
                 .values(top_terms=[], status=Status.PENDING)
@@ -76,10 +82,14 @@ class TopicQueue(StageQueue):
     def stop(self, within: Any = None) -> int:
         """Withdraws a fit that has been asked for but not started.
 
-        Deletes the request rather than parking it: a request row is only ever
-        the asking, so one nobody is going to run is not a state worth keeping.
+        Deletes the request rather than parking it. A fit already running is
+        left alone.
 
-        `within` is the base's; this stage declares no scope to narrow to.
+        Args:
+            within: The base's; this stage declares no scope to narrow to.
+
+        Returns:
+            How many requests were withdrawn.
         """
         with self._session.begin() as session:
             return session.execute(
@@ -87,7 +97,11 @@ class TopicQueue(StageQueue):
             ).rowcount
 
     def claim(self) -> int | None:
-        """Takes the next requested fit off the queue."""
+        """Takes the next requested fit off the queue.
+
+        Returns:
+            Its id, or None if none is pending.
+        """
         claimed = self._claim(Topic.id)
         return claimed.id if claimed else None
 
@@ -105,10 +119,10 @@ class TopicQueue(StageQueue):
             ]
 
     def passages(self, language: str) -> Iterator[PassageVocabulary]:
-        """Streams one language's vocabulary, in a stable order.
+        """Streams one language's passages by id, in batches of `_BATCH`.
 
-        Ordered by id so a seeded fit is reproducible, and read in batches so
-        the worker's memory follows the batch rather than the corpus.
+        Yields:
+            Each passage's id and the lemmas chunking stored for it.
         """
         with self._session() as session:
             rows = session.execute(
@@ -121,7 +135,7 @@ class TopicQueue(StageQueue):
                 yield PassageVocabulary(id=row.id, lemmas=list(row.lemmas or []))
 
     def excerpts(self, passage_ids: list[int]) -> list[str]:
-        """Reads the text of a few passages, for naming the topic holding them."""
+        """Reads the text of some passages, in no particular order."""
         if not passage_ids:
             return []
         with self._session() as session:
@@ -132,7 +146,7 @@ class TopicQueue(StageQueue):
             )
 
     def labelled_topics(self, language: str) -> list[FittedTopic]:
-        """Reads the topics of one language a person has said something about."""
+        """Reads one language's topics that hold a label or sit out of coverage."""
         with self._session() as session:
             return [
                 FittedTopic(
@@ -160,11 +174,18 @@ class TopicQueue(StageQueue):
     def replace(self, fit_id: int, fittings: list[Fitting]) -> int:
         """Replaces every topic and membership with one run's results.
 
-        Every language in one transaction, because a corpus holding one
-        language's new topics beside another's old memberships is a corpus
-        whose weights point at the wrong subjects. The claimed request row
-        goes with them, which is why this does not finish it: the new rows are
-        written `modelled` outright.
+        Every language in one transaction: a corpus holding one language's new
+        topics beside another's old memberships has weights pointing at the
+        wrong subjects. Takes the claimed request row with them, which is why
+        this does not finish it - the new rows are written `modelled` outright.
+        A request queued behind this fit is left on the queue.
+
+        Args:
+            fit_id: The request row this run claimed.
+            fittings: What each language's fit produced.
+
+        Returns:
+            How many memberships were written.
         """
         with self._session.begin() as session:
             # Read as values, not as func.now(): these go into an executemany
@@ -177,7 +198,7 @@ class TopicQueue(StageQueue):
                     func.now(),
                 )
             ).one()
-            session.execute(delete(Topic))
+            session.execute(delete(Topic).where(~_OUTSTANDING | (Topic.id == fit_id)))
 
             rows = [
                 {
@@ -226,7 +247,12 @@ class TopicQueue(StageQueue):
         return len(memberships)
 
     def counts(self) -> dict[str, int]:
-        """Reports what this service owns, for the status panel."""
+        """Reports what this service owns, for the status panel.
+
+        Returns:
+            Rows by status - `modelled` counts topics, the rest count fits -
+            plus the memberships held and the passages holding a topic.
+        """
         with self._session() as session:
             memberships = (
                 session.scalar(select(func.count()).select_from(PassageTopic)) or 0
@@ -252,8 +278,16 @@ class TopicCatalog(Repository):
     ) -> StoredTopic | None:
         """Records what a person decided about one topic.
 
-        Returns None if no topic has that id: a fit request is not a topic and
-        is not editable.
+        A blank label clears the label and its provenance; a label present
+        marks the topic `person`-named.
+
+        Args:
+            topic_id: The topic. A fit request is not one and is not editable.
+            label: The name to record, or None to clear it.
+            include_in_coverage: Whether it counts toward coverage reporting.
+
+        Returns:
+            The topic as it now reads, or None if no topic has that id.
         """
         with self._session.begin() as session:
             changed = session.execute(
@@ -272,7 +306,10 @@ class TopicCatalog(Repository):
     def delete_all(self) -> TopicRemoval:
         """Removes every topic, and with it every membership.
 
-        Any outstanding request goes too.
+        Any outstanding request goes too, running or not.
+
+        Returns:
+            What went, and the languages whose figures are now orphaned.
         """
         with self._session.begin() as session:
             languages = list(
@@ -311,9 +348,11 @@ class TopicCatalog(Repository):
         """Reports the state of the model, one entry per language.
 
         Each language carries the live passage and membership counts beside
-        the ones its fit recorded, which is what makes a stale model visible:
-        re-chunking a document deletes its passages and the memberships go
-        with them.
+        the ones its fit recorded, which is what makes a stale model readable.
+        The status and error are the newest request row's.
+
+        Returns:
+            The state of the model, or every field empty if nothing is stored.
         """
         with self._session() as session:
             outstanding = session.execute(
@@ -390,14 +429,17 @@ class TopicCatalog(Repository):
         )
 
     def topics(self) -> list[StoredTopic]:
-        """Reads the fitted topics with how much of the corpus each holds."""
+        """Reads the fitted topics with how much of the corpus each holds.
+
+        Returns:
+            One entry per topic, ordered by language then topic index.
+        """
         # Three queries, not one. Folding either of the first two into the
         # aggregate below would join a second row per passage and inflate both
         # the membership count and the mean weight.
         with self._session() as session:
-            # Over the passages this topic owns rather than every passage
-            # holding it: a passage belongs to several topics, so counting all
-            # of them dilutes whatever separates one topic from another.
+            # Over the passages this topic is dominant in rather than every
+            # passage holding it: a passage belongs to several topics.
             owned = {
                 row.topic_id: row
                 for row in session.execute(

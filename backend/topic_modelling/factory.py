@@ -19,6 +19,12 @@ def build_service(settings: Settings) -> TopicModellingService:
     """Wires the service and its collaborators.
 
     The labeller is left out when no model is configured.
+
+    Args:
+        settings: The environment this deployment reads.
+
+    Returns:
+        The service, ready to drain the fit queue.
     """
     labeller = None
     if settings.model is not None:

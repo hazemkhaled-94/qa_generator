@@ -12,7 +12,7 @@ from blob_store.seaweedfs import ExportBucket
 from stages import StageService
 from telemetry import tracer
 from topic_modelling.labels import TopicLabeller
-from topic_modelling.models import Fitting
+from topic_modelling.models import FittedTopic, Fitting
 from topic_modelling.repository import TopicQueue
 from topic_modelling.topics import NoVocabulary, TopicFitter, carry_labels
 
@@ -26,9 +26,9 @@ _EXCERPTS = 4
 class TopicModellingService(StageService):
     """Fits the corpus topic model when a run asks for it.
 
-    The unit of work is a whole language. Each fit replaces every topic and
-    every membership, carrying human labels across by matching top terms. A
-    fit that fails leaves the previous topics in place, with the reason on
+    The unit of work is one fit, over every language. Each fit replaces every
+    topic and every membership, carrying labels across by matching top terms.
+    A fit that fails leaves the previous topics in place, with the reason on
     the request row beside them.
     """
 
@@ -45,8 +45,12 @@ class TopicModellingService(StageService):
     ) -> None:
         """Initialises the service with its collaborators.
 
-        The labeller is optional; without one a topic keeps its terms and no
-        name.
+        Args:
+            repository: The fit queue and the corpus reader.
+            fitter: Fits one language at a time.
+            export: Where each language's figure is stored.
+            labeller: Names the unnamed topics. Without one a topic keeps its
+                terms and no name.
         """
         super().__init__(repository)
         self._repository: TopicQueue = repository
@@ -55,13 +59,21 @@ class TopicModellingService(StageService):
         self._labeller = labeller
 
     def request(self) -> int:
-        """Asks for a fit, without doing it."""
+        """Asks for a fit, without doing it.
+
+        Returns:
+            The id of the request row.
+        """
         fit_id = self._repository.request()
         log.info("requested topic fit %d", fit_id)
         return fit_id
 
     def process_next(self) -> int | None:
-        """Runs one requested fit, recording a failure against the request."""
+        """Runs one requested fit, recording a failure against the request.
+
+        Returns:
+            The id of the fit that was claimed, or None if none was queued.
+        """
         fit_id = self._repository.claim()
         if fit_id is None:
             return None
@@ -80,11 +92,11 @@ class TopicModellingService(StageService):
     def _fit(self, fit_id: int, current: Span) -> None:
         """Fits every language the corpus holds and stores what they produced.
 
-        A language whose vocabulary the frequency filter empties is logged
-        and left out rather than failing the run.
+        A language the fitter refuses is logged and left out.
 
         Raises:
-            NoVocabulary: If no language produced a model at all.
+            NoVocabulary: If no passage carries a language, or if no language
+                produced a model.
         """
         languages = self._repository.languages()
         if not languages:
@@ -122,14 +134,13 @@ class TopicModellingService(StageService):
 
         for fitting in fittings:
             log.info(
-                "fit %d [%s]: %d topic(s) over %d passage(s), %d term(s), "
-                "%d label(s) carried",
+                "fit %d [%s]: %d topic(s) over %d passage(s), %d term(s), %d named",
                 fit_id,
                 fitting.language,
                 len(fitting.topics),
                 fitting.passages,
                 fitting.vocabulary,
-                fitting.labels_carried,
+                fitting.labelled,
             )
             if fitting.without_topics:
                 log.warning(
@@ -143,10 +154,9 @@ class TopicModellingService(StageService):
     def _draw(self, fittings: list[Fitting]) -> None:
         """Stores each language's model as a page.
 
-        The topics are already written when this runs, so a failure here is
-        logged and left: a model with no picture is still a model. pyLDAvis is
-        imported here for the same reason, so an image built before it was
-        declared still fits.
+        Runs after the topics are written, so every failure here is logged and
+        left rather than raised. pyLDAvis is imported here, so an image built
+        without it still fits.
         """
         try:
             from topic_modelling.visualisation import render
@@ -155,10 +165,9 @@ class TopicModellingService(StageService):
             return
 
         for fitting in fittings:
-            # Taken away before the new one is drawn: these topics have just
-            # replaced the ones the stored figure describes, and a figure of
-            # topics that no longer exist is worse than none. The route
-            # answers 404 for a language that has no figure.
+            # Taken away before the new one is drawn, so a language whose
+            # figure fails to render has none rather than a stale one. The
+            # route answers 404 for that.
             key = self._export.topic_visualisation_key(fitting.language)
             try:
                 self._export.remove(key)
@@ -174,11 +183,14 @@ class TopicModellingService(StageService):
             except Exception:
                 log.exception("could not draw the %s topics", fitting.language)
 
-    def _named(self, topics: list, fitting: Fitting, language: str) -> list:
-        """Names the topics no person has named, with the model.
+    def _named(
+        self, topics: list[FittedTopic], fitting: Fitting, language: str
+    ) -> list[FittedTopic]:
+        """Names the topics that hold no label yet, with the model.
 
-        Only the unnamed ones: a name a person typed, or one carried from the
-        last fit, is left alone.
+        A topic that already carries one - typed by a person, or carried from
+        the last fit - is left alone. Returns `topics` unchanged when no
+        labeller is configured.
         """
         if self._labeller is None:
             return topics
@@ -189,7 +201,7 @@ class TopicModellingService(StageService):
             if len(held) < _EXCERPTS:
                 held.append(weight.passage_id)
 
-        named = []
+        named: list[FittedTopic] = []
         for topic in topics:
             if topic.label:
                 named.append(topic)
