@@ -4,8 +4,8 @@ Applied cheapest first, because each one that fires saves the cost of those
 behind it:
 
   malformed       structural, free
-  restates_fact   structural, free: the question is about what its fact is
-                  about and nothing more
+  answer_too_short  free: nothing worth scoring against
+  leaks_source    free where the title is quoted, the verifier's otherwise
   duplicate       one index probe against the questions already accepted
   answerable      the same probe, when an unanswerable question has a twin
                   the corpus does answer
@@ -18,12 +18,11 @@ the passages, which is what a question is for, and a paraphrase, a
 decomposition and a resolved pronoun all survive it where a threshold would
 not.
 
-`unanchored` rides on the same call. Whether a question reads like one a
-person would type is a judgement, not a measurement, and no structural check
-makes it - but a model already looking at the question and the material can,
-and asking costs nothing extra. It is the half of quality `restates_fact`
-cannot reach: a question can add a word its fact lacks and still be one
-nobody would ask.
+`unanchored` and `leaks_source` ride on the same call. Whether a question
+names its subject, and whether it gives away which document answers it, are
+judgements rather than measurements; no structural check makes either, but a
+model already looking at the question and the material can, and asking costs
+nothing extra.
 
 Two things are load-bearing. The verifier is a different model from the
 writer, because a model marking its own work agrees with itself. And it sees
@@ -41,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from database.qa_generator import QuestionRejection, QuestionStatus
 from llm.client import Client
-from nlp.analysis import claim, content, normalised, vocabulary
+from nlp.analysis import claim, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
 from question_generation.models import (
@@ -159,9 +158,9 @@ def structural(
     Returns the code to store and the reason to log. The several ways of
     being malformed share one code, because none of them measures anything a
     report would group on and the reason belongs where a person debugging
-    reads it. Restating the fact gets a code of its own: it is how a writer
-    fails when the prompt is right and the model ignores it, which is worth
-    counting apart from a missing question mark.
+    reads it. The two that do get a code of their own - an answer too short
+    to score, and a question quoting the title of its own source - are the
+    two a report should be able to count.
     """
     asked = question_text.strip()
     if not asked:
@@ -269,29 +268,26 @@ def structural(
             ),
         )
 
-    # The defect this stage was first shipped with, made measurable. A
-    # question built by taking its fact and replacing one part with a
-    # question word is about exactly what the fact is about and nothing more:
-    # `Geopolitische Konflikte schüren Unsicherheit` becomes `Was schüren
-    # geopolitische Konflikte?`, which nobody searching a corpus would type.
+    # There is no gate here for "the question is its own fact rearranged",
+    # and that is a finding rather than an omission. One was written, in two
+    # formulations, and measured against 61 real rows: both refused questions
+    # like `Wie hoch war die Arbeitslosenquote im August 2025?` -> `6,4
+    # Prozent`, which is as good as a benchmark question gets.
     #
-    # Compared on content lemmas - what each is about - rather than on words,
-    # so an inflection or a rephrasing is not mistaken for added meaning. A
-    # question that names its document, its institution or its year adds a
-    # lemma the fact does not have and passes; one that permutes the fact has
-    # nothing of its own to show.
-    if statements and answerable:
-        asking = content(asked, language)
-        told = set().union(*(content(one, language) for one in statements))
-        if asking and not asking - told:
-            return (
-                QuestionRejection.RESTATES_FACT,
-                (
-                    f"it is about {', '.join(sorted(asking))} and so is its fact, "
-                    f"so it adds nothing a person searching for this would have "
-                    f"to know to ask it"
-                ),
-            )
+    # The reason no such gate can work: for a single atomic fact, a good
+    # question IS the fact minus its answer, put as a question. That is what
+    # asking about a fact means. `Wie hoch war die Arbeitslosenquote im August
+    # 2025?` and `Was schüren geopolitische Konflikte?` have the same shape and
+    # the same overlap with their facts; what separates them is whether the
+    # answer is determinate, and that is not lexical either - a units rule
+    # refused 7 of 15 accepted answers, `knapp ein Fünftel` among them.
+    #
+    # Whether a question is worth asking is a judgement, so the verifier makes
+    # it. `not_recoverable` already carries it: it cannot get a determinate
+    # answer back out of the passages for a vague question, which is the same
+    # thing measured where it can be measured. The exact-match check above
+    # stays, because a fact handed back with a question mark is not a
+    # judgement call.
 
     # Read on the question and its answer together, and only believed when it
     # answers: lingua returns nothing below forty characters of prose, and

@@ -81,7 +81,6 @@ class QuestionRejection(StrEnum):
     MALFORMED = "malformed"
     ANSWER_TOO_SHORT = "answer_too_short"
     LEAKS_SOURCE = "leaks_source"
-    RESTATES_FACT = "restates_fact"
     UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"
     DUPLICATE = "duplicate"

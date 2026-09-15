@@ -49,47 +49,6 @@ _GATES = {
             "passage as something to cite rather than as context."
         ),
     ),
-    "restates_fact": (
-        "Asks more than its fact",
-        (
-            "The question names something its fact does not - the institution, "
-            "the document, the period - so a person searching could have asked "
-            "it."
-        ),
-        (
-            "The question is its own fact with one part replaced by a question "
-            "word: `Geopolitische Konflikte schüren Unsicherheit` asked as `Was "
-            "schüren geopolitische Konflikte?`. Nobody searching a corpus types "
-            "that. A high share means the writer is ignoring its prompt - check "
-            "QUESTIONS_FACT_SAMPLE and the prompt version."
-        ),
-    ),
-    "unanchored": (
-        "Names a subject",
-        ("A reader who has never seen the passage can tell what is being asked about."),
-        (
-            "Questions that name nothing at all: `What specific components are "
-            "included?`, or `the requirements` without saying which. The "
-            "opposite failure to naming a source, and the two are easy to "
-            "confuse - a question is supposed to name its subject and supposed "
-            "not to name its document. The verifier judges this on the call it "
-            "was already making, so it costs nothing, but it is a model's "
-            "opinion and not a measurement."
-        ),
-    ),
-    "answer_too_short": (
-        "Answer worth scoring",
-        (
-            "The target answer is long enough to mark a chatbot right or wrong "
-            "against, as QUESTIONS_MIN_ANSWER_CHARS defines long enough."
-        ),
-        (
-            "Answers too thin to score: `7`, `8%`, `Nein`. A blunt measure, and "
-            "the cost is real - at 15 characters it also refuses `70%` and "
-            "`2025`, which are the most unambiguously scoreable answers there "
-            "are. Lower QUESTIONS_MIN_ANSWER_CHARS to keep bare values."
-        ),
-    ),
     "duplicate": (
         "Not already asked",
         (

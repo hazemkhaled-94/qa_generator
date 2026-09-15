@@ -365,88 +365,82 @@ def test_the_difficulty_is_read_off_the_group_rather_than_judged() -> None:
 # was given the passage and these gates were added.
 
 
+# ── Why there is no gate for "the question is its own fact" ───────────────
+#
+# One was written and removed. These keep the finding, because the idea is an
+# appealing one and the next person to have it should be able to see what it
+# costs before writing it again.
+
+
 @pytest.mark.parametrize(
-    ("question", "fact"),
+    ("question", "answer", "fact"),
     [
         (
-            "Was schüren geopolitische Konflikte?",
-            "Geopolitische Konflikte schüren Unsicherheit.",
+            "Wie hoch war die Arbeitslosenquote im August 2025?",
+            "6,4 Prozent",
+            "Die Arbeitslosenquote liegt im August 2025 bei 6,4 Prozent.",
         ),
         (
-            "Was umfasst Kreditgeschäfte?",
-            "Kreditgeschäfte umfassen Bilanzaktiva und außerbilanzielle Geschäfte.",
+            "Wie viele Banken in Deutschland könnten sich qualifizieren?",
+            "Etwa 1.000 Banken",
+            "Etwa 1.000 Banken in Deutschland könnten sich qualifizieren.",
         ),
         (
-            "Was prägt das Umfeld des Finanzsektors?",
-            "Das Umfeld des Finanzsektors ist geprägt von geopolitischen Umbrüchen.",
+            "Wie oft muss die Angemessenheit der Verfahren überprüft werden?",
+            "jährlich",
+            "Die Angemessenheit der Verfahren ist zumindest jährlich zu prüfen.",
         ),
     ],
 )
-def test_a_question_that_only_permutes_its_fact_is_refused(question, fact) -> None:
-    """The defect this stage shipped with, one real row at a time.
+def test_a_good_question_is_its_fact_minus_the_answer(question, answer, fact) -> None:
+    """Which is why no lexical gate can refuse one for being that.
 
-    Each is the fact with one part replaced by a question word. Nobody
-    searching a corpus of thousands of pages types any of them.
+    For a single atomic fact, asking about it IS reproducing it without its
+    answer. Every question here does exactly that and every one is as good
+    as a benchmark question gets; a gate refusing the shape refused all
+    three, measured on 61 real rows.
     """
+    assert (
+        checked(
+            question_text=question,
+            target_answer=answer,
+            language="de",
+            statements=(fact,),
+        )
+        is None
+    )
+
+
+def test_a_vague_question_has_the_same_shape_and_is_not_refused_here() -> None:
+    """The one the removed gate was written for, kept to show the problem.
+
+    It has the same overlap with its fact as the three above. What makes it
+    worse is that its answer is not determinate - and that is not lexical
+    either: requiring a number or a name in the answer refused 7 of 15
+    accepted answers. So the verifier judges it, under
+    `not_recoverable`, where it can be judged.
+    """
+    assert (
+        checked(
+            question_text="Was schüren geopolitische Konflikte?",
+            target_answer="Unsicherheit",
+            language="de",
+            statements=("Geopolitische Konflikte schüren Unsicherheit.",),
+        )
+        is None
+    )
+
+
+def test_a_fact_handed_back_with_a_question_mark_is_still_refused() -> None:
+    """The exact-match check stays: that one is not a judgement call."""
     failed = checked(
-        question_text=question,
+        question_text="Geopolitische Konflikte schüren Unsicherheit?",
         target_answer="Unsicherheit",
-        language="de",
-        statements=(fact,),
-    )
-
-    assert code(failed) == QuestionRejection.RESTATES_FACT
-
-
-def test_a_question_naming_something_its_fact_does_not_is_kept() -> None:
-    """The gate has to let a real question through or it is just a filter.
-
-    `Bundesbank` and `Vorschlag` are in the passage and not in the fact, so
-    the question carries something a searcher would have had to know.
-    """
-    failed = checked(
-        question_text=(
-            "Welchen Vorschlag haben Bafin und Bundesbank für kleine Banken gemacht?"
-        ),
-        target_answer="eine Bilanzsumme unter 10 Milliarden Euro",
-        language="de",
-        statements=("Die kleinen Banken müssen eine Bilanzsumme haben.",),
-    )
-
-    assert failed is None
-
-
-def test_a_question_sharing_its_subject_with_its_fact_is_not_a_restatement() -> None:
-    """Reusing the subject's words is how a question is about the subject.
-
-    Only adding *nothing at all* is the failure, so a question that names
-    the document its rule comes from passes on that word alone.
-    """
-    failed = checked(
-        question_text="Wie oft verlangt die MaRisk einen Risikobericht?",
-        target_answer="vierteljährlich",
-        language="de",
-        statements=("Ein Risikobericht muss vierteljährlich erstellt werden.",),
-    )
-
-    assert failed is None
-
-
-def test_the_restatement_gate_leaves_unanswerable_questions_alone() -> None:
-    """A perturbation is meant to depart from its fact, not to restate it.
-
-    It is written from the fact and deliberately not answered by it, so
-    comparing the two for overlap says nothing about whether it is good.
-    """
-    failed = checked(
-        question_text="Was schüren geopolitische Konflikte im Jahr 2030?",
-        target_answer=None,
-        answerable=False,
         language="de",
         statements=("Geopolitische Konflikte schüren Unsicherheit.",),
     )
 
-    assert failed is None
+    assert code(failed) == QuestionRejection.MALFORMED
 
 
 @pytest.mark.parametrize(
@@ -598,7 +592,7 @@ def test_the_free_gates_are_unaffected_by_who_is_verifying() -> None:
 
     result = checker.check(
         candidate(
-            question_text="Was schüren geopolitische Konflikte?",
+            question_text="Geopolitische Konflikte schüren Unsicherheit?",
             target_answer="Unsicherheit",
             facts=group(
                 source(
@@ -610,7 +604,7 @@ def test_the_free_gates_are_unaffected_by_who_is_verifying() -> None:
         )
     )
 
-    assert result.rejected_reason == QuestionRejection.RESTATES_FACT
+    assert result.rejected_reason == QuestionRejection.MALFORMED
 
 
 # ── The answer floor, and the criteria the gates read off ──────────────────
