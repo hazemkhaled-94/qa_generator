@@ -275,7 +275,7 @@ def test_storing_writes_the_questions_their_links_and_finishes_the_topic(
     corpus, engine
 ) -> None:
     """One transaction: a topic marked done with no questions is a lie."""
-    from question_generation.models import CheckedQuestion
+    from question_generation.models import CheckedQuestion, criteria_of
 
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -286,17 +286,21 @@ def test_storing_writes_the_questions_their_links_and_finishes_the_topic(
     stored = QuestionQueue().store(
         topic_id,
         [
-            CheckedQuestion(
-                question_text="What does the device weigh?",
-                target_answer="4 kg",
-                answerable=True,
-                difficulty="cross_passage",
-                language="en",
-                status="accepted",
-                rejected_reason=None,
-                fact_ids=facts,
-                embedding=[0.1] * 1024,
-            )
+            [
+                CheckedQuestion(
+                    question_text="What does the device weigh?",
+                    target_answer="4 kg",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=2, documents=1, topics=1, answer_chars=4
+                    ),
+                    language="en",
+                    status="accepted",
+                    rejected_reason=None,
+                    fact_ids=facts,
+                    embedding=[0.1] * 1024,
+                )
+            ]
         ],
     )
 
@@ -319,7 +323,7 @@ def test_a_second_run_adds_to_the_questions_rather_than_replacing_them(
     corpus, engine
 ) -> None:
     """Questions are append-only; a rejected one is the drop-rate evidence."""
-    from question_generation.models import CheckedQuestion
+    from question_generation.models import CheckedQuestion, criteria_of
 
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -330,16 +334,20 @@ def test_a_second_run_adds_to_the_questions_rather_than_replacing_them(
         queue.store(
             topic_id,
             [
-                CheckedQuestion(
-                    question_text=f"Question {position}?",
-                    target_answer="4 kg",
-                    answerable=True,
-                    difficulty="single_passage",
-                    language="en",
-                    status="accepted",
-                    rejected_reason=None,
-                    fact_ids=(fact_id,),
-                )
+                [
+                    CheckedQuestion(
+                        question_text=f"Question {position}?",
+                        target_answer="4 kg",
+                        answerable=True,
+                        criteria=criteria_of(
+                            passages=1, documents=1, topics=1, answer_chars=4
+                        ),
+                        language="en",
+                        status="accepted",
+                        rejected_reason=None,
+                        fact_ids=(fact_id,),
+                    )
+                ]
             ],
         )
 
@@ -537,7 +545,11 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
             question_text="What is it and how often is it reviewed?",
             target_answer="4 kg, yearly",
             status="accepted",
-            difficulty="cross_document",
+            difficulty="hard",
+            passage_scope="multi_passage",
+            document_scope="cross_document",
+            topic_scope="single_topic",
+            answer_chars=12,
         )
         session.add(asked)
         session.flush()
@@ -547,12 +559,17 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
 
     settings = Settings(
         per_topic=4,
-        sample_size=2,
+        sample_size=4,
         unanswerable_share=0.25,
+        bridge_share=0.5,
+        followup_share=0.5,
+        max_followups=2,
+        min_answer_chars=0,
+        long_answer_chars=60,
         duplicate_cosine=0.93,
         embedding_model="stub",
         max_tokens=512,
-        verifier_model=None,
+        verifier_model="ollama/verifier",
     )
     # Re-extracting one document deletes its facts; the other citation stays.
     with engine.begin() as connection:

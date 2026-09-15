@@ -44,7 +44,12 @@ from llm.client import Client
 from nlp.analysis import claim, content, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
-from question_generation.models import Candidate, CheckedQuestion, Neighbour
+from question_generation.models import (
+    LONG_ANSWER_CHARS,
+    Candidate,
+    CheckedQuestion,
+    Neighbour,
+)
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +127,7 @@ def structural(
     answerable: bool,
     language: str | None,
     statements: Sequence[str] = (),
+    min_answer_chars: int = 0,
 ) -> tuple[str, str] | None:
     """The gates that need neither a model nor an index, or None if it passes.
 
@@ -182,7 +188,22 @@ def structural(
     # Nothing narrower is checked here. `48 hours` answering `within how many
     # hours ...` shares its head noun with the question and is a perfectly
     # ordinary pair, so overlap between the two is not evidence of anything.
+    # A floor on the answer, so a question is not scored against something
+    # too thin to be worth scoring: `7`, `8%`, `Nein`. It is a blunt
+    # instrument and QUESTIONS_MIN_ANSWER_CHARS is where it is set, because
+    # the cost is real - on one corpus a floor of 15 refused 41% of the
+    # accepted answers, `70%` and `2025` among them. Raise it to force
+    # substance, lower it to keep bare values.
     answer = (target_answer or "").strip()
+    if answer and len(answer) < min_answer_chars:
+        return (
+            QuestionRejection.ANSWER_TOO_SHORT,
+            (
+                f"the target answer {answer!r} is {len(answer)} characters and "
+                f"QUESTIONS_MIN_ANSWER_CHARS is {min_answer_chars}"
+            ),
+        )
+
     if answer and claim(answer, language).verbs:
         return (
             QuestionRejection.MALFORMED,
@@ -281,7 +302,12 @@ class Verifier:
         """The model doing the verifying."""
         return self._client.model
 
-    def read(self, question: str, passages: Sequence[str]) -> Reading:
+    def read(
+        self,
+        question: str,
+        passages: Sequence[str],
+        thread: Sequence[tuple[str, str | None]] = (),
+    ) -> Reading:
         """Answers one question from these passages, and judges the question.
 
         Two verdicts out of one call. The phrasing judgement is a model's to
@@ -296,9 +322,17 @@ class Verifier:
         numbered = "\n\n".join(
             f"[{position}] {passage}" for position, passage in enumerate(passages, 1)
         )
+        # A follow-up is asked in a conversation, so it is judged in one. Read
+        # alone, `And for an urgent one?` has no answer in any passage.
+        asked = (
+            "\n".join(f"Q: {q}\nA: {a or 'not in the material'}" for q, a in thread)
+            + f"\nQ: {question}"
+            if thread
+            else f"Question: {question}"
+        )
         got = self._client.answer(
             system=_VERIFY,
-            user=f"Passages:\n{numbered}\n\nQuestion: {question}",
+            user=f"Passages:\n{numbered}\n\n{asked}",
             shape=_Recovered,
         )
         return Reading(
@@ -340,6 +374,8 @@ class QuestionChecker:
         nearest,
         threshold: float,
         judge_phrasing: bool = True,
+        min_answer_chars: int = 0,
+        long_answer_chars: int = LONG_ANSWER_CHARS,
     ) -> None:
         """Initialises the checker with its collaborators.
 
@@ -360,6 +396,8 @@ class QuestionChecker:
         self._verifier = verifier
         self._nearest = nearest
         self._judge_phrasing = judge_phrasing
+        self._min_answer_chars = min_answer_chars
+        self._long_answer_chars = long_answer_chars
         self._threshold = threshold
 
     def check(
@@ -381,9 +419,10 @@ class QuestionChecker:
             answerable=candidate.answerable,
             language=candidate.group.language,
             statements=candidate.group.statements,
+            min_answer_chars=self._min_answer_chars,
         )
         if failed:
-            return self._verdict(candidate, failed, None)
+            return self._verdict(candidate, failed, None, self._long_answer_chars)
 
         embedding = self._embedder.embed(candidate.question_text)
         failed = near_verdict(
@@ -392,18 +431,30 @@ class QuestionChecker:
             threshold=self._threshold,
         )
         if failed:
-            return self._verdict(candidate, failed, embedding)
+            return self._verdict(candidate, failed, embedding, self._long_answer_chars)
 
-        return self._verdict(candidate, self._round_trip(candidate), embedding)
+        return self._verdict(
+            candidate,
+            self._round_trip(candidate),
+            embedding,
+            self._long_answer_chars,
+        )
 
     def _round_trip(self, candidate: Candidate) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back, and how it reads."""
-        read = self._verifier.read(candidate.question_text, candidate.group.passages)
+        read = self._verifier.read(
+            candidate.question_text, candidate.group.passages, candidate.thread
+        )
 
         # Judged before the answer is, and for both kinds of question: an
         # unanswerable question nobody would ask is as useless as an
         # answerable one, and a chatbot declining it proves nothing.
-        if not read.stands_alone:
+        #
+        # Never for a follow-up. `And for an urgent one?` names nothing and
+        # is exactly the question a person asks second; leaning on the thread
+        # is what a follow-up is for, so judging it as though it had been
+        # asked cold would reject every one of them.
+        if not read.stands_alone and not candidate.follows:
             reason = (
                 "the verifier says it names nothing a person searching would "
                 "know, so it could not have been asked without the passage"
@@ -460,6 +511,7 @@ class QuestionChecker:
         candidate: Candidate,
         failed: tuple[str, str] | None,
         embedding: list[float] | None,
+        long_answer: int = LONG_ANSWER_CHARS,
     ) -> CheckedQuestion:
         """Assembles one judged question, kept whichever way it went."""
         code, reason = failed if failed else (None, "")
@@ -469,10 +521,15 @@ class QuestionChecker:
             question_text=candidate.question_text,
             target_answer=candidate.target_answer,
             answerable=candidate.answerable,
-            difficulty=candidate.group.difficulty,
+            criteria=candidate.group.criteria(
+                len(candidate.target_answer) if candidate.target_answer else None,
+                follows=candidate.follows,
+                long_answer=long_answer,
+            ),
             language=candidate.group.language,
             status=QuestionStatus.REJECTED if code else QuestionStatus.ACCEPTED,
             rejected_reason=code,
             fact_ids=tuple(fact.id for fact in candidate.group.facts),
             embedding=embedding,
+            thread_position=candidate.thread_position,
         )

@@ -37,6 +37,7 @@ def checked(**kwargs):
             "answerable": True,
             "language": "en",
             "statements": (),
+            "min_answer_chars": 0,
             **kwargs,
         }
     )
@@ -194,6 +195,7 @@ class Recording:
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
+        self.threaded: tuple = ()
         self.embedded = 0
         self.verified = 0
 
@@ -202,9 +204,10 @@ class Recording:
         self.embedded += 1
         return self.vector
 
-    def read(self, question: str, passages) -> Reading:
+    def read(self, question: str, passages, thread=()) -> Reading:
         """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
+        self.threaded = tuple(thread)
         return Reading(recovered=self.recovers, stands_alone=self.stands_alone)
 
 
@@ -323,10 +326,10 @@ def test_the_verifier_is_shown_the_cited_passages_and_nothing_else() -> None:
     class Watching(Recording):
         """Records what the verifier was shown."""
 
-        def read(self, question: str, passages) -> Reading:
+        def read(self, question: str, passages, thread=()) -> Reading:
             """Keeps the passages and answers as scripted."""
             seen.append(list(passages))
-            return super().read(question, passages)
+            return super().read(question, passages, thread)
 
     pair = group(
         source(1, document="a", passage_id=1, statement="The device weighs 4 kg."),
@@ -345,7 +348,7 @@ def test_the_difficulty_is_read_off_the_group_rather_than_judged() -> None:
 
     result = build(Recording()).check(candidate(facts=pair))
 
-    assert result.difficulty == "cross_document"
+    assert result.criteria.document_scope == "cross_document"
     assert result.fact_ids == (1, 2)
 
 
@@ -601,3 +604,112 @@ def test_the_free_gates_are_unaffected_by_who_is_verifying() -> None:
     )
 
     assert result.rejected_reason == QuestionRejection.RESTATES_FACT
+
+
+# ── The answer floor, and the criteria the gates read off ──────────────────
+
+
+@pytest.mark.parametrize("answer", ["7", "8%", "Nein", "70%", "2025"])
+def test_an_answer_under_the_floor_is_refused(answer) -> None:
+    """A blunt measure, chosen deliberately.
+
+    At fifteen characters it refuses `70%` and `2025` as well as `7` and
+    `Nein` - measured on one corpus, 41% of the answers that had been
+    accepted. QUESTIONS_MIN_ANSWER_CHARS is where that is decided.
+    """
+    failed = checked(target_answer=answer, min_answer_chars=15)
+
+    assert code(failed) == QuestionRejection.ANSWER_TOO_SHORT
+
+
+@pytest.mark.parametrize(
+    "answer", ["European Supervisory Authorities", "29 January 2027", "Article 4(1)(1)"]
+)
+def test_an_answer_over_the_floor_is_kept(answer) -> None:
+    """A name, a date and a citation, all of them scoreable."""
+    assert checked(target_answer=answer, min_answer_chars=15) is None
+
+
+def test_a_floor_of_zero_refuses_nothing_for_length() -> None:
+    """Which is what keeps the bare values a corpus of numbers needs."""
+    assert checked(target_answer="70%", min_answer_chars=0) is None
+
+
+def test_an_unanswerable_question_is_never_too_short() -> None:
+    """It has no answer to measure, and is scored on behaviour."""
+    assert checked(answerable=False, target_answer=None, min_answer_chars=15) is None
+
+
+def test_a_follow_up_is_not_judged_on_standing_alone() -> None:
+    """`And for an urgent one?` names nothing, and is the point.
+
+    Leaning on the thread is what makes a follow-up a follow-up, so judging
+    one as though it had been asked cold would reject every one of them.
+    """
+    recording = Recording(recovers="4 kg", stands_alone=False)
+
+    result = build(recording).check(
+        candidate(
+            question_text="And for an urgent one?",
+            target_answer="4 hours",
+            thread=(("How long for a standard one?", "48 hours"),),
+        )
+    )
+
+    assert result.accepted
+    assert result.thread_position == 2
+
+
+def test_the_verifier_is_shown_the_thread_when_it_reads_a_follow_up() -> None:
+    """Read alone, a follow-up has no answer in any passage."""
+    recording = Recording(recovers="4 kg")
+
+    build(recording).check(
+        candidate(
+            question_text="And for an urgent one?",
+            target_answer="4 hours",
+            thread=(("How long for a standard one?", "48 hours"),),
+        )
+    )
+
+    assert recording.threaded == (("How long for a standard one?", "48 hours"),)
+
+
+def test_a_root_question_is_still_judged_on_standing_alone() -> None:
+    """The exemption is for follow-ups and for nothing else."""
+    recording = Recording(recovers="4 kg", stands_alone=False)
+
+    result = build(recording).check(candidate())
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED
+
+
+def test_the_three_criteria_are_read_off_the_facts_the_question_cites() -> None:
+    """Each says something different about what a chatbot has to do."""
+    across = group(
+        source(1, document="a", passage_id=1, topic_id=7),
+        source(2, document="b", passage_id=2, topic_id=8),
+    )
+
+    result = build(Recording()).check(candidate(facts=across))
+
+    assert result.criteria.passage_scope == "multi_passage"
+    assert result.criteria.document_scope == "cross_document"
+    assert result.criteria.topic_scope == "multi_topic"
+    assert result.criteria.difficulty == "hard", "three of the five"
+    assert result.criteria.score == 3
+
+
+def test_a_follow_up_counts_towards_its_own_difficulty() -> None:
+    """Carrying a thread is one of the things that makes answering harder.
+
+    Measured on the score rather than on the band: one point does not
+    always cross a boundary, and the score is what the band is read from.
+    """
+    alone = build(Recording()).check(candidate())
+    followed = build(Recording()).check(
+        candidate(thread=(("How long for a standard one?", "48 hours"),))
+    )
+
+    assert followed.criteria.score == alone.criteria.score + 1
+    assert followed.criteria.follows and not alone.criteria.follows

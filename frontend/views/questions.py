@@ -63,6 +63,19 @@ _GATES = {
             "and not a measurement."
         ),
     ),
+    "answer_too_short": (
+        "Answer worth scoring",
+        (
+            "The target answer is long enough to mark a chatbot right or wrong "
+            "against, as QUESTIONS_MIN_ANSWER_CHARS defines long enough."
+        ),
+        (
+            "Answers too thin to score: `7`, `8%`, `Nein`. A blunt measure, and "
+            "the cost is real - at 15 characters it also refuses `70%` and "
+            "`2025`, which are the most unambiguously scoreable answers there "
+            "are. Lower QUESTIONS_MIN_ANSWER_CHARS to keep bare values."
+        ),
+    ),
     "duplicate": (
         "Not already asked",
         (
@@ -116,20 +129,53 @@ _GATES = {
     ),
 }
 
-#: What each difficulty band means. Read off how far the evidence is spread,
-#: so nobody has to agree with a judgement to use it.
-_DIFFICULTY = {
-    "single_passage": "Answerable from one passage.",
-    "cross_passage": "Needs two passages of the same document.",
-    "cross_document": "Needs passages from two different documents.",
+#: The three criteria a question is classified by, and what each value means.
+#: Each says something different about what a chatbot has to do, and each is
+#: read off the facts the question cites rather than judged.
+_CRITERIA = {
+    "passage_scope": (
+        "Passages",
+        {
+            "single_passage": ("One", "Answerable from a single passage."),
+            "multi_passage": ("Two or more", "Needs more than one passage."),
+        },
+    ),
+    "document_scope": (
+        "Documents",
+        {
+            "single_document": ("One", "Answerable within a single document."),
+            "cross_document": (
+                "Two or more",
+                (
+                    "Needs passages from two different documents. The scope a "
+                    "retriever cannot fake: no one chunk holds the answer."
+                ),
+            ),
+        },
+    ),
+    "topic_scope": (
+        "Subjects",
+        {
+            "single_topic": ("One", "Stays inside one subject."),
+            "multi_topic": (
+                "Two or more",
+                (
+                    "Bridges two subjects. Available because a passage usually "
+                    "sits in several topics above the weight floor, and the corpus "
+                    "itself is what says the two meet."
+                ),
+            ),
+        },
+    ),
 }
 
-#: What each band is called in a figure, which has room for a word and not a
-#: sentence. The sentence above is the tooltip.
-_DIFFICULTY_LABELS = {
-    "single_passage": "One passage",
-    "cross_passage": "Two passages",
-    "cross_document": "Two documents",
+#: What each difficulty band means. Derived from the three criteria above, a
+#: long answer and being a follow-up: each is worth a point and the band is
+#: the total, so nobody has to agree with a judgement to use it.
+_DIFFICULTY = {
+    "easy": "None or one of the five things that make a question harder.",
+    "medium": "Two or three of them.",
+    "hard": "Four or five of them.",
 }
 
 #: What a healthy unanswerable share looks like. Too few and nothing tests
@@ -200,7 +246,8 @@ def view() -> None:
         "judged.",
     )
     page.metrics(_quality_figures(quality))
-    page.metrics(_spread_figures(quality))
+    page.metrics(_criteria_figures(quality))
+    page.metrics(_difficulty_figures(quality))
     page.findings(
         "Every gate, and what it found",
         "A question is stored whether or not it passed. Each row is one gate, "
@@ -219,10 +266,15 @@ def view() -> None:
                 else "—",
                 "Answerable": "yes" if row["answerable"] else "no",
                 "Difficulty": row["difficulty"] or "—",
+                "Passages": "1" if row["passage_scope"] == "single_passage" else "2+",
+                "Documents": "1"
+                if row["document_scope"] == "single_document"
+                else "2+",
+                "Subjects": "1" if row["topic_scope"] == "single_topic" else "2+",
+                "Turn": row["thread_position"],
                 "Question": row["question_text"],
                 "Answer": row["target_answer"] or "—",
                 "Cites": row["facts"],
-                "Documents": len(row["documents"]),
             }
             for row in rows
         ],
@@ -332,14 +384,51 @@ def _quality_figures(quality: dict) -> dict[str, tuple]:
     }
 
 
-def _spread_figures(quality: dict) -> dict[str, tuple]:
-    """Names the figures describing how the evidence is spread."""
-    difficulty = quality["difficulty"]
-    total = sum(difficulty.values())
+def _criteria_figures(quality: dict) -> dict[str, tuple]:
+    """Names the three criteria, each as the share that is more than one."""
+    figures = {}
+    for column, (label, values) in _CRITERIA.items():
+        counts = quality[column]
+        total = sum(counts.values())
+        wider = next(name for name in values if name.startswith(("multi", "cross")))
+        figures[label] = (
+            *page.portion(counts.get(wider, 0), total),
+            values[wider][1] + " This is the share of the set that needs that.",
+        )
+    return {
+        **figures,
+        "Follow-ups": (
+            *page.portion(quality["followups"], quality["total"]),
+            (
+                "Questions asked after another in a thread. These may lean on "
+                "the conversation - `And for urgent requests?` - so a chatbot "
+                "answering one has to carry the thread. The phrasing gate is "
+                "not applied to them, because not standing alone is the point."
+            ),
+        ),
+        "Answer length": (
+            f"{quality['mean_answer_chars']:.0f}",
+            "characters, mean",
+            (
+                "Mean length of the target answers. Above "
+                "QUESTIONS_LONG_ANSWER_CHARS an answer counts towards the "
+                "difficulty band: a chatbot has to produce more of the right "
+                "thing and a grader has more to disagree about."
+            ),
+        ),
+    }
+
+
+def _difficulty_figures(quality: dict) -> dict[str, tuple]:
+    """Names the difficulty bands, and the two figures that read beside them."""
+    bands = quality["difficulty"]
+    total = sum(bands.values())
     figures = {
-        _DIFFICULTY_LABELS[band]: (
-            *page.portion(difficulty.get(band, 0), total),
-            explanation,
+        band.capitalize(): (
+            *page.portion(bands.get(band, 0), total),
+            explanation
+            + " Derived from the three criteria above, a long answer and being "
+            "a follow-up; each is worth a point and the band is the total.",
         )
         for band, explanation in _DIFFICULTY.items()
     }
@@ -574,6 +663,30 @@ def _detail(client, question: dict) -> None:
         st.warning(
             "A fact this question rests on no longer passes its own checks. "
             "`make questions-reverify` rejects every question in that state."
+        )
+
+    if len(detail.get("thread") or []) > 1:
+        page.section(
+            "The conversation this sits in",
+            "A follow-up may lean on what was asked before it, so it is scored "
+            "with the thread replayed rather than on its own. The phrasing gate "
+            "is not applied to one for the same reason.",
+        )
+        st.dataframe(
+            [
+                {
+                    "Turn": turn["thread_position"],
+                    "State": turn["status"],
+                    "Question": turn["question_text"],
+                    "Answer": turn["target_answer"] or "—",
+                }
+                for turn in detail["thread"]
+            ],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Question": st.column_config.TextColumn(width="large"),
+            },
         )
 
     _verdict(client, question)

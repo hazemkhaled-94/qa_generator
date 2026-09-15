@@ -41,6 +41,7 @@ def source(
     language: str = "en",
     passage_text: str | None = None,
     section_path: str | None = None,
+    topic_id: int | None = None,
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
@@ -55,6 +56,7 @@ def source(
         doc_sha256=document,
         language=language,
         section_path=section_path,
+        topic_id=topic_id,
     )
 
 
@@ -68,6 +70,7 @@ def candidate(
     target_answer: str | None = "4 kg",
     answerable: bool = True,
     facts: FactGroup | None = None,
+    thread: tuple[tuple[str, str | None], ...] = (),
 ) -> Candidate:
     """A question as the model wrote it, before any gate has read it.
 
@@ -82,6 +85,7 @@ def candidate(
         target_answer=target_answer,
         answerable=answerable,
         group=facts if facts is not None else group(),
+        thread=thread,
     )
 
 

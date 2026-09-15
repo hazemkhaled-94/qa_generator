@@ -12,6 +12,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from database.qa_generator import (
     Fact,
     Passage,
+    PassageTopic,
     Question,
     QuestionFact,
     QuestionStatus,
@@ -96,7 +97,16 @@ def _joined(query: Select) -> Select:
     )
 
 
-def _filtered(query, document, topic, search, status, answerable, field):
+#: The scope columns a caller may narrow to, by the name the API takes.
+SCOPES = {
+    "passage_scope": Question.passage_scope,
+    "document_scope": Question.document_scope,
+    "topic_scope": Question.topic_scope,
+    "difficulty": Question.difficulty,
+}
+
+
+def _filtered(query, document, topic, search, status, answerable, field, **scopes):
     """Applies every filter a listing and its figures have to agree about.
 
     One place, so the page of rows and the quality panel above it cannot be
@@ -106,6 +116,15 @@ def _filtered(query, document, topic, search, status, answerable, field):
         query = query.where(Passage.doc_sha256 == document)
     if topic:
         query = query.where(DOMINANT.c.topic_id == topic)
+    for name, column in SCOPES.items():
+        if scopes.get(name):
+            query = query.where(column == scopes[name])
+    if scopes.get("follows") is not None:
+        query = query.where(
+            Question.follows_id.is_not(None)
+            if scopes["follows"]
+            else Question.follows_id.is_(None)
+        )
     if search:
         query = query.where(
             matching(
@@ -119,7 +138,7 @@ def _filtered(query, document, topic, search, status, answerable, field):
     return query
 
 
-def _ids(document, topic, search, status, answerable, field) -> Select:
+def _ids(document, topic, search, status, answerable, field, **scopes) -> Select:
     """The questions a filter selects, as one id apiece.
 
     Every figure is measured over this rather than over the joined query,
@@ -135,6 +154,7 @@ def _ids(document, topic, search, status, answerable, field) -> Select:
         status,
         answerable,
         field,
+        **scopes,
     ).distinct()
 
 
@@ -148,10 +168,16 @@ def _listing() -> Select:
                 Question.target_answer,
                 Question.answerable,
                 Question.difficulty,
+                Question.passage_scope,
+                Question.document_scope,
+                Question.topic_scope,
+                Question.answer_chars,
                 Question.language,
                 Question.status,
                 Question.rejected_reason,
                 Question.created_at,
+                Question.thread_position,
+                Question.follows_id,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
                 func.array_agg(func.distinct(Passage.doc_sha256)).label("documents"),
                 func.array_agg(func.distinct(Topic.label)).label("topics"),
@@ -180,6 +206,10 @@ def _stored(row: Any) -> StoredQuestion:
         target_answer=row.target_answer,
         answerable=row.answerable,
         difficulty=row.difficulty,
+        passage_scope=row.passage_scope,
+        document_scope=row.document_scope,
+        topic_scope=row.topic_scope,
+        answer_chars=row.answer_chars,
         language=row.language,
         status=row.status,
         rejected_reason=row.rejected_reason,
@@ -187,6 +217,8 @@ def _stored(row: Any) -> StoredQuestion:
         facts=row.facts,
         documents=_present(row.documents),
         topics=_present(row.topics),
+        thread_position=row.thread_position,
+        follows_id=row.follows_id,
     )
 
 
@@ -244,6 +276,7 @@ class QuestionQueue(RowQueue):
                     Passage.doc_sha256,
                     Passage.language,
                     Passage.section_path,
+                    DOMINANT.c.topic_id,
                 )
                 .select_from(Fact)
                 .join(Passage, Passage.id == Fact.passage_id)
@@ -268,44 +301,115 @@ class QuestionQueue(RowQueue):
                 doc_sha256=row.doc_sha256,
                 language=row.language,
                 section_path=row.section_path,
+                topic_id=row.topic_id,
             )
             for row in rows
         ]
 
-    def store(self, topic_id: int, questions: list[CheckedQuestion]) -> int:
-        """Writes one topic's questions and finishes it, in one transaction.
+    def bridging(self, topic_id: int) -> list[SourceFact]:
+        """The facts of passages that bridge this topic to another.
+
+        A bridge passage belongs to some other topic more strongly than to
+        this one, but carries this one above the weight floor - so the corpus
+        itself says the two subjects meet there. Pairing a bridge with an own
+        passage is what makes a multi-topic question available, and it is a
+        far better reason to put two passages together than that they came
+        from different files.
+
+        Facts an accepted question already rests on are skipped, as in
+        `facts`: a bridge is still a fact to be asked about once.
+        """
+        with self._session() as session:
+            rows = session.execute(
+                select(
+                    Fact.id,
+                    Fact.statement,
+                    Passage.id.label("passage_id"),
+                    Passage.text,
+                    Passage.doc_sha256,
+                    Passage.language,
+                    Passage.section_path,
+                    DOMINANT.c.topic_id,
+                )
+                .select_from(Fact)
+                .join(Passage, Passage.id == Fact.passage_id)
+                .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
+                .join(PassageTopic, PassageTopic.passage_id == Passage.id)
+                .where(
+                    # Carries this topic, but is not strongest in it.
+                    PassageTopic.topic_id == topic_id,
+                    DOMINANT.c.topic_id != topic_id,
+                    Fact.validated,
+                    Passage.language.is_not(None),
+                    ~_ALREADY_ASKED,
+                )
+                .order_by(Fact.id)
+            ).all()
+        return [
+            SourceFact(
+                id=row.id,
+                statement=row.statement,
+                passage_id=row.passage_id,
+                passage_text=row.text,
+                doc_sha256=row.doc_sha256,
+                language=row.language,
+                section_path=row.section_path,
+                topic_id=row.topic_id,
+            )
+            for row in rows
+        ]
+
+    def store(self, topic_id: int, threads: list[list[CheckedQuestion]]) -> int:
+        """Writes one topic's threads and finishes it, in one transaction.
+
+        A thread is a root question and its follow-ups, in the order they
+        were asked. They are written in that order and each follow-up is
+        linked to the row before it, which is why this takes threads rather
+        than a flat list: a follow-up needs its parent's id, and the parent
+        does not have one until it is inserted.
 
         Appends rather than replaces, which is what every other stage does:
         questions are append-only, a rejected one is the drop-rate evidence,
         and a second run over the same topic writes only what the facts it
         skipped did not already cover.
         """
+        written = 0
         with self._session.begin() as session:
-            for written in questions:
-                question_id = session.scalar(
-                    insert(Question)
-                    .values(
-                        question_text=written.question_text,
-                        target_answer=written.target_answer,
-                        answerable=written.answerable,
-                        difficulty=written.difficulty,
-                        language=written.language,
-                        embedding=written.embedding,
-                        status=written.status,
-                        rejected_reason=written.rejected_reason,
-                        status_changed_at=func.now(),
+            for thread in threads:
+                follows: int | None = None
+                for position, question in enumerate(thread, 1):
+                    question_id = session.scalar(
+                        insert(Question)
+                        .values(
+                            question_text=question.question_text,
+                            target_answer=question.target_answer,
+                            answerable=question.answerable,
+                            difficulty=question.criteria.difficulty,
+                            passage_scope=question.criteria.passage_scope,
+                            document_scope=question.criteria.document_scope,
+                            topic_scope=question.criteria.topic_scope,
+                            answer_chars=question.criteria.answer_chars,
+                            language=question.language,
+                            embedding=question.embedding,
+                            status=question.status,
+                            rejected_reason=question.rejected_reason,
+                            status_changed_at=func.now(),
+                            follows_id=follows,
+                            thread_position=position,
+                        )
+                        .returning(Question.id)
                     )
-                    .returning(Question.id)
-                )
-                session.execute(
-                    insert(QuestionFact),
-                    [
-                        {"question_id": question_id, "fact_id": fact_id}
-                        for fact_id in written.fact_ids
-                    ],
-                )
+                    session.execute(
+                        insert(QuestionFact),
+                        [
+                            {"question_id": question_id, "fact_id": fact_id}
+                            for fact_id in question.fact_ids
+                        ],
+                    )
+                    follows = question_id
+                    written += 1
             self._finish(topic_id, session=session)
-        return len(questions)
+        return written
 
     def counts(self) -> dict[str, int]:
         """Reports what this service owns, for the status panel."""
@@ -380,12 +484,17 @@ class QuestionCatalog(Repository):
                     Question.target_answer,
                     Question.answerable,
                     Question.difficulty,
+                    Question.passage_scope,
+                    Question.document_scope,
+                    Question.topic_scope,
+                    Question.follows_id,
                     Question.language,
                     Question.status,
                     Question.embedding,
                     func.coalesce(func.bool_and(Fact.validated), False).label("holds"),
                     func.count(func.distinct(Passage.doc_sha256)).label("documents"),
                     func.count(func.distinct(Fact.passage_id)).label("passages"),
+                    func.count(func.distinct(DOMINANT.c.topic_id)).label("topics"),
                     func.array_agg(Fact.statement).label("statements"),
                 )
             )
@@ -403,6 +512,10 @@ class QuestionCatalog(Repository):
                     target_answer=row.target_answer,
                     answerable=row.answerable,
                     difficulty=row.difficulty,
+                    passage_scope=row.passage_scope,
+                    document_scope=row.document_scope,
+                    topic_scope=row.topic_scope,
+                    follows_id=row.follows_id,
                     language=row.language,
                     status=row.status,
                     embedding=list(row.embedding)
@@ -414,6 +527,7 @@ class QuestionCatalog(Repository):
                     facts_validated=bool(row.holds),
                     documents=row.documents,
                     passages=row.passages,
+                    topics=row.topics,
                 )
 
     def reject(self, verdicts: list[tuple[int, str]]) -> int:
@@ -470,18 +584,50 @@ class QuestionCatalog(Repository):
         status: str | None = None,
         answerable: bool | None = None,
         field: str | None = None,
+        **scopes: Any,
     ) -> tuple[int, list[StoredQuestion]]:
         """Reads one page of questions and the total behind it."""
         listing = _filtered(
-            _listing(), document, topic, search, status, answerable, field
+            _listing(), document, topic, search, status, answerable, field, **scopes
         )
         counting = select(func.count()).select_from(
-            _ids(document, topic, search, status, answerable, field).subquery()
+            _ids(
+                document, topic, search, status, answerable, field, **scopes
+            ).subquery()
         )
         with self._session() as session:
             total = session.scalar(counting) or 0
             rows = session.execute(listing.limit(limit).offset(offset)).all()
         return total, [_stored(row) for row in rows]
+
+    def _thread(self, question: StoredQuestion) -> list[StoredQuestion]:
+        """The whole thread this question sits in, oldest first.
+
+        Walked from the root rather than from the question, so a follow-up
+        shows what was asked before it as well as after: reading a follow-up
+        without its parent is reading half a conversation, and the parent is
+        what makes it answerable.
+        """
+        root = question
+        while root.follows_id is not None:
+            found = self.one(root.follows_id)
+            if found is None:  # pragma: no cover - the cascade prevents it
+                break
+            root = found
+
+        thread = [root]
+        while True:
+            with self._session() as session:
+                nxt = session.scalar(
+                    select(Question.id).where(Question.follows_id == thread[-1].id)
+                )
+            if nxt is None:
+                break
+            found = self.one(nxt)
+            if found is None:  # pragma: no cover
+                break
+            thread.append(found)
+        return thread
 
     def detail(self, question_id: int) -> QuestionDetail | None:
         """Reads one question with the facts it was written from."""
@@ -507,6 +653,7 @@ class QuestionCatalog(Repository):
             ).all()
         return QuestionDetail(
             question=found,
+            thread=self._thread(found),
             sources=[
                 QuestionSource(
                     fact_id=row.id,
@@ -529,6 +676,7 @@ class QuestionCatalog(Repository):
         status: str | None = None,
         answerable: bool | None = None,
         field: str | None = None,
+        **scopes: Any,
     ) -> QuestionQuality:
         """Measures how generation is doing, under the listing's filter.
 
@@ -539,7 +687,7 @@ class QuestionCatalog(Repository):
         # One question per row from here on, so a plain count is the right
         # count and the mean is not weighted by how many facts each cites.
         selected = Question.id.in_(
-            _ids(document, topic, search, status, answerable, field)
+            _ids(document, topic, search, status, answerable, field, **scopes)
         )
         totals = select(
             func.count().label("total"),
@@ -548,6 +696,8 @@ class QuestionCatalog(Repository):
             .label("accepted"),
             func.count().filter(Question.status == QuestionStatus.DRAFT).label("draft"),
             func.count().filter(~Question.answerable).label("unanswerable"),
+            func.count().filter(Question.follows_id.is_not(None)).label("followups"),
+            func.coalesce(func.avg(Question.answer_chars), 0.0).label("answer"),
             func.coalesce(func.avg(func.length(Question.question_text)), 0.0).label(
                 "chars"
             ),
@@ -555,6 +705,9 @@ class QuestionCatalog(Repository):
         grouped = {
             "rejected": Question.rejected_reason,
             "difficulty": Question.difficulty,
+            "passage_scope": Question.passage_scope,
+            "document_scope": Question.document_scope,
+            "topic_scope": Question.topic_scope,
         }
         with self._session() as session:
             row = session.execute(totals).one()
@@ -598,9 +751,14 @@ class QuestionCatalog(Repository):
             accepted=row.accepted,
             draft=row.draft,
             unanswerable=row.unanswerable,
+            followups=row.followups,
             topics_covered=covered,
             topics_in_coverage=in_coverage,
             mean_question_chars=round(float(row.chars), 1),
+            mean_answer_chars=round(float(row.answer), 1),
             rejected=spread["rejected"],
             difficulty=spread["difficulty"],
+            passage_scope=spread["passage_scope"],
+            document_scope=spread["document_scope"],
+            topic_scope=spread["topic_scope"],
         )

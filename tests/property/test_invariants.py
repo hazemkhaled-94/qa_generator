@@ -199,18 +199,75 @@ def test_every_sample_holds_whole_passages_and_never_none(rows, wanted, size) ->
 
 @given(rows=FACTS, wanted=st.integers(1, 12), size=st.integers(1, 4))
 @settings(max_examples=200, deadline=None)
-def test_difficulty_always_matches_the_spread_it_is_read_from(
+def test_every_scope_always_matches_the_spread_it_is_read_from(
     rows, wanted, size
 ) -> None:
     """The property the re-check relies on to notice evidence that moved."""
-    from question_generation.models import difficulty_of
+    from question_generation.models import criteria_of
     from question_generation.selection import samples
 
     for one in samples(_sources(rows), wanted=wanted, size=size):
-        assert one.difficulty == difficulty_of(
-            documents=len({fact.doc_sha256 for fact in one.facts}),
+        assert one.criteria() == criteria_of(
             passages=len({fact.passage_id for fact in one.facts}),
+            documents=len({fact.doc_sha256 for fact in one.facts}),
+            topics=len({fact.topic_id for fact in one.facts if fact.topic_id}),
+            answer_chars=None,
         )
+
+
+@given(
+    passages=st.integers(1, 5),
+    documents=st.integers(1, 5),
+    topics=st.integers(1, 5),
+    answer=st.integers(0, 200),
+    follows=st.booleans(),
+)
+@settings(max_examples=300, deadline=None)
+def test_the_difficulty_band_never_disagrees_with_its_own_score(
+    passages, documents, topics, answer, follows
+) -> None:
+    """The band is the total, and nothing else may move it.
+
+    A weighting would be an opinion, and the point of deriving difficulty
+    rather than judging it is that nobody has to hold one.
+    """
+    from question_generation.models import criteria_of
+
+    read = criteria_of(
+        passages=passages,
+        documents=documents,
+        topics=topics,
+        answer_chars=answer,
+        follows=follows,
+    )
+    from question_generation.models import band
+
+    assert read.difficulty == band(read.score)
+
+
+@given(
+    passages=st.integers(1, 5),
+    documents=st.integers(1, 5),
+    topics=st.integers(1, 5),
+)
+@settings(max_examples=200, deadline=None)
+def test_a_wider_scope_is_never_easier(passages, documents, topics) -> None:
+    """Every criterion points the same way, so the band is monotonic."""
+    from question_generation.models import criteria_of
+
+    order = {"easy": 0, "medium": 1, "hard": 2}
+    narrow = criteria_of(
+        passages=1, documents=1, topics=1, answer_chars=0, follows=False
+    )
+    wide = criteria_of(
+        passages=passages,
+        documents=documents,
+        topics=topics,
+        answer_chars=0,
+        follows=False,
+    )
+
+    assert order[wide.difficulty] >= order[narrow.difficulty]
 
 
 @given(count=st.integers(1, 40), share=st.floats(0.0, 1.0))
@@ -219,9 +276,9 @@ def test_the_unanswerable_share_is_never_more_than_it_was_asked_for(
     count, share
 ) -> None:
     """A run must not quietly become mostly questions with no answer."""
-    from question_generation.selection import perturbed
+    from question_generation.selection import spread
 
-    over = sum(perturbed(index, share) for index in range(count))
+    over = sum(spread(index, share) for index in range(count))
 
     assert 0 <= over <= count
     assert over == int(count * share) or over == int(count * share) + 1

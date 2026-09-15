@@ -2,25 +2,120 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from database.qa_generator import Difficulty
+from database.qa_generator import (
+    Difficulty,
+    DocumentScope,
+    PassageScope,
+    TopicScope,
+)
+
+#: A long answer, in characters. Above it a question counts as harder: a
+#: chatbot has to produce more of the right thing, and a grader has more to
+#: disagree about. QUESTIONS_LONG_ANSWER_CHARS sets it; this is the fallback
+#: for a re-check reading a row whose settings are not to hand.
+LONG_ANSWER_CHARS = 60
 
 
-def difficulty_of(*, documents: int, passages: int) -> str:
-    """Names how far evidence spread over this many documents and passages is.
+def band(score: int) -> str:
+    """The difficulty band a point total falls in.
 
-    One function, because two callers read it off different things: the
-    service off the facts it is about to write a question from, and a
-    re-check off the facts a stored question still has. A question whose
-    evidence moved under it is one whose difficulty stopped being true, and
-    the two readings have to be the same reading to notice.
+    Written once, because the service bands a question it is about to store
+    and a re-check bands the same question read back; two spellings of this
+    would be two difficulties for one row.
     """
-    if documents > 1:
-        return Difficulty.CROSS_DOCUMENT
-    if passages > 1:
-        return Difficulty.CROSS_PASSAGE
-    return Difficulty.SINGLE_PASSAGE
+    if score >= 3:
+        return Difficulty.HARD
+    if score >= 2:
+        return Difficulty.MEDIUM
+    return Difficulty.EASY
+
+
+@dataclass(frozen=True)
+class Criteria:
+    """What kind of question this is, read off the facts it cites.
+
+    Three scopes and a length, none of them judged. Each says something
+    different about what a chatbot has to do: reach more than one passage,
+    reach more than one document, bridge two subjects, or produce more than
+    a value. `difficulty` is their total, banded.
+    """
+
+    passage_scope: str
+    document_scope: str
+    topic_scope: str
+    answer_chars: int | None
+    difficulty: str
+    follows: bool = False
+    #: The boundary the answer length was read against, kept so `score` can
+    #: reproduce the band from the object rather than from a setting that may
+    #: since have changed.
+    long_answer: int = LONG_ANSWER_CHARS
+
+    @property
+    def score(self) -> int:
+        """How many of the things that make a question harder are true.
+
+        Every input, `follows` included, so the band can be recomputed from
+        this object alone and a row that disagrees with its own score is
+        something a test can catch.
+        """
+        return sum(
+            (
+                self.passage_scope == PassageScope.MULTI,
+                self.document_scope == DocumentScope.CROSS,
+                self.topic_scope == TopicScope.MULTI,
+                (self.answer_chars or 0) >= self.long_answer,
+                self.follows,
+            )
+        )
+
+
+def criteria_of(
+    *,
+    passages: int,
+    documents: int,
+    topics: int,
+    answer_chars: int | None,
+    follows: bool = False,
+    long_answer: int = LONG_ANSWER_CHARS,
+) -> Criteria:
+    """Reads the three scopes and the difficulty band off one question.
+
+    One function, because three callers read it off different things: the
+    service off the facts it is about to write from, the writer off what it
+    reported using, and a re-check off the facts a stored question still
+    has. A question whose evidence moved under it is one whose criteria
+    stopped being true, and the readings have to be the same reading for
+    anything to notice.
+
+    Each of the four is worth a point, and so is following another question:
+    a chatbot answering a follow-up has to carry the thread. Nothing here is
+    weighted, because a weighting is an opinion and the point of deriving
+    this rather than judging it is that nobody has to hold one.
+
+    Three points is hard, not four. `cross_document` implies
+    `multi_passage` - two documents are two passages - so the most the three
+    scopes can total is three, and a threshold of four would have made the
+    hardest thing a retriever faces, a question spanning two documents and
+    two subjects, only medium. Hard has to be reachable by evidence spread
+    alone rather than only by a long answer or a follow-up.
+    """
+    passage_scope = PassageScope.MULTI if passages > 1 else PassageScope.SINGLE
+    document_scope = DocumentScope.CROSS if documents > 1 else DocumentScope.SINGLE
+    topic_scope = TopicScope.MULTI if topics > 1 else TopicScope.SINGLE
+
+    read = Criteria(
+        passage_scope=passage_scope,
+        document_scope=document_scope,
+        topic_scope=topic_scope,
+        answer_chars=answer_chars,
+        difficulty=Difficulty.EASY,
+        follows=follows,
+        long_answer=long_answer,
+    )
+    return replace(read, difficulty=band(read.score))
 
 
 @dataclass(frozen=True)
@@ -55,6 +150,9 @@ class SourceFact:
     #: whose rule or which year a question is about. NULL on a passage the
     #: parser found no heading above.
     section_path: str | None = None
+    #: The topic this fact's passage counts towards - its strongest, not all
+    #: of them. Two facts with different ones make a multi-topic question.
+    topic_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -68,12 +166,21 @@ class FactGroup:
 
     facts: tuple[SourceFact, ...]
 
-    @property
-    def difficulty(self) -> str:
-        """How far this group's evidence is spread."""
-        return difficulty_of(
-            documents=len({fact.doc_sha256 for fact in self.facts}),
+    def criteria(
+        self,
+        answer_chars: int | None = None,
+        *,
+        follows: bool = False,
+        long_answer: int = LONG_ANSWER_CHARS,
+    ) -> Criteria:
+        """What kind of question this group's facts make."""
+        return criteria_of(
             passages=len({fact.passage_id for fact in self.facts}),
+            documents=len({fact.doc_sha256 for fact in self.facts}),
+            topics=len({fact.topic_id for fact in self.facts if fact.topic_id}),
+            answer_chars=answer_chars,
+            follows=follows,
+            long_answer=long_answer,
         )
 
     @property
@@ -126,6 +233,21 @@ class Candidate:
     target_answer: str | None
     answerable: bool
     group: FactGroup
+    #: The question and answer of everything earlier in this thread, oldest
+    #: first. Empty on a root question. A follow-up is written with these in
+    #: front of the model and judged with them in front of the verifier,
+    #: because relying on them is what makes it a follow-up.
+    thread: tuple[tuple[str, str | None], ...] = ()
+
+    @property
+    def follows(self) -> bool:
+        """Whether this question is a follow-up to another."""
+        return bool(self.thread)
+
+    @property
+    def thread_position(self) -> int:
+        """Where this sits in its thread: 1 is a root."""
+        return len(self.thread) + 1
 
 
 @dataclass(frozen=True)
@@ -135,17 +257,23 @@ class CheckedQuestion:
     question_text: str
     target_answer: str | None
     answerable: bool
-    difficulty: str
+    criteria: Criteria
     language: str
     status: str
     rejected_reason: str | None
     fact_ids: tuple[int, ...]
     embedding: list[float] | None = None
+    thread_position: int = 1
 
     @property
     def accepted(self) -> bool:
         """Whether every gate let this question through."""
         return self.rejected_reason is None
+
+    @property
+    def follows(self) -> bool:
+        """Whether this question is a follow-up to another."""
+        return self.thread_position > 1
 
 
 @dataclass(frozen=True)
@@ -179,6 +307,9 @@ class JudgedQuestion:
     target_answer: str | None
     answerable: bool
     difficulty: str | None
+    passage_scope: str | None
+    document_scope: str | None
+    topic_scope: str | None
     language: str
     status: str
     embedding: list[float] | None
@@ -186,6 +317,8 @@ class JudgedQuestion:
     facts_validated: bool
     documents: int
     passages: int
+    topics: int
+    follows_id: int | None
 
 
 @dataclass(frozen=True)
@@ -197,6 +330,10 @@ class StoredQuestion:
     target_answer: str | None
     answerable: bool
     difficulty: str | None
+    passage_scope: str | None
+    document_scope: str | None
+    topic_scope: str | None
+    answer_chars: int | None
     language: str
     status: str
     rejected_reason: str | None
@@ -205,6 +342,9 @@ class StoredQuestion:
     facts: int
     documents: list[str]
     topics: list[str]
+    #: Where it sits in its thread, and what it follows. 1 and None on a root.
+    thread_position: int = 1
+    follows_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +371,9 @@ class QuestionDetail:
 
     question: StoredQuestion
     sources: list[QuestionSource] = field(default_factory=list)
+    #: The whole thread this question sits in, oldest first, the question
+    #: itself included. One entry for a root nothing follows.
+    thread: list[StoredQuestion] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -246,8 +389,16 @@ class QuestionQuality:
     accepted: int
     draft: int
     unanswerable: int
+    followups: int
     topics_covered: int
     topics_in_coverage: int
     mean_question_chars: float
+    mean_answer_chars: float
     rejected: dict[str, int]
     difficulty: dict[str, int]
+    #: One entry per value of each scope column, so the page can say how much
+    #: of the set is cross-document, multi-topic and multi-passage without
+    #: three more requests.
+    passage_scope: dict[str, int]
+    document_scope: dict[str, int]
+    topic_scope: dict[str, int]

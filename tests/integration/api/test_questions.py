@@ -59,28 +59,43 @@ def written(client, engine):
                 question_text="Within how many hours is a request answered?",
                 target_answer="48 hours",
                 status="accepted",
-                difficulty="single_passage",
+                difficulty="easy",
+                passage_scope="single_passage",
+                document_scope="single_document",
+                topic_scope="single_topic",
+                answer_chars=8,
                 embedding=[1.0] + [0.0] * 1023,
             ),
             "crossing": question(
                 question_text="How is an urgent request raised, and how often reviewed?",
                 target_answer="by phone, yearly",
                 status="accepted",
-                difficulty="cross_document",
+                difficulty="hard",
+                passage_scope="multi_passage",
+                document_scope="cross_document",
+                topic_scope="multi_topic",
+                answer_chars=16,
             ),
             "refused": question(
                 question_text="Within how many hours is a request answered again?",
                 target_answer="48 hours",
                 status="rejected",
                 rejected_reason="duplicate",
-                difficulty="single_passage",
+                difficulty="easy",
+                passage_scope="single_passage",
+                document_scope="single_document",
+                topic_scope="single_topic",
+                answer_chars=8,
             ),
             "unanswered": question(
                 question_text="Within how many hours is a request answered on a holiday?",
                 target_answer=None,
                 answerable=False,
                 status="accepted",
-                difficulty="single_passage",
+                difficulty="easy",
+                passage_scope="single_passage",
+                document_scope="single_document",
+                topic_scope="single_topic",
             ),
         }
         session.add_all(rows.values())
@@ -248,7 +263,9 @@ def test_quality_splits_the_states_and_the_gates(written) -> None:
     assert measured["unanswerable"] == 1
     assert measured["draft"] == 0
     assert measured["rejected"] == {"duplicate": 1}
-    assert measured["difficulty"] == {"single_passage": 3, "cross_document": 1}
+    assert measured["difficulty"] == {"easy": 3, "hard": 1}
+    assert measured["document_scope"] == {"single_document": 3, "cross_document": 1}
+    assert measured["topic_scope"] == {"single_topic": 3, "multi_topic": 1}
 
 
 def test_the_mean_length_is_not_weighted_by_how_many_facts_a_question_cites(

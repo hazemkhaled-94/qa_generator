@@ -290,13 +290,18 @@
     "get": {
       "parameters": [
         "answerable",
+        "difficulty",
         "document",
+        "document_scope",
         "field",
+        "follows",
         "limit",
         "offset",
+        "passage_scope",
         "q",
         "status",
-        "topic"
+        "topic",
+        "topic_scope"
       ],
       "responses": [
         "200",
@@ -308,11 +313,16 @@
     "get": {
       "parameters": [
         "answerable",
+        "difficulty",
         "document",
+        "document_scope",
         "field",
+        "follows",
+        "passage_scope",
         "q",
         "status",
-        "topic"
+        "topic",
+        "topic_scope"
       ],
       "responses": [
         "200",

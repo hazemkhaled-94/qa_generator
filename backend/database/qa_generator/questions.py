@@ -13,18 +13,24 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Index,
+    Integer,
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
 from database.qa_generator.outcomes import (
     Difficulty,
+    DocumentScope,
+    PassageScope,
     QuestionRejection,
     QuestionStatus,
+    TopicScope,
     one_of,
 )
 
@@ -71,6 +77,27 @@ class Question(Base):
             f"difficulty IS NULL OR {one_of('difficulty', Difficulty)}",
             name="questions_difficulty_valid",
         ),
+        *(
+            CheckConstraint(
+                f"{column} IS NULL OR {one_of(column, values)}",
+                name=f"questions_{column}_valid",
+            )
+            for column, values in (
+                ("passage_scope", PassageScope),
+                ("document_scope", DocumentScope),
+                ("topic_scope", TopicScope),
+            )
+        ),
+        # A thread runs 1, 2, 3: the root is 1 and a follow-up is one past
+        # whatever it follows. The two halves cannot disagree.
+        CheckConstraint(
+            "(follows_id IS NULL) = (thread_position = 1)",
+            name="questions_thread_position_agrees",
+        ),
+        CheckConstraint("thread_position >= 1", name="questions_thread_position_valid"),
+        # Reached on every read of a thread, and by the cascade a deleted
+        # parent runs.
+        Index("ix_questions_follows_id", "follows_id"),
         # A person rejecting a question from the page names no gate, so a
         # rejected question may carry no reason; a reason that is not a gate
         # is what this refuses.
@@ -105,10 +132,50 @@ class Question(Base):
     )
     difficulty: Mapped[str | None] = mapped_column(
         Text,
-        comment="single_passage | cross_passage | cross_document, enforced by a "
-        "CHECK constraint. Read off how far the facts the question was written "
-        "from are spread rather than judged, so it is measurable and two readers "
-        "cannot disagree about it. Used to stratify the review sample.",
+        comment="easy | medium | hard, enforced by a CHECK constraint. Derived "
+        "rather than judged: the three scope columns, a long answer and being a "
+        "follow-up are each worth a point, and the band is the total. Two readers "
+        "cannot disagree about it, and a review sample can stratify on it.",
+    )
+    passage_scope: Mapped[str | None] = mapped_column(
+        Text,
+        comment="single_passage | multi_passage, enforced by a CHECK constraint. "
+        "How many distinct passages the facts this question cites come from.",
+    )
+    document_scope: Mapped[str | None] = mapped_column(
+        Text,
+        comment="single_document | cross_document, enforced by a CHECK "
+        "constraint. The scope a retriever cannot fake: a cross-document "
+        "question has no one chunk holding its answer.",
+    )
+    topic_scope: Mapped[str | None] = mapped_column(
+        Text,
+        comment="single_topic | multi_topic, enforced by a CHECK constraint. "
+        "Read off the dominant topic of each cited fact's passage. A passage "
+        "usually sits in several topics above the weight floor, so a question "
+        "bridging two subjects is one about the material rather than about a "
+        "section of it.",
+    )
+    answer_chars: Mapped[int | None] = mapped_column(
+        Integer,
+        comment="Length of target_answer, stored rather than measured on read so "
+        "the difficulty band it fed can be recomputed and checked. NULL on an "
+        "unanswerable question, which has no answer to measure.",
+    )
+    follows_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("questions.id", ondelete="CASCADE"),
+        comment="The question this one follows, for a multi-turn thread. NULL on "
+        "a root question. A follow-up may rely on its parent for context - that "
+        "is what it is for - so it is deliberately not self-contained and the "
+        "phrasing gate is not applied to one. Cascades: a follow-up whose parent "
+        "is gone has no thread to be read in.",
+    )
+    thread_position: Mapped[int] = mapped_column(
+        Integer,
+        server_default=text("1"),
+        comment="Where this question sits in its thread: 1 is a root, 2 is the "
+        "first follow-up. QUESTIONS_MAX_FOLLOWUPS caps how far it goes.",
     )
     language: Mapped[str] = mapped_column(
         CHAR(2),

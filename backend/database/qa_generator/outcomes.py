@@ -26,17 +26,48 @@ class QuestionStatus(StrEnum):
     REJECTED = "rejected"
 
 
-class Difficulty(StrEnum):
-    """How far a question's evidence is spread.
+class PassageScope(StrEnum):
+    """Whether one passage answers the question or several are needed."""
 
-    Read off the facts a question was written from rather than judged, so
-    two people reading the same question agree on it and a report can
-    stratify on it without anybody's opinion in the way.
+    SINGLE = "single_passage"
+    MULTI = "multi_passage"
+
+
+class DocumentScope(StrEnum):
+    """Whether the answer sits in one document or spans two.
+
+    The one a retriever cannot fake: a cross-document question has no single
+    chunk that contains its answer.
     """
 
-    SINGLE_PASSAGE = "single_passage"
-    CROSS_PASSAGE = "cross_passage"
-    CROSS_DOCUMENT = "cross_document"
+    SINGLE = "single_document"
+    CROSS = "cross_document"
+
+
+class TopicScope(StrEnum):
+    """Whether the question stays inside one subject or bridges two.
+
+    A passage usually belongs to several topics above the weight floor, so a
+    question drawing on two subjects is a question about the material rather
+    than about a section of it.
+    """
+
+    SINGLE = "single_topic"
+    MULTI = "multi_topic"
+
+
+class Difficulty(StrEnum):
+    """How hard a question is to answer, as a band.
+
+    Derived and not judged: the three scopes above, the length of the answer
+    and whether the question follows another are each worth a point, and the
+    band is the total. Two people reading the same question agree on it, and
+    a review sample can stratify on it without anybody's opinion in the way.
+    """
+
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
 
 
 class QuestionRejection(StrEnum):
@@ -48,6 +79,7 @@ class QuestionRejection(StrEnum):
     """
 
     MALFORMED = "malformed"
+    ANSWER_TOO_SHORT = "answer_too_short"
     RESTATES_FACT = "restates_fact"
     UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"

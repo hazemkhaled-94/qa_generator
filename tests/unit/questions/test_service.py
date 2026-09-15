@@ -9,6 +9,8 @@ and a row nothing can move is a stage that has stopped.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from factories import source
 
@@ -20,8 +22,13 @@ from question_generation.service import QuestionGenerationService
 
 SETTINGS = Settings(
     per_topic=4,
-    sample_size=2,
+    sample_size=4,
     unanswerable_share=0.25,
+    bridge_share=0.5,
+    followup_share=0.5,
+    max_followups=2,
+    min_answer_chars=0,
+    long_answer_chars=60,
     duplicate_cosine=0.93,
     embedding_model="stub",
     max_tokens=512,
@@ -34,11 +41,12 @@ class StubQueue:
 
     done = Status.GENERATED
 
-    def __init__(self, topic: TopicToCover | None, facts=()) -> None:
-        """Initialises the queue with one topic and its facts."""
+    def __init__(self, topic: TopicToCover | None, facts=(), bridges=()) -> None:
+        """Initialises the queue with one topic, its facts and its bridges."""
         self._topic = topic
         self._facts = list(facts)
-        self.stored: list[list[CheckedQuestion]] = []
+        self._bridges = list(bridges)
+        self.stored: list[list[list[CheckedQuestion]]] = []
         self.failed: list[tuple[int, str]] = []
         self.finished: list[int] = []
 
@@ -55,11 +63,20 @@ class StubQueue:
         """The facts this topic is the subject of."""
         return list(self._facts)
 
-    def store(self, topic_id: int, questions) -> int:
-        """Records what the topic produced and finishes it."""
-        self.stored.append(list(questions))
+    def bridging(self, topic_id: int):
+        """The facts of passages bridging this topic to another."""
+        return list(self._bridges)
+
+    def store(self, topic_id: int, threads) -> int:
+        """Records the threads the topic produced and finishes it."""
+        self.stored.append([list(one) for one in threads])
         self.finished.append(topic_id)
-        return len(questions)
+        return sum(len(one) for one in threads)
+
+    @property
+    def written(self) -> list:
+        """Every question of the last store, threads flattened."""
+        return [one for thread in self.stored[-1] for one in thread]
 
     def fail(self, key: int, error: str) -> None:
         """Records the failure against the row."""
@@ -93,6 +110,21 @@ class StubWriter:
             facts=group,
         )
 
+    def follow_up(self, group, thread):
+        """Writes the next question in a thread."""
+        self.calls += 1
+        if self._raises:
+            raise self._raises
+        from factories import candidate
+
+        return candidate(
+            question_text=f"And question {self.calls}?",
+            target_answer="12 hours",
+            answerable=True,
+            facts=group,
+            thread=thread,
+        )
+
 
 class StubChecker:
     """A checker that accepts everything and counts what it saw."""
@@ -108,11 +140,15 @@ class StubChecker:
             question_text=candidate.question_text,
             target_answer=candidate.target_answer,
             answerable=candidate.answerable,
-            difficulty=candidate.group.difficulty,
+            criteria=candidate.group.criteria(
+                len(candidate.target_answer or "") or None,
+                follows=candidate.follows,
+            ),
             language=candidate.group.language,
             status="accepted",
             rejected_reason=None,
             fact_ids=tuple(one.id for one in candidate.group.facts),
+            thread_position=candidate.thread_position,
         )
 
 
@@ -183,7 +219,7 @@ def test_a_topic_writes_no_more_than_it_was_asked_for() -> None:
 
     service.process_next()
 
-    assert len(queue.stored[0]) == SETTINGS.per_topic
+    assert len(queue.written) >= SETTINGS.per_topic
 
 
 def test_the_run_sees_what_it_has_already_accepted() -> None:
@@ -198,7 +234,11 @@ def test_the_run_sees_what_it_has_already_accepted() -> None:
 
     service.process_next()
 
-    assert checker.seen_sizes == [0, 1, 2, 3], checker.seen_sizes
+    # Every accepted question joins the set, follow-ups included, so the
+    # list only ever grows and each candidate sees one more than the last.
+    assert checker.seen_sizes == sorted(checker.seen_sizes)
+    assert checker.seen_sizes[0] == 0
+    assert checker.seen_sizes[-1] == len(checker.seen_sizes) - 1
 
 
 def test_the_unanswerable_share_reaches_the_writer() -> None:
@@ -208,9 +248,9 @@ def test_the_unanswerable_share_reaches_the_writer() -> None:
 
     service.process_next()
 
-    written = queue.stored[0]
-    assert [one.answerable for one in written] == [True, True, True, False]
-    assert written[-1].target_answer is None
+    roots = [thread[0] for thread in queue.stored[0]]
+    assert [one.answerable for one in roots] == [True, True, True, False]
+    assert roots[-1].target_answer is None
 
 
 def test_a_model_that_will_not_answer_fails_the_topic(caplog) -> None:
@@ -290,7 +330,7 @@ def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
 
     held = SETTINGS.lease(call).total_seconds()
 
-    assert held == call * SETTINGS.per_topic * 2
+    assert held == call * SETTINGS.per_topic * (1 + SETTINGS.max_followups) * 2
 
 
 def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
@@ -325,3 +365,107 @@ def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
     assert built("ollama/verifier") is True
     assert built(None) is False
     assert model.model == "ollama/writer"
+
+
+# ── Follow-up threads ──────────────────────────────────────────────────────
+
+
+def test_a_thread_is_a_root_and_the_questions_that_follow_it() -> None:
+    """Stored as a thread so each follow-up can be linked to its parent.
+
+    A follow-up needs the parent's id and the parent has none until it is
+    inserted, which is why the queue takes threads rather than a flat list.
+    """
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    threads = queue.stored[0]
+    followed = [one for one in threads if len(one) > 1]
+    assert followed, "no thread ran past its root"
+    for thread in followed:
+        assert thread[0].thread_position == 1
+        assert [one.thread_position for one in thread] == list(
+            range(1, len(thread) + 1)
+        )
+        assert all(one.follows for one in thread[1:])
+
+
+def test_a_thread_never_runs_past_the_maximum() -> None:
+    """QUESTIONS_MAX_FOLLOWUPS is what a topic's worst case is priced from."""
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    assert all(len(thread) <= 1 + SETTINGS.max_followups for thread in queue.stored[0])
+
+
+def test_an_unanswerable_question_is_never_followed() -> None:
+    """There is nothing to follow on from.
+
+    The chatbot was supposed to say it did not know, so a second question
+    after that measures nothing.
+    """
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    for thread in queue.stored[0]:
+        if not thread[0].answerable:
+            assert len(thread) == 1
+
+
+def test_a_rejected_root_is_never_followed() -> None:
+    """A conversation starting with a question nobody would ask."""
+
+    class Refusing(StubChecker):
+        """A checker that rejects everything it sees."""
+
+        def check(self, candidate, seen=()):
+            """Rejects the candidate."""
+            checked = super().check(candidate, seen)
+            return replace(checked, status="rejected", rejected_reason="malformed")
+
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    service, queue = build(topic(), facts, checker=Refusing())
+
+    service.process_next()
+
+    assert all(len(thread) == 1 for thread in queue.stored[0])
+
+
+def test_a_follow_up_is_written_from_the_same_sample_as_its_root() -> None:
+    """So the thread is about one subject rather than two in sequence."""
+    facts = [source(n, document="a", passage_id=1) for n in range(3)]
+    service, queue = build(topic(), facts)
+
+    service.process_next()
+
+    for thread in queue.stored[0]:
+        cited = {fact for one in thread for fact in one.fact_ids}
+        assert cited <= {one.id for one in facts}
+
+
+def test_a_follow_up_is_shown_what_was_already_asked() -> None:
+    """Without the thread it is a fresh question, not a follow-up."""
+    seen: list = []
+
+    class Watching(StubWriter):
+        """Records the conversation each follow-up was written from."""
+
+        def follow_up(self, group, thread):
+            """Keeps the thread and writes as scripted."""
+            seen.append(tuple(thread))
+            return super().follow_up(group, thread)
+
+    facts = [source(n, document="a", passage_id=n) for n in range(8)]
+    service, _ = build(topic(), facts, writer=Watching())
+
+    service.process_next()
+
+    assert seen, "no follow-up was written"
+    assert all(turns for turns in seen), "a follow-up was written with no thread"
+    assert any(len(turns) > 1 for turns in seen), "no second follow-up saw two turns"

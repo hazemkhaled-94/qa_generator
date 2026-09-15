@@ -23,6 +23,47 @@ from itertools import zip_longest
 from question_generation.models import FactGroup, SourceFact
 
 
+def bridged(
+    formed: list[FactGroup],
+    bridges: Iterable[SourceFact],
+    *,
+    share: float,
+    size: int,
+) -> list[FactGroup]:
+    """Adds a bridging passage to a share of the samples.
+
+    A bridge is a passage whose strongest topic is not the one being worked,
+    but which carries it above the weight floor. Adding one to a sample is
+    what makes a multi-topic question available: the two passages are about
+    different subjects and the corpus itself says they are related, which is
+    a far better reason to pair them than that they came from different
+    files.
+
+    Only a share, by position, and only where the sample has room. A bridge
+    on every sample would make `single_topic` unreachable, and the scope is
+    worth measuring in both directions.
+    """
+    available = _by_passage(bridges)
+    if not available:
+        return formed
+
+    widened: list[FactGroup] = []
+    taken = 0
+    for index, sample in enumerate(formed):
+        if not spread(index, share) or taken >= len(available):
+            widened.append(sample)
+            continue
+        passage = available[taken]
+        taken += 1
+        # Room for the whole passage or none of it, as when a sample is
+        # filled: half a passage's facts is the incoherence to avoid.
+        if len(sample.facts) + len(passage) > max(size, 1):
+            widened.append(sample)
+            continue
+        widened.append(FactGroup((*sample.facts, *passage)))
+    return widened
+
+
 def samples(facts: Iterable[SourceFact], *, wanted: int, size: int) -> list[FactGroup]:
     """Forms up to `wanted` samples of at most `size` facts to offer.
 
@@ -83,12 +124,17 @@ def _by_passage(facts: Iterable[SourceFact]) -> list[list[SourceFact]]:
     ]
 
 
-def perturbed(index: int, share: float) -> bool:
-    """Whether the sample at this position is perturbed rather than asked.
+def spread(index: int, share: float) -> bool:
+    """Whether the thing at this position is one of a share of them.
 
     Spread across the run by position instead of drawn at random, so a share
-    of 0.25 gives exactly one unanswerable question in every four and gives
-    the same four twice. 0 never perturbs and 1 always does, without either
-    needing a branch of its own.
+    of 0.25 picks exactly one in every four and picks the same four twice. 0
+    never picks and 1 always does, without either needing a branch of its
+    own.
+
+    Three decisions read it: which samples are perturbed into unanswerable
+    questions, which get a bridging passage, and which accepted questions
+    get a follow-up. All three want an exact, reproducible share of a run,
+    which is the same want.
     """
     return int((index + 1) * share) > int(index * share)

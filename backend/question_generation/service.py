@@ -14,10 +14,10 @@ from question_generation.models import (
     CheckedQuestion,
     JudgedQuestion,
     TopicToCover,
-    difficulty_of,
+    criteria_of,
 )
 from question_generation.repository import QuestionCatalog, QuestionQueue
-from question_generation.selection import perturbed, samples
+from question_generation.selection import bridged, samples, spread
 from question_generation.verification import (
     QuestionChecker,
     near_verdict,
@@ -81,14 +81,29 @@ def _recheck(
 
     # A cross-document question that lost a citation is still a question and
     # is not deleted: the trigger takes one only when its last fact goes. It
-    # is a question whose stored difficulty stopped being true, which is a
-    # quieter kind of wrong and so worth naming.
-    spread = difficulty_of(documents=question.documents, passages=question.passages)
-    if question.difficulty and spread != question.difficulty:
-        return (
-            QuestionRejection.SOURCE_CHANGED,
-            f"it was written as {question.difficulty} and its facts are now {spread}",
+    # is a question whose stored scopes stopped being true, which is a
+    # quieter kind of wrong and so worth naming. Compared on the scopes and
+    # not on the band, because two different spreads can land in one band
+    # and the scopes are what a reader filters on.
+    now = criteria_of(
+        passages=question.passages,
+        documents=question.documents,
+        topics=question.topics,
+        answer_chars=len(question.target_answer or "") or None,
+        follows=question.follows_id is not None,
+        long_answer=settings.long_answer_chars,
+    )
+    moved = [
+        f"{name} was {was} and is now {is_now}"
+        for name, was, is_now in (
+            ("passage_scope", question.passage_scope, now.passage_scope),
+            ("document_scope", question.document_scope, now.document_scope),
+            ("topic_scope", question.topic_scope, now.topic_scope),
         )
+        if was and was != is_now
+    ]
+    if moved:
+        return QuestionRejection.SOURCE_CHANGED, "; ".join(moved)
 
     failed = structural(
         question_text=question.question_text,
@@ -96,6 +111,7 @@ def _recheck(
         answerable=question.answerable,
         language=question.language,
         statements=question.statements,
+        min_answer_chars=settings.min_answer_chars,
     )
     if failed:
         return failed
@@ -149,25 +165,31 @@ class QuestionGenerationService(StageService):
             current.set_attribute("topic.id", topic.id)
             current.set_attribute("topic.label", topic.label or "")
             try:
-                written = self._topic(topic, current)
-                stored = self._repository.store(topic.id, written)
+                threads = self._topic(topic, current)
+                stored = self._repository.store(topic.id, threads)
+                written = [one for thread in threads for one in thread]
                 accepted = sum(1 for one in written if one.accepted)
+                followups = sum(1 for one in written if one.follows)
                 self._done(current)
                 current.set_attribute("questions.written", stored)
                 current.set_attribute("questions.accepted", accepted)
+                current.set_attribute("questions.followups", followups)
                 log.info(
-                    "topic %d: %d question(s), %d accepted (%d rejected)",
+                    "topic %d: %d question(s) in %d thread(s), %d accepted "
+                    "(%d rejected), %d follow-up(s)",
                     topic.id,
                     stored,
+                    len(threads),
                     accepted,
                     stored - accepted,
+                    followups,
                 )
             except Exception as exc:
                 self._fail(topic.id, f"{type(exc).__name__}: {exc}", current)
                 log.exception("failed topic %d", topic.id)
         return topic.id
 
-    def _topic(self, topic: TopicToCover, current: Span) -> list[CheckedQuestion]:
+    def _topic(self, topic: TopicToCover, current: Span) -> list[list[CheckedQuestion]]:
         """Writes and gates every question one topic is still missing."""
         if not topic.include_in_coverage:
             # Finished with nothing written, not left `new`: somebody said
@@ -181,25 +203,66 @@ class QuestionGenerationService(StageService):
             current.set_attribute("questions.skipped", "no facts left to ask about")
             return []
 
-        formed = samples(
-            facts,
-            wanted=self._settings.per_topic,
+        formed = bridged(
+            samples(
+                facts,
+                wanted=self._settings.per_topic,
+                size=self._settings.sample_size,
+            ),
+            self._repository.bridging(topic.id),
+            share=self._settings.bridge_share,
             size=self._settings.sample_size,
         )
         current.set_attribute("questions.samples", len(formed))
 
-        written: list[CheckedQuestion] = []
+        threads: list[list[CheckedQuestion]] = []
         accepted: list[CheckedQuestion] = []
         for index, sample in enumerate(formed):
             candidate = self._writer.write(
                 sample,
-                answerable=not perturbed(index, self._settings.unanswerable_share),
+                answerable=not spread(index, self._settings.unanswerable_share),
             )
             # Against what this run has accepted as well as what the database
             # holds: nothing is stored until the topic is finished, so
             # without it a topic would happily write the same question twice.
             checked = self._checker.check(candidate, accepted)
-            written.append(checked)
+            thread = [checked]
             if checked.accepted:
                 accepted.append(checked)
+                if spread(index, self._settings.followup_share):
+                    thread += self._followups(sample, checked, accepted)
+            threads.append(thread)
+        return threads
+
+    def _followups(
+        self,
+        sample,
+        root: CheckedQuestion,
+        accepted: list[CheckedQuestion],
+    ) -> list[CheckedQuestion]:
+        """Writes the questions somebody would ask after this one.
+
+        Only after an accepted, answerable root. A thread whose first turn
+        has no answer has nothing to follow on from - the chatbot was
+        supposed to say it did not know - and a thread whose root a gate
+        refused is a conversation starting with a question nobody would ask.
+
+        Stops at the first follow-up a gate refuses. The refused one is
+        stored, because it is drop-rate evidence like any other, but nothing
+        is written after it: a third turn following a second that was thrown
+        out is a conversation with a hole in it.
+        """
+        if not root.answerable:
+            return []
+
+        turns: list[tuple[str, str | None]] = [(root.question_text, root.target_answer)]
+        written: list[CheckedQuestion] = []
+        for _ in range(self._settings.max_followups):
+            candidate = self._writer.follow_up(sample, tuple(turns))
+            checked = self._checker.check(candidate, accepted)
+            written.append(checked)
+            if not checked.accepted:
+                break
+            accepted.append(checked)
+            turns.append((checked.question_text, checked.target_answer))
         return written

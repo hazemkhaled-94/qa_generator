@@ -32,6 +32,14 @@ from question_generation.models import (
 SearchField = Literal["question", "answer", "both"]
 Decision = Literal["draft", "accepted", "rejected"]
 
+#: The three criteria a question is classified by, and the band they feed.
+#: Each is a filter on the listing and a column of the quality report, so a
+#: reader can ask for the cross-document ones or the hard ones alone.
+PassageScope = Literal["single_passage", "multi_passage"]
+DocumentScope = Literal["single_document", "cross_document"]
+TopicScope = Literal["single_topic", "multi_topic"]
+Band = Literal["easy", "medium", "hard"]
+
 router = stage_router(name="questions", repository=questions_queue)
 
 
@@ -62,12 +70,33 @@ def questions(
     field: SearchField = "both",
     status: Decision | None = None,
     answerable: bool | None = None,
+    passage_scope: PassageScope | None = None,
+    document_scope: DocumentScope | None = None,
+    topic_scope: TopicScope | None = None,
+    difficulty: Band | None = None,
+    follows: bool | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> QuestionPage:
-    """Lists generated questions, including those a gate rejected."""
+    """Lists generated questions, including those a gate rejected.
+
+    `follows` narrows to the follow-ups or to the roots: true for questions
+    asked after another, false for the ones that start a thread.
+    """
     total, rows = question_catalog.page(
-        document, topic, limit, offset, q, status, answerable, field
+        document,
+        topic,
+        limit,
+        offset,
+        q,
+        status,
+        answerable,
+        field,
+        passage_scope=passage_scope,
+        document_scope=document_scope,
+        topic_scope=topic_scope,
+        difficulty=difficulty,
+        follows=follows,
     )
     return QuestionPage(total=total, questions=rows)
 
@@ -80,14 +109,32 @@ def quality(
     field: SearchField = "both",
     status: Decision | None = None,
     answerable: bool | None = None,
+    passage_scope: PassageScope | None = None,
+    document_scope: DocumentScope | None = None,
+    topic_scope: TopicScope | None = None,
+    difficulty: Band | None = None,
+    follows: bool | None = None,
 ) -> QuestionQuality:
     """Reports how generation is doing, under the same filter.
 
     The numbers that say whether the questions are questions: how many
-    cleared every gate, which gate stopped the rest, how the evidence is
-    spread, and how much of the corpus's subject matter is covered at all.
+    cleared every gate, which gate stopped the rest, how the three criteria
+    are spread, and how much of the corpus's subject matter is covered at
+    all.
     """
-    return question_catalog.quality(document, topic, q, status, answerable, field)
+    return question_catalog.quality(
+        document,
+        topic,
+        q,
+        status,
+        answerable,
+        field,
+        passage_scope=passage_scope,
+        document_scope=document_scope,
+        topic_scope=topic_scope,
+        difficulty=difficulty,
+        follows=follows,
+    )
 
 
 @router.get("/{question_id}", responses={404: {"model": ErrorBody}})

@@ -152,6 +152,51 @@ Worked example:
 """
 
 
+_FOLLOW = """You write the question somebody would ask NEXT.
+
+You are given the FACTS, the PASSAGE they came from, and the CONVERSATION so
+far: one or more questions already asked and the answers they got.
+
+Write the next question in that conversation. Somebody has just been told the
+last answer and wants to know one more thing about the same material.
+
+This one is different from a question asked cold, and the difference is the
+point: it MAY rely on the conversation. "And for urgent requests?" is a
+perfectly good follow-up. You do not have to name the subject again, because
+the person you are talking to already knows it.
+
+Rules, all of them mandatory:
+- ONE question, ending in a question mark.
+- It must be answered by the FACTS, like any other. A follow-up whose answer
+  is not in the material tests nothing.
+- ASK FOR ONE CHECKABLE VALUE, and answer with a SHORT NOUN PHRASE. Never a
+  sentence, never anything with a verb in it.
+- DO NOT REPEAT a question already in the conversation, and do not ask one
+  the last answer already gave. It has to want something new.
+- Write in the language of the facts.
+- `facts` is the NUMBERS of the facts your question needs.
+
+Worked example.
+
+  [1] A standard support request is answered within 48 hours.
+  [2] An urgent support request is answered within 4 hours.
+
+  CONVERSATION:
+    Q: How long does the service agreement allow for answering a standard
+       support request?
+    A: 48 hours
+
+  WRONG  "How long does the service agreement allow for a standard request?"
+         (already asked)
+  WRONG  "What is a support request?"
+         (not in the facts)
+
+  RIGHT  question: "And for an urgent one?"
+         answer:   "4 hours"
+         facts:    [2]
+"""
+
+
 class _Answered(BaseModel):
     """A question the facts answer, as the model is asked to return it."""
 
@@ -234,6 +279,46 @@ class QuestionWriter:
             answerable=False,
             group=first,
         )
+
+    def follow_up(
+        self, sample: FactGroup, thread: tuple[tuple[str, str | None], ...]
+    ) -> Candidate:
+        """Asks the model for the question somebody would ask next.
+
+        Written from the same sample as the thread it joins, so a follow-up
+        is about the same material rather than a fresh question that happens
+        to come after one.
+
+        Only answerable questions get follow-ups. A thread whose first turn
+        has no answer has nothing to follow on from - the chatbot was
+        supposed to say it did not know - and asking a second question after
+        that measures nothing.
+
+        Raises:
+            ModelUnavailable: If the model could not be reached or would not
+                answer in the shape.
+        """
+        written = self._client.answer(
+            system=_FOLLOW,
+            user=f"{self._prompt(sample)}\n\n{self._conversation(thread)}",
+            shape=_Answered,
+        )
+        return Candidate(
+            question_text=written.question.strip(),
+            target_answer=written.answer.strip() or None,
+            answerable=True,
+            group=self._used(sample, written.facts),
+            thread=thread,
+        )
+
+    @staticmethod
+    def _conversation(thread: tuple[tuple[str, str | None], ...]) -> str:
+        """Renders the turns already asked, oldest first."""
+        turns = "\n".join(
+            f"  Q: {question}\n  A: {answer or 'no answer in the material'}"
+            for question, answer in thread
+        )
+        return f"CONVERSATION so far:\n{turns}"
 
     @staticmethod
     def _used(sample: FactGroup, numbered: list[int]) -> FactGroup:

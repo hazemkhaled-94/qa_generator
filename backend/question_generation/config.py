@@ -20,6 +20,11 @@ class Settings:
     per_topic: int
     sample_size: int
     unanswerable_share: float
+    bridge_share: float
+    followup_share: float
+    max_followups: int
+    min_answer_chars: int
+    long_answer_chars: int
     duplicate_cosine: float
     embedding_model: str
     max_tokens: int
@@ -33,13 +38,19 @@ class Settings:
         writer's and a verifier's, so a lease sized for one call fails a
         worker that is only halfway through its first topic.
 
+        A thread is more than one question, so `max_followups` is in it too:
+        every root may be followed twice, and each follow-up is another pair
+        of calls.
+
         Two calls per candidate and not a round number above it. This is
         already the worst case - every call taking its full timeout on every
         attempt - and padding a worst case is what makes a lease long enough
         to matter: a worker killed mid-topic leaves that row unclaimable
         until the lease runs out, and nothing but time moves it.
         """
-        return timedelta(seconds=call_seconds * self.per_topic * 2)
+        return timedelta(
+            seconds=call_seconds * self.per_topic * (1 + self.max_followups) * 2
+        )
 
     @classmethod
     def load(cls) -> Settings:
@@ -53,6 +64,11 @@ class Settings:
             per_topic=integer("QUESTIONS_PER_TOPIC"),
             sample_size=integer("QUESTIONS_FACT_SAMPLE"),
             unanswerable_share=decimal("QUESTIONS_UNANSWERABLE_SHARE"),
+            bridge_share=decimal("QUESTIONS_BRIDGE_SHARE"),
+            followup_share=decimal("QUESTIONS_FOLLOWUP_SHARE"),
+            max_followups=integer("QUESTIONS_MAX_FOLLOWUPS"),
+            min_answer_chars=integer("QUESTIONS_MIN_ANSWER_CHARS"),
+            long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS"),
             duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE"),
             # The one embedding model, as chunking reads it: a question
             # embedded by a model other than the one a passage was sized by

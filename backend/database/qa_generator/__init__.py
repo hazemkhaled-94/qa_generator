@@ -11,10 +11,13 @@ from database.qa_generator.facts import Fact
 from database.qa_generator.ingest_events import IngestEvent
 from database.qa_generator.outcomes import (
     Difficulty,
+    DocumentScope,
     Outcome,
+    PassageScope,
     QuestionRejection,
     QuestionStatus,
     Rejection,
+    TopicScope,
     one_of,
 )
 from database.qa_generator.passage_topics import PassageTopic
@@ -28,10 +31,12 @@ __all__ = [
     "Base",
     "Difficulty",
     "Document",
+    "DocumentScope",
     "Fact",
     "IngestEvent",
     "Outcome",
     "Passage",
+    "PassageScope",
     "PassageTopic",
     "Question",
     "QuestionFact",
@@ -40,6 +45,7 @@ __all__ = [
     "Rejection",
     "Status",
     "Topic",
+    "TopicScope",
     "check",
     "engine",
     "one_of",

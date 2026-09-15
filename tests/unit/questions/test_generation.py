@@ -159,7 +159,7 @@ def test_the_question_cites_only_the_facts_the_model_said_it_used() -> None:
     written = QuestionWriter(model).write(sample, answerable=True)
 
     assert [one.id for one in written.group.facts] == [2]
-    assert written.group.difficulty == "single_passage"
+    assert written.group.criteria().passage_scope == "single_passage"
 
 
 def test_naming_no_facts_falls_back_to_the_first() -> None:

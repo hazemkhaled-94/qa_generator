@@ -140,3 +140,112 @@ def test_stepping_down_one_revision_at_a_time_reaches_base(spare: str) -> None:
         command.downgrade(config, "-1")
 
     assert tables(spare) <= {"alembic_version"}
+
+
+def test_a_populated_table_survives_the_scopes_migration(spare: str) -> None:
+    """A data backfill has to run in an order the constraints allow.
+
+    This is the only layer that can catch it. Autogenerate never writes a
+    backfill, an empty database runs every UPDATE against no rows, and the
+    models compare equal either way - so an UPDATE that writes a value the
+    constraint it has not dropped yet forbids passes everything except a
+    real table with real rows in it. That is what happened here: the band
+    was written while the old `difficulty` CHECK was still in force.
+    """
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    scopes = "c41f8b7d2e06"
+    config = alembic(spare)
+    command.upgrade(config, "head")
+    command.downgrade(config, f"{scopes}-1")
+
+    engine = create_engine(spare)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO questions "
+                "  (question_text, target_answer, answerable, difficulty, "
+                "   language, status) "
+                "VALUES "
+                "  ('Q1?', '48 hours', true, 'single_passage', 'en', 'accepted'), "
+                "  ('Q2?', 'a much longer answer than sixty characters would be, "
+                "written out at length', true, 'cross_document', 'en', 'accepted'), "
+                "  ('Q3?', NULL, false, 'cross_passage', 'en', 'accepted')"
+            )
+        )
+
+    command.upgrade(config, scopes)
+
+    with engine.connect() as connection:
+        rows = {
+            row.question_text: row
+            for row in connection.execute(
+                text(
+                    "SELECT question_text, difficulty, passage_scope, "
+                    "document_scope, topic_scope, answer_chars, thread_position "
+                    "FROM questions"
+                )
+            ).all()
+        }
+    engine.dispose()
+
+    # The mechanical translation, one row per old value.
+    assert rows["Q1?"].passage_scope == "single_passage"
+    assert rows["Q1?"].document_scope == "single_document"
+    assert rows["Q2?"].document_scope == "cross_document"
+    assert rows["Q3?"].passage_scope == "multi_passage"
+    assert rows["Q3?"].document_scope == "single_document"
+
+    # Every row lands in a band, and the band agrees with what it was built
+    # from: Q1 has none of the five, Q2 has a wide spread and a long answer.
+    assert rows["Q1?"].difficulty == "easy"
+    assert rows["Q2?"].difficulty == "hard"
+    assert rows["Q1?"].answer_chars == len("48 hours")
+    assert all(row.topic_scope == "single_topic" for row in rows.values())
+    assert all(row.thread_position == 1 for row in rows.values())
+
+
+def test_a_thread_is_deleted_rather_than_orphaned_on_the_way_back(spare: str) -> None:
+    """A follow-up without its parent is not a question anybody can score.
+
+    It may lean on the thread for context, so the downgrade takes it rather
+    than leaving a row the older schema has no way to read.
+    """
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    scopes = "c41f8b7d2e06"
+    config = alembic(spare)
+    command.upgrade(config, "head")
+
+    engine = create_engine(spare)
+    with engine.begin() as connection:
+        root = connection.execute(
+            text(
+                "INSERT INTO questions (question_text, target_answer, answerable, "
+                "language, status, difficulty) VALUES "
+                "('Root?', '48 hours', true, 'en', 'accepted', 'easy') RETURNING id"
+            )
+        ).scalar_one()
+        connection.execute(
+            text(
+                "INSERT INTO questions (question_text, target_answer, answerable, "
+                "language, status, difficulty, follows_id, thread_position) VALUES "
+                "('And urgent?', '4 hours', true, 'en', 'accepted', 'easy', "
+                ":root, 2)"
+            ),
+            {"root": root},
+        )
+
+    command.downgrade(config, f"{scopes}-1")
+
+    with engine.connect() as connection:
+        left = (
+            connection.execute(text("SELECT question_text FROM questions"))
+            .scalars()
+            .all()
+        )
+    engine.dispose()
+
+    assert left == ["Root?"], "the follow-up outlived the column linking it"

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from factories import source
 
-from database.qa_generator import Difficulty
-from question_generation.selection import perturbed, samples
+from database.qa_generator import DocumentScope, PassageScope, TopicScope
+from question_generation.selection import bridged, samples, spread
 
 
 def test_a_group_spans_two_documents_when_the_topic_has_two() -> None:
@@ -24,7 +24,9 @@ def test_a_group_spans_two_documents_when_the_topic_has_two() -> None:
 
     formed = samples(facts, wanted=10, size=2)
 
-    assert [one.difficulty for one in formed] == [Difficulty.CROSS_DOCUMENT] * 2
+    assert [one.criteria().document_scope for one in formed] == [
+        DocumentScope.CROSS
+    ] * 2
 
 
 def test_reading_straight_down_the_list_would_never_cross_a_document() -> None:
@@ -38,18 +40,25 @@ def test_reading_straight_down_the_list_would_never_cross_a_document() -> None:
     straight = [facts[0:2], facts[2:4]]
 
     assert all(len({one.doc_sha256 for one in pair}) == 1 for pair in straight)
-    assert [one.difficulty for one in samples(facts, wanted=4, size=2)] == [
-        Difficulty.CROSS_DOCUMENT
-    ] * 2
+    assert [
+        one.criteria().document_scope for one in samples(facts, wanted=4, size=2)
+    ] == [DocumentScope.CROSS] * 2
 
 
 def test_one_document_still_yields_samples() -> None:
-    """A corpus of one document has no cross-document question to write."""
+    """A corpus of one document has no cross-document question to write.
+
+    It still has multi-passage ones, which is the scope that separates
+    "reach two chunks" from "reach two files".
+    """
     facts = [source(n, document="a", passage_id=n) for n in range(4)]
 
     formed = samples(facts, wanted=10, size=2)
 
-    assert [one.difficulty for one in formed] == [Difficulty.CROSS_PASSAGE] * 2
+    assert [one.criteria().passage_scope for one in formed] == [PassageScope.MULTI] * 2
+    assert [one.criteria().document_scope for one in formed] == [
+        DocumentScope.SINGLE
+    ] * 2
 
 
 def test_two_facts_of_one_passage_are_a_single_passage_question() -> None:
@@ -60,7 +69,7 @@ def test_two_facts_of_one_passage_are_a_single_passage_question() -> None:
         size=2,
     )
 
-    assert formed[0].difficulty == Difficulty.SINGLE_PASSAGE
+    assert formed[0].criteria().passage_scope == PassageScope.SINGLE
 
 
 def test_a_group_of_one_is_an_ordinary_question() -> None:
@@ -70,7 +79,7 @@ def test_a_group_of_one_is_an_ordinary_question() -> None:
     formed = samples(facts, wanted=10, size=1)
 
     assert all(len(one.facts) == 1 for one in formed)
-    assert {one.difficulty for one in formed} == {Difficulty.SINGLE_PASSAGE}
+    assert {one.criteria().passage_scope for one in formed} == {PassageScope.SINGLE}
 
 
 def test_no_more_groups_than_were_wanted() -> None:
@@ -108,7 +117,7 @@ def test_every_fact_is_used_at_most_once() -> None:
 
 def test_the_unanswerable_share_is_exact_and_spread_out() -> None:
     """A quarter means one in every four, not a coin weighted a quarter."""
-    over = [perturbed(index, 0.25) for index in range(12)]
+    over = [spread(index, 0.25) for index in range(12)]
 
     assert sum(over) == 3
     assert over == [False, False, False, True] * 3
@@ -116,5 +125,65 @@ def test_the_unanswerable_share_is_exact_and_spread_out() -> None:
 
 def test_a_share_of_zero_perturbs_nothing_and_a_share_of_one_perturbs_all() -> None:
     """Both ends without a branch of their own."""
-    assert not any(perturbed(index, 0.0) for index in range(10))
-    assert all(perturbed(index, 1.0) for index in range(10))
+    assert not any(spread(index, 0.0) for index in range(10))
+    assert all(spread(index, 1.0) for index in range(10))
+
+
+# ── Bridges, which is what makes a multi-topic question available ──────────
+
+
+def test_a_bridge_passage_turns_a_sample_multi_topic() -> None:
+    """The scope that was impossible before.
+
+    A sample was drawn from one claimed topic's facts, so every question was
+    single-topic by construction. A bridge is a passage whose strongest
+    topic is a different one but which carries the claimed one above the
+    weight floor, so the corpus itself says the two subjects meet there.
+    """
+    own = [source(n, document="a", passage_id=1, topic_id=7) for n in range(2)]
+    bridge = [source(9, document="b", passage_id=2, topic_id=8)]
+
+    formed = bridged(samples(own, wanted=1, size=4), bridge, share=1.0, size=4)
+
+    assert formed[0].criteria().topic_scope == TopicScope.MULTI
+    assert formed[0].criteria().document_scope == DocumentScope.CROSS
+
+
+def test_only_a_share_of_samples_is_bridged() -> None:
+    """A bridge on every sample would make single_topic unreachable.
+
+    The scope is worth measuring in both directions, so a corpus where
+    everything crosses two subjects measures nothing about either.
+    """
+    own = [source(n, document="a", passage_id=n, topic_id=7) for n in range(4)]
+    bridges = [
+        source(50 + n, document="b", passage_id=50 + n, topic_id=8) for n in range(4)
+    ]
+
+    formed = bridged(samples(own, wanted=4, size=2), bridges, share=0.5, size=4)
+
+    scopes = [one.criteria().topic_scope for one in formed]
+    assert TopicScope.MULTI in scopes
+    assert TopicScope.SINGLE in scopes
+
+
+def test_a_bridge_that_would_overflow_the_sample_is_left_out() -> None:
+    """Whole passages or none, as when a sample is filled.
+
+    Half a passage's facts is the incoherence the whole design avoids.
+    """
+    own = [source(n, document="a", passage_id=1, topic_id=7) for n in range(3)]
+    bridge = [source(50 + n, document="b", passage_id=2, topic_id=8) for n in range(3)]
+
+    formed = bridged(samples(own, wanted=1, size=4), bridge, share=1.0, size=4)
+
+    assert formed[0].criteria().topic_scope == TopicScope.SINGLE
+    assert len(formed[0].facts) == 3
+
+
+def test_no_bridges_leaves_every_sample_as_it_was() -> None:
+    """A topic no passage bridges is a topic with its own subject alone."""
+    own = [source(n, document="a", passage_id=n, topic_id=7) for n in range(4)]
+    formed = samples(own, wanted=4, size=2)
+
+    assert bridged(formed, [], share=1.0, size=2) == formed

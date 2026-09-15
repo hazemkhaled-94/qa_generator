@@ -115,12 +115,17 @@ class StubModel:
 #: loaded: these are the run's settings, not the deployment's.
 QUESTIONS = QuestionSettings(
     per_topic=4,
-    sample_size=2,
+    sample_size=4,
     unanswerable_share=0.25,
+    bridge_share=0.5,
+    followup_share=0.5,
+    max_followups=2,
+    min_answer_chars=0,
+    long_answer_chars=60,
     duplicate_cosine=0.93,
     embedding_model="stub",
     max_tokens=512,
-    verifier_model="ollama/stub-verifier",
+    verifier_model="ollama/verifier",
 )
 
 
