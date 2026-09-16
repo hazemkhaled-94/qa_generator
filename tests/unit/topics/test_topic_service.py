@@ -8,7 +8,7 @@ gensim and pyLDAvis.
 from __future__ import annotations
 
 import pytest
-from drivers import LabellerDriver, corpus
+from topic_drivers import LabellerDriver, corpus
 
 from topic_modelling.models import FittedTopic, PassageVocabulary
 

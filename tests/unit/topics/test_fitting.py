@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from drivers import FitterDriver, corpus
+from topic_drivers import FitterDriver, corpus
 
 from topic_modelling.models import PassageVocabulary
 from topic_modelling.topics import NoVocabulary

@@ -7,7 +7,7 @@ has to do is call one collaborator and answer with an exit status.
 from __future__ import annotations
 
 import pytest
-from drivers import CommandDriver
+from topic_drivers import CommandDriver
 
 
 @pytest.fixture

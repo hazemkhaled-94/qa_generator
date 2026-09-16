@@ -575,8 +575,8 @@ screen, top to bottom:
 | Unit | `tests/unit/topics/test_fitting.py` | 35 | The fitter: weights, vocabulary filtering, reproducibility, subject separation, and every setting it refuses. |
 | Unit | `tests/unit/topics/test_labelling.py` | 36 | The prompt, what the model's answer is stripped of, what counts as a refusal, and every path through `carry_labels`. |
 | Unit | `tests/unit/topics/test_visualisation.py` | 14 | The shape of the space handed to pyLDAvis, and that the page is self-contained, numbered correctly and parseable. |
-| Unit | `tests/unit/topics/test_service.py` | 27 | The flow: claim, multi-language fit, partial failure, drawing, naming, and every failure that must not lose the topics. |
-| Unit | `tests/unit/topics/test_wiring.py` | 22 | The settings read from the environment, and what the factory builds with and without a served model. |
+| Unit | `tests/unit/topics/test_topic_service.py` | 27 | The flow: claim, multi-language fit, partial failure, drawing, naming, and every failure that must not lose the topics. |
+| Unit | `tests/unit/topics/test_topic_wiring.py` | 22 | The settings read from the environment, and what the factory builds with and without a served model. |
 | Unit | `tests/unit/topics/test_run.py` | 13 | Every command-line flag, and the exit status each gives. |
 | Unit | `tests/unit/topics/test_reporting.py` | 12 | `stale`, the one derived answer on this service's boundary. |
 | Unit | `tests/unit/topics/test_vocabulary.py` | 9 | What reaches the vocabulary: grammar dropped, inflections folded, URLs and foreign function words excluded. Needs spaCy (`nlp` marker). |
@@ -595,7 +595,7 @@ The one uncovered line is `run.py`'s `if __name__ == "__main__"`.
 Every test acts through an object rather than through the code under test
 directly — the page object pattern, applied to a service:
 
-- `tests/unit/topics/drivers.py` holds `FitterDriver`, `FittingDriver`,
+- `tests/unit/topics/topic_drivers.py` holds `FitterDriver`, `FittingDriver`,
   `LabellerDriver`, `ServiceDriver` and `CommandDriver`, plus in-memory
   doubles for the queue and the bucket. A test says
   `fitter.with_passage(99, "zzz").fit("de")` and asks

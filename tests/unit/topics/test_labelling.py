@@ -7,7 +7,7 @@ top terms.
 from __future__ import annotations
 
 import pytest
-from drivers import LabellerDriver
+from topic_drivers import LabellerDriver
 
 from llm.client import ModelUnavailable
 from topic_modelling.labels import _EXCERPT_CHARS

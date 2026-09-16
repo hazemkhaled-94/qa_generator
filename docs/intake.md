@@ -570,10 +570,18 @@ Things that are true, are not bugs, and have surprised somebody:
 - **A failed parse can leave an object in the `parsed` bucket.** The
   converted document is stored before the confidence and duplicate-text
   checks run. It is collected when the document is deleted.
-- **A document is only searchable by the name it first arrived under.** The
-  listing carries one filename per document, the earliest; a re-upload under
-  another name is recorded in `ingest_events` and does not become a second
-  way to find the document.
+- **A re-upload's filename is recorded and never shown.** The same bytes
+  under a new name are refused as `duplicate_bytes`, so there is no second
+  document — but the name they were refused under is written to
+  `ingest_events`, and `_FIRST_EVENT` is the only reader of that column and
+  takes the earliest row. Somebody who was told "already held" and later
+  searches for the name they used will find nothing.
+- **A duplicate by content costs a stored file and a failed row.** Different
+  bytes carrying the same text pass ingestion — nothing knows the text yet —
+  and are refused at parsing. The document row stays at `parse_status =
+  failed`, with its object in both buckets, until somebody deletes it.
+  `content_sha256` is deliberately not written on it, so the copy that
+  parsed keeps the text and every later copy fails against that one.
 - **`Content-Length` is an upper bound.** It covers the whole multipart body,
   so the early size refusal can in principle fire on a file just under the
   limit. A request declaring no length at all is read in full and measured

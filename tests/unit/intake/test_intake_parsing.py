@@ -448,3 +448,30 @@ def test_a_score_reaches_the_database_as_a_value_it_accepts(reported, expected) 
 def test_a_conversion_reporting_no_confidence_at_all_reads_as_none() -> None:
     """A converter that measures nothing is not a converter that scored zero."""
     assert _score(SimpleNamespace(), "mean_score") is None
+
+
+def test_the_same_text_under_different_bytes_is_refused_once_it_is_read() -> None:
+    """Ingestion catches a re-upload by its bytes; this catches a re-export.
+
+    Two documents the corpus accepted separately, because their bytes differ,
+    converting to the same text. The first keeps it and the second is refused
+    by name.
+    """
+    driver = ParseDriver(queued=(claimed(SHA), claimed(OTHER)))
+
+    assert driver.drain() == 2
+
+    assert list(driver.completed) == [SHA]
+    assert f"document {SHA[:12]} already holds" in driver.failures[OTHER]
+
+
+def test_a_duplicate_by_content_keeps_its_file_and_its_converted_form() -> None:
+    """Refused after both were written, so somebody has to delete the row."""
+    driver = ParseDriver(queued=(claimed(SHA), claimed(OTHER)))
+
+    driver.drain()
+
+    assert sorted(driver.parsed_keys) == sorted(
+        [driver.parsed.key_for(SHA), driver.parsed.key_for(OTHER)]
+    )
+    assert OTHER in driver.failures

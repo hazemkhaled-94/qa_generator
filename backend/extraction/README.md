@@ -378,14 +378,14 @@ Twenty-two files, 349 tests, over seven layers. Coverage of
 | Unit | `tests/unit/extraction/test_bridge_extractor.py` | — | The numbered group, positions deduped in order, a group of one never sent. |
 | Unit | `tests/unit/extraction/test_table_extractor.py` | `nlp` | Header stacks, spans, the row-header fallback, a row the passage does not render. |
 | Unit | `tests/unit/extraction/test_passage_gate.py` | `nlp` | Which passages never reach a model. |
-| Unit | `tests/unit/extraction/test_service.py` | `nlp` | The per-passage flow: both readings stored, the digest skipped when there is nothing to condense, a model that will not answer failing the row, an unexpected exception named by its type. |
+| Unit | `tests/unit/extraction/test_extraction_service.py` | `nlp` | The per-passage flow: both readings stored, the digest skipped when there is nothing to condense, a model that will not answer failing the row, an unexpected exception named by its type. |
 | Unit | `tests/unit/extraction/test_bridge_pass.py` | `nlp` | The pass: clear then write, one failing group not stopping the rest. |
 | Unit | `tests/unit/extraction/test_grouping.py` | `nlp` | Documents paired across rather than within, groups strided over the topic. |
 | Unit | `tests/unit/extraction/test_revalidate.py` | `nlp` | Re-judging in batches, a bridge judged against its whole group. |
 | Unit | `tests/unit/extraction/test_replay.py` | `nlp` | A second judgement reaches the first verdict, for every kind. |
 | Unit | `tests/unit/extraction/test_registry.py` | — | Routing, the default, two readers claiming one block type. |
 | Unit | `tests/unit/extraction/test_config.py` | — | Every refusal a bad setting gets, naming itself. |
-| Unit | `tests/unit/extraction/test_wiring.py` | — | The settings reach the objects that read them; every operation is on the command line. |
+| Unit | `tests/unit/extraction/test_extraction_wiring.py` | — | The settings reach the objects that read them; every operation is on the command line. |
 | Integration | `tests/integration/database/test_fact_store.py` | `integration` | The SQL, against a real Postgres: which rows a store replaces and which it leaves, the listing and its count agreeing about the filter, the quality figures, the groups a topic offers, a bridge read back whole. |
 | Integration | `tests/integration/database/test_fact_constraints.py` | `integration` | What the database refuses: an unknown kind, an unknown code, a duplicate link, a link to nothing. Plus the two cascades and the trigger. |
 | Integration | `tests/integration/api/test_facts.py` | `integration` | The HTTP surface against the real wiring. |

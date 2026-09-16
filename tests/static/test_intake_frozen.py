@@ -18,6 +18,7 @@ one story: a file becomes a document becomes passages.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -251,21 +252,20 @@ def test_every_setting_is_declared_where_a_deployment_reads_it() -> None:
 PREFIXES = ("/documents", "/parsing", "/chunking", "/passages")
 
 
-@pytest.mark.integration
-def test_the_stages_serve_exactly_the_routes_named_here(application) -> None:
+def test_the_stages_serve_exactly_the_routes_named_here() -> None:
     """The frontend and the Makefile both address these by hand.
 
-    Through the fixture rather than by importing a route module: importing
-    one imports the composition root, which binds every service to the
-    environment as it is read, and doing that before the containers are up
-    leaves the API pointed at nothing for the rest of the session.
-
-    Read off the published document rather than off `app.routes`, which
-    holds one opaque object per included router and no paths at all.
+    Read off the committed OpenAPI snapshot rather than off a live
+    application: importing a route module imports the composition root,
+    which binds every service to the environment as it is read, and doing
+    that before the containers are up leaves the API pointed at nothing for
+    the rest of the session. tests/contract holds that snapshot to the
+    running application, so this needs neither.
     """
+    published = json.loads((ROOT / "tests/contract/openapi.json").read_text())
     found = {
         (verb.upper(), path)
-        for path, operations in application.openapi()["paths"].items()
+        for path, operations in published.items()
         for verb in operations
         if path.startswith(PREFIXES)
     }

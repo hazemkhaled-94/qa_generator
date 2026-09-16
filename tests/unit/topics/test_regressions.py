@@ -12,7 +12,7 @@ import re
 from math import isnan
 
 import pytest
-from drivers import FitterDriver, LabellerDriver, corpus
+from topic_drivers import FitterDriver, LabellerDriver, corpus
 
 from topic_modelling.models import FittedTopic, PassageVocabulary, TopicSpace
 from topic_modelling.topics import NoVocabulary, carry_labels

@@ -617,8 +617,13 @@ class ParseRows:
         return None if held is None or held == besides else held
 
     def complete(self, sha256: str, parsed) -> None:
-        """Records a successful parse."""
+        """Records a successful parse.
+
+        The content digest becomes this document's, which is what the real
+        repository writes here and what `holder_of` reads back.
+        """
         self.completed[sha256] = parsed
+        self.holders.setdefault(parsed.content_sha256, sha256)
 
     def fail(self, key: str, error: str) -> None:
         """Records a document this stage could not process."""

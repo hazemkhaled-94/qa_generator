@@ -6,7 +6,7 @@ import json
 import re
 
 import pytest
-from drivers import FitterDriver
+from topic_drivers import FitterDriver
 
 from topic_modelling.models import TopicSpace
 from topic_modelling.visualisation import _TERMS_SHOWN, render
@@ -50,7 +50,7 @@ def test_the_document_matrix_holds_one_row_per_scored_passage(fitting) -> None:
 
 def test_a_document_length_counts_occurrences_not_distinct_terms(settings) -> None:
     """PyLDAvis weights a term by how often it appears, so repeats count."""
-    from drivers import corpus
+    from topic_drivers import corpus
 
     repeated = FitterDriver(
         settings,
