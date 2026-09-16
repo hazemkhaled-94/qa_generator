@@ -7,7 +7,7 @@ a full refit.
 
 Nothing is re-exported: a caller names the submodule it wants.
 
-Frozen: README.md in this package describes the steps, the settings and the
-reasoning behind them, and tests/static/test_topics_frozen.py pins the
+README.md in this package describes the steps, the settings and the
+reasoning behind them, and tests/static/test_topics_pinned.py pins the
 surface this service presents.
 """

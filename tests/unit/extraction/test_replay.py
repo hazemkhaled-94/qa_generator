@@ -11,7 +11,7 @@ import pytest
 from drivers import DIGEST_SHARE, group, passage
 
 from database.qa_generator import FactKind
-from extraction.models import CandidateFact
+from extraction.models import CandidateFact, Cited
 from extraction.validation import FactChecker
 
 pytestmark = pytest.mark.nlp
@@ -25,7 +25,7 @@ def same(first, again) -> None:
     assert again.evidence_sentence_ids == first.evidence_sentence_ids
     assert again.units_added == first.units_added
     assert again.kind == first.kind
-    assert again.passage_ids == first.passage_ids
+    assert again.citations == first.citations
 
 
 @pytest.mark.parametrize(
@@ -78,19 +78,30 @@ def test_a_bridge_is_judged_the_same_way_from_its_stored_group(
         "Standard requests are answered within 48 hours.",
         "Urgent requests are answered within 4 hours.",
     )
-    candidate = CandidateFact(statement, (), kind=FactKind.BRIDGE, passages=rests_on)
+    candidate = CandidateFact(
+        statement,
+        (),
+        kind=FactKind.BRIDGE,
+        passages=tuple(
+            Cited(position=position, sentences=(0,)) for position in rests_on
+        ),
+    )
 
     first = checker.check_bridge(offered, candidate)
-    # The catalogue rebuilds the positions from however many passages the
-    # link table held for this fact.
-    stored = [one for one in offered if one.id in first.passage_ids]
+    # The catalogue rebuilds the positions and the citations from whatever
+    # the link table held for this fact.
+    held = [one.passage_id for one in first.citations]
+    stored = [one for one in offered if one.id in held]
     again = checker.check_bridge(
         stored,
         CandidateFact(
             first.statement,
             (),
             kind=FactKind.BRIDGE,
-            passages=tuple(range(len(stored))),
+            passages=tuple(
+                Cited(position=position, sentences=tuple(one.sentence_ids))
+                for position, one in enumerate(first.citations)
+            ),
         ),
     )
 

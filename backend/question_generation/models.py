@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from database.qa_generator import (
     Difficulty,
     DocumentScope,
+    FactKind,
     PassageScope,
     TopicScope,
 )
@@ -130,44 +131,114 @@ class TopicToCover:
 
 
 @dataclass(frozen=True)
-class SourceFact:
-    """One validated fact a question may be written from.
+class SourcePassage:
+    """One passage a fact rests on, as question generation reads it.
 
-    Carries the passage text rather than only the statement: the verifier is
-    shown the passage, because what is being tested is whether the answer is
-    in the corpus and not whether it is in a sentence somebody rewrote.
+    Carries the text rather than only an id: the verifier is shown the
+    passage, because what is being tested is whether the answer is in the
+    corpus and not whether it is in a sentence somebody rewrote.
     """
 
     id: int
-    statement: str
-    passage_id: int
-    passage_text: str
+    text: str
     doc_sha256: str
     #: Not optional: the repository selects only passages whose language
     #: chunking could read, because a question has to be written in one and
     #: the column holding it is NOT NULL.
     language: str
-    #: The heading trail the passage sits under, which is most of what says
-    #: whose rule or which year a question is about. NULL on a passage the
-    #: parser found no heading above.
+    #: The heading trail it sits under, which is most of what says whose rule
+    #: or which year a question is about. NULL where the parser found none.
     section_path: str | None = None
-    #: The topic this fact's passage counts towards - its strongest, not all
-    #: of them. Two facts with different ones make a multi-topic question.
+    #: The topic it counts towards - its strongest, not all of them. Two
+    #: passages with different ones make a multi-topic question.
     topic_id: int | None = None
-    #: The title of the document this came from. Carried so a gate can refuse
-    #: a question that quotes it: naming where the answer lives is the one
-    #: thing a question must not do.
+    #: The title of its document. Carried so a gate can refuse a question
+    #: that quotes it: naming where the answer lives is the one thing a
+    #: question must not do.
     document_title: str | None = None
-    #: Where the passage sits in its document. Passages are numbered in
-    #: reading order, so two close ordinals are two parts of one section.
+    #: Where it sits in its document. Passages are numbered in reading
+    #: order, so two close ordinals are two parts of one section.
     ordinal: int = 0
-    #: The passage's content lemmas, which is what says whether two passages
-    #: are about related things. The same vocabulary the topics were fitted
-    #: over, so nothing here re-reads any text.
+    #: Its content lemmas, which is what says whether two passages are about
+    #: related things. The same vocabulary the topics were fitted over, so
+    #: nothing here re-reads any text.
     lemmas: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SourceFact:
+    """One validated fact a question may be written from.
+
+    A bridge rests on several passages and every other kind on one, so
+    `passages` holds them all, anchor first. The anchor is what the fact is
+    listed, filtered and ordered by; the whole tuple is what it is answered
+    from.
+    """
+
+    id: int
+    statement: str
+    passages: tuple[SourcePassage, ...]
+    #: Which reading produced it. A bridge is asked about alone, because it
+    #: already spans the passages a wide question needs.
+    kind: str = FactKind.ATOMIC
     #: The numbers, dates and amounts this fact asserts, as extraction read
     #: them. A fact carrying one is what a checkable question is written from.
     units: tuple[str, ...] = ()
+
+    @property
+    def anchor(self) -> SourcePassage:
+        """The passage this fact is anchored to."""
+        return self.passages[0]
+
+    @property
+    def passage_id(self) -> int:
+        """The anchor's id."""
+        return self.anchor.id
+
+    @property
+    def passage_text(self) -> str:
+        """The anchor's text."""
+        return self.anchor.text
+
+    @property
+    def doc_sha256(self) -> str:
+        """The anchor's document."""
+        return self.anchor.doc_sha256
+
+    @property
+    def language(self) -> str:
+        """The anchor's language."""
+        return self.anchor.language
+
+    @property
+    def section_path(self) -> str | None:
+        """The anchor's heading trail."""
+        return self.anchor.section_path
+
+    @property
+    def topic_id(self) -> int | None:
+        """The topic the anchor counts towards."""
+        return self.anchor.topic_id
+
+    @property
+    def document_title(self) -> str | None:
+        """The anchor's document title."""
+        return self.anchor.document_title
+
+    @property
+    def ordinal(self) -> int:
+        """Where the anchor sits in its document."""
+        return self.anchor.ordinal
+
+    @property
+    def lemmas(self) -> tuple[str, ...]:
+        """The anchor's content lemmas."""
+        return self.anchor.lemmas
+
+    @property
+    def spans(self) -> bool:
+        """Whether this fact rests on more than one passage."""
+        return len(self.passages) > 1
 
 
 @dataclass(frozen=True)
@@ -181,6 +252,19 @@ class FactGroup:
 
     facts: tuple[SourceFact, ...]
 
+    @property
+    def resting(self) -> tuple[SourcePassage, ...]:
+        """Every distinct passage this group's facts rest on, anchors first.
+
+        Over every passage of every fact, not one per fact: a bridge rests on
+        two, and a question written from it needs both.
+        """
+        seen: dict[int, SourcePassage] = {}
+        for fact in self.facts:
+            for passage in fact.passages:
+                seen.setdefault(passage.id, passage)
+        return tuple(seen.values())
+
     def criteria(
         self,
         answer_chars: int | None = None,
@@ -189,10 +273,11 @@ class FactGroup:
         long_answer: int = LONG_ANSWER_CHARS,
     ) -> Criteria:
         """What kind of question this group's facts make."""
+        resting = self.resting
         return criteria_of(
-            passages=len({fact.passage_id for fact in self.facts}),
-            documents=len({fact.doc_sha256 for fact in self.facts}),
-            topics=len({fact.topic_id for fact in self.facts if fact.topic_id}),
+            passages=len(resting),
+            documents=len({passage.doc_sha256 for passage in resting}),
+            topics=len({one.topic_id for one in resting if one.topic_id}),
             answer_chars=answer_chars,
             follows=follows,
             long_answer=long_answer,
@@ -215,10 +300,7 @@ class FactGroup:
         What the verifier is shown, and all it is shown: the question is
         being asked of the corpus, not of a retriever.
         """
-        seen: dict[int, str] = {}
-        for fact in self.facts:
-            seen.setdefault(fact.passage_id, fact.passage_text)
-        return tuple(seen.values())
+        return tuple(passage.text for passage in self.resting)
 
     @property
     def context(self) -> tuple[tuple[str, str], ...]:
@@ -228,11 +310,13 @@ class FactGroup:
         together with the text, for the reason extraction fences one: a model
         shown the two as one block asks about the heading.
         """
-        seen: dict[int, tuple[str, str]] = {}
-        for fact in self.facts:
-            heading = f"Under: {fact.section_path}\n" if fact.section_path else ""
-            seen.setdefault(fact.passage_id, (heading, fact.passage_text))
-        return tuple(seen.values())
+        return tuple(
+            (
+                f"Under: {passage.section_path}\n" if passage.section_path else "",
+                passage.text,
+            )
+            for passage in self.resting
+        )
 
     @property
     def statements(self) -> tuple[str, ...]:
@@ -245,10 +329,14 @@ class FactGroup:
 
         What a question must not quote. A question naming the file its answer
         is in has already done the retrieving it was written to measure.
+
+        Over every passage, so a bridge's second document is covered too.
         """
         return tuple(
             dict.fromkeys(
-                fact.document_title for fact in self.facts if fact.document_title
+                passage.document_title
+                for passage in self.resting
+                if passage.document_title
             )
         )
 

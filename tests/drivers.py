@@ -14,7 +14,7 @@ from typing import Any
 from factories import passage as build_passage
 
 from database.qa_generator import FactKind
-from extraction.models import CandidateFact, CheckedFact, PassageToExtract
+from extraction.models import CandidateFact, CheckedFact, Cited, PassageToExtract
 from extraction.validation import FactChecker
 
 #: The share a digest must come in under. Stated here rather than read from
@@ -179,6 +179,7 @@ class Checker:
         statement: str,
         offered: list[PassageToExtract],
         rests_on: tuple[int, ...] = (0, 1),
+        cites: dict[int, tuple[int, ...]] | None = None,
     ) -> CheckedFact:
         """Checks a claim drawn from a group of passages.
 
@@ -186,13 +187,24 @@ class Checker:
             statement: What the model wrote.
             offered: The passages it was shown.
             rests_on: Which of them it named, by position.
+            cites: Which sentences of each named position, when a test cares.
+                Every position cites its sentence 0 otherwise.
 
         Returns:
             The checked fact.
         """
+        named = cites or {}
         return self.checker.check_bridge(
             offered,
-            CandidateFact(statement, (), kind=FactKind.BRIDGE, passages=rests_on),
+            CandidateFact(
+                statement,
+                (),
+                kind=FactKind.BRIDGE,
+                passages=tuple(
+                    Cited(position=position, sentences=named.get(position, (0,)))
+                    for position in rests_on
+                ),
+            ),
         )
 
     def _single(

@@ -223,11 +223,12 @@ def test_a_sample_never_spans_more_passages_than_its_shape_asked_for(
 ) -> None:
     """One passage for `single`, at most two for anything wider.
 
-    A shape a topic cannot supply falls back to a narrower one, so this is a
-    ceiling and never a floor.
+    Measured over every passage the facts rest on, not one per fact, so a
+    bridge counts for the two it spans. A shape a topic cannot supply falls
+    back to a narrower one, so this is a ceiling and never a floor.
     """
     for one in _dealt(rows, wanted, size, shape):
-        reached = len({fact.passage_id for fact in one.facts})
+        reached = len({passage.id for fact in one.facts for passage in fact.passages})
         assert reached == 1 if shape == "single" else reached <= 2
 
 
@@ -241,14 +242,24 @@ def test_a_sample_never_spans_more_passages_than_its_shape_asked_for(
 def test_every_scope_always_matches_the_spread_it_is_read_from(
     rows, wanted, size, shape
 ) -> None:
-    """The property the re-check relies on to notice evidence that moved."""
+    """The property the re-check relies on to notice evidence that moved.
+
+    Read over every passage of every fact rather than one per fact: a
+    bridge rests on several, and the re-check counts the same way.
+    """
     from question_generation.models import criteria_of
 
     for one in _dealt(rows, wanted, size, shape):
+        # First wins on a repeated id, which is how the group reads it.
+        held: dict[int, object] = {}
+        for fact in one.facts:
+            for passage in fact.passages:
+                held.setdefault(passage.id, passage)
+        resting = held.values()
         assert one.criteria() == criteria_of(
-            passages=len({fact.passage_id for fact in one.facts}),
-            documents=len({fact.doc_sha256 for fact in one.facts}),
-            topics=len({fact.topic_id for fact in one.facts if fact.topic_id}),
+            passages=len(resting),
+            documents=len({passage.doc_sha256 for passage in resting}),
+            topics=len({one.topic_id for one in resting if one.topic_id}),
             answer_chars=None,
         )
 

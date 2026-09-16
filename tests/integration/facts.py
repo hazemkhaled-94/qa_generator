@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database.qa_generator import FactKind, PassageTopic, Status, Topic
-from extraction.models import CheckedFact, PassageToExtract
+from extraction.models import CheckedFact, Citation, PassageToExtract
 from extraction.repository import FactCatalog, PassageQueue
 
 
@@ -26,6 +26,7 @@ def checked(
     validated: bool = True,
     rejection_code: str | None = None,
     passage_ids: list[int] | None = None,
+    citations: list[Citation] | None = None,
     **columns: Any,
 ) -> CheckedFact:
     """One fact as the checker would hand it to the repository.
@@ -36,7 +37,10 @@ def checked(
         kind: Which reading it is.
         validated: Whether it passed.
         rejection_code: Why it did not, when it did not.
-        passage_ids: The passages a bridge rests on.
+        passage_ids: The passages a bridge rests on, each cited at its
+            sentence 0 over an empty span. For a test that reads the links
+            rather than the spans.
+        citations: The citations themselves, for a test that reads a span.
         **columns: Anything else `CheckedFact` takes.
 
     Returns:
@@ -54,7 +58,12 @@ def checked(
         rejection_code=rejection_code,
         validation_error=columns.pop("validation_error", None),
         kind=kind,
-        passage_ids=passage_ids or [],
+        citations=citations
+        if citations is not None
+        else [
+            Citation(passage_id=one, sentence_ids=[0], start=0, end=0)
+            for one in (passage_ids or [])
+        ],
         **columns,
     )
 
@@ -164,6 +173,25 @@ class FactStore:
             "SELECT fact_id, passage_id, position FROM fact_passages "
             "ORDER BY fact_id, position"
         )
+
+    def citations(self) -> list[tuple]:
+        """Where in each passage every bridge rests, in the same order."""
+        return self._execute(
+            "SELECT passage_id, sentence_ids, evidence_start, evidence_end "
+            "FROM fact_passages ORDER BY fact_id, position"
+        )
+
+    def cited_text(self) -> list[str]:
+        """The text each citation resolves to, read out of its own passage."""
+        return [
+            row[0]
+            for row in self._execute(
+                "SELECT substring(p.text FROM fp.evidence_start + 1 FOR "
+                "fp.evidence_end - fp.evidence_start) FROM fact_passages fp "
+                "JOIN passages p ON p.id = fp.passage_id "
+                "ORDER BY fp.fact_id, fp.position"
+            )
+        ]
 
     def count(self, table: str = "facts") -> int:
         """How many rows a table holds."""

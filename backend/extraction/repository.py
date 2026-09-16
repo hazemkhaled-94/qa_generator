@@ -30,6 +30,7 @@ from database.qa_generator.repository import Repository, matching
 from extraction.models import (
     CandidateFact,
     CheckedFact,
+    Cited,
     FactQuality,
     PassageToExtract,
     StoredFact,
@@ -310,9 +311,16 @@ class FactCatalog(Repository):
                 [_row(fact) for fact in facts],
             ).all()
             links = [
-                {"fact_id": fact_id, "passage_id": passage_id, "position": position}
+                {
+                    "fact_id": fact_id,
+                    "passage_id": cited.passage_id,
+                    "position": position,
+                    "sentence_ids": cited.sentence_ids,
+                    "evidence_start": cited.start,
+                    "evidence_end": cited.end,
+                }
                 for fact_id, fact in zip(ids, facts, strict=True)
-                for position, passage_id in enumerate(fact.passage_ids)
+                for position, cited in enumerate(fact.citations)
             ]
             if links:
                 session.execute(insert(FactPassage), links)
@@ -358,36 +366,55 @@ class FactCatalog(Repository):
                 group = bridges.get(row.fact_id)
                 yield (
                     row.fact_id,
-                    group or [_passage(row, row.language)],
+                    [passage for passage, _ in group]
+                    if group
+                    else [_passage(row, row.language)],
                     CandidateFact(
                         statement=row.statement,
                         sentences=tuple(row.evidence_sentence_ids or ()),
                         kind=row.kind,
-                        passages=tuple(range(len(group or ()))),
+                        passages=tuple(
+                            Cited(position=position, sentences=cited)
+                            for position, (_, cited) in enumerate(group or ())
+                        ),
                     ),
                     row.extraction_method,
                 )
 
-    def _bridge_groups(self) -> dict[int, list[PassageToExtract]]:
-        """Reads every bridge fact's passages, in the order it was shown them.
+    def _bridge_groups(
+        self,
+    ) -> dict[int, list[tuple[PassageToExtract, tuple[int, ...]]]]:
+        """Reads every bridge's passages and citations, in the order shown.
 
         Held whole rather than streamed, and never narrowed: a bridge is one
         call per topic group, so there are orders of magnitude fewer of these
         than of facts, and a narrowing on the fact would drop the half of a
         group that sits in another document.
+
+        Returns:
+            Per fact id, one (passage, cited sentence indices) per passage.
+            The indices are empty on a bridge drawn before prompt version 2,
+            which recorded none.
         """
         query = (
-            select(FactPassage.fact_id, *_PASSAGE_COLUMNS, Document.language)
+            select(
+                FactPassage.fact_id,
+                FactPassage.sentence_ids,
+                *_PASSAGE_COLUMNS,
+                Document.language,
+            )
             .select_from(FactPassage)
             .join(Passage, Passage.id == FactPassage.passage_id)
             .join(Document, Document.sha256 == Passage.doc_sha256)
             .order_by(FactPassage.fact_id, FactPassage.position)
         )
 
-        groups: dict[int, list[PassageToExtract]] = {}
+        groups: dict[int, list[tuple[PassageToExtract, tuple[int, ...]]]] = {}
         with self._session() as session:
             for row in session.execute(query):
-                groups.setdefault(row.fact_id, []).append(_passage(row, row.language))
+                groups.setdefault(row.fact_id, []).append(
+                    (_passage(row, row.language), tuple(row.sentence_ids or ()))
+                )
         return groups
 
     def rejudge(self, verdicts: list[tuple[int, CheckedFact]]) -> int:

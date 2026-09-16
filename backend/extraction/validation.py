@@ -16,6 +16,8 @@ from extraction.models import (
     MIN_POINTS,
     CandidateFact,
     CheckedFact,
+    Citation,
+    Cited,
     PassageToExtract,
     Provenance,
 )
@@ -48,7 +50,8 @@ class Judged:
         claim: What the statement itself asserts.
         evidence_vocabulary: Every form a word of the evidence appears in,
             over every passage the candidate rests on.
-        passage_ids: Every passage it rests on, anchor first.
+        citations: One entry per passage a bridge cites, anchor first. Empty
+            on every other kind, whose one citation is the span above.
     """
 
     statement: str
@@ -59,7 +62,7 @@ class Judged:
     evidence_predicates: int
     claim: Claim
     evidence_vocabulary: frozenset[str]
-    passage_ids: tuple[int, ...] = field(default=())
+    citations: tuple[Citation, ...] = field(default=())
 
     @property
     def added(self) -> tuple[str, ...]:
@@ -185,14 +188,18 @@ def _listed(judged: Judged) -> Failure | None:
 
 
 def _bridging(judged: Judged) -> Failure | None:
-    """Refuses a bridge resting on fewer than two passages."""
-    if len(judged.passage_ids) >= 2:
+    """Refuses a bridge citing sentences in fewer than two passages.
+
+    Counted on what resolved, not on what was named: a claim that named two
+    passages and cited a real sentence in only one of them rests on one.
+    """
+    if len(judged.citations) >= 2:
         return None
     return (
         Rejection.NOT_BRIDGING,
         (
-            f"the statement rests on {len(judged.passage_ids)} passage(s); a "
-            "bridge carries a claim no single passage states"
+            f"the statement cites {len(judged.citations)} passage(s); a bridge "
+            "carries a claim no single passage states"
         ),
     )
 
@@ -287,33 +294,47 @@ class FactChecker:
 
         Returns:
             The candidate as a storable fact, anchored to the first passage
-            it rests on.
+            it cites and carrying a span in each of them.
         """
-        rested = [
-            offered[position]
-            for position in sorted(set(candidate.passages))
-            if 0 <= position < len(offered)
-        ]
+        # One citation per passage, whichever position named it first: two
+        # rows for one passage would collide on fact_passages' primary key,
+        # and would let a claim resting on one passage count as a bridge.
+        rested: list[tuple[PassageToExtract, Citation]] = []
+        seen: set[int] = set()
+        for one in sorted(candidate.passages, key=lambda cited: cited.position):
+            resolved = _resolve(offered, one)
+            if resolved is None or resolved[0].id in seen:
+                continue
+            seen.add(resolved[0].id)
+            rested.append(resolved)
         if not rested:
             return _absent(
                 offered[0] if offered else _NOWHERE, candidate, _WRITTEN, provenance
             )
 
-        anchor = rested[0]
+        anchor, cited = rested[0]
+        statement = candidate.statement.strip()
         judged = Judged(
-            statement=candidate.statement.strip(),
-            evidence=anchor.text,
-            sentence_ids=[sentence.index for sentence in anchor.sentences],
-            start=0,
-            end=len(anchor.text),
+            statement=statement,
+            evidence=anchor.text[cited.start : cited.end],
+            sentence_ids=list(cited.sentence_ids),
+            start=cited.start,
+            end=cited.end,
+            # Over the cited sentences of every passage, not over every
+            # sentence of them: what the claim rests on is what it named.
             evidence_predicates=sum(
-                sentence.predicates for one in rested for sentence in one.sentences
+                passage.sentences[index].predicates
+                for passage, one in rested
+                for index in one.sentence_ids
             ),
-            claim=claim(candidate.statement.strip(), anchor.language),
+            claim=claim(statement, anchor.language),
             evidence_vocabulary=frozenset().union(
-                *(vocabulary(one.text, one.language) for one in rested)
+                *(
+                    vocabulary(passage.text[one.start : one.end], passage.language)
+                    for passage, one in rested
+                )
             ),
-            passage_ids=tuple(one.id for one in rested),
+            citations=tuple(one for _, one in rested),
         )
         return self._verdict(anchor, candidate, judged, _WRITTEN, provenance)
 
@@ -357,7 +378,6 @@ class FactChecker:
             evidence_predicates=sum(sentence.predicates for sentence in cited),
             claim=claim(candidate.statement.strip(), passage.language),
             evidence_vocabulary=vocabulary(evidence, passage.language),
-            passage_ids=(passage.id,),
         )
 
 
@@ -365,6 +385,35 @@ class FactChecker:
 _NOWHERE = PassageToExtract(
     id=0, text="", section_path=None, block_type=None, language=None
 )
+
+
+def _resolve(
+    offered: Sequence[PassageToExtract], cited: Cited
+) -> tuple[PassageToExtract, Citation] | None:
+    """Resolves one of a bridge's citations against the passage it names.
+
+    Args:
+        offered: The passages the model was shown.
+        cited: One entry of what it returned.
+
+    Returns:
+        The passage and the span its cited sentences cover, or None when the
+        position is not one it was shown or none of the sentences is one that
+        passage has.
+    """
+    if not 0 <= cited.position < len(offered):
+        return None
+    passage = offered[cited.position]
+    ids = sorted({i for i in cited.sentences if 0 <= i < len(passage.sentences)})
+    if not ids:
+        return None
+    spans = [passage.sentences[i] for i in ids]
+    return passage, Citation(
+        passage_id=passage.id,
+        sentence_ids=ids,
+        start=spans[0].start,
+        end=spans[-1].end,
+    )
 
 
 def _fact(
@@ -389,9 +438,7 @@ def _fact(
         rejection_code=code,
         validation_error=detail,
         kind=candidate.kind,
-        passage_ids=list(judged.passage_ids)
-        if candidate.kind == FactKind.BRIDGE
-        else [],
+        citations=list(judged.citations) if candidate.kind == FactKind.BRIDGE else [],
         statement_predicates=judged.claim.predicates,
         evidence_predicates=judged.evidence_predicates,
         units_statement=list(judged.claim.units),
@@ -413,7 +460,8 @@ def _absent(
 ) -> CheckedFact:
     """Builds a fact whose citation names nothing that was offered."""
     if candidate.kind == FactKind.BRIDGE:
-        named, detail = candidate.passages, "no passage of the group it was shown"
+        named = tuple(one.position for one in candidate.passages)
+        detail = "no sentence of any passage of the group it was shown"
     else:
         named = candidate.sentences
         detail = f"the passage has {len(passage.sentences)}"

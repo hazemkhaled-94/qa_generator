@@ -1,14 +1,12 @@
-"""Ingestion, parsing and chunking are frozen: their surface is pinned here.
+"""Ingestion, parsing and chunking: their surface, pinned.
 
-Frozen means the three stages are finished. Their behaviour is settled, their
-documentation is written, and every layer of their test suite passes. Nothing
-here stops the code being changed - it makes a change to the surface fail a
-test, so that it is a decision somebody took rather than a drift nobody
-noticed.
+Nothing here stops the code being changed - it makes a change to the surface
+fail a test, so that it is a decision somebody took rather than a drift
+nobody noticed.
 
 Four things are pinned: the settings they read, the routes they serve, the
 fields they answer with, and the modules they are made of. A change to any of
-them is a change every reader of these stages sees, so unfreezing means
+them is a change every reader of these stages sees, so making one means
 editing this file in the same commit and saying why in the message.
 
 One document describes all three, at docs/intake.md, because the three are
@@ -239,7 +237,7 @@ def test_the_stages_read_exactly_the_settings_named_here() -> None:
 
 
 def test_every_setting_is_declared_where_a_deployment_reads_it() -> None:
-    """Frozen or not, a setting with nowhere to be set is unreachable."""
+    """A setting with nowhere to be set is unreachable."""
     declared = (ROOT / "configs/env/backend.env").read_text() + (
         ROOT / ".env.example"
     ).read_text()
@@ -322,7 +320,7 @@ def test_the_registry_dispatches_exactly_the_types_the_allowlist_may_name() -> N
 
 
 def test_the_stages_document_themselves() -> None:
-    """Frozen means the document is the description, so it has to be there."""
+    """One document is the description of all three, so it has to be there."""
     assert README.exists(), f"{README} is missing"
 
     written = README.read_text()
@@ -334,4 +332,3 @@ def test_the_stages_document_themselves() -> None:
         "## Tests",
     ):
         assert heading in written, f"the document has no {heading!r} section"
-    assert "frozen" in written.lower()

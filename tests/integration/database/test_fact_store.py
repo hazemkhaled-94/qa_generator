@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import pytest
 from facts import FactStore, checked
+from sqlalchemy.exc import IntegrityError
 
 from database.qa_generator import FactKind, Rejection, Status
+from extraction.models import Citation
 
 pytestmark = pytest.mark.integration
 
@@ -150,6 +152,77 @@ class TestBridges:
 
         ((fact_id, *_),) = store.rows("id")
         assert store.links() == [(fact_id, anchor, 0), (fact_id, other, 1)]
+
+    def test_a_bridge_records_where_in_each_passage_it_rests(
+        self, store, corpus
+    ) -> None:
+        """The span, not just the passage: a citation has to be resolvable."""
+        anchor, other = corpus["a"][0], corpus["b"][0]
+        store.bridges(
+            checked(
+                anchor,
+                "Both name a way in.",
+                kind=FactKind.BRIDGE,
+                citations=[
+                    Citation(passage_id=anchor, sentence_ids=[0], start=0, end=47),
+                    Citation(passage_id=other, sentence_ids=[0], start=0, end=32),
+                ],
+            )
+        )
+
+        assert store.citations() == [
+            (anchor, [0], 0, 47),
+            (other, [0], 0, 32),
+        ]
+
+    def test_every_stored_citation_resolves_in_its_own_passage(
+        self, store, corpus
+    ) -> None:
+        """The invariant a reader of fact_passages relies on."""
+        anchor, other = corpus["a"][0], corpus["b"][0]
+        store.bridges(
+            checked(
+                anchor,
+                "Both name a way in.",
+                kind=FactKind.BRIDGE,
+                citations=[
+                    Citation(
+                        passage_id=anchor,
+                        sentence_ids=[0],
+                        start=0,
+                        end=len("Standard requests are answered within 48 hours."),
+                    ),
+                    Citation(
+                        passage_id=other,
+                        sentence_ids=[0],
+                        start=0,
+                        end=len("Requests may be raised by phone."),
+                    ),
+                ],
+            )
+        )
+
+        assert store.cited_text() == [
+            "Standard requests are answered within 48 hours.",
+            "Requests may be raised by phone.",
+        ]
+
+    def test_a_citation_is_written_whole_or_not_at_all(self, store, corpus) -> None:
+        """A span with no sentences behind it is a span nothing can resolve."""
+        anchor, other = corpus["a"][0], corpus["b"][0]
+
+        with pytest.raises(IntegrityError, match="fact_passages_citation_complete"):
+            store.bridges(
+                checked(
+                    anchor,
+                    "Both name a way in.",
+                    kind=FactKind.BRIDGE,
+                    citations=[
+                        Citation(passage_id=anchor, sentence_ids=None, start=0, end=4),  # type: ignore[arg-type]
+                        Citation(passage_id=other, sentence_ids=[0], start=0, end=4),
+                    ],
+                )
+            )
 
     def test_no_other_kind_records_a_group(self, store, corpus) -> None:
         """Every other kind rests on its anchor alone."""
@@ -531,7 +604,10 @@ class TestRejudging:
 
         ((_, passages, candidate, _),) = store.catalog.judged()
         assert [one.id for one in passages] == [anchor, other]
-        assert candidate.passages == (0, 1)
+        assert [(one.position, one.sentences) for one in candidate.passages] == [
+            (0, (0,)),
+            (1, (0,)),
+        ]
 
     def test_a_narrowed_read_still_hands_back_a_whole_group(
         self, store, corpus

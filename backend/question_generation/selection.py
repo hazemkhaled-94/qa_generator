@@ -163,7 +163,11 @@ class Deal:
         head = self._next()
         if head is None:
             return None
-        if shape == Shape.SINGLE:
+        if shape == Shape.SINGLE or head[0].spans:
+            # A fact that already rests on several passages is asked about
+            # alone: it satisfies a wide shape by itself, and pairing it with
+            # a second passage would put the sample over the budget and make
+            # what the question is about impossible to read off.
             return self._group([head])
 
         partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
@@ -264,10 +268,16 @@ class Deal:
         The cap is divided between the passages rather than applied to the
         sample, so a wide sample offers both sides of what it is asking about
         instead of filling itself from the first passage.
+
+        Every passage a chosen fact rests on is marked, not only the one it
+        is filed under: a bridge's second passage has been asked about once
+        the bridge has, and offering it again would ask the same thing twice.
         """
         each = max(1, self._size // len(passages))
         facts: list[SourceFact] = []
         for passage in passages:
             self._used.add(passage[0].passage_id)
             facts.extend(passage[:each])
+        for fact in facts:
+            self._used.update(one.id for one in fact.passages)
         return FactGroup(tuple(facts))

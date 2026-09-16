@@ -51,13 +51,37 @@ def revalidate(catalog: FactCatalog, within=None) -> int:
         written += catalog.rejudge(verdicts)
         verdicts.clear()
 
+    skipped = 0
     for fact_id, passages, candidate, method in catalog.judged(within):
+        if _uncitable(candidate):
+            skipped += 1
+            continue
         verdicts.append((fact_id, _rejudge(checker, passages, candidate, method)))
         if len(verdicts) >= _REJUDGE_BATCH:
             flush()
     flush()
     log.info("re-judged %d fact(s)", written)
+    if skipped:
+        log.warning(
+            "left %d bridge(s) alone: they were drawn before the prompt recorded "
+            "which sentences they rest on, so there is nothing to judge them "
+            "against. Run --bridge to replace them.",
+            skipped,
+        )
     return written
+
+
+def _uncitable(candidate) -> bool:
+    """Whether a stored bridge recorded no sentence to judge it against.
+
+    A bridge drawn before prompt version 2 named its passages and not the
+    sentences in them. Judging one would resolve nothing and refuse it as
+    evidence_absent, which would throw away a fact that was correct under the
+    prompt that wrote it.
+    """
+    return candidate.kind == FactKind.BRIDGE and not any(
+        one.sentences for one in candidate.passages
+    )
 
 
 def _rejudge(

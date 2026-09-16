@@ -12,9 +12,10 @@ question was single-passage, and `hard` was unreachable.
 
 from __future__ import annotations
 
-from factories import source
+from factories import bridge, resting, source
 
 from database.qa_generator import DocumentScope, PassageScope, TopicScope
+from question_generation.models import FactGroup
 from question_generation.selection import (
     Deal,
     Shape,
@@ -275,3 +276,81 @@ def test_a_share_of_zero_perturbs_nothing_and_a_share_of_one_perturbs_all() -> N
     """Both ends without a branch of their own."""
     assert not any(spread(index, 0.0) for index in range(10))
     assert all(spread(index, 1.0) for index in range(10))
+
+
+# ── A fact that already spans several passages ────────────────────────────
+
+
+def test_a_bridge_is_offered_alone() -> None:
+    """It already spans two passages, so a partner would put it over budget."""
+    spanning = bridge(
+        resting(2, document="doc-b"),
+        fact_id=1,
+        passage_id=1,
+        document="doc-a",
+    )
+    deal = Deal([spanning, *facts_of(3, "doc-c")], wanted=4, size=4)
+
+    sample = deal.sample(Shape.CROSS)
+
+    assert sample is not None
+    assert [fact.id for fact in sample.facts] == [1]
+    assert len(sample.resting) == 2, "its own two passages, and no third"
+
+
+def test_a_bridge_reads_as_the_spread_it_rests_on() -> None:
+    """One fact, two passages, two documents: a cross-document question."""
+    spanning = bridge(
+        resting(2, document="doc-b", topic_id=9),
+        passage_id=1,
+        document="doc-a",
+        topic_id=8,
+    )
+
+    read = FactGroup((spanning,)).criteria()
+
+    assert read.passage_scope == PassageScope.MULTI
+    assert read.document_scope == DocumentScope.CROSS
+    assert read.topic_scope == TopicScope.MULTI
+
+
+def test_the_verifier_is_shown_every_passage_a_bridge_rests_on() -> None:
+    """Shown the anchor alone it could never recover the answer."""
+    spanning = bridge(
+        resting(2, document="doc-b", text="Urgent requests take 4 hours."),
+        passage_id=1,
+        passage_text="Standard requests take 48 hours.",
+    )
+
+    assert FactGroup((spanning,)).passages == (
+        "Standard requests take 48 hours.",
+        "Urgent requests take 4 hours.",
+    )
+
+
+def test_a_bridge_names_the_titles_of_both_its_documents() -> None:
+    """The free leaks_source gate reads these, so it must see both."""
+    spanning = bridge(
+        resting(2, document="doc-b", document_title="The Urgent Handbook"),
+        passage_id=1,
+        document_title="The Standard Handbook",
+    )
+
+    assert FactGroup((spanning,)).titles == (
+        "The Standard Handbook",
+        "The Urgent Handbook",
+    )
+
+
+def test_a_passage_a_bridge_rests_on_is_never_dealt_again() -> None:
+    """Asking about it twice would ask the same thing twice."""
+    spanning = bridge(
+        resting(2, document="doc-b"), fact_id=1, passage_id=1, document="doc-a"
+    )
+    deal = Deal([spanning, *facts_of(2, "doc-b")], wanted=4, size=2)
+
+    first = deal.sample(Shape.SINGLE)
+    second = deal.sample(Shape.SINGLE)
+
+    assert first is not None and [fact.id for fact in first.facts] == [1]
+    assert second is None, "passage 2 was already offered inside the bridge"

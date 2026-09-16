@@ -16,7 +16,13 @@ from llm.client import ModelUnavailable
 
 ANSWER = {
     "facts": [
-        {"passages": [0, 1], "statement": "Two response times are stated."},
+        {
+            "passages": [
+                {"passage": 0, "sentences": [0]},
+                {"passage": 1, "sentences": [0]},
+            ],
+            "statement": "Two response times are stated.",
+        },
     ]
 }
 
@@ -77,27 +83,48 @@ def test_a_returned_claim_becomes_a_bridge_candidate(offered) -> None:
 
     assert len(facts) == 1
     assert facts[0].kind == FactKind.BRIDGE
-    assert facts[0].passages == (0, 1)
-    assert facts[0].sentences == (), "a bridge cites passages, not sentences"
+    assert [(one.position, one.sentences) for one in facts[0].passages] == [
+        (0, (0,)),
+        (1, (0,)),
+    ]
+    assert facts[0].sentences == (), "a bridge cites each passage separately"
 
 
 def test_a_repeated_position_is_kept_once_and_in_order(offered) -> None:
-    """The same passage named twice is one passage."""
-    answer = {"facts": [{"passages": [1, 0, 1], "statement": "Both are stated."}]}
+    """The same passage named twice is one passage carrying both readings."""
+    answer = {
+        "facts": [
+            {
+                "passages": [
+                    {"passage": 1, "sentences": [0]},
+                    {"passage": 0, "sentences": [0]},
+                    {"passage": 1, "sentences": [1]},
+                ],
+                "statement": "Both are stated.",
+            }
+        ]
+    }
     facts = BridgeExtractor(Model(answer)).extract(offered)
 
-    assert facts[0].passages == (1, 0)
+    assert [(one.position, one.sentences) for one in facts[0].passages] == [
+        (1, (0, 1)),
+        (0, (0,)),
+    ]
 
 
 @pytest.mark.parametrize(
     "returned",
     [
-        {"passages": [0, 1], "statement": ""},
-        {"passages": [0, 1], "statement": "   "},
+        {"passages": [{"passage": 0, "sentences": [0]}], "statement": ""},
+        {"passages": [{"passage": 0, "sentences": [0]}], "statement": "   "},
         {"passages": [], "statement": "A claim resting on nothing."},
+        {
+            "passages": [{"passage": 0, "sentences": []}],
+            "statement": "A claim citing no sentence.",
+        },
     ],
 )
-def test_a_claim_with_no_statement_or_no_passage_is_dropped(offered, returned) -> None:
+def test_a_claim_with_no_statement_or_no_citation_is_dropped(offered, returned) -> None:
     """Neither can be checked, so neither is a candidate."""
     assert BridgeExtractor(Model({"facts": [returned]})).extract(offered) == []
 

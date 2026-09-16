@@ -21,7 +21,10 @@ pytestmark = pytest.mark.nlp
 ANSWER = {
     "facts": [
         {
-            "passages": [0, 1],
+            "passages": [
+                {"passage": 0, "sentences": [0]},
+                {"passage": 1, "sentences": [0]},
+            ],
             "statement": "Support response times are stated separately for "
             "standard and urgent requests.",
         }
@@ -105,7 +108,7 @@ def test_a_refused_bridge_is_stored_with_its_reason() -> None:
     alone = {
         "facts": [
             {
-                "passages": [0],
+                "passages": [{"passage": 0, "sentences": [0]}],
                 "statement": "Standard requests are answered within 48 hours.",
             }
         ]
