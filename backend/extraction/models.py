@@ -60,22 +60,52 @@ class PassageToExtract:
 
 
 @dataclass(frozen=True)
+class Cited:
+    """Which sentences of one offered passage a bridge rests on.
+
+    Attributes:
+        position: That passage's position in the offered group, from 0.
+        sentences: Indices of its sentences the claim rests on.
+    """
+
+    position: int
+    sentences: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class Citation:
+    """Which sentences of one passage a fact rests on, and the span they cover.
+
+    Attributes:
+        passage_id: The passage.
+        sentence_ids: Which of its sentences, in order.
+        start: Offset of the span in that passage's text.
+        end: Offset one past its last character.
+    """
+
+    passage_id: int
+    sentence_ids: list[int]
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
 class CandidateFact:
     """A statement an extractor proposes, before it has been checked.
 
     Attributes:
         statement: What the extractor wrote.
         sentences: Indices of the passage sentences it cites. Empty on a
-            bridge, which cites passages rather than sentences.
+            bridge, which cites each passage separately.
         kind: Which checks it is held to.
-        passages: Positions in the offered group a bridge rests on, from 0.
+        passages: What a bridge rests on, one entry per passage it cites.
             Empty on every other kind.
     """
 
     statement: str
     sentences: tuple[int, ...]
     kind: str = FactKind.ATOMIC
-    passages: tuple[int, ...] = ()
+    passages: tuple[Cited, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,8 +124,9 @@ class CheckedFact:
         rejection_code: Which one did not, or None.
         validation_error: That failure in words, or None.
         kind: atomic, summary, outline or bridge.
-        passage_ids: Every passage a bridge rests on, anchor first. Empty on
-            every other kind.
+        citations: What a bridge rests on, one entry per passage it cites,
+            anchor first. Empty on every other kind, which rests on the
+            anchor alone and carries its span in the columns above.
         statement_predicates: Finite verbs in the statement.
         evidence_predicates: Finite verbs across the cited sentences.
         units_statement: The numbers and proper nouns the statement asserts.
@@ -119,7 +150,7 @@ class CheckedFact:
     rejection_code: str | None
     validation_error: str | None
     kind: str = FactKind.ATOMIC
-    passage_ids: list[int] = field(default_factory=list)
+    citations: list[Citation] = field(default_factory=list)
     statement_predicates: int = 0
     evidence_predicates: int = 0
     units_statement: list[str] = field(default_factory=list)

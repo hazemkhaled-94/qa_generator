@@ -10,6 +10,7 @@ import pytest
 from drivers import Checker, group, passage
 
 from database.qa_generator import FactKind, Rejection
+from extraction.models import CandidateFact, Cited
 
 pytestmark = pytest.mark.nlp
 
@@ -32,7 +33,7 @@ def test_one_claim_drawn_from_its_sentence_is_accepted(checker) -> None:
     assert not good.units_added, good.units_added
     assert good.rejection_code is None and good.validation_error is None
     assert good.kind == FactKind.ATOMIC
-    assert good.passage_ids == [], "a single-passage fact records no group"
+    assert good.citations == [], "a single-passage fact records no group"
 
 
 def test_the_source_own_words_are_accepted_when_they_narrow_the_claim(checker) -> None:
@@ -322,21 +323,65 @@ class TestBridge:
 
         assert bridged.validated, (bridged.rejection_code, bridged.validation_error)
         assert bridged.kind == FactKind.BRIDGE
-        assert bridged.passage_ids == [11, 22]
+        assert [one.passage_id for one in bridged.citations] == [11, 22]
         assert bridged.passage_id == 11, "the anchor is the first passage offered"
 
-    def test_the_anchor_evidence_is_the_whole_of_its_passage(
-        self, checker, offered
-    ) -> None:
-        """So the span still resolves in the passage the fact points at."""
+    def test_the_anchor_evidence_is_the_span_it_cited(self, checker, offered) -> None:
+        """So the span resolves in the passage the fact points at."""
         bridged = checker.bridge("Two request kinds are named.", offered)
 
-        assert bridged.evidence_text == offered[0].text
-        assert bridged.evidence_start == 0
-        assert bridged.evidence_end == len(offered[0].text)
+        cited = offered[0].sentences[0]
+        assert bridged.evidence_start == cited.start
+        assert bridged.evidence_end == cited.end
         assert offered[0].text[bridged.evidence_start : bridged.evidence_end] == (
             bridged.evidence_text
         )
+
+    def test_every_citation_resolves_in_the_passage_it_names(
+        self, checker, offered
+    ) -> None:
+        """A bridge is traceable in each half, not only in its anchor."""
+        bridged = checker.bridge("Two request kinds are named.", offered)
+
+        by_id = {one.id: one for one in offered}
+        for one in bridged.citations:
+            passage = by_id[one.passage_id]
+            cited = [passage.sentences[index] for index in one.sentence_ids]
+            assert one.start == cited[0].start
+            assert one.end == cited[-1].end
+            assert passage.text[one.start : one.end].strip()
+
+    def test_a_citation_names_the_sentences_the_model_read(
+        self, checker, offered
+    ) -> None:
+        """Not every sentence of the passage, which cites nothing in particular."""
+        two = group(
+            "Standard requests are answered within 48 hours. The clock starts "
+            "at acknowledgement.",
+            "Urgent requests are answered within 4 hours. They may be raised by phone.",
+        )
+
+        bridged = checker.bridge(
+            "Two request kinds are answered on different times.",
+            two,
+            cites={0: (0,), 1: (0,)},
+        )
+
+        assert [one.sentence_ids for one in bridged.citations] == [[0], [0]]
+        assert bridged.evidence_text == two[0].sentences[0].text
+
+    def test_a_claim_citing_a_sentence_one_passage_lacks_rests_on_the_other(
+        self, checker, offered
+    ) -> None:
+        """An unresolvable half leaves it resting on one passage, so refused."""
+        bridged = checker.bridge(
+            "Requests are answered within a stated time.",
+            offered,
+            cites={0: (0,), 1: (9,)},
+        )
+
+        assert bridged.rejection_code == Rejection.NOT_BRIDGING
+        assert [one.passage_id for one in bridged.citations] == [11]
 
     def test_a_claim_resting_on_one_passage_is_refused(self, checker, offered) -> None:
         """That is an ordinary fact, and the atomic pass has it already."""
@@ -352,7 +397,7 @@ class TestBridge:
         """Nothing resolves, so nothing supports it."""
         nowhere = checker.bridge("Anything at all happens.", offered, rests_on=named)
         assert nowhere.rejection_code == Rejection.EVIDENCE_ABSENT
-        assert nowhere.passage_ids == []
+        assert nowhere.citations == []
 
     def test_a_unit_from_the_second_passage_is_supported(
         self, checker, offered
@@ -385,7 +430,7 @@ class TestBridge:
         reversed_order = checker.bridge(
             "Two request kinds are named.", offered, rests_on=(1, 0)
         )
-        assert reversed_order.passage_ids == [11, 22]
+        assert [one.passage_id for one in reversed_order.citations] == [11, 22]
 
 
 def test_each_failure_reaches_its_own_code(checker, offered) -> None:
@@ -407,3 +452,28 @@ def test_each_failure_reaches_its_own_code(checker, offered) -> None:
     }
 
     assert codes == set(Rejection), sorted(set(Rejection) - codes)
+
+
+def test_one_passage_cited_twice_is_one_citation() -> None:
+    """Two rows for one passage would collide in the link table."""
+    offered = group(
+        "Standard requests are answered within 48 hours.",
+        "Urgent requests are answered within 4 hours.",
+    )
+    checker = Checker()
+
+    bridged = checker.checker.check_bridge(
+        offered,
+        CandidateFact(
+            "Requests are answered within a stated time.",
+            (),
+            kind=FactKind.BRIDGE,
+            passages=(
+                Cited(position=0, sentences=(0,)),
+                Cited(position=0, sentences=(0,)),
+            ),
+        ),
+    )
+
+    assert [one.passage_id for one in bridged.citations] == [11]
+    assert bridged.rejection_code == Rejection.NOT_BRIDGING

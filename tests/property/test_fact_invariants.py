@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from database.qa_generator import FactKind, Rejection
-from extraction.models import BULLET, MIN_POINTS, CandidateFact
+from extraction.models import BULLET, MIN_POINTS, CandidateFact, Cited
 from extraction.service import grouped
 from extraction.validation import FactChecker
 
@@ -106,25 +106,37 @@ def test_an_evidence_span_always_resolves_in_its_passage(statement, cited) -> No
 
 @given(
     statement=st.text(max_size=120),
-    rests_on=st.lists(st.integers(-3, 3), max_size=4),
+    rests_on=st.lists(
+        st.tuples(st.integers(-3, 3), st.lists(st.integers(-3, 3), max_size=3)),
+        max_size=4,
+    ),
 )
 @settings(max_examples=100, deadline=None)
 @pytest.mark.nlp
 def test_a_bridge_records_only_passages_it_was_offered(statement, rests_on) -> None:
-    """A position outside the group names nothing, so it rests on nothing."""
+    """A position or a sentence outside the group resolves to nothing."""
     offered = group("Requests are answered within 48 hours.", "Urgent: 4 hours.")
     checked = FactChecker(DIGEST_SHARE).check_bridge(
         offered,
-        CandidateFact(statement, (), kind=FactKind.BRIDGE, passages=tuple(rests_on)),
+        CandidateFact(
+            statement,
+            (),
+            kind=FactKind.BRIDGE,
+            passages=tuple(
+                Cited(position=position, sentences=tuple(sentences))
+                for position, sentences in rests_on
+            ),
+        ),
     )
     held = {one.id for one in offered}
 
-    assert set(checked.passage_ids) <= held
-    assert len(checked.passage_ids) == len(set(checked.passage_ids))
+    rested = [one.passage_id for one in checked.citations]
+    assert set(rested) <= held
+    assert len(rested) == len(set(rested))
     # Never validated, rather than always `not_bridging`: an empty statement
     # resting on one passage is refused by `asserts_nothing` first, and which
     # check fires first is the order, not the invariant.
-    if len(checked.passage_ids) < 2:
+    if len(rested) < 2:
         assert not checked.validated
 
 

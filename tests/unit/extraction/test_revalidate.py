@@ -11,7 +11,7 @@ import pytest
 from drivers import Catalogue, group, passage
 
 from database.qa_generator import FactKind, Rejection
-from extraction.models import CandidateFact
+from extraction.models import CandidateFact, Cited
 from extraction.service import _REJUDGE_BATCH, revalidate
 
 pytestmark = pytest.mark.nlp
@@ -73,7 +73,10 @@ def test_a_bridge_is_judged_against_its_whole_group() -> None:
                 "Support response times are stated separately for both kinds.",
                 (),
                 kind=FactKind.BRIDGE,
-                passages=(0, 1),
+                passages=(
+                    Cited(position=0, sentences=(0,)),
+                    Cited(position=1, sentences=(0,)),
+                ),
             ),
             "llm",
         )
@@ -82,7 +85,7 @@ def test_a_bridge_is_judged_against_its_whole_group() -> None:
 
     ((_, checked),) = catalog.verdicts
     assert checked.kind == FactKind.BRIDGE
-    assert checked.passage_ids == [one.id for one in offered]
+    assert [one.passage_id for one in checked.citations] == [one.id for one in offered]
     assert checked.validated, checked.validation_error
 
 
@@ -97,7 +100,7 @@ def test_a_bridge_left_with_one_passage_is_refused_on_the_second_reading() -> No
                 "Support response times are stated separately for both kinds.",
                 (),
                 kind=FactKind.BRIDGE,
-                passages=(0,),
+                passages=(Cited(position=0, sentences=(0,)),),
             ),
             "llm",
         )

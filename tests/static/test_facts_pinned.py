@@ -82,7 +82,7 @@ SHAPES = {
         "rejection_code",
         "validation_error",
         "kind",
-        "passage_ids",
+        "citations",
         "statement_predicates",
         "evidence_predicates",
         "units_statement",
@@ -175,7 +175,7 @@ CHECKS = {
 #: The prompt version recorded on every fact each model-backed reader draws.
 #: Bumped whenever the prompt changes what counts as a fact: two prompts are
 #: two datasets, and a corpus read under both is neither.
-PROMPTS = {"llm": "5", "digest": "1", "bridge": "1"}
+PROMPTS = {"llm": "5", "digest": "1", "bridge": "2"}
 
 
 def test_the_service_reads_exactly_the_settings_named_here() -> None:

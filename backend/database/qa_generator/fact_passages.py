@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Integer
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
+
+#: A citation is written whole or not at all, and reads forwards.
+CITATION_COMPLETE = (
+    "(sentence_ids IS NULL AND evidence_start IS NULL AND evidence_end IS NULL) "
+    "OR (sentence_ids IS NOT NULL AND evidence_end >= evidence_start)"
+)
 
 if TYPE_CHECKING:
     from database.qa_generator.facts import Fact
@@ -24,10 +31,11 @@ class FactPassage(Base):
 
     __tablename__ = "fact_passages"
     __table_args__ = (
+        CheckConstraint(CITATION_COMPLETE, name="fact_passages_citation_complete"),
         {
             "comment": "Which passages a bridge fact rests on, one row per passage "
-            "including the anchor in facts.passage_id. Empty for every other kind, "
-            "which rests on that anchor alone."
+            "including the anchor in facts.passage_id, and where in each it rests. "
+            "Empty for every other kind, which rests on that anchor alone."
         },
     )
 
@@ -51,6 +59,20 @@ class FactPassage(Base):
         Integer,
         comment="Where this passage sat in the excerpt the model was shown, from "
         "0. Position 0 is the anchor.",
+    )
+    sentence_ids: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer),
+        comment="Which of this passage's sentences the claim rests on. NULL on a "
+        "bridge drawn before prompt version 2, which cited a passage without "
+        "saying where in it; such a bridge is not offered to question generation.",
+    )
+    evidence_start: Mapped[int | None] = mapped_column(
+        Integer,
+        comment="Offset of the cited span's first character within this passage's "
+        "text. NULL alongside sentence_ids.",
+    )
+    evidence_end: Mapped[int | None] = mapped_column(
+        Integer, comment="Offset one past its last character."
     )
 
     fact: Mapped[Fact] = relationship(back_populates="passage_links")
