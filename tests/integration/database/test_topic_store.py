@@ -8,10 +8,10 @@ figures read back as.
 from __future__ import annotations
 
 import pytest
+from topics import TopicStore, fitting
 
 from database.qa_generator import Status
 from topic_modelling.models import FittedTopic
-from topics import TopicStore, fitting
 
 pytestmark = pytest.mark.integration
 

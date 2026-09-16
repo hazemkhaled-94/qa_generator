@@ -148,6 +148,17 @@ ignore = [
 # from the models and are longer than a line.
 "backend/database/migrations/versions/*" = ["E501"]
 
+[tool.ruff.lint.isort]
+# The test helpers on pytest's pythonpath, grouped with the third-party
+# imports because that is where ruff puts every other one of them.
+#
+# `topics` is named here and the rest are not, because `make topics-visualise`
+# writes ./topics/, and `src` above includes the repository root: on a machine
+# where that figure has been drawn ruff calls the import first-party, and
+# everywhere else - CI included - third-party. The same file then lints two
+# ways depending on whether somebody has run a visualisation.
+known-third-party = ["topics"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 

@@ -7,9 +7,9 @@ these cover is the status code, the body and the row each one leaves.
 from __future__ import annotations
 
 import pytest
+from topics import TopicsApi, TopicStore, fitting
 
 from database.qa_generator import Status
-from topics import TopicsApi, TopicStore, fitting
 
 pytestmark = pytest.mark.integration
 
