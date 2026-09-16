@@ -109,7 +109,8 @@ class PdfPipeline(Pipeline):
             ConversionFailed: If the document needs OCR, or if Docling cannot
                 convert it.
         """
-        # OCR extension point. See docs/intake.md for what enabling it takes.
+        # OCR extension point. See this package's README for what enabling
+        # it takes.
         if source.scanned:
             raise ConversionFailed(
                 "the document carries too little text to read without OCR, "

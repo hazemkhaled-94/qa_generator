@@ -9,8 +9,9 @@ fields they answer with, and the modules they are made of. A change to any of
 them is a change every reader of these stages sees, so making one means
 editing this file in the same commit and saying why in the message.
 
-One document describes all three, at docs/intake.md, because the three are
-one story: a file becomes a document becomes passages.
+Each of the three describes itself, in a README beside its code: they share
+one story - a file becomes a document becomes passages - and they are three
+packages with three queues and three command lines.
 """
 
 from __future__ import annotations
@@ -30,8 +31,9 @@ SERVICES = {
     "chunking": ROOT / "backend/preprocessing/chunking",
 }
 
-#: The one document that describes all three.
-README = ROOT / "docs/intake.md"
+#: The headings every service README carries, as in test_topics_pinned.py
+#: and test_facts_pinned.py.
+HEADINGS = ("## What it does", "## Configuration", "## Tests")
 
 #: The readers in backend/settings/env.py, by name.
 READERS = frozenset({"required", "optional", "integer", "decimal", "boolean", "csv"})
@@ -319,16 +321,12 @@ def test_the_registry_dispatches_exactly_the_types_the_allowlist_may_name() -> N
     assert PdfPipeline.media_types == tuple(sorted(DETECTABLE))
 
 
-def test_the_stages_document_themselves() -> None:
-    """One document is the description of all three, so it has to be there."""
-    assert README.exists(), f"{README} is missing"
+@pytest.mark.parametrize("service", sorted(SERVICES))
+def test_each_stage_documents_itself(service: str) -> None:
+    """The README is the stage's description, so it has to be there."""
+    readme = SERVICES[service] / "README.md"
 
-    written = README.read_text()
-    for heading in (
-        "## What it does",
-        "## The steps",
-        "## Inputs and outputs",
-        "## Configuration",
-        "## Tests",
-    ):
-        assert heading in written, f"the document has no {heading!r} section"
+    assert readme.exists(), f"{readme} is missing"
+    written = readme.read_text()
+    for heading in HEADINGS:
+        assert heading in written, f"{service} has no {heading!r} section"
