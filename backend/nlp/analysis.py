@@ -72,9 +72,53 @@ def normalised(text: str) -> str:
 VERSION = version("spacy")
 
 
+#: Dependency labels that hang a clause off another one rather than standing
+#: it beside. A finite verb under one of these is a modifier, not a second
+#: assertion: German `rc` (relative), `oc` (clausal object), `mo` (adverbial),
+#: `sb` (clausal subject), `re` (reported), and the UD names for the same.
+#: Coordination is deliberately absent - `cj` and `conj` join two claims.
+_SUBORDINATE = frozenset(
+    {
+        "rc",
+        "oc",
+        "mo",
+        "sb",
+        "re",
+        "relcl",
+        "ccomp",
+        "xcomp",
+        "advcl",
+        "csubj",
+        "acl",
+    }
+)
+
+
+def _dependent(token) -> bool:
+    """Whether a token sits inside a clause hung off another one."""
+    return token.dep_ in _SUBORDINATE or any(
+        parent.dep_ in _SUBORDINATE for parent in token.ancestors
+    )
+
+
 def _predicates(span: Doc | Span) -> int:
-    """Counts finite verbs, which is how many claims a span makes."""
-    return sum(1 for token in span if "Fin" in token.morph.get("VerbForm", []))
+    """Counts the claims a span makes, as its independent finite verbs.
+
+    A finite verb inside a relative or other subordinate clause is a
+    modifier of something already said rather than a second thing said:
+    "TPI NEXT gehört zu den Prozessmodellen, die die Testprozessverbesserung
+    unterstützen" carries two finite verbs and one claim. Coordination is
+    the other case and does count: two main clauses joined by "und" are two
+    claims.
+
+    A span carrying a finite verb makes at least one claim. A parse that
+    hangs every clause off something else has mis-read the sentence, which
+    is not the same as a sentence that asserts nothing.
+    """
+    finite = [token for token in span if "Fin" in token.morph.get("VerbForm", [])]
+    return len([token for token in finite if not _dependent(token)]) or int(
+        bool(finite)
+    )
 
 
 def _verbs(span: Doc | Span) -> int:
@@ -137,9 +181,10 @@ def _units(span: Doc | Span) -> tuple[str, ...]:
 
 
 #: Dependency labels for a pronoun that stands in for no antecedent: German
-#: `ph` (Platzhalter) and English `expl`. "Es besteht Potenzial" and "There is
-#: potential" name nothing and leave nothing dangling.
-_EXPLETIVE = frozenset({"ph", "expl"})
+#: `ph` (Platzhalter) and `ep` (expletive es), and English `expl`. "Es gibt
+#: Best Practices", "Es besteht Potenzial" and "There is potential" name
+#: nothing and leave nothing dangling.
+_EXPLETIVE = frozenset({"ph", "ep", "expl"})
 
 
 def _refers(token) -> bool:

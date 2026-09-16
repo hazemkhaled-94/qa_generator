@@ -45,3 +45,21 @@ def test_a_table_is_not_judged_on_its_sentences() -> None:
 def test_a_passage_with_nothing_numbered_is_skipped(kwargs) -> None:
     """Nothing can cite a passage that has no numbered units, table or not."""
     assert skipped(passage("| a | b |", sentences=[], **kwargs)) == "no sentences"
+
+
+@pytest.mark.parametrize("block_type", ["document_index", "code"])
+def test_a_navigation_passage_is_skipped(block_type: str) -> None:
+    """A table of contents says where something is, not what it says."""
+    listing = passage("Das Team managen dauert 225 Minuten.", block_type=block_type)
+
+    assert skipped(listing) == f"{block_type}: navigation rather than content"
+
+
+def test_a_navigation_passage_is_skipped_before_its_sentences_are_read() -> None:
+    """It is refused on what kind of block it is, not on what it says."""
+    prose = passage(
+        "The device weighs 4 kg and runs for 12 hours.", block_type="document_index"
+    )
+
+    assert prose.claims, "this passage does assert something"
+    assert skipped(prose) is not None
