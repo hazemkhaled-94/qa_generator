@@ -13,6 +13,7 @@ from database.qa_generator import (
     Document,
     Fact,
     FactKind,
+    FactPassage,
     Passage,
     PassageTopic,
     Question,
@@ -31,6 +32,7 @@ from question_generation.models import (
     QuestionQuality,
     QuestionSource,
     SourceFact,
+    SourcePassage,
     StoredQuestion,
     TopicToCover,
 )
@@ -85,15 +87,27 @@ def _joined(query: Select) -> Select:
     trigger is about to delete: it should not disappear from a count before
     it disappears from the table.
 
-    Every join here multiplies a question by its facts, so anything counted
-    over this has to be counted distinctly - which is why the figures are
-    measured over :func:`_ids` instead.
+    A fact reaches its passages through `fact_passages` where it has rows and
+    through its anchor where it has none, which is what the coalesce below
+    says. A bridge therefore reaches both of its passages here: the documents
+    a question is filtered by, listed under and scored against are the ones
+    its answer actually needs.
+
+    Every join here multiplies a question by its facts, and a bridge by its
+    passages on top, so anything counted over this has to be counted
+    distinctly - which is why the figures are measured over :func:`_ids`
+    instead.
     """
     return (
         query.select_from(Question)
         .join(QuestionFact, QuestionFact.question_id == Question.id, isouter=True)
         .join(Fact, Fact.id == QuestionFact.fact_id, isouter=True)
-        .join(Passage, Passage.id == Fact.passage_id, isouter=True)
+        .join(FactPassage, FactPassage.fact_id == Fact.id, isouter=True)
+        .join(
+            Passage,
+            Passage.id == func.coalesce(FactPassage.passage_id, Fact.passage_id),
+            isouter=True,
+        )
         .join(DOMINANT, DOMINANT.c.passage_id == Passage.id, isouter=True)
         .join(Topic, Topic.id == DOMINANT.c.topic_id, isouter=True)
     )
@@ -217,13 +231,14 @@ def _present(values: Sequence[Any] | None) -> list[str]:
 #:            by" one rests on a paraphrase rather than on a checked claim
 #:   outline  newline-separated `- ` bullets. Interpolated into a numbered
 #:            prompt it breaks the numbering the writer cites facts by
-#:   bridge   one claim resting on the passages in fact_passages. The right
-#:            seed for a cross-passage question and the one that needs work:
-#:            SourceFact carries a single passage, so the verifier would be
-#:            shown the anchor alone and could never recover the answer
+#:   bridge   one claim resting on the passages in fact_passages. Asked
+#:            about alone: it already spans the passages a wide question
+#:            needs, and the verifier is shown all of them. A bridge drawn
+#:            before prompt version 2 recorded no citation and is skipped,
+#:            because there is nothing to show the verifier
 #:
 #: QUESTIONS_FACT_KINDS is what decides; this is what it is checked against.
-ASKABLE = (FactKind.ATOMIC,)
+ASKABLE = (FactKind.ATOMIC, FactKind.BRIDGE)
 
 
 #: One validated fact with everything selection and the writer read off it.
@@ -233,6 +248,7 @@ _SOURCE = (
     select(
         Fact.id,
         Fact.statement,
+        Fact.kind,
         Fact.units_statement,
         Passage.id.label("passage_id"),
         Passage.text,
@@ -250,14 +266,41 @@ _SOURCE = (
     .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
 )
 
+#: The passages a bridge rests on besides its anchor, with everything the
+#: writer and the gates read off one. Ordered by position, so the anchor
+#: comes first and the rest follow as the model was shown them.
+#:
+#: A separate query rather than an aggregate on _SOURCE: two call sites share
+#: that select, and joining a second passage onto it would multiply every row
+#: and change what its callers count.
+_RESTING = (
+    select(
+        FactPassage.fact_id,
+        FactPassage.position,
+        FactPassage.sentence_ids,
+        Passage.id.label("passage_id"),
+        Passage.text,
+        Passage.doc_sha256,
+        Passage.language,
+        Passage.section_path,
+        Passage.ordinal,
+        Passage.lemmas,
+        DOMINANT.c.topic_id,
+        Document.title,
+    )
+    .select_from(FactPassage)
+    .join(Passage, Passage.id == FactPassage.passage_id)
+    .join(Document, Document.sha256 == Passage.doc_sha256)
+    .join(DOMINANT, DOMINANT.c.passage_id == Passage.id, isouter=True)
+    .order_by(FactPassage.fact_id, FactPassage.position)
+)
 
-def _fact(row: Any) -> SourceFact:
-    """Reads one row of the query above back as a fact to write from."""
-    return SourceFact(
-        id=row.id,
-        statement=row.statement,
-        passage_id=row.passage_id,
-        passage_text=row.text,
+
+def _passage(row: Any) -> SourcePassage:
+    """Reads one passage out of either query above."""
+    return SourcePassage(
+        id=row.passage_id,
+        text=row.text,
         doc_sha256=row.doc_sha256,
         language=row.language,
         section_path=row.section_path,
@@ -265,6 +308,25 @@ def _fact(row: Any) -> SourceFact:
         document_title=row.title,
         ordinal=row.ordinal,
         lemmas=tuple(row.lemmas or ()),
+    )
+
+
+def _fact(row: Any, resting: tuple[SourcePassage, ...] = ()) -> SourceFact:
+    """Reads one row of the query above back as a fact to write from.
+
+    Args:
+        row: The selected row.
+        resting: Every passage a bridge rests on, anchor first. Empty for
+            every other kind, which rests on the row's own passage.
+
+    Returns:
+        The fact.
+    """
+    return SourceFact(
+        id=row.id,
+        statement=row.statement,
+        kind=row.kind,
+        passages=resting or (_passage(row),),
         units=tuple(row.units_statement or ()),
     )
 
@@ -365,7 +427,58 @@ class QuestionQueue(RowQueue):
                     ~_ALREADY_ASKED,
                 ).order_by(Fact.id)
             ).all()
-        return [_fact(row) for row in rows]
+        return self._read(rows)
+
+    def _read(self, rows: list[Any]) -> list[SourceFact]:
+        """Turns selected rows into facts, giving a bridge all its passages.
+
+        A bridge whose citations were never recorded is dropped: it was drawn
+        before the prompt said where in each passage it rests, so the verifier
+        could not be shown what it was answered from.
+
+        Args:
+            rows: What one of the selects above returned.
+
+        Returns:
+            The facts, in the order the rows came.
+        """
+        bridges = [row for row in rows if row.kind == FactKind.BRIDGE]
+        if not bridges:
+            return [_fact(row) for row in rows]
+
+        resting = self._resting([row.id for row in bridges])
+        return [
+            _fact(row, resting.get(row.id, ()))
+            for row in rows
+            if row.kind != FactKind.BRIDGE or resting.get(row.id)
+        ]
+
+    def _resting(self, fact_ids: list[int]) -> dict[int, tuple[SourcePassage, ...]]:
+        """Reads the passages those bridges rest on, anchors first.
+
+        Args:
+            fact_ids: The bridge facts to read.
+
+        Returns:
+            Per fact, its passages. A fact whose citations were never
+            recorded, or one of whose passages has no language, is absent:
+            neither can be written from.
+        """
+        found: dict[int, list[SourcePassage]] = {}
+        refused: set[int] = set()
+        with self._session() as session:
+            for row in session.execute(
+                _RESTING.where(FactPassage.fact_id.in_(fact_ids))
+            ):
+                if not row.sentence_ids or row.language is None:
+                    refused.add(row.fact_id)
+                    continue
+                found.setdefault(row.fact_id, []).append(_passage(row))
+        return {
+            fact_id: tuple(passages)
+            for fact_id, passages in found.items()
+            if fact_id not in refused and len(passages) > 1
+        }
 
     def bridging(self, topic_id: int) -> list[SourceFact]:
         """The facts of passages that bridge this topic to another.
@@ -394,7 +507,7 @@ class QuestionQueue(RowQueue):
                 )
                 .order_by(Fact.id)
             ).all()
-        return [_fact(row) for row in rows]
+        return self._read(rows)
 
     def store(self, topic_id: int, threads: list[list[CheckedQuestion]]) -> int:
         """Writes one topic's threads and finishes it, in one transaction.
@@ -535,9 +648,9 @@ class QuestionCatalog(Repository):
                     Question.answer_form,
                     func.coalesce(func.bool_and(Fact.validated), False).label("holds"),
                     func.count(func.distinct(Passage.doc_sha256)).label("documents"),
-                    func.count(func.distinct(Fact.passage_id)).label("passages"),
+                    func.count(func.distinct(Passage.id)).label("passages"),
                     func.count(func.distinct(DOMINANT.c.topic_id)).label("topics"),
-                    func.array_agg(Fact.statement).label("statements"),
+                    func.array_agg(func.distinct(Fact.statement)).label("statements"),
                 )
             )
             .group_by(Question.id)
@@ -685,13 +798,21 @@ class QuestionCatalog(Repository):
                     Fact.statement,
                     Fact.evidence_text,
                     Fact.validated,
-                    Fact.passage_id,
+                    # The passage this row reached, not the fact's anchor: a
+                    # bridge comes back once per passage it rests on, and the
+                    # document and the ordinal beside it are that passage's.
+                    Passage.id.label("passage_id"),
                     Passage.doc_sha256,
                     Passage.ordinal,
                 )
                 .select_from(QuestionFact)
                 .join(Fact, Fact.id == QuestionFact.fact_id)
-                .join(Passage, Passage.id == Fact.passage_id)
+                .join(FactPassage, FactPassage.fact_id == Fact.id, isouter=True)
+                .join(
+                    Passage,
+                    Passage.id
+                    == func.coalesce(FactPassage.passage_id, Fact.passage_id),
+                )
                 .where(QuestionFact.question_id == question_id)
                 .order_by(Passage.doc_sha256, Passage.ordinal, Fact.id)
             ).all()

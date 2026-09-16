@@ -694,6 +694,8 @@ def test_only_the_kinds_this_stage_can_use_are_offered(corpus, engine) -> None:
     passage rather than a checked claim; a bridge rests on passages the
     verifier is never shown. Without this filter the first re-extraction that
     writes any of them silently changes what a question rests on.
+
+    A bridge is askable and is covered separately below.
     """
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -707,3 +709,95 @@ def test_only_the_kinds_this_stage_can_use_are_offered(corpus, engine) -> None:
 
     assert len(offered) == 1
     assert written["facts"][topic_id][0] not in {one.id for one in offered}
+
+
+# ── Bridges, which rest on more than one passage ──────────────────────────
+
+
+def _bridge(engine, *passage_ids: int, cited: bool = True) -> int:
+    """Turns the first fact of these passages into a bridge resting on all.
+
+    Args:
+        engine: The engine the fixtures built.
+        *passage_ids: The passages it rests on, anchor first.
+        cited: Whether to record where in each it rests. False is a bridge
+            drawn before the prompt said.
+
+    Returns:
+        The bridge fact's id.
+    """
+    anchor = passage_ids[0]
+    with engine.begin() as connection:
+        fact_id = connection.execute(
+            text(
+                "UPDATE facts SET kind = 'bridge' WHERE passage_id = :anchor "
+                "RETURNING id"
+            ),
+            {"anchor": anchor},
+        ).scalar_one()
+        for position, passage_id in enumerate(passage_ids):
+            connection.execute(
+                text(
+                    "INSERT INTO fact_passages (fact_id, passage_id, position, "
+                    "sentence_ids, evidence_start, evidence_end) VALUES "
+                    "(:fact, :passage, :position, :ids, :start, :end)"
+                ),
+                {
+                    "fact": fact_id,
+                    "passage": passage_id,
+                    "position": position,
+                    "ids": [0] if cited else None,
+                    "start": 0 if cited else None,
+                    "end": 23 if cited else None,
+                },
+            )
+    return fact_id
+
+
+def _passages_of(engine, topic_id: int) -> dict[int, list[int]]:
+    """Which passages each offered fact rests on, by fact id."""
+    return {
+        one.id: [passage.id for passage in one.passages]
+        for one in QuestionQueue().facts(topic_id)
+    }
+
+
+def test_a_bridge_is_offered_with_every_passage_it_rests_on(corpus, engine) -> None:
+    """The anchor alone is what the verifier could never recover from."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    topic_id = written["topics"][0]
+    anchor, other = (one.passage_id for one in QuestionQueue().facts(topic_id))
+    fact_id = _bridge(engine, anchor, other)
+
+    assert _passages_of(engine, topic_id)[fact_id] == [anchor, other]
+
+
+def test_a_bridge_carries_the_document_of_each_of_its_passages(corpus, engine) -> None:
+    """Which is what makes it a cross-document question."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    topic_id = written["topics"][0]
+    anchor, other = (one.passage_id for one in QuestionQueue().facts(topic_id))
+    fact_id = _bridge(engine, anchor, other)
+
+    offered = next(one for one in QuestionQueue().facts(topic_id) if one.id == fact_id)
+    assert len({passage.doc_sha256 for passage in offered.passages}) == 2
+
+
+def test_a_bridge_that_recorded_no_citation_is_never_offered(corpus, engine) -> None:
+    """It was drawn before the prompt said where in each passage it rests."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    topic_id = written["topics"][0]
+    anchor, other = (one.passage_id for one in QuestionQueue().facts(topic_id))
+    fact_id = _bridge(engine, anchor, other, cited=False)
+
+    assert fact_id not in _passages_of(engine, topic_id)
+
+
+def test_a_bridge_left_resting_on_one_passage_is_never_offered(corpus, engine) -> None:
+    """A claim no single passage states cannot rest on a single passage."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    topic_id = written["topics"][0]
+    anchor, _other = (one.passage_id for one in QuestionQueue().facts(topic_id))
+    fact_id = _bridge(engine, anchor)
+
+    assert fact_id not in _passages_of(engine, topic_id)

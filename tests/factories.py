@@ -5,11 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from database.qa_generator import Difficulty, QuestionType
+from database.qa_generator import Difficulty, FactKind, QuestionType
 from extraction.models import PassageToExtract
 from preprocessing.chunking.models import Chunking
 from preprocessing.chunking.passages import chunking_of
-from question_generation.models import Candidate, FactGroup, SourceFact
+from question_generation.models import (
+    Candidate,
+    FactGroup,
+    SourceFact,
+    SourcePassage,
+)
 from question_generation.planning import Plan
 from question_generation.selection import Shape
 from question_generation.types import SPECS
@@ -50,27 +55,65 @@ def source(
     ordinal: int = 0,
     lemmas: tuple[str, ...] = (),
     units: tuple[str, ...] = (),
+    kind: str = FactKind.ATOMIC,
+    rests_on: tuple[SourcePassage, ...] = (),
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
     The passage and its heading are what the writer is shown, so a test
     about phrasing sets them and one about sampling does not. `lemmas` and
     `ordinal` are what pairs two passages, so a test about the deal sets
-    those.
+    those. `rests_on` names the passages besides the anchor; use `bridge()`
+    rather than passing it by hand.
     """
     return SourceFact(
         id=fact_id,
         statement=statement,
-        passage_id=passage_id,
-        passage_text=passage_text or f"{statement} It ships from Hamburg.",
-        doc_sha256=document,
-        language=language,
-        section_path=section_path,
-        topic_id=topic_id,
-        document_title=document_title,
-        ordinal=ordinal or passage_id,
-        lemmas=lemmas,
+        kind=kind,
+        passages=(
+            SourcePassage(
+                id=passage_id,
+                text=passage_text or f"{statement} It ships from Hamburg.",
+                doc_sha256=document,
+                language=language,
+                section_path=section_path,
+                topic_id=topic_id,
+                document_title=document_title,
+                ordinal=ordinal or passage_id,
+                lemmas=lemmas,
+            ),
+            *rests_on,
+        ),
         units=units,
+    )
+
+
+def resting(
+    passage_id: int,
+    document: str = "doc-b",
+    text: str | None = None,
+    **columns: Any,
+) -> SourcePassage:
+    """One further passage a bridge rests on."""
+    return SourcePassage(
+        id=passage_id,
+        text=text or "Urgent requests are answered within 4 hours.",
+        doc_sha256=document,
+        language=columns.pop("language", "en"),
+        section_path=columns.pop("section_path", None),
+        topic_id=columns.pop("topic_id", None),
+        document_title=columns.pop("document_title", None),
+        ordinal=columns.pop("ordinal", passage_id),
+        lemmas=columns.pop("lemmas", ()),
+    )
+
+
+def bridge(*passages: SourcePassage, **columns: Any) -> SourceFact:
+    """One validated bridge, resting on its anchor and the passages given."""
+    return source(
+        kind=FactKind.BRIDGE,
+        rests_on=passages or (resting(2),),
+        **columns,
     )
 
 
