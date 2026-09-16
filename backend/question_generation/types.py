@@ -27,16 +27,14 @@ from database.qa_generator import AnswerForm, QuestionType
 #: datasets, as with extraction.
 PROMPT_VERSION = "6"
 
-_RULES = """You write ONE test question for measuring a document-search chatbot.
-
-You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
-from. The question must be answered by the facts. The passage is there so you
-know what the material is about - use it to phrase the question, never as
-something to ask about and never as something to cite.
-
-Write the question somebody who needs this information would actually type.
-They have not read the passage. They do not know which document answers them -
-finding that out is the whole reason they are asking.
+#: How every question must READ, whatever it is for. Shared by the writer and
+#: by the perturbation that writes the unanswerable ones: a rule in one prompt
+#: and not the other is how the two come to disagree, and it showed - every
+#: question padded with `spezifische` was an unanswerable one, written by the
+#: only prompt that had never been told not to.
+READS = """Write the question somebody who needs this information would actually
+type. They have not read the passage. They do not know which document answers
+them - finding that out is the whole reason they are asking.
 
 Rules, all of them mandatory:
 
@@ -64,7 +62,16 @@ Rules, all of them mandatory:
 - ONE question, ending in a question mark. One thing asked.
 
 - Write in the language of the facts.
+"""
 
+_RULES = f"""You write ONE test question for measuring a document-search chatbot.
+
+You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
+from. The question must be answered by the facts. The passage is there so you
+know what the material is about - use it to phrase the question, never as
+something to ask about and never as something to cite.
+
+{READS}
 - `facts` is the NUMBERS of the facts your question needs. Use several only
   when the question genuinely cannot be answered without all of them.
 """

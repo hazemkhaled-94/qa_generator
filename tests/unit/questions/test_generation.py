@@ -294,3 +294,23 @@ def test_the_writer_is_told_not_to_pad_a_question_with_hedges() -> None:
     QuestionWriter(model).write(group(), plan())
 
     assert "PADDING" in model.system
+
+
+def test_the_unanswerable_prompt_carries_the_same_reading_rules() -> None:
+    """A rule in one prompt and not the other is how the two disagree.
+
+    Measured: every question padded with `spezifische Kriterien` was an
+    unanswerable one, because the perturbation was the only prompt that had
+    never been told not to pad. It had its own copy of some rules and none of
+    the rest.
+    """
+    model = StubModel(question="Q?", answer="A")
+    writer = QuestionWriter(model)
+
+    writer.write(group(), plan())
+    answerable = model.system
+    writer.write(group(), plan(answerable=False))
+
+    for rule in ("PADDING", "NEVER SAY WHERE THE ANSWER IS", "ONE question"):
+        assert rule in answerable, rule
+        assert rule in model.system, f"{rule} is missing from the perturbation"

@@ -23,11 +23,11 @@ from pydantic import BaseModel, Field
 from llm.client import Client
 from question_generation.models import Candidate, FactGroup
 from question_generation.planning import Plan
-from question_generation.types import PROMPT_VERSION
+from question_generation.types import PROMPT_VERSION, READS
 
 __all__ = ["PROMPT_VERSION", "QuestionWriter"]
 
-_PERTURB = """You write one test question that the material does NOT answer.
+_PERTURB = f"""You write one test question that the material does NOT answer.
 
 These measure whether a chatbot says it does not know instead of inventing an
 answer. So the question has to be a plausible thing to ask of this material
@@ -39,18 +39,13 @@ just out of reach. Make ONE change:
 - ask for a detail of the same subject it does not state, or
 - ask about a different party, place, period or category.
 
-Rules, all of them mandatory:
-- ONE question, ending in a question mark.
-- NAME THE SUBJECT, NEVER THE SOURCE. Say what you are asking about - the
-  party, the thing, the period - so the question reads as though it belongs to
-  this material, because a question about an unrelated subject tests nothing:
-  any chatbot declines that one. But NEVER say which document, report or
-  section it would be in.
-- It must NOT be answerable from the fact or the passage. If reading either
+{READS}
+- IT MUST NOT BE ANSWERABLE from the fact or the passage. If reading either
   answers your question, you have written the wrong question.
-- Do not ask something absurd and do not invent a thing that does not exist.
-  Both are too easy to decline.
-- Write in the language of the fact.
+
+- DO NOT ask something absurd and do not invent a thing that does not exist.
+  Both are too easy to decline. A question about an unrelated subject tests
+  nothing, because any chatbot declines that one.
 
 Worked example:
 
