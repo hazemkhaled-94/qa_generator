@@ -1,7 +1,4 @@
-"""Wiring for the ingestion services.
-
-Separate from `run` so the command line and the API build them the same way.
-"""
+"""Wiring for the ingestion services."""
 
 from __future__ import annotations
 
@@ -13,7 +10,14 @@ from ingestion.service import IngestService
 
 
 def build_service(settings: Settings) -> IngestService:
-    """Wires the ingest service and its collaborators."""
+    """Wires the ingest service and its collaborators.
+
+    Args:
+        settings: The loaded ingestion settings.
+
+    Returns:
+        The service.
+    """
     return IngestService(
         repository=DocumentRepository(),
         store=DocumentsBucket(),
@@ -24,7 +28,11 @@ def build_service(settings: Settings) -> IngestService:
 
 
 def build_removal() -> RemovalService:
-    """Wires the removal service and its collaborators."""
+    """Wires the removal service and its collaborators.
+
+    Returns:
+        The service.
+    """
     return RemovalService(
         repository=DocumentRepository(),
         store=DocumentsBucket(),

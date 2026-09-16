@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Behind TYPE_CHECKING: the repository imports this module, so an
-    # unconditional import would put Docling and torch in the API process.
+    # Behind TYPE_CHECKING: the repository imports this module, and the API
+    # imports the repository.
     from docling_core.types.doc.document import DoclingDocument
 
 
@@ -15,8 +15,11 @@ if TYPE_CHECKING:
 class ClaimedDocument:
     """One document taken off the parsing queue.
 
-    A plain value rather than the row it was read from, which belongs to the
-    repository's session.
+    Attributes:
+        sha256: The document's digest.
+        media_type: Media type detected at ingest.
+        page_count: Pages, counted at ingest.
+        char_count: Characters in the text layer, counted at ingest.
     """
 
     sha256: str
@@ -29,8 +32,10 @@ class ClaimedDocument:
 class SourceDocument:
     """One stored file, as a pipeline receives it.
 
-    The same shape for every format, so the service hands a pipeline its
-    work without knowing which format it holds.
+    Attributes:
+        sha256: The document's digest.
+        data: The raw file bytes.
+        scanned: Whether the document carries too little text to read.
     """
 
     sha256: str
@@ -42,8 +47,10 @@ class SourceDocument:
 class Conversion:
     """What a pipeline produced from one file.
 
-    Confidence travels beside the document because the converter reports it
-    on the result, so it is absent from the exported model.
+    Attributes:
+        document: The converted document.
+        confidence: Mean confidence the converter reported, or None.
+        confidence_low: Confidence of its worst page, or None.
     """
 
     document: DoclingDocument
@@ -53,10 +60,15 @@ class Conversion:
 
 @dataclass(frozen=True)
 class ParsedDocument:
-    """One document as the pipeline understood it.
+    """One document as the pipeline understood it. Only what a column holds.
 
-    Only what a column holds. Bounding boxes, cell grids, figures and
-    captions stay in the parsed bucket.
+    Attributes:
+        title: The document's own title, or None.
+        language: ISO 639-1 code, or None when too short to tell.
+        content_sha256: Digest of the normalised body text.
+        page_count: Pages the converted document holds.
+        confidence: Mean confidence the converter reported, or None.
+        confidence_low: Confidence of its worst page, or None.
     """
 
     title: str | None

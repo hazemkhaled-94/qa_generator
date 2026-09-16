@@ -11,11 +11,19 @@ from settings import boolean, decimal, integer, optional, required
 class Settings:
     """Runtime configuration, read from the environment.
 
-    Connection settings are absent: database and blob_store own theirs.
+    Attributes:
+        ocr_char_threshold: Characters per page below which a document counts
+            as scanned.
+        min_confidence: Lowest confidence a conversion may carry and still be
+            kept.
+        table_mode: TableFormer mode, `fast` or `accurate`.
+        heading_hierarchy: Whether the converter rebuilds the heading tree.
+        document_timeout_seconds: Longest one conversion may run.
+        artifacts_path: Where the converter's model weights are, or None to
+            let it download them.
     """
 
     ocr_char_threshold: int
-    #: Lowest confidence a conversion may carry and still be kept.
     min_confidence: float
     table_mode: str
     heading_hierarchy: bool
@@ -24,7 +32,10 @@ class Settings:
 
     @classmethod
     def load(cls) -> Settings:
-        """Reads settings from the environment.
+        """Reads the settings from the environment.
+
+        Returns:
+            The loaded settings.
 
         Raises:
             KeyError: If any required setting is missing.

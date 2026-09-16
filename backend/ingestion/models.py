@@ -7,22 +7,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 
-#: Leading bytes that identify a type, checked instead of trusting the
-#: upload's declared content type. ALLOWED_MIME_TYPES may name only types
-#: listed here, which the ingest service checks at start-up.
+#: Leading bytes that identify a media type.
 _MAGIC = {b"%PDF-": "application/pdf"}
 
-#: Every type this build can detect, for a caller to check its allowlist
-#: against.
+#: Every media type this build can detect.
 DETECTABLE = frozenset(_MAGIC.values())
 
 
 @dataclass(frozen=True)
 class UploadedFile:
-    """One file as it arrived, and everything derivable from the bytes.
+    """One file as it arrived, and everything derived from its bytes.
 
-    Size, digest and media type are properties rather than fields, so no
-    instance can hold a digest that disagrees with its content.
+    Attributes:
+        filename: Name the file was submitted under.
+        data: The raw bytes.
     """
 
     filename: str
@@ -40,11 +38,7 @@ class UploadedFile:
 
     @cached_property
     def media_type(self) -> str | None:
-        """Type detected from the leading bytes, or None if unrecognised.
-
-        The trust boundary: neither the declared content type nor the
-        filename extension is evidence of anything.
-        """
+        """Media type detected from the leading bytes, or None if unrecognised."""
         return next(
             (
                 mime
@@ -59,8 +53,9 @@ class UploadedFile:
 class PdfFacts:
     """Measurements taken from a PDF by reading it.
 
-    Measurements, not judgements: whether a document counts as scanned is
-    parsing's decision.
+    Attributes:
+        page_count: Pages in the document.
+        char_count: Characters extractable from its text layer.
     """
 
     page_count: int
@@ -69,7 +64,12 @@ class PdfFacts:
 
 @dataclass(frozen=True)
 class DocumentName:
-    """One document as a picker shows it."""
+    """One document as a picker shows it.
+
+    Attributes:
+        sha256: The document's digest.
+        filename: Name it first arrived under, if any is recorded.
+    """
 
     sha256: str
     filename: str | None
@@ -79,7 +79,20 @@ class DocumentName:
 class StoredDocument:
     """One document as the catalogue reports it.
 
-    A declared shape rather than a mapping, so the API publishes its fields.
+    Attributes:
+        sha256: The document's digest.
+        filename: Name it first arrived under.
+        first_seen: When it first arrived.
+        page_count: Pages, counted at upload.
+        title: Title, written by parsing.
+        language: ISO 639-1 code, written by parsing.
+        parse_status: Where parsing has got to.
+        parse_error: Why parsing failed.
+        chunk_status: Where chunking has got to.
+        chunk_error: Why chunking failed.
+        extracted_passages: Passages extraction has read.
+        total_passages: Passages chunking produced.
+        oversized: Passages stored above the token budget.
     """
 
     sha256: str
@@ -99,10 +112,14 @@ class StoredDocument:
 
 @dataclass(frozen=True)
 class Removal:
-    """What deleting a document took with it.
+    """What deleting a document took with it, reported per store.
 
-    Reported per store rather than assumed, since a document's rows, its
-    file and its converted form are deleted separately.
+    Attributes:
+        sha256: The document's digest.
+        document: Whether the document row was deleted.
+        passages: Passages deleted.
+        file: Whether the uploaded file was deleted.
+        parsed: Whether the converted form was deleted.
     """
 
     sha256: str
@@ -114,7 +131,13 @@ class Removal:
 
 @dataclass(frozen=True)
 class IngestResult:
-    """What happened to one upload."""
+    """What happened to one upload.
+
+    Attributes:
+        outcome: One of the `Outcome` values.
+        sha256: The document's digest, when one was hashed.
+        detail: The refusal in words, when it was refused.
+    """
 
     outcome: str
     sha256: str | None = None

@@ -15,10 +15,8 @@ from database.qa_generator import (
 from database.qa_generator.repository import Repository, matching
 from ingestion.models import DocumentName, PdfFacts, StoredDocument, UploadedFile
 
-#: The name and date a digest first arrived under. DISTINCT ON rather than two
-#: independent MIN aggregates: those take the earliest timestamp and the
-#: alphabetically smallest name, which come from different rows whenever the
-#: same bytes were uploaded twice.
+#: The name and date a digest first arrived under. DISTINCT ON, so the name
+#: and the timestamp come from the same row.
 _FIRST_EVENT = (
     select(
         IngestEvent.sha256.label("sha256"),
@@ -33,11 +31,7 @@ _FIRST_EVENT = (
 
 
 def _passages(*where) -> ScalarSelect[int]:
-    """Counts one document's passages, as a scalar subquery.
-
-    Correlated rather than a grouped join: the join grouped every passage in
-    the corpus to return one page of documents.
-    """
+    """Counts one document's passages, as a correlated scalar subquery."""
     return (
         select(func.count())
         .select_from(Passage)
@@ -47,11 +41,7 @@ def _passages(*where) -> ScalarSelect[int]:
 
 
 def _filtered(query, search: str | None):
-    """Applies the search filter to a document query.
-
-    One place, so a listing and its count cannot disagree about what they are
-    looking at. Wildcards are escaped.
-    """
+    """Applies the search filter to a document query. Wildcards are escaped."""
     if not search:
         return query
     return query.where(
@@ -60,11 +50,7 @@ def _filtered(query, search: str | None):
 
 
 class DocumentRepository(Repository):
-    """Reads and writes `documents` and `ingest_events`.
-
-    Both tables are behind one repository because a stored upload writes both
-    in a single transaction.
-    """
+    """Reads and writes `documents` and `ingest_events`."""
 
     def exists(self, sha256: str) -> bool:
         """Reports whether these exact bytes are already stored."""
@@ -75,7 +61,7 @@ class DocumentRepository(Repository):
             )
 
     def media_type(self, sha256: str) -> str | None:
-        """Reads the type detected for a stored document."""
+        """Reads the media type detected for a stored document."""
         with self._session() as session:
             return session.scalar(
                 select(Document.mime_type).where(Document.sha256 == sha256)
@@ -84,7 +70,13 @@ class DocumentRepository(Repository):
     def delete(self, sha256: str) -> int:
         """Removes a document row and everything derived from it.
 
-        The cascades do the work. Ingest events survive, on ON DELETE SET NULL.
+        Ingest events survive, on ON DELETE SET NULL.
+
+        Args:
+            sha256: The document's digest.
+
+        Returns:
+            Passages the cascade took with it.
         """
         with self._session.begin() as session:
             passages = session.scalar(
@@ -96,10 +88,13 @@ class DocumentRepository(Repository):
         return passages or 0
 
     def delete_derived(self, sha256: str) -> int:
-        """Drops a document's passages and marks it unchunked again.
+        """Drops a document's passages and returns chunk_status to `new`.
 
-        Left `new` rather than `pending`: this restores the state a freshly
-        parsed document is in, and starting chunking stays a decision.
+        Args:
+            sha256: The document's digest.
+
+        Returns:
+            Passages deleted.
         """
         with self._session.begin() as session:
             passages = session.scalar(
@@ -126,11 +121,7 @@ class DocumentRepository(Repository):
             }
 
     def names(self) -> list[DocumentName]:
-        """Lists just enough of each document to put it in a picker.
-
-        Separate from `page` because three pages draw that picker and none of
-        them needs the passage counts.
-        """
+        """Lists every document by digest and first filename, newest first."""
         with self._session() as session:
             return [
                 DocumentName(sha256=row.sha256, filename=row.filename)
@@ -148,7 +139,16 @@ class DocumentRepository(Repository):
     def page(
         self, search: str | None = None, limit: int = 100, offset: int = 0
     ) -> tuple[int, list[StoredDocument]]:
-        """Reads one page of documents and the total behind it."""
+        """Reads one page of documents and the total behind it.
+
+        Args:
+            search: Matched against filename, title and digest.
+            limit: Rows to return.
+            offset: Rows to skip.
+
+        Returns:
+            The total matching the search, and the requested page.
+        """
         listing = _filtered(
             select(
                 Document.sha256,
@@ -168,8 +168,7 @@ class DocumentRepository(Repository):
                 ),
             )
             .join(_FIRST_EVENT, _FIRST_EVENT.c.sha256 == Document.sha256, isouter=True)
-            # nullslast: DESC sorts NULLs first in PostgreSQL, which put a
-            # document whose upload events were removed above every real one.
+            # nullslast: DESC sorts NULLs first in PostgreSQL.
             .order_by(_FIRST_EVENT.c.first_seen.desc().nullslast()),
             search,
         )
@@ -187,8 +186,13 @@ class DocumentRepository(Repository):
     def store(self, upload: UploadedFile, facts: PdfFacts) -> str:
         """Inserts a document and its event in one transaction.
 
-        Answers DUPLICATE_BYTES when another upload of the same bytes won the
-        race between the existence check and this insert.
+        Args:
+            upload: The file as it arrived.
+            facts: What reading the PDF measured.
+
+        Returns:
+            STORED, or DUPLICATE_BYTES when another upload of the same bytes
+            won the race with the existence check.
         """
         with self._session.begin() as session:
             inserted = session.scalar(
@@ -220,8 +224,13 @@ class DocumentRepository(Repository):
     ) -> None:
         """Records an upload that did not produce a new document.
 
-        Pass a digest only when a document row exists for it:
-        ingest_events.sha256 is a foreign key into documents.
+        Args:
+            filename: Name the file was submitted under.
+            size_bytes: Size of the submitted file.
+            outcome: One of the `Outcome` values.
+            detail: The refusal in words.
+            sha256: A digest a document row already exists for;
+                ingest_events.sha256 is a foreign key into documents.
         """
         with self._session.begin() as session:
             session.add(self._event(filename, size_bytes, outcome, detail, sha256))

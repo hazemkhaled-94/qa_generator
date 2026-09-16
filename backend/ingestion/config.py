@@ -11,8 +11,10 @@ from settings import csv, integer, required
 class Settings:
     """Runtime configuration, read from the environment.
 
-    Connection settings are absent on purpose: database and blob_store each
-    own theirs, and this service builds neither an engine nor an S3 client.
+    Attributes:
+        pipeline_version: Recorded in the stored object's metadata.
+        max_file_size_mb: Largest upload accepted.
+        allowed_mime_types: Media types the service stores.
     """
 
     pipeline_version: str
@@ -21,14 +23,18 @@ class Settings:
 
     @property
     def max_file_size_bytes(self) -> int:
-        """The upload limit expressed in bytes."""
+        """The upload limit in bytes."""
         return self.max_file_size_mb * 1024 * 1024
 
     @classmethod
     def load(cls) -> Settings:
-        """Reads settings from the environment.
+        """Reads the settings from the environment.
+
+        Returns:
+            The loaded settings.
 
         Raises:
+            KeyError: If a required setting is missing.
             ValueError: If MAX_FILE_SIZE_MB is not an integer.
         """
         return cls(

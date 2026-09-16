@@ -19,8 +19,7 @@ from preprocessing.chunking.models import (
 )
 from stages import Columns, RowQueue
 
-#: The next document to chunk. This stage's own column and nothing else: it
-#: does not read parse_status, because it knows of no parsing stage. A
+#: The next document to chunk. This stage's own column and nothing else: a
 #: document queued here without a parsed form fails on the missing object.
 _NEXT_PENDING = (
     select(Document.sha256)
@@ -45,11 +44,7 @@ _PASSAGES = cast("Table", Passage.__table__)
 
 
 def _filtered(query, document, search, block_type, field):
-    """Applies the document, text and type filters to a passage query.
-
-    One place, so a listing and its count cannot disagree about what they are
-    looking at.
-    """
+    """Applies the document, text and type filters to a passage query."""
     if document:
         query = query.where(Passage.doc_sha256 == document)
     if search:
@@ -73,14 +68,18 @@ class ChunkQueue(RowQueue):
         error=Document.chunk_error,
         claimed_at=Document.chunk_claimed_at,
     )
-    #: One document at a time, which is what the Documents page acts on.
+    #: The narrowings this stage accepts.
     scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}
     done = Status.CHUNKED
     lease = timedelta(minutes=30)
     next_pending = _NEXT_PENDING
 
     def claim(self) -> ClaimedDocument | None:
-        """Takes the next unchunked document off the queue."""
+        """Takes the next unchunked document off the queue.
+
+        Returns:
+            The claimed document, or None when the queue is empty.
+        """
         claimed = self._claim(Document.sha256, Document.language)
         if claimed is None:
             return None
@@ -89,10 +88,16 @@ class ChunkQueue(RowQueue):
     def replace(self, sha256: str, chunking: Chunking) -> int:
         """Replaces a document's passages with a new set, then finishes it.
 
-        One transaction: the passages, the oversized count and the status land
-        together, so a document can never read as chunked while holding
-        another run's passages. The delete cascades to the facts drawn from
-        them and to the topic memberships they held.
+        One transaction: the passages, the oversized count and the status
+        land together. The delete cascades to the facts drawn from the old
+        passages and to the topic memberships they held.
+
+        Args:
+            sha256: The document's digest.
+            chunking: What the builder produced.
+
+        Returns:
+            Passages stored.
         """
         chunks: list[Chunk] = chunking.passages
         with self._session.begin() as session:
@@ -138,11 +143,15 @@ class PassageCatalog(Repository):
     def texts(self, within=None) -> list[tuple[int, str, str | None]]:
         """Reads every passage's id, text and its document's language.
 
-        The document's language and not the passage's: it is the fallback for
-        a passage too short to detect, which is what chunking reads it as.
+        The document's language and not the passage's: it is the fallback a
+        re-read applies. Joined to the document so `--only document=`
+        narrows here too.
 
-        Joined to the document so `--only document=` narrows here too: this
-        stage queues over documents, so that is the column it narrows on.
+        Args:
+            within: A condition narrowing which passages, or None for all.
+
+        Returns:
+            One (id, text, document language) per passage.
         """
         query = (
             select(Passage.id, Passage.text, Document.language)
@@ -157,11 +166,13 @@ class PassageCatalog(Repository):
     def revocabulary(self, read: list[tuple[int, str | None, list[str]]]) -> int:
         """Replaces the stored language and lemmas, and nothing else.
 
-        Sentence offsets are left alone: a fact cites one by index, so moving
-        them would point every citation in the corpus at different text. The
-        language is safe to move beside them because extraction reads the
-        document's language rather than the passage's, so only which topic
-        model covers this passage changes.
+        Sentence offsets are left alone: a fact cites one by index.
+
+        Args:
+            read: One (passage id, language, lemmas) per passage.
+
+        Returns:
+            Passages rewritten.
         """
         if not read:
             return 0
@@ -201,9 +212,16 @@ class PassageCatalog(Repository):
     ) -> tuple[int, list[StoredPassage]]:
         """Reads one page of passages and the total behind it.
 
-        Both in one call: a listing and its pager asked separately, which cost
-        two round trips and let the count describe a corpus the rows no longer
-        matched.
+        Args:
+            document: A digest to narrow to, or None for the corpus.
+            limit: Rows to return.
+            offset: Rows to skip.
+            search: Text to match.
+            block_type: A block type to narrow to.
+            field: Which columns `search` looks in, a key of SEARCH_FIELDS.
+
+        Returns:
+            The total matching the filters, and the requested page.
         """
         narrowed = _filtered(
             select(Passage).order_by(Passage.doc_sha256, Passage.ordinal),
@@ -225,7 +243,14 @@ class PassageCatalog(Repository):
         return total, [_stored(row) for row in rows]
 
     def passage(self, passage_id: int) -> PassageDetail | None:
-        """Reads one passage in full, its cell grids and sentences included."""
+        """Reads one passage in full, its cell grids and sentences included.
+
+        Args:
+            passage_id: The passage's row id.
+
+        Returns:
+            The passage, or None if no passage has that id.
+        """
         with self._session() as session:
             row = session.get(Passage, passage_id)
             if row is None:

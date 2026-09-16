@@ -26,79 +26,49 @@ from preprocessing.parsing.pipelines.base import ConversionFailed, Pipeline
 
 log = logging.getLogger(__name__)
 
-#: A word the page broke across two lines. Some fonts map their discretionary
-#: hyphen to U+0002 rather than to a hyphen and pypdfium2 passes the mapping
-#: through, so the two halves arrive joined by a control character and
-#: whatever space the assembler put between the cells; others use U+00AD,
-#: which is the same mark spelled properly. Both join the halves.
+#: A discretionary hyphen, spelled either as U+00AD or as the U+0002 some
+#: fonts map it to, with whatever space follows it.
 _SOFT_HYPHEN = re.compile(r"[\x02\u00ad]\s*")
 
-#: Anything else the content stream carried that is not text. Newline and
-#: tab are the two the passage text is allowed to keep.
+#: Control characters other than newline and tab.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
-#: Zero-width marks, which render as nothing and so cannot be quoted back.
+#: Zero-width marks.
 _INVISIBLE = re.compile(r"[\u200b-\u200d\u2060\ufeff]")
 
-#: The conjunctions a hanging hyphen is followed by. German writes a shared
-#: suffix as "Zoll- und Steuerrecht", and the Ergaenzungsstrich is only ever
-#: completed by a coordinating conjunction, so a hyphen followed by anything
-#: else is a broken word rather than an abbreviated compound. Not a guess at
-#: the language: it is the rule the mark is defined by.
+#: The coordinating conjunctions that complete a hanging hyphen, as in
+#: "Zoll- und Steuerrecht".
 _JOINING = "und|oder|bzw|sowie|beziehungsweise|and|or"
 
-#: A word the page broke across two lines with a real hyphen.
+#: A word the page broke across two lines with a real hyphen: a hyphen after
+#: a letter and before a lower-case continuation, unless a conjunction
+#: follows it.
 #:
-#: Docling applies the same test - a hyphen before a lower-case continuation
-#: is a split word - in ReadingOrderModel._merge_elements, but only where it
-#: joins two layout elements, and without the conjunction guard. Within one
-#: element the backend has already turned the line break into a space before
-#: anything here runs, so no item text holds a hyphen before a newline and
-#: Docling's rule never sees these. This is that same rule for that case.
-#:
-#: The guard is what the space costs: with the newline gone, "Zoll- und" and
-#: "ergaen- zende" are the same shape, and joining blindly gives "Zollund".
-#: pd3f's `dehyphen` scores the alternatives with a character language model
-#: instead, which is the thorough answer; it was last released in 2020 against
-#: a fork of Flair and declares no Python above 3.8.
-#:
-#: ponytail: measured over this corpus, 127 of 131 joins are right and all 222
-#: hanging hyphens are left alone. The four misses are one table cell, "Mittel-
-#: niedrig", where two ratings sit side by side and neither is a broken word.
-#: Nothing in the punctuation separates that from "Nied- rig"; telling them
-#: apart needs the language model above, or the cell geometry either side.
+#: ponytail: punctuation alone cannot separate a broken word from two ratings
+#: written side by side in one cell ("Mittel- niedrig"). Measured over this
+#: corpus, 127 of 131 joins are right and all 222 hanging hyphens are left
+#: alone. Telling the remaining four apart needs a character language model
+#: or the geometry of the cells either side.
 _BROKEN_WORD = re.compile(
     rf"(?<=[A-Za-z\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc\u00df])-\s+(?!(?:{_JOINING})\b)(?=[a-z\u00e4\u00f6\u00fc\u00df])"
 )
 
-#: Every space that is not U+0020. A model asked to copy a span verbatim
-#: returns an ordinary space for all of them, so leaving one in the passage
-#: text rejects an evidence quote that is correct in every visible respect -
-#: eight of this corpus's seventeen rejected facts differed from their
-#: passage by one U+00A0 and nothing else.
+#: Every space that is not U+0020.
 _SPACES = re.compile(r"[\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]")
 
 
 class PdfPipeline(Pipeline):
     """Converts PDFs, tuned for born-digital documents with tables.
 
-    Heading hierarchy and table structure are both on, which Docling leaves
-    off: without them every section header comes back at level one and no
-    cell grid is recovered. OCR is not implemented, so a scanned document is
-    refused rather than converted into an empty one.
+    Heading hierarchy and table structure are both on. OCR is not
+    implemented, so a scanned document is refused rather than converted into
+    an empty one.
 
     Text comes off the page through Docling's own backend with
-    `enforce_same_font` turned off. Left on, docling-parse cuts a text cell
-    wherever the font changes, and an f-ligature is set in a font of its own,
-    so a word carrying one arrives split around a bare `f` - `identify` as
-    `identi f y`. Every later stage then reads the broken spelling: the
-    chunker cuts on it, the vocabulary keeps `f` as a term, and the evidence
-    gate matches against it. Measured on a 73-page test document: 397 splits
-    with the flag on, none with it off, and the same section headers at the
-    same levels.
+    `enforce_same_font` turned off, so a word carrying an f-ligature arrives
+    whole rather than split around a bare `f`.
 
-    The converter is built once and reused, since constructing it loads the
-    layout and table models.
+    The converter is built once and reused.
     """
 
     media_types: ClassVar[tuple[str, ...]] = ("application/pdf",)
@@ -111,10 +81,14 @@ class PdfPipeline(Pipeline):
         document_timeout_seconds: float | None,
         artifacts_path: str | None,
     ) -> None:
-        """Initialises the pipeline.
+        """Initialises the pipeline. Every value comes from the environment.
 
-        No defaults: every value comes from the environment, and one written
-        here would silently disagree with the one in `.env.example`.
+        Args:
+            table_mode: TableFormer mode, `fast` or `accurate`.
+            heading_hierarchy: Whether to rebuild the heading tree.
+            document_timeout_seconds: Longest one conversion may run.
+            artifacts_path: Where the model weights are, or None to let
+                Docling download them.
         """
         self._table_mode = TableFormerMode(table_mode)
         self._heading_hierarchy = heading_hierarchy
@@ -125,21 +99,17 @@ class PdfPipeline(Pipeline):
     def convert(self, source: SourceDocument) -> Conversion:
         """Converts one PDF, refusing a scanned one.
 
+        Args:
+            source: The stored file and what is known about it.
+
+        Returns:
+            The mended document and its confidences.
+
         Raises:
-            ConversionFailed: If the document needs OCR, or if Docling
-                cannot convert it.
+            ConversionFailed: If the document needs OCR, or if Docling cannot
+                convert it.
         """
-        # ── OCR placeholder ────────────────────────────────────────────────
-        # Refused here, where the reason is still known, rather than as "no
-        # extractable body text" three steps later.
-        #
-        # To enable OCR: install an engine (docling supports EasyOCR,
-        # RapidOCR and Tesseract; none is installed and Tesseract also needs
-        # its system binary in the image), delete this guard, and pass
-        # `do_ocr=True` with an explicit `ocr_options` in `_converter`. Note
-        # that OCR wants a language hint before conversion while
-        # documents.language is only detected after it, and that the hint
-        # uses ISO 639-2 codes where that column uses 639-1.
+        # OCR extension point. See docs/intake.md for what enabling it takes.
         if source.scanned:
             raise ConversionFailed(
                 "the document carries too little text to read without OCR, "
@@ -148,8 +118,8 @@ class PdfPipeline(Pipeline):
 
         try:
             result = self._converter().convert(
-                # Docling picks its input format from the extension, so
-                # naming the stream is where this pipeline states its format.
+                # Docling picks its input format from the extension, so the
+                # stream's name is where this pipeline states its format.
                 DocumentStream(
                     name=f"{source.sha256}.pdf", stream=io.BytesIO(source.data)
                 )
@@ -172,8 +142,8 @@ class PdfPipeline(Pipeline):
                 heading_hierarchy_options=HeadingHierarchyOptions(
                     enabled=self._heading_hierarchy
                 ),
-                # Required by the line above, not independent of it: the
-                # hierarchy reads font style off the parsed cells.
+                # Required by the line above: the hierarchy reads font style
+                # off the parsed cells.
                 generate_parsed_pages=self._heading_hierarchy,
                 document_timeout=self._timeout,
                 artifacts_path=self._artifacts_path,
@@ -182,9 +152,9 @@ class PdfPipeline(Pipeline):
                 format_options={
                     InputFormat.PDF: PdfFormatOption(
                         pipeline_options=options,
-                        # No backend=: Docling's own is the one that reports
-                        # the font style heading levels are ranked by and the
-                        # word cells table structure is matched against.
+                        # No backend=: Docling's own reports the font style
+                        # heading levels are ranked by and the word cells
+                        # table structure is matched against.
                         backend_options=ThreadedDoclingParseBackendOptions(  # pyright: ignore[reportCallIssue]
                             enforce_same_font=False
                         ),
@@ -198,31 +168,35 @@ class PdfPipeline(Pipeline):
 def _mend(text: str) -> str:
     """Rejoins a line-broken word and spells the rest so it can be copied.
 
-    Runs before anything reads the document, so passages.text, the cell grid
-    and every evidence offset are all indices into the mended spelling. A
-    character a model cannot reproduce is one no quote of it can match, and
-    the evidence gate reports that as the model inventing a quote.
+    Composes to NFC, joins soft and line-break hyphens, drops control and
+    zero-width characters, and turns every other kind of space into U+0020.
 
-    NFC first: the same umlaut arrives composed from one document and
-    decomposed from another, and the two compare unequal character for
-    character while looking identical on the page.
+    Args:
+        text: One string as the converter read it.
+
+    Returns:
+        The mended string.
     """
     composed = unicodedata.normalize("NFC", text)
     cleaned = _SPACES.sub(
         " ", _INVISIBLE.sub("", _CONTROL.sub("", _SOFT_HYPHEN.sub("", composed)))
     )
     # After the space normalisation, so the broken-word rule sees one kind of
-    # space rather than having to spell every one of them again.
+    # space.
     return _BROKEN_WORD.sub("", cleaned)
 
 
 def _repaired(document: DoclingDocument) -> DoclingDocument:
     """Mends every string a later stage reads out of a converted document.
 
-    Runs before the document is stored, so the parsed object, the passages
-    and the cell grid all carry one spelling. Both places are needed: a
-    passage's text comes from the text items, and its table_cells come from
-    the table grid, which the serialiser does not touch.
+    Both the text items and the table grid: a passage's text comes from the
+    first and its table_cells from the second.
+
+    Args:
+        document: The converted document, modified in place.
+
+    Returns:
+        The same document.
     """
     for item in document.texts:
         item.text = _mend(item.text)
@@ -234,11 +208,14 @@ def _repaired(document: DoclingDocument) -> DoclingDocument:
 
 
 def _score(result: ConversionResult, name: str) -> float | None:
-    """Reads one score off a conversion, as a value the database accepts.
+    """Reads one confidence score off a conversion.
 
-    Docling reports an unmeasured score as NaN, which reaches PostgreSQL as
-    a value comparing equal to nothing, so a later `WHERE confidence < 0.8`
-    would skip those rows silently. NULL behaves.
+    Args:
+        result: What Docling returned.
+        name: The score's attribute name.
+
+    Returns:
+        The score, or None when it is absent or NaN.
     """
     value = getattr(getattr(result, "confidence", None), name, None)
     return None if value is None or math.isnan(value) else float(value)

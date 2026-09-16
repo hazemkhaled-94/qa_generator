@@ -12,8 +12,8 @@ from database.qa_generator import Document, Status
 from preprocessing.parsing.models import ClaimedDocument, ParsedDocument
 from stages import Columns, RowQueue
 
-#: The next document to parse. FOR UPDATE SKIP LOCKED lets a second worker
-#: take the following row instead of blocking on this one.
+#: The next document to parse. FOR UPDATE SKIP LOCKED, so a second worker
+#: takes the following row rather than blocking on this one.
 _NEXT_PENDING = (
     select(Document.sha256)
     .where(Document.parse_status == Status.PENDING)
@@ -25,13 +25,9 @@ _NEXT_PENDING = (
 
 
 class ParseQueue(RowQueue):
-    """Reads the parsing queue and records what became of each document.
+    """Reads the parsing queue and records what became of each document."""
 
-    Uses the shared models and session factory in database.qa_generator.
-    """
-
-    #: This stage's columns on `documents`, which is what StageQueue writes
-    #: every claim, failure and requeue against.
+    #: This stage's columns on `documents`.
     columns = Columns(
         entity=Document,
         key=Document.sha256,
@@ -39,15 +35,19 @@ class ParseQueue(RowQueue):
         error=Document.parse_error,
         claimed_at=Document.parse_claimed_at,
     )
-    #: One document at a time, which is what the Documents page acts on.
+    #: The narrowings this stage accepts.
     scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}
     done = Status.PARSED
-    #: Four times PARSING_TIMEOUT_SECONDS, which is thirty minutes.
+    #: Four times PARSING_TIMEOUT_SECONDS.
     lease = timedelta(hours=2)
     next_pending = _NEXT_PENDING
 
     def claim(self) -> ClaimedDocument | None:
-        """Takes the next pending document off the queue."""
+        """Takes the next pending document off the queue.
+
+        Returns:
+            The claimed document, or None when the queue is empty.
+        """
         claimed = self._claim(
             Document.sha256,
             Document.mime_type,
@@ -66,9 +66,12 @@ class ParseQueue(RowQueue):
     def holder_of(self, content_sha256: str, besides: str) -> str | None:
         """Names another document holding this exact text, if one does.
 
-        Ingestion catches a file uploaded twice by its bytes. The same report
-        released as a second PDF has different bytes and the same text, and is
-        only knowable here, once the text exists.
+        Args:
+            content_sha256: Digest of the normalised body text.
+            besides: The document being parsed, which is excluded.
+
+        Returns:
+            The other document's digest, or None.
         """
         with self._session() as session:
             return session.scalar(
@@ -82,13 +85,13 @@ class ParseQueue(RowQueue):
         """Records a successful parse, releasing the claim.
 
         Writes the title, language, content digest and both confidences.
-        page_count is left alone: ingestion owns that column.
+        page_count is ingestion's column and chunk_status is chunking's;
+        neither is touched, so re-parsing leaves the old passages standing
+        until somebody asks for them to be rebuilt.
 
-        chunk_status is not touched. This stage does not know that a
-        chunking stage exists, so it cannot set one going, and a re-parse
-        therefore leaves the old passages standing until someone asks for
-        them to be rebuilt. That is the orchestrator's job: after re-parsing,
-        redo chunking.
+        Args:
+            sha256: The document's digest.
+            parsed: What the analyser read.
         """
         self._finish(
             sha256,

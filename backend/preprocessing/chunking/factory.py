@@ -10,7 +10,14 @@ from preprocessing.chunking.service import ChunkingService
 
 
 def build_service(settings: Settings) -> ChunkingService:
-    """Wires the service and its collaborators."""
+    """Wires the service and its collaborators.
+
+    Args:
+        settings: The loaded chunking settings.
+
+    Returns:
+        The service. Building it loads the embedding model's tokenizer.
+    """
     return ChunkingService(
         repository=ChunkQueue(),
         parsed=ParsedBucket(),

@@ -5,6 +5,5 @@ with the pipeline for that format, writes the converted document to the
 parsed bucket, then reads out of it the title, language, content digest and
 confidence the database holds.
 
-Nothing is re-exported here: a caller naming a submodule pays for that
-submodule alone.
+Nothing is re-exported: a caller names the submodule it wants.
 """

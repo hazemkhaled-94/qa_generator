@@ -77,7 +77,7 @@ def view() -> None:
             {
                 "Document": catalog.label_for(document),
                 "Title": document["title"] or "—",
-                "Pages": document["page_count"] or "—",
+                "Pages": str(document["page_count"] or "—"),
                 "Language": (document["language"] or "—").upper(),
                 "Parsing": document["parse_status"],
                 "Chunking": document["chunk_status"],

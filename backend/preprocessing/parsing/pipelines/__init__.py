@@ -27,6 +27,9 @@ class PipelineRegistry:
     def __init__(self, pipelines: tuple[Pipeline, ...]) -> None:
         """Initialises the registry.
 
+        Args:
+            pipelines: The pipelines to dispatch between.
+
         Raises:
             ValueError: If two pipelines claim the same media type.
         """
@@ -40,9 +43,14 @@ class PipelineRegistry:
     def for_media_type(self, media_type: str) -> Pipeline:
         """Returns the pipeline that handles a media type.
 
+        Args:
+            media_type: The type recorded at ingest.
+
+        Returns:
+            The pipeline for that type.
+
         Raises:
-            UnsupportedFormat: If no pipeline handles the type, which means
-                it has drifted from ALLOWED_MIME_TYPES.
+            UnsupportedFormat: If no pipeline handles the type.
         """
         pipeline = self._by_media_type.get(media_type)
         if pipeline is None:
@@ -54,5 +62,5 @@ class PipelineRegistry:
 
     @property
     def media_types(self) -> tuple[str, ...]:
-        """Every media type the registry can dispatch."""
+        """Every media type the registry can dispatch, sorted."""
         return tuple(sorted(self._by_media_type))

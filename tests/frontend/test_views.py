@@ -473,3 +473,178 @@ def test_the_questions_page_says_which_kinds_were_asked_for_and_written(
     tabled = " ".join(str(one.value) for one in app.dataframe)
     assert "comparison" in tabled, "the kind written was not listed"
     assert "factoid" in tabled, "a kind asked for and never written was not listed"
+
+
+#: One passage, as /passages returns it in a listing.
+PASSAGE = {
+    "id": 11,
+    "doc_sha256": "a" * 64,
+    "ordinal": 3,
+    "text": "| Modell | Masse |\n| Kompakt | 4 |",
+    "page_from": 4,
+    "page_to": 5,
+    "section_path": "2 Tabellen",
+    "block_type": "table",
+    "language": "de",
+    "doc_item_refs": ["#/tables/0"],
+    "bbox": [{"page": 4, "l": 1.0, "t": 2.0, "r": 3.0, "b": 4.0}],
+    "table_count": 1,
+    "sentence_count": 2,
+}
+
+#: That passage in full, as /passages/{id} returns it.
+PASSAGE_DETAIL = {
+    "passage": PASSAGE,
+    "table_cells": [
+        {
+            "caption": "Tabelle 1",
+            "num_rows": 2,
+            "num_cols": 2,
+            "cells": [
+                {
+                    "row": 0,
+                    "col": 0,
+                    "row_span": 1,
+                    "col_span": 1,
+                    "column_header": True,
+                    "row_header": False,
+                    "text": "Modell",
+                    "line": None,
+                },
+                {
+                    "row": 1,
+                    "col": 0,
+                    "row_span": 1,
+                    "col_span": 1,
+                    "column_header": False,
+                    "row_header": True,
+                    "text": "Kompakt",
+                    "line": 1,
+                },
+            ],
+        }
+    ],
+    "sentences": [
+        {"i": 0, "start": 0, "end": 18, "predicates": 0},
+        {"i": 1, "start": 19, "end": 34, "predicates": 0},
+    ],
+    "extract_status": "extracted",
+    "extract_error": None,
+}
+
+
+def passages_backend(**overrides) -> Answers:
+    """A backend that answers every call the Passages page makes."""
+    return Answers(
+        **{
+            "passages": {"total": 1, "passages": [PASSAGE]},
+            "passage": PASSAGE_DETAIL,
+            "document_names": [{"sha256": "a" * 64, "filename": "report.pdf"}],
+            "passage_types": ["table", "text"],
+            "stage_status": {"working": False, "rows": {"chunked": 1, "extracted": 1}},
+            **overrides,
+        }
+    )
+
+
+def test_the_passages_page_lists_what_the_backend_returns(run_view) -> None:
+    """One row per passage, drawn from the answer and not a second call."""
+    app = run_view("passages", catalog_api=passages_backend())
+
+    assert not app.exception, app.exception
+    listed = app.dataframe[0].value
+    assert listed["#"].tolist() == [3]
+    assert listed["Pages"].tolist() == ["4–5"]
+    assert listed["Language"].tolist() == ["DE"]
+
+
+def test_the_passages_page_survives_a_page_whose_rows_have_gone(run_view) -> None:
+    """The count and the rows are two queries, so they can disagree.
+
+    A delete landing between them leaves a total with no rows, and the
+    lengths measured on those rows have nothing to measure.
+    """
+    app = run_view(
+        "passages", catalog_api=passages_backend(passages={"total": 3, "passages": []})
+    )
+
+    assert not app.exception, f"the page raised: {app.exception}"
+    assert "Failed to load" not in text_of(app), text_of(app)
+
+
+def test_the_passages_page_numbers_the_sentences_a_fact_would_cite(run_view) -> None:
+    """The number in the first column is what a citation refers to."""
+    app = run_view("passages", catalog_api=passages_backend())
+
+    numbered = next(
+        frame.value for frame in app.dataframe if "Claims" in frame.value.columns
+    )
+    assert numbered["#"].tolist() == [0, 1]
+    assert numbered["Text"].tolist()[0] == "| Modell | Masse |"
+
+
+def test_the_passages_page_shows_which_row_each_cell_cites(run_view) -> None:
+    """A header cell cites nothing; a data cell cites the row it sits in."""
+    app = run_view("passages", catalog_api=passages_backend())
+
+    cells = next(
+        frame.value for frame in app.dataframe if "Cites row" in frame.value.columns
+    )
+    assert cells["Cites row"].tolist() == ["—", "1"]
+    assert cells["Header"].tolist() == ["column", "row"]
+
+
+def test_the_passages_page_reports_a_passage_extraction_could_not_read(
+    run_view,
+) -> None:
+    """The reason, against the passage it belongs to."""
+    app = run_view(
+        "passages",
+        catalog_api=passages_backend(
+            passage={
+                **PASSAGE_DETAIL,
+                "extract_status": "failed",
+                "extract_error": "the model did not answer",
+            }
+        ),
+    )
+
+    assert not app.exception
+    assert "the model did not answer" in text_of(app)
+
+
+def test_the_documents_page_reports_a_stage_that_failed(run_view) -> None:
+    """Parsing and chunking both record their failure on the document row."""
+    app = run_view(
+        "documents",
+        catalog_api=Answers(
+            documents={
+                "total": 1,
+                "documents": [
+                    {
+                        "sha256": "a" * 64,
+                        "filename": "report.pdf",
+                        "first_seen": "2026-09-14T10:00:00",
+                        "page_count": 12,
+                        "title": None,
+                        "language": None,
+                        "parse_status": "failed",
+                        "parse_error": "the converter puts this at 0.31",
+                        "chunk_status": "new",
+                        "chunk_error": "a failure from an earlier run",
+                        "extracted_passages": 0,
+                        "total_passages": 0,
+                        "oversized": 0,
+                    }
+                ],
+            },
+            stage_status={"working": False, "rows": {}},
+        ),
+    )
+
+    assert not app.exception, app.exception
+    drawn = text_of(app)
+    assert "the converter puts this at 0.31" in drawn
+    assert "a failure from an earlier run" not in drawn, (
+        "an error from a stage that is not failed was shown as its state"
+    )

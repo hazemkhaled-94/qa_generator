@@ -1,8 +1,7 @@
 """Command-line entry point for the ingestion service.
 
-Deleting is here rather than under a stage because a document belongs to
-ingestion. The same operations are on the API under /documents. Run with
---help for the flags.
+The same operations are on the API under /documents. Run with --help for the
+flags.
 """
 
 from __future__ import annotations
@@ -20,11 +19,7 @@ log = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Builds the argument parser.
-
-    The three are mutually exclusive: two in one command silently ran only
-    the first, and one of them is irreversible.
-    """
+    """Builds the argument parser. The three flags are mutually exclusive."""
     built = argparse.ArgumentParser(prog="python -m ingestion.run")
     group = built.add_mutually_exclusive_group(required=True)
     group.add_argument("--list", action="store_true", help="list every document")
@@ -44,8 +39,13 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Lists stored documents, or deletes one.
 
-    A digest is taken in full rather than as a prefix: this is the operation
-    where guessing wrong cannot be undone.
+    A digest is taken in full rather than as a prefix.
+
+    Args:
+        argv: Arguments to parse, defaulting to the process's own.
+
+    Returns:
+        0, or 1 when no document has the given digest.
     """
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
 

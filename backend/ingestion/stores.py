@@ -1,9 +1,4 @@
-"""What this package needs from object storage.
-
-Declared here rather than imported from blob_store, so the dependency points
-inwards: the services name the operations they use and nothing supplies them
-but the composition root.
-"""
+"""What this package needs from object storage."""
 
 from __future__ import annotations
 
@@ -38,11 +33,7 @@ class DocumentStore(Protocol):
 
 
 class ParsedStore(Protocol):
-    """The store holding converted documents.
-
-    Read-and-delete only from here: parsing is what writes them. Deleting a
-    document has to take its converted form, or the object is orphaned.
-    """
+    """The store holding converted documents. Read and delete only."""
 
     def key_for(self, sha256: str) -> str:
         """Returns the key a converted document is stored under."""

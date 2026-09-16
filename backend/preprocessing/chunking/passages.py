@@ -30,11 +30,7 @@ class NoPassages(Exception):
 
 
 class _Markdown(ChunkingSerializerProvider):
-    """Renders every kind of block into the passage text, in Markdown.
-
-    One rule for the whole pipeline: a block renders into the text or it does
-    not exist, so evidence is always a span of the passage text.
-    """
+    """Renders every kind of block into the passage text, in Markdown."""
 
     def get_serializer(self, doc: DoclingDocument) -> ChunkingDocSerializer:
         """Builds the serializer the chunker uses for one document."""
@@ -54,8 +50,19 @@ def chunking_of(
 ) -> Chunking:
     """Numbers every chunk the chunker produced and counts the oversized ones.
 
-    All of the builder's decisions and none of its machinery, so it can be
-    checked without loading a tokenizer.
+    All of the builder's decisions and none of its machinery.
+
+    Args:
+        chunks: What the chunker returned.
+        max_tokens: The token budget.
+        count_tokens: Counts the tokens in a string.
+        to_passage: Turns an ordinal and a chunk into a passage.
+
+    Returns:
+        The numbered passages and how many exceed the budget.
+
+    Raises:
+        NoPassages: If no chunk holds anything but whitespace.
     """
     kept = [chunk for chunk in chunks if chunk.text.strip()]
     if not kept:
@@ -71,8 +78,14 @@ def chunking_of(
 def lines_of(text: str) -> list[dict]:
     """Locates every non-empty line of a rendered table passage.
 
-    A table has no sentences, so its rows are what a fact cites. Numbering
-    them the same way gives every passage one citation mechanism.
+    A table has no sentences, so its rows are what a fact cites.
+
+    Args:
+        text: The rendered passage text.
+
+    Returns:
+        One {i, start, end, predicates} per non-empty line, numbered from
+        zero, with offsets into `text`.
     """
     found: list[dict] = []
     offset = 0
@@ -105,9 +118,11 @@ class PassageBuilder:
     ) -> None:
         """Initialises the builder and its chunker.
 
-        The embedding model's tokenizer sizes a passage, rather than the
-        chunker's own English default, which counts German at about two
-        thirds the rate this corpus is embedded at.
+        Args:
+            embedding_model: The model whose tokenizer sizes a passage.
+            max_tokens: The token budget a passage is cut to.
+            merge_peers: Whether to combine undersized neighbours that share
+                a heading.
         """
         self._max_tokens = max_tokens
         self._tokenizer = HuggingFaceTokenizer.from_pretrained(
@@ -120,7 +135,19 @@ class PassageBuilder:
         )
 
     def build(self, document: DoclingDocument, language: str | None) -> Chunking:
-        """Cuts one document into passages and reads their linguistic surface."""
+        """Cuts one document into passages and reads their linguistic surface.
+
+        Args:
+            document: The converted document.
+            language: The document's language, used where a passage is too
+                short to detect its own.
+
+        Returns:
+            The numbered passages and how many exceed the budget.
+
+        Raises:
+            NoPassages: If the document yielded nothing but whitespace.
+        """
         chunking = chunking_of(
             self._chunker.chunk(document),
             max_tokens=self._max_tokens,
@@ -131,22 +158,20 @@ class PassageBuilder:
 
     @staticmethod
     def _read(passages: list[Chunk], language: str | None) -> list[Chunk]:
-        """Adds each passage's language, sentences and lemmas.
+        """Adds each passage's language, numbered units and lemmas.
 
-        The language is detected per passage rather than taken from the
-        document: these documents carry an English summary of a German report
-        and a language switcher in every link, so a document-wide label sends
-        half the passages to the wrong pipeline. A passage too short to judge
-        keeps the document's.
+        The language is detected per passage; one too short to judge keeps
+        the document's. Every passage is read for vocabulary, a table
+        included. Only the numbering differs: a table's rows are numbered
+        rather than its sentences split. Passages are parsed in one batch per
+        language.
 
-        Every passage is read for vocabulary, a table included: its headings
-        and cell values are what it is about, and leaving them out put every
-        table, and so every fact the cell reader draws from one, outside every
-        topic-weighted report. Only the numbering differs - a table is a grid,
-        so its rows are numbered rather than its sentences split.
+        Args:
+            passages: The numbered passages.
+            language: The document's language.
 
-        Passages are parsed in one batch per language, which is where the time
-        goes.
+        Returns:
+            The same passages, each carrying its language, units and lemmas.
         """
         spoken = [
             (index, detect(p.text) or language) for index, p in enumerate(passages)
@@ -194,9 +219,8 @@ class PassageBuilder:
         """Reads one chunk into the values the passages table holds."""
         # Every evidence offset is an index into this string.
         text = chunk.text.strip()
-        # Resolved once and handed to both readers below: each asks which rows
-        # of this table this passage rendered, and the answer has to be the
-        # same for the cells and for the box drawn over them.
+        # Resolved once and handed to both readers below, so the cells and the
+        # box drawn over them agree on which rows this passage rendered.
         tables = _tables_rendered(document, chunk.meta.doc_items, text)
         boxes = _boxes(document, chunk.meta.doc_items, tables)
         return Chunk(
@@ -217,8 +241,8 @@ class PassageBuilder:
 def _block_type(items: list[DocItem]) -> str | None:
     """Labels a passage for the extractor that will read it.
 
-    A table anywhere in a merged passage wins, because sending a table to the
-    model is the more expensive mistake.
+    A table anywhere in a merged passage wins; otherwise the first item's
+    label.
     """
     if not items:
         return None
@@ -230,7 +254,16 @@ def _block_type(items: list[DocItem]) -> str | None:
 def _tables_rendered(
     document: DoclingDocument, items: list[DocItem], rendered: str
 ) -> dict[str, tuple]:
-    """Resolves every table in a passage and the rows this passage renders."""
+    """Resolves every table in a passage and the rows this passage renders.
+
+    Args:
+        document: The converted document.
+        items: The items this passage was cut from.
+        rendered: The rendered passage text.
+
+    Returns:
+        The table and its paired rows, by the item's self reference.
+    """
     numbered = lines_of(rendered)
     tables = {}
     for reference in items:
@@ -249,11 +282,14 @@ def _tables_rendered(
 def _cell_box(table, rows: list[tuple[list, dict | None]]) -> tuple[int, list] | None:
     """Locates the rows of a table that one passage renders.
 
-    A split table points every piece at the whole item, so a box taken from
-    the item covers rows the piece does not show. Header cells are left out
-    although the piece repeats them: they sit at the top of the original
-    table, and including them would stretch the box back over every row in
-    between.
+    Header cells are left out although the piece repeats them.
+
+    Args:
+        table: The resolved table item.
+        rows: Its rows, each paired with the line rendering it or None.
+
+    Returns:
+        The page and the cell boxes on it, or None when either is missing.
     """
     boxes = [
         cell.bbox
@@ -274,8 +310,15 @@ def _boxes(
 ) -> list[dict]:
     """Locates a passage on the pages it spans, one box per page.
 
-    Every box is normalised to a top-left origin: the converter reports text
-    from the bottom left and table cells from the top left.
+    Every box is normalised to a top-left origin.
+
+    Args:
+        document: The converted document.
+        items: The items this passage was cut from.
+        tables: What `_tables_rendered` resolved.
+
+    Returns:
+        One {page, l, t, r, b} per page spanned, in page order.
     """
     by_page: dict[int, list] = {}
     for reference in items:
@@ -314,19 +357,19 @@ def _rendered_rows(
 ) -> list[tuple[list, dict | None]]:
     """Pairs each row of a table with the numbered line that renders it.
 
-    A row matches by position, not by content: every one of its values must
-    sit at its own column index, or a table of repeated counts matches nearly
-    every row. Lines are consumed in order, so two identical rows take two
-    different lines rather than both taking the first.
+    A row matches by position: every one of its values must sit at its own
+    column index. Lines are consumed in order, so two identical rows take two
+    different lines. A data row this passage does not render is dropped.
+    Header rows are kept whether matched or not, and so carry no line; a
+    `row_header` cell does not make its row one.
 
-    A data row this passage does not render is dropped: it belongs to another
-    piece of a split table, and keeping it would let the extractor describe a
-    value with a row the passage never shows. Header rows are kept whether
-    matched or not, and so carry no line.
+    Args:
+        table: The resolved table item.
+        rendered: The rendered passage text.
+        numbered: What `lines_of` found in it.
 
-    A row is not a header row for holding a `row_header` cell: that marks the
-    stub in the first column of an ordinary data row, and reading it as a
-    header left 82% of this corpus's cells with nothing quotable.
+    Returns:
+        One (cells, line) per kept row, in row order.
     """
     lines = [
         line
@@ -368,10 +411,17 @@ def _grids(
 ) -> list[dict]:
     """Reads the cell grid out of every table in a passage.
 
-    Kept because the passage text is enough to retrieve a table and not enough
-    to read one: header flags, position and spans are all lost in the string.
-    Each data cell carries the numbered line it sits in, so the extractor
-    cites a row it was handed rather than searching the text for one.
+    Header flags, position and spans are all lost in the rendered string.
+    Each data cell carries the numbered line it sits in, which is what a fact
+    drawn from it cites.
+
+    Args:
+        document: The converted document.
+        items: The items this passage was cut from.
+        tables: What `_tables_rendered` resolved.
+
+    Returns:
+        One grid per table, each {caption, num_rows, num_cols, cells}.
     """
     grids = []
     for reference in items:

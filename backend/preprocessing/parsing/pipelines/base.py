@@ -20,20 +20,22 @@ class Pipeline(ABC):
     """Converts one family of document formats into a Docling document.
 
     Every pipeline takes the same :class:`SourceDocument` and returns the
-    same :class:`Conversion`, so the service dispatches without learning
-    which format it holds. Anything format-specific - the converter's input
-    stream name, whether `scanned` means anything - belongs to the pipeline
-    that owns the format.
+    same :class:`Conversion`. Anything format-specific belongs to the
+    pipeline that owns the format.
     """
 
-    #: Media types this pipeline handles. A ClassVar rather than an abstract
-    #: property, because a subclass would answer a property with a ClassVar
-    #: anyway - which shadows the descriptor rather than implementing it.
+    #: Media types this pipeline handles.
     media_types: ClassVar[tuple[str, ...]]
 
     @abstractmethod
     def convert(self, source: SourceDocument) -> Conversion:
         """Converts one document.
+
+        Args:
+            source: The stored file and what is known about it.
+
+        Returns:
+            The converted document and its confidences.
 
         Raises:
             ConversionFailed: If the document cannot be converted.

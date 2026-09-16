@@ -178,7 +178,7 @@ def _filtered_figures(
             ),
         ),
         "Shortest on page": (
-            f"{min(lengths):,}",
+            f"{min(lengths):,}" if lengths else "—",
             "characters",
             (
                 "The shortest passage among the rows shown. Very short passages "
@@ -187,7 +187,7 @@ def _filtered_figures(
             ),
         ),
         "Longest on page": (
-            f"{max(lengths):,}",
+            f"{max(lengths):,}" if lengths else "—",
             "characters",
             (
                 "The longest passage among the rows shown. One far above the "
@@ -315,7 +315,9 @@ def _detail(client, row: dict) -> None:
                     if cell["row_header"]
                     else "—",
                     "Text": cell["text"],
-                    "Cites row": "—" if cell["line"] is None else cell["line"],
+                    # A string either way: a column mixing one with a number
+                    # is not a column the table can render.
+                    "Cites row": "—" if cell["line"] is None else str(cell["line"]),
                 }
                 for cell in grid["cells"]
             ],

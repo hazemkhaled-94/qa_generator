@@ -1,4 +1,4 @@
-"""Reading a PDF, the one thing in this package that needs a PDF library."""
+"""Reading a PDF's page and character counts."""
 
 from __future__ import annotations
 
@@ -18,19 +18,21 @@ class UnreadablePdf(Exception):
 def read_pdf(data: bytes) -> PdfFacts:
     """Opens a PDF and counts its pages and extractable characters.
 
-    Takes about a second, so the upload can answer while the user is still
-    watching; the structural parse is a separate stage.
+    Args:
+        data: The raw file bytes.
+
+    Returns:
+        The page and character counts.
 
     Raises:
         UnreadablePdf: If the file is encrypted, corrupt or otherwise cannot
-            be opened, which Docling would not manage either.
+            be opened.
     """
     try:
         with pymupdf.open(stream=data, filetype="pdf") as document:
             if document.needs_pass:
                 raise UnreadablePdf("the PDF is password protected")
-            # Summed page by page, so a long document's text is never all
-            # held at once for the sake of two integers.
+            # Summed page by page, so no document's text is held all at once.
             return PdfFacts(
                 page_count=document.page_count,
                 char_count=sum(len(page.get_text()) for page in document),

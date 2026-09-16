@@ -23,11 +23,15 @@ span = tracer(__name__)
 def revocabulary(catalog: PassageCatalog, within=None) -> int:
     """Reads every stored passage's language and vocabulary again, in place.
 
-    The same two readings chunking makes, over passages already stored: the
-    language is detected per passage and falls back to the document's, and
-    the vocabulary is read with the pipeline that language names. Applies a
-    change to either without re-chunking, which would delete every passage
-    and take its facts with it.
+    The same two readings chunking makes, over passages already stored, so a
+    change to either reaches the topic model without re-chunking.
+
+    Args:
+        catalog: Where the passages are read and written.
+        within: A condition narrowing which passages, or None for all.
+
+    Returns:
+        Passages rewritten.
     """
     passages = catalog.texts(within)
     if not passages:
@@ -35,13 +39,16 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
         return 0
 
     # Detected first, so each passage is read by the pipeline for the language
-    # it is actually in, and one batch is parsed per language.
+    # it is in, and one batch is parsed per language.
     spoken = [
         (passage_id, text, detect(text) or fallback)
         for passage_id, text, fallback in passages
     ]
     written = 0
-    for language, group in groupby(sorted(spoken, key=_spoken), key=_spoken):
+    for grouped, group in groupby(sorted(spoken, key=_spoken), key=_spoken):
+        # Back to NULL: the key is "" for a passage with no language, and the
+        # column takes no empty string.
+        language = grouped or None
         batch = list(group)
         found: list[tuple[int, str | None, list[str]]] = [
             (passage_id, language, terms)
@@ -65,11 +72,7 @@ def _spoken(row: tuple[int, str, str | None]) -> str:
 
 
 class ParsedStore(Protocol):
-    """What this service needs from the store holding converted documents.
-
-    Declared here rather than imported from blob_store, so the dependency
-    points inwards.
-    """
+    """What this service needs from the store holding converted documents."""
 
     def key_for(self, sha256: str) -> str:
         """Returns the key a converted document is stored under."""
@@ -97,14 +100,25 @@ class ChunkingService(StageService):
         parsed: ParsedStore,
         builder: PassageBuilder,
     ) -> None:
-        """Initialises the service with its collaborators."""
+        """Initialises the service with its collaborators.
+
+        Args:
+            repository: The chunking queue.
+            parsed: Where the converted documents are.
+            builder: Cuts a document into passages.
+        """
         super().__init__(repository)
         self._repository: ChunkQueue = repository
         self._parsed = parsed
         self._builder = builder
 
     def process_next(self) -> str | None:
-        """Chunks one queued document, recording a failure against the row."""
+        """Chunks one queued document, recording a failure against the row.
+
+        Returns:
+            The digest of the document worked, or None when the queue is
+            empty.
+        """
         claimed = self._repository.claim()
         if claimed is None:
             return None
@@ -121,7 +135,13 @@ class ChunkingService(StageService):
         return claimed.sha256
 
     def _chunk(self, sha256: str, language: str | None, current: Span) -> None:
-        """Cuts one claimed document into passages and stores them."""
+        """Cuts one claimed document into passages and stores them.
+
+        Args:
+            sha256: The document's digest.
+            language: The document's language.
+            current: The span to annotate.
+        """
         document = DoclingDocument.model_validate_json(
             self._parsed.get(self._parsed.key_for(sha256))
         )
@@ -138,8 +158,8 @@ class ChunkingService(StageService):
             sum(len(passage.sentences) for passage in chunking.passages),
         )
         if chunking.oversized:
-            # Loud on purpose: the chunker splits on this budget, so a passage
-            # above it means the split did not happen.
+            # A passage above the budget means the chunker's split did not
+            # happen.
             log.warning(
                 "%d passage(s) of %s came back over the token budget and were "
                 "stored anyway; they will be truncated when embedded.",

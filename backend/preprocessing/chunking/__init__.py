@@ -5,6 +5,6 @@ bucket, cuts it into passages carrying their heading trail, pages, block
 type, table cells, sentences and lemmas, and replaces whatever passages the
 document had before.
 
-Nothing is re-exported here: a caller naming a submodule pays for that
-submodule alone, which is what keeps Docling out of the API.
+Nothing is re-exported: a caller names the submodule it wants, which is what
+keeps Docling out of the API process.
 """

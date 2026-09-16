@@ -1,8 +1,4 @@
-"""Wiring for the parsing service.
-
-Separate from `run` so the worker's entry point is the flags and nothing
-else. The API builds no stage service: it only reads and writes the queue.
-"""
+"""Wiring for the parsing service."""
 
 from __future__ import annotations
 
@@ -17,8 +13,11 @@ from preprocessing.parsing.service import ParsingService
 def build_service(settings: Settings) -> ParsingService:
     """Wires the service and its collaborators.
 
-    Constructing this loads Docling's layout and table models, so build it
-    once and when it is first needed.
+    Args:
+        settings: The loaded parsing settings.
+
+    Returns:
+        The service. Its converter is built on first use, not here.
     """
     return ParsingService(
         repository=ParseQueue(),

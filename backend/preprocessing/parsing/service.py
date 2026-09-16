@@ -33,11 +33,7 @@ span = tracer(__name__)
 
 
 class SourceStore(Protocol):
-    """What this service needs from the store holding source documents.
-
-    Declared here rather than imported from blob_store, so the dependency
-    points inwards.
-    """
+    """What this service needs from the store holding source documents."""
 
     def key_for(self, sha256: str, media_type: str) -> str:
         """Returns the key a document of this type is stored under."""
@@ -71,8 +67,7 @@ class ParsingService(StageService):
     """Converts stored documents into structured ones, one at a time.
 
     The order is fixed: dispatch on the media type recorded at ingest,
-    convert, store the converted document, and only then read out of it, so
-    a bug in the analysis does not mean paying for the conversion twice.
+    convert, store the converted document, and only then read out of it.
 
     Work arrives through documents.parse_status.
     """
@@ -91,7 +86,18 @@ class ParsingService(StageService):
         ocr_char_threshold: int,
         min_confidence: float,
     ) -> None:
-        """Initialises the service with its collaborators."""
+        """Initialises the service with its collaborators.
+
+        Args:
+            repository: The parsing queue.
+            documents: Where the uploaded files are.
+            parsed: Where the converted documents go.
+            pipelines: One pipeline per media type.
+            analyser: Reads the converted document.
+            ocr_char_threshold: Characters per page below which a document
+                counts as scanned.
+            min_confidence: Lowest confidence a conversion may carry.
+        """
         super().__init__(repository)
         self._repository: ParseQueue = repository
         self._documents = documents
@@ -104,8 +110,11 @@ class ParsingService(StageService):
     def process_next(self) -> str | None:
         """Parses one queued document.
 
-        A failure is recorded against the document rather than raised, so one
-        unreadable file does not stop a batch.
+        A failure is recorded against the document rather than raised.
+
+        Returns:
+            The digest of the document worked, or None when the queue is
+            empty.
         """
         document = self._repository.claim()
         if document is None:
@@ -132,10 +141,16 @@ class ParsingService(StageService):
     def _parse(self, document: ClaimedDocument, current: Span) -> None:
         """Runs one claimed document through its pipeline.
 
+        Args:
+            document: The document taken off the queue.
+            current: The span to annotate.
+
         Raises:
             UnsupportedFormat: If no pipeline handles the media type.
             ConversionFailed: If the pipeline could not convert the file.
             EmptyDocument: If the conversion yielded no body text.
+            Unconvincing: If the conversion's confidence is below the floor.
+            AlreadyHeld: If another document holds the same text.
         """
         pipeline = self._pipelines.for_media_type(document.media_type)
         scanned = self._is_scanned(document)
@@ -177,10 +192,10 @@ class ParsingService(StageService):
         )
 
     def _trustworthy(self, parsed: ParsedDocument) -> None:
-        """Refuses a conversion the converter itself is unsure of.
+        """Refuses a conversion whose lower-bound confidence is under the floor.
 
-        Judged on the lower bound rather than the mean, which is the figure
-        that says how bad the worst of the document is.
+        Args:
+            parsed: What the analyser read.
 
         Raises:
             Unconvincing: If the lower bound is under PARSING_MIN_CONFIDENCE.
@@ -197,6 +212,10 @@ class ParsingService(StageService):
     def _unheld(self, sha256: str, parsed: ParsedDocument) -> None:
         """Refuses a document whose text the corpus already holds.
 
+        Args:
+            sha256: The document being parsed.
+            parsed: What the analyser read.
+
         Raises:
             AlreadyHeld: If another document has the same content digest.
         """
@@ -211,7 +230,14 @@ class ParsingService(StageService):
     def _is_scanned(self, document: ClaimedDocument) -> bool:
         """Decides whether a document carries a text layer worth reading.
 
-        Read from the counts ingestion already took, so it costs nothing.
+        Read from the counts ingestion already took.
+
+        Args:
+            document: The document taken off the queue.
+
+        Returns:
+            True when there is less than PARSING_OCR_CHAR_THRESHOLD of text
+            per page, or nothing was counted.
         """
         if document.char_count is None or not document.page_count:
             return True

@@ -26,10 +26,8 @@ class IngestService:
     """Accepts one uploaded file and decides what becomes of it.
 
     Checks run cheapest first and nothing is written until all of them pass.
-    Duplicate detection is byte-exact; the same content under different
-    bytes is parsing's `content_sha256` to answer.
-
-    Deleting a document is not here: see :class:`RemovalService`.
+    Duplicate detection is byte-exact. Deleting a document is
+    :class:`RemovalService`.
     """
 
     def __init__(
@@ -43,9 +41,16 @@ class IngestService:
     ) -> None:
         """Initialises the service with its collaborators.
 
+        Args:
+            repository: Where documents and ingest events are written.
+            store: Where the accepted bytes are put.
+            max_file_size_bytes: Largest upload accepted.
+            allowed_media_types: Media types to store, each of DETECTABLE.
+            pipeline_version: Recorded in the stored object's metadata.
+
         Raises:
             ValueError: If the allowlist names a type this build cannot
-                detect, which would read as support that does not exist.
+                detect.
         """
         unknown = set(allowed_media_types) - DETECTABLE
         if unknown:
@@ -62,13 +67,22 @@ class IngestService:
 
     @property
     def max_file_size_bytes(self) -> int:
-        """Largest upload accepted, so a caller can refuse one unread."""
+        """Largest upload accepted."""
         return self._max_file_size_bytes
 
     def documents(
         self, search: str | None = None, limit: int = 100, offset: int = 0
     ) -> tuple[int, list[StoredDocument]]:
-        """Lists one page of what has been ingested, and the total behind it."""
+        """Lists one page of what has been ingested, and the total behind it.
+
+        Args:
+            search: Matched against filename, title and digest.
+            limit: Rows to return.
+            offset: Rows to skip.
+
+        Returns:
+            The total matching the search, and the requested page.
+        """
         return self._repository.page(search, limit, offset)
 
     def document_names(self) -> list[DocumentName]:
@@ -78,8 +92,14 @@ class IngestService:
     def stored_file(self, sha256: str) -> tuple[bytes, str] | None:
         """Reads one stored document back, exactly as it was uploaded.
 
-        The digest is looked up before it is used to build an object key, so
-        an unknown one never reaches the store.
+        The digest is looked up before it becomes an object key.
+
+        Args:
+            sha256: The document's digest.
+
+        Returns:
+            The bytes and their media type, or None if no document has that
+            digest.
         """
         media_type = self._repository.media_type(sha256)
         if media_type is None:
@@ -90,6 +110,12 @@ class IngestService:
         """Runs one upload through every check and stores it if they pass.
 
         Every path records an ingest_events row, refusals included.
+
+        Args:
+            upload: The file as it arrived.
+
+        Returns:
+            What became of the upload.
         """
         with span.start_as_current_span("ingest") as current:
             current.set_attribute("upload.filename", upload.filename)
@@ -103,8 +129,15 @@ class IngestService:
     def refuse_oversized(self, filename: str, size_bytes: int) -> IngestResult:
         """Refuses an upload on its declared size, without reading the body.
 
-        Writes only the ingest_events row: with no bytes there is no digest
+        Writes the ingest_events row only: with no bytes there is no digest
         and no document.
+
+        Args:
+            filename: Name the file was submitted under.
+            size_bytes: Size the request declared.
+
+        Returns:
+            A TOO_LARGE result carrying the measurement.
         """
         detail = self._over_limit(size_bytes)
         self._repository.record_attempt(filename, size_bytes, Outcome.TOO_LARGE, detail)
@@ -138,7 +171,7 @@ class IngestService:
             return self._attempted(upload, Outcome.UNSUPPORTED_TYPE, str(exc))
 
         # Object before row: the key is content-addressed, so an object with
-        # no row is harmless, and a row with no object is not.
+        # no row is harmless and a row with no object is not.
         self._store.put(
             self._store.key_for(upload.sha256, upload.media_type),
             upload.data,
@@ -146,8 +179,7 @@ class IngestService:
             metadata=self._metadata(upload),
         )
 
-        # If the row cannot be written, take the object back out: nothing
-        # would reference it and nothing would ever collect it.
+        # An unwritable row takes its object back out.
         try:
             outcome = self._repository.store(upload, facts)
         except Exception:
@@ -197,8 +229,8 @@ class IngestService:
     def _metadata(self, upload: UploadedFile) -> dict[str, str]:
         """Builds the S3 user metadata for a document.
 
-        Enough for the bucket alone to rebuild the database. Nothing mutable
-        is included: S3 metadata cannot change without rewriting the object.
+        Enough for the bucket alone to rebuild the row. Nothing mutable is
+        included.
         """
         return {
             "sha256": upload.sha256,

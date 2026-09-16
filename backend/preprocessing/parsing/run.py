@@ -1,7 +1,7 @@
 """Command-line entry point for the parsing service.
 
-Every flag is the same operation as the route beside it under /parsing.
-Run with --help for the list.
+Every flag is the same operation as the route beside it under /parsing. Run
+with --help for the list.
 """
 
 from __future__ import annotations
@@ -15,7 +15,14 @@ from stages.cli import queue_main
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Runs the parsing command line."""
+    """Runs the parsing command line.
+
+    Args:
+        argv: Arguments to parse, defaulting to the process's own.
+
+    Returns:
+        The process exit code.
+    """
     settings = Settings.load()
     return queue_main(
         name="parsing",

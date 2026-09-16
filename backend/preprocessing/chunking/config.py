@@ -11,7 +11,11 @@ from settings import boolean, integer, required
 class Settings:
     """Runtime configuration, read from the environment.
 
-    Connection settings are absent: database and blob_store own theirs.
+    Attributes:
+        embedding_model: The model whose tokenizer sizes a passage.
+        max_tokens: The token budget a passage is cut to.
+        merge_peers: Whether to combine undersized neighbours that share a
+            heading.
     """
 
     embedding_model: str
@@ -20,7 +24,10 @@ class Settings:
 
     @classmethod
     def load(cls) -> Settings:
-        """Reads settings from the environment.
+        """Reads the settings from the environment.
+
+        Returns:
+            The loaded settings.
 
         Raises:
             KeyError: If any required setting is missing.
