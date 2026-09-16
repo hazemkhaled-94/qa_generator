@@ -141,10 +141,11 @@ cannot be half-right. What a statement asserts is read off its spaCy parse
 rather than guessed from how many words it shares with its source. There are
 no similarity thresholds anywhere in this service.
 
-First the citation is resolved. An atomic fact cites sentences; a summary, an
-outline and a bridge stand in for whole passages and cite all of them. If the
-citation names nothing that exists, that is `evidence_absent` and no further
-check runs.
+First the citation is resolved. An atomic fact cites sentences of its passage;
+a summary and an outline stand in for a whole passage and cite all of them; a
+bridge cites sentences in each of the passages it rests on. If the citation
+names nothing that exists, that is `evidence_absent` and no further check
+runs.
 
 Then the checks the candidate's kind calls for, in order, first failure
 winning:
@@ -214,18 +215,33 @@ many files as the topic does; the groups are then strided over the whole
 topic rather than taken from its start, so a large topic is sampled across
 rather than at its head.
 
-The model is shown the group as `[P0]`, `[P1]`, … and answers with a claim
-plus the *numbers* of the passages it rests on. It is told explicitly not to
-compute: a total nobody wrote down is not in the material, and would be
-refused as `unsupported_addition` anyway, since the arithmetic result appears
-in no passage.
+The model is shown the group as `[P0]`, `[P1]`, … with the sentences numbered
+inside each one, and answers with a claim plus, per passage, the *numbers* of
+the sentences it read it in. It is told explicitly not to compute: a total
+nobody wrote down is not in the material, and would be refused as
+`unsupported_addition` anyway, since the arithmetic result appears in no
+passage.
 
-A bridge is stored anchored to the first passage it rests on. That anchor is
-its `passage_id`, so it lists, filters, cascades and joins exactly like every
-other fact; the full group is in `fact_passages`. A trigger deletes a bridge
-that falls below two passages, because re-chunking one side of it cascades to
-the link table and not to the fact, which would otherwise leave a claim
-bridging nothing.
+Those citations are what a bridge is judged against. The vocabulary ADD
+NOTHING reads is the cited spans rather than the whole of every passage, and
+`not_bridging` counts the passages that *resolved* rather than the ones that
+were named: a claim naming two and citing a real sentence in only one of them
+rests on one passage.
+
+A bridge is stored anchored to the first passage it cites. That anchor is its
+`passage_id`, so it lists, filters, cascades and joins exactly like every
+other fact, and its own evidence columns hold the span it cited there. The
+rest is in `fact_passages`, one row per passage with the sentences and the
+span in each. A trigger deletes a bridge that falls below two passages,
+because re-chunking one side of it cascades to the link table and not to the
+fact, which would otherwise leave a claim bridging nothing.
+
+A bridge drawn under prompt version 1 recorded no sentence numbers, so its
+`fact_passages` rows carry no citation. Nothing can fill them in. Such a row
+is left exactly as it is: `--revalidate` skips it rather than resolving
+nothing and refusing it, and question generation does not offer it, because
+there would be nothing to show the verifier. Re-running this pass replaces
+it.
 
 Re-running the pass replaces what the previous one wrote rather than adding
 to it.
@@ -263,7 +279,8 @@ call.
   evidence text and span, cited sentence ids, kind, method, verdict,
   rejection code and message, everything the checks read, and full
   provenance: model, prompt version, temperature, spaCy model and version.
-- `fact_passages` — one row per passage a bridge rests on, anchor first.
+- `fact_passages` — one row per passage a bridge rests on, anchor first, each
+  carrying the sentences and the span the claim rests on there.
 - `passages.extract_status`, `extract_error`, `extract_claimed_at`.
 
 **Serves**
@@ -279,9 +296,10 @@ call.
 
 **Invariant every reader can rely on:** for every fact,
 `passages.text[evidence_start:evidence_end] == evidence_text`, where the
-passage is `facts.passage_id`. It holds for all four kinds; a bridge's
-evidence is the whole of its anchor, and the rest of its group is reached
-through `fact_passages`.
+passage is `facts.passage_id`. It holds for all four kinds. A bridge carries
+the same invariant once per passage in `fact_passages`:
+`passages.text[evidence_start:evidence_end] == the text it was read in`, for
+every row whose citation was recorded.
 
 ## Configuration
 

@@ -801,3 +801,122 @@ def test_a_bridge_left_resting_on_one_passage_is_never_offered(corpus, engine) -
     fact_id = _bridge(engine, anchor)
 
     assert fact_id not in _passages_of(engine, topic_id)
+
+
+def _settings(**overrides):
+    """The question settings a re-check reads, with nothing served."""
+    from question_generation.config import Settings
+
+    return Settings(
+        per_topic=4,
+        sample_size=4,
+        fact_kinds=("atomic", "bridge"),
+        type_mix={"factoid": 1},
+        difficulty_mix={"easy": 1},
+        followup_types=("condition",),
+        unanswerable_share=0.25,
+        followup_share=0.5,
+        max_followups=2,
+        answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+        answer_overlap=0.6,
+        long_answer_chars=60,
+        duplicate_cosine=0.93,
+        embedding_model="stub",
+        max_tokens=512,
+        verifier_model="ollama/verifier",
+        **overrides,
+    )
+
+
+def test_a_re_check_leaves_a_bridge_backed_question_accepted(engine, database) -> None:
+    """The scopes it was stored with are the ones the re-check reads back.
+
+    A bridge rests on two passages through one fact. Counted the old way -
+    one passage per fact - the re-check would read `single_passage` off a
+    question stored `multi_passage` and reject every one of them as
+    `source_changed` on its first run.
+    """
+    from question_generation.repository import QuestionCatalog
+    from question_generation.service import reverify
+
+    with Session(engine) as session:
+        session.add_all([document(digest("a")), document(digest("b"))])
+        session.flush()
+        here = passage(digest("a"), ordinal=1, language="en")
+        there = passage(digest("b"), ordinal=1, language="en")
+        session.add_all([here, there])
+        session.flush()
+        spanning = fact(here.id, statement="Both kinds are answered on a clock.")
+        session.add(spanning)
+        session.flush()
+        asked = question(
+            question_text="Which kinds of request are answered on a clock?",
+            target_answer="standard and urgent",
+            status="accepted",
+            difficulty="hard",
+            passage_scope="multi_passage",
+            document_scope="cross_document",
+            topic_scope="single_topic",
+            answer_chars=19,
+        )
+        session.add(asked)
+        session.flush()
+        session.add(QuestionFact(question_id=asked.id, fact_id=spanning.id))
+        session.commit()
+        asked_id, fact_id = asked.id, spanning.id
+        anchor, other = here.id, there.id
+
+    _bridge(engine, anchor, other)
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE facts SET kind = 'bridge' WHERE id = :id"), {"id": fact_id}
+        )
+
+    assert reverify(QuestionCatalog(), _settings()) == 0, (
+        "the re-check rejected a question nothing had changed under"
+    )
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT status, rejected_reason FROM questions WHERE id = :id"),
+            {"id": asked_id},
+        ).one()
+    assert (row.status, row.rejected_reason) == ("accepted", None)
+
+
+def test_a_bridge_backed_question_is_found_by_either_of_its_documents(
+    engine, database
+) -> None:
+    """The page must not contradict the cross_document it was stored with."""
+    from question_generation.repository import QuestionCatalog
+
+    with Session(engine) as session:
+        session.add_all([document(digest("a")), document(digest("b"))])
+        session.flush()
+        here = passage(digest("a"), ordinal=1, language="en")
+        there = passage(digest("b"), ordinal=1, language="en")
+        session.add_all([here, there])
+        session.flush()
+        spanning = fact(here.id, statement="Both kinds are answered on a clock.")
+        session.add(spanning)
+        session.flush()
+        asked = question(question_text="Which kinds?", status="accepted")
+        session.add(asked)
+        session.flush()
+        session.add(QuestionFact(question_id=asked.id, fact_id=spanning.id))
+        session.commit()
+        fact_id, anchor, other = spanning.id, here.id, there.id
+
+    _bridge(engine, anchor, other)
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE facts SET kind = 'bridge' WHERE id = :id"), {"id": fact_id}
+        )
+
+    catalog = QuestionCatalog()
+    assert catalog.page(document=digest("a"))[0] == 1
+    assert catalog.page(document=digest("b"))[0] == 1, "its other half"
+    # Unfiltered, so the aggregate sees every passage: a document filter
+    # narrows the joined rows and so narrows this list too, which is how the
+    # listing has always read.
+    _, listed = catalog.page()
+    assert sorted(listed[0].documents) == sorted([digest("a"), digest("b")])
