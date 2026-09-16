@@ -1,7 +1,9 @@
-"""Each page, run against a scripted backend.
+"""The rules every page keeps, checked on every page.
 
-A page that raises renders a Streamlit traceback and nothing else, so the
-thing worth asserting is that a refusal reaches the reader as a message.
+The pages differ in what they list and which stage they run. Everything else
+about them is deliberately the same, and that sameness is what these cover:
+one service per page, one row of figures, nothing below the table until a
+row is picked, and no page reaching into another page's stage.
 """
 
 from __future__ import annotations
@@ -9,642 +11,443 @@ from __future__ import annotations
 import pytest
 import requests
 from conftest import Answers
+from pages import (
+    LISTING,
+    OWNED,
+    QUESTION,
+    QUESTION_SOURCE,
+    SHA,
+    View,
+    answers,
+    changed,
+    status,
+)
 
 pytestmark = pytest.mark.frontend
 
-#: What the backend answers when it is down.
-UNREACHABLE = requests.exceptions.ConnectionError("connection refused")
+#: Every page, including the two that list nothing.
+EVERY = (*LISTING, "upload", "health")
 
-HEALTHY = {
-    "database": {"ok": True, "detail": "Connected, schema applied.", "metrics": {}},
-    "object_store": {
-        "ok": True,
-        "detail": "documents, export, parsed",
-        "metrics": {"documents": 2, "parsed": 1, "export": 0},
+#: A question the gates have not judged, so Accept is live on it.
+QUESTION_DRAFT = changed(QUESTION, status="draft", rejected_reason=None)
+
+#: What the two pages outside the catalogue are stubbed with.
+OUTSIDE = {
+    "upload": {"upload_api": Answers(counts={"documents": 3, "upload_attempts": 5})},
+    "health": {
+        "health_api": Answers(
+            reachable=(True, "Reachable."),
+            components={
+                "database": {"ok": True, "detail": "Connected.", "metrics": {}},
+                "ingestion": {
+                    "ok": True,
+                    "detail": "Documents held.",
+                    "metrics": {"documents": 3, "upload_attempts": 5},
+                },
+            },
+        )
     },
-    "ingestion": {"ok": True, "detail": "Documents held.", "metrics": {"documents": 2}},
-}
-
-EMPTY_PAGE = {
-    "total": 0,
-    "documents": [],
-    "passages": [],
-    "facts": [],
-    "questions": [],
-}
-
-#: One accepted question, as /questions returns it.
-QUESTION = {
-    "id": 1,
-    "question_text": "Within how many hours is a standard request answered?",
-    "target_answer": "48 hours",
-    "answerable": True,
-    "difficulty": "hard",
-    "passage_scope": "multi_passage",
-    "document_scope": "cross_document",
-    "topic_scope": "multi_topic",
-    "answer_chars": 8,
-    "thread_position": 1,
-    "follows_id": None,
-    "question_type": "comparison",
-    "answer_form": "list",
-    "planned_difficulty": "hard",
-    "language": "en",
-    "status": "accepted",
-    "rejected_reason": None,
-    "created_at": "2026-09-14T10:00:00",
-    "facts": 2,
-    "documents": ["a" * 64, "b" * 64],
-    "topics": ["Support"],
-}
-
-#: What /questions/quality returns for that one question.
-QUESTION_QUALITY = {
-    "total": 1,
-    "accepted": 1,
-    "draft": 0,
-    "unanswerable": 0,
-    "topics_covered": 1,
-    "topics_in_coverage": 2,
-    "followups": 0,
-    "mean_question_chars": 54.0,
-    "mean_answer_chars": 8.0,
-    "rejected": {},
-    "difficulty": {"hard": 1},
-    "passage_scope": {"multi_passage": 1},
-    "document_scope": {"cross_document": 1},
-    "topic_scope": {"multi_topic": 1},
-    "question_type": {"comparison": 1},
-    "answer_form": {"list": 1},
-    "planned_difficulty": {"hard": 1},
-    "planned_met": 1,
-}
-
-#: What /questions/plan returns: the mix that was asked for.
-QUESTION_PLAN = {
-    "types": {"factoid": 3, "comparison": 1},
-    "difficulty": {"easy": 2, "hard": 1},
-    "followup_types": ["condition", "reason"],
-    "per_topic": 20,
-    "unanswerable_share": 0.25,
-    "followup_share": 0.3,
-    "max_followups": 2,
-    "answer_chars": {"value": [1, 80], "list": [3, 300], "explanation": [20, 600]},
 }
 
 
-def text_of(app) -> str:
-    """Everything the page rendered, as one string."""
-    parts = []
-    for kind in (
-        "markdown",
-        "text",
-        "info",
-        "warning",
-        "error",
-        "caption",
-        "title",
-        "subheader",
-    ):
-        parts += [element.value for element in getattr(app, kind)]
-    return " ".join(str(part) for part in parts)
+def opened(run_view, name: str) -> View:
+    """Opens any page, whichever client it happens to hold."""
+    clients = OUTSIDE.get(name) or {"catalog_api": Answers(**answers())}
+    return View(run_view(name, **clients), name)
 
 
-def test_the_health_page_draws_the_figures_the_backend_reports(run_view) -> None:
-    """The panel renders whatever is there without knowing the names.
+# ── Every page ────────────────────────────────────────────────────────────
 
-    A component reporting no figures - the database - contributes a card
-    and no metric, which is why this counts the figures rather than the
-    components.
+
+@pytest.mark.parametrize("name", EVERY)
+def test_a_page_renders(run_view, name) -> None:
+    """Top to bottom, without raising."""
+    assert opened(run_view, name).raised == []
+
+
+@pytest.mark.parametrize("name", EVERY)
+def test_a_page_draws_no_progress_bar(run_view, name) -> None:
+    """A queue's depth is a number and a spinner, never a filling bar."""
+    assert opened(run_view, name).progress_bars() == []
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_opens_an_analysis_fold_rather_than_spilling_it(run_view, name) -> None:
+    """Everything beyond the headline figures is folded away on arrival."""
+    assert opened(run_view, name).folds() == ["Analysis"]
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_every_page_is_laid_out_the_same_way(run_view, name) -> None:
+    """Overview, the service, search, filters, the table. In that order.
+
+    Topics carries a sixth: its deletion is over the whole model rather
+    than over a row, so the box is on the page and not in a selection.
     """
-    app = run_view(
-        "health",
-        health_api=Answers(reachable=(True, "ok"), components=HEALTHY),
-    )
+    drawn = opened(run_view, name).panels()
 
-    assert not app.exception
-    drawn = [element.value for element in app.metric]
-    assert drawn == ["2", "1", "0", "2"], drawn
+    assert [drawn[0], *drawn[2:4]] == ["Overview", "Search", "Filters"], drawn
+    assert drawn[4].lower().startswith(name), drawn
+    assert drawn[5:] in ([], ["Delete"]), drawn
 
 
-def test_the_health_page_names_each_group_of_figures(run_view) -> None:
-    """One heading per component that has any."""
-    app = run_view(
-        "health",
-        health_api=Answers(reachable=(True, "ok"), components=HEALTHY),
-    )
-
-    headings = [element.value for element in app.markdown]
-    assert "##### Object Store" in headings, headings
-    assert "##### Ingestion" in headings, headings
-
-
-def test_the_health_page_survives_a_backend_that_is_down(run_view) -> None:
-    """The one page that must render when nothing else can."""
-    app = run_view(
-        "health",
-        health_api=Answers(
-            reachable=(False, "connection refused"), components=UNREACHABLE
-        ),
-    )
-
-    assert not app.exception, "the health page raised instead of reporting"
-
-
-@pytest.mark.parametrize(
-    ("view", "factory"),
-    [
-        ("documents", "catalog_api"),
-        ("passages", "catalog_api"),
-        ("facts", "catalog_api"),
-        ("questions", "catalog_api"),
-    ],
-)
-def test_a_listing_page_renders_when_the_corpus_is_empty(
-    run_view, view, factory
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_names_its_service_between_the_figures_and_the_search(
+    run_view, name
 ) -> None:
-    """The first thing a new deployment shows."""
-    app = run_view(
-        view,
-        **{
-            factory: Answers(
-                documents=EMPTY_PAGE,
-                passages=EMPTY_PAGE,
-                facts=EMPTY_PAGE,
-                fact_quality={},
-                questions=EMPTY_PAGE,
-                question_quality=QUESTION_QUALITY,
-                question_plan=QUESTION_PLAN,
-                document_names=[],
-                passage_types=[],
-                stage_status={"stage": view, "working": False, "rows": {}},
-            )
-        },
-    )
+    """So a reader finds the controls in the same place on every page."""
+    drawn = opened(run_view, name).panels()
 
-    assert not app.exception, app.exception
+    assert drawn[1].lower().startswith(OWNED[name][:5]), drawn
 
 
-@pytest.mark.parametrize(
-    ("view", "factory"),
-    [
-        ("documents", "catalog_api"),
-        ("passages", "catalog_api"),
-        ("facts", "catalog_api"),
-        ("topics", "catalog_api"),
-        ("questions", "catalog_api"),
-        ("upload", "upload_api"),
-    ],
-)
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_shows_a_handful_of_figures_and_no_more(run_view, name) -> None:
+    """The first section carries what is worth seeing, not everything."""
+    assert len(opened(run_view, name).stats()) <= 5
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_every_figure_says_what_it_counts(run_view, name) -> None:
+    """A figure cannot reach the page without a line saying what it is."""
+    unexplained = [
+        label
+        for label, text in opened(run_view, name).explanations().items()
+        if not text
+    ]
+
+    assert not unexplained
+
+
+@pytest.mark.parametrize("name", EVERY)
 def test_a_page_reports_an_unreachable_backend_rather_than_raising(
-    run_view, view, factory
+    run_view, name
 ) -> None:
-    """Every call the page makes fails; the reader is told, not shown a stack."""
-    app = run_view(
-        view,
-        **{
-            factory: Answers(
-                documents=UNREACHABLE,
-                passages=UNREACHABLE,
-                facts=UNREACHABLE,
-                fact_quality=UNREACHABLE,
-                questions=UNREACHABLE,
-                question_quality=UNREACHABLE,
-                question_plan=UNREACHABLE,
-                document_names=UNREACHABLE,
-                passage_types=UNREACHABLE,
-                topics=UNREACHABLE,
-                fit=UNREACHABLE,
-                stage_status=UNREACHABLE,
-                add_document=UNREACHABLE,
-            )
-        },
+    """Streamlit would otherwise replace the page with a stack trace."""
+    down = requests.exceptions.ConnectionError("backend is down")
+    clients = (
+        {"catalog_api": Answers(**dict.fromkeys(answers(), down))}
+        if name in LISTING
+        else {
+            "upload_api": Answers(counts=down),
+            "health_api": Answers(reachable=(False, "down"), components={}),
+        }
     )
+    page = View(run_view(name, **clients), name)
 
-    assert not app.exception, f"{view} raised: {app.exception}"
+    assert page.raised == []
+    assert "Failed to load" in page.text() or "unreachable" in page.text().lower()
 
 
-def test_the_documents_page_lists_what_the_backend_returns(run_view) -> None:
-    """The listing is drawn from the answer, not from a second call."""
-    held = {
-        "sha256": "a" * 64,
-        "filename": "annual-report.pdf",
-        "title": "Annual Report",
-        "page_count": 12,
-        "language": "en",
-        "parse_status": "parsed",
-        "parse_error": None,
-        "chunk_status": "chunked",
-        "chunk_error": None,
-        "extracted_passages": 3,
-        "total_passages": 5,
-        "first_seen": "2026-09-14T10:00:00",
-        "oversized": 0,
+# ── One service per page ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_runs_its_own_stage_and_no_other(run_view, name) -> None:
+    """The rule the whole layout is built on.
+
+    Read off the controls themselves: every queue button is keyed with the
+    stage it moves, so a page carrying a control for somebody else's stage
+    says so in its own keys.
+    """
+    page = opened(run_view, name)
+    verbs = ("start", "stop", "retry", "rerun", "discover")
+
+    moved = {
+        key.split("-")[1]
+        for key in page.control_keys()
+        if key and key.split("-")[0] in verbs
     }
-    app = run_view(
-        "documents",
-        catalog_api=Answers(
-            documents={"total": 1, "documents": [held]},
-            document_names=[{"sha256": "a" * 64, "filename": "annual-report.pdf"}],
-            stage_status={"stage": "parsing", "working": False, "rows": {}},
-            fact_quality={},
+
+    assert moved == {OWNED[name]}, page.control_keys()
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_can_run_its_stage_over_everything_at_once(run_view, name) -> None:
+    """Each service is startable for the whole corpus, not row by row."""
+    page = opened(run_view, name)
+
+    assert page.button("Start all") or page.button("Fit all"), sorted(page.buttons())
+
+
+@pytest.mark.parametrize("name", ("documents", "passages", "facts", "questions"))
+def test_a_stage_that_queues_rows_offers_the_four_verbs(run_view, name) -> None:
+    """Start, Stop, Retry and Redo, whichever page the stage is on."""
+    offered = set(opened(run_view, name).buttons())
+
+    assert {"Start all", "Stop", "Retry", "Redo all"} <= offered
+
+
+def test_the_topics_page_offers_a_fit_rather_than_a_start(run_view) -> None:
+    """A fit is all-or-nothing, so it has no per-topic form and no redo."""
+    page = opened(run_view, "topics")
+
+    assert page.button("Fit all")
+    assert page.button("Redo all") is None
+
+
+# ── Search, filters and the table ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_searching_is_a_separate_control_from_filtering(run_view, name) -> None:
+    """Typing words is one thing; narrowing to a value another."""
+    keys = opened(run_view, name).widget_keys()
+
+    assert f"{name}-search" in keys
+    assert {key for key in keys if key.startswith(f"{name}-")} - {
+        f"{name}-search",
+        f"{name}-field",
+        f"{name}-page",
+    }, keys
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_nothing_about_an_item_is_shown_until_one_is_picked(run_view, name) -> None:
+    """A page opens as a list, and stays one until a row is clicked."""
+    page = opened(run_view, name)
+
+    assert "Field" not in page.tables()
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_picking_a_row_opens_everything_held_about_it(run_view, name) -> None:
+    """One table of every field, rather than a second row of figures."""
+    page = opened(run_view, name).select(0)
+
+    assert page.raised == []
+    assert "Field" in page.tables()
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_picking_a_row_adds_no_figures(run_view, name) -> None:
+    """Below the table everything is a table. No boxes."""
+    before = opened(run_view, name)
+    after = before.select(0)
+
+    assert set(after.stats()) == set(before.stats())
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_with_nothing_on_it_says_so(run_view, name) -> None:
+    """An empty corpus is a sentence, not a stack trace or a blank."""
+    page = View(
+        run_view(
+            name,
+            catalog_api=Answers(
+                **answers(
+                    documents={"total": 0, "documents": []},
+                    passages={"total": 0, "passages": []},
+                    facts={"total": 0, "facts": []},
+                    questions={"total": 0, "questions": []},
+                    topics=[],
+                    stage_status=lambda *a, **k: status(),
+                )
+            ),
         ),
+        name,
     )
 
-    assert not app.exception, app.exception
-    assert "annual-report.pdf" in text_of(app) or app.dataframe
+    assert page.raised == []
+    assert "matches" in page.text() or "Fit the model" in page.text()
+
+
+# ── Deletion ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", ("passages", "facts", "questions"))
+def test_a_page_whose_rows_cannot_be_deleted_offers_no_deletion(run_view, name) -> None:
+    """A passage belongs to its document; a rejected question is evidence."""
+    page = opened(run_view, name).select(0)
+
+    assert not [key for key in page.control_keys() if key and key.startswith("danger-")]
+
+
+@pytest.mark.parametrize(
+    ("name", "label"),
+    (("documents", "Delete document"), ("topics", "Delete all topics")),
+)
+def test_a_deletion_asks_before_it_does_anything(run_view, name, label) -> None:
+    """The first click arms it; a second, separately labelled one acts."""
+    page = opened(run_view, name).select(0)
+    assert page.button("Yes, delete") is None
+
+    armed = page.press(label)
+
+    assert armed.button("Yes, delete")
+    assert armed.button("Cancel")
+
+
+def test_cancelling_a_deletion_removes_nothing(run_view) -> None:
+    """Nothing is asked of the backend until the second click."""
+    client = Answers(**answers())
+    page = View(run_view("documents", catalog_api=client), "documents").select(0)
+
+    page.press("Delete document").press("Cancel")
+
+    assert not [one for one in client.asked if one[0] == "delete"]
+
+
+def test_confirming_a_deletion_deletes(run_view) -> None:
+    """And says what went."""
+    client = Answers(**answers())
+    page = View(run_view("documents", catalog_api=client), "documents").select(0)
+
+    page.press("Delete document").press("Yes, delete")
+
+    assert [one for one in client.asked if one[0] == "delete"]
+
+
+def test_deleting_the_derived_data_keeps_the_document(run_view) -> None:
+    """The two deletions are different operations, not one with a flag."""
+    client = Answers(**answers())
+    page = View(run_view("documents", catalog_api=client), "documents").select(0)
+
+    page.press("Delete passages and facts").press("Yes, delete")
+
+    assert [
+        one for one in client.asked if one[0] == "delete" and one[2].get("derived_only")
+    ]
+
+
+# ── The pages outside the catalogue ───────────────────────────────────────
 
 
 def test_the_upload_page_offers_a_file_picker(run_view) -> None:
-    """The one control that starts everything."""
-    app = run_view("upload", upload_api=Answers(add_document={}))
+    """The one page whose service runs in the request rather than a worker."""
+    app = run_view("upload", **OUTSIDE["upload"])
 
-    assert not app.exception
-    assert app.get("file_uploader"), "no file picker on the upload page"
-
-
-def test_the_questions_page_lists_what_the_backend_returns(run_view) -> None:
-    """The listing and the gate table are drawn from one answer each."""
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={"total": 1, "questions": [QUESTION]},
-            question_quality=QUESTION_QUALITY,
-            question_plan=QUESTION_PLAN,
-            question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
-            document_names=[],
-            stage_status={
-                "stage": "questions",
-                "working": False,
-                "rows": {"generated": 1, "new": 1},
-            },
-        ),
-    )
-
-    assert not app.exception, app.exception
-    assert app.dataframe, "nothing was tabled"
+    assert app.get("file_uploader")
 
 
-def test_the_questions_page_says_when_a_cited_fact_no_longer_holds(run_view) -> None:
-    """A question resting on a rejected fact is the quiet kind of wrong."""
-    moved = {
-        "fact_id": 9,
-        "statement": "A standard request is answered within 48 hours.",
-        "evidence_text": "Standard requests are answered within 48 hours.",
-        "validated": False,
-        "passage_id": 4,
-        "doc_sha256": "a" * 64,
-        "ordinal": 2,
-    }
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={"total": 1, "questions": [QUESTION]},
-            question_quality=QUESTION_QUALITY,
-            question_plan=QUESTION_PLAN,
-            question={"question": QUESTION, "sources": [moved], "thread": [QUESTION]},
-            document_names=[],
-            stage_status={"stage": "questions", "working": False, "rows": {}},
-        ),
-    )
+def test_the_upload_page_uploads_every_chosen_file_at_once(run_view) -> None:
+    """Its all-at-once is the picker taking several files."""
+    app = run_view("upload", **OUTSIDE["upload"])
 
-    assert not app.exception, app.exception
-    assert "questions-reverify" in text_of(app)
+    assert app.get("file_uploader")[0].proto.multiple_files
 
 
-def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> None:
-    """The one control on this page that changes a row."""
-    client = Answers(
-        questions={
-            "total": 1,
-            "questions": [
-                {**QUESTION, "status": "rejected", "rejected_reason": "duplicate"}
-            ],
-        },
-        question_quality={
-            **QUESTION_QUALITY,
-            "accepted": 0,
-            "rejected": {"duplicate": 1},
-        },
-        question_plan=QUESTION_PLAN,
-        question={"question": {**QUESTION, "status": "rejected"}, "sources": []},
-        decide_question={},
-        document_names=[],
-        stage_status={"stage": "questions", "working": False, "rows": {}},
-    )
-    app = run_view("questions", catalog_api=client)
+def test_the_health_page_lists_every_component_the_backend_reports(run_view) -> None:
+    """A component appears without a change here."""
+    page = opened(run_view, "health")
 
-    accepting = [one for one in app.button if one.label == "Accept"]
-    assert accepting, "no accept control on the page"
-    accepting[0].click().run()
-
-    assert ("decide_question", (1, "accepted"), {}) in client.asked
+    assert "Ingestion" in page.tables()
+    assert "Database" in page.tables()
 
 
-def test_starting_generation_queues_the_topics(run_view) -> None:
-    """The Start control on the Questions page, which acts on every topic.
-
-    Generation queues over topics rather than documents, so this page has no
-    per-item controls: the four verbs act on the whole corpus, and Start is
-    the one that makes a fitted topic claimable.
-    """
-    client = Answers(
-        questions={"total": 1, "questions": [QUESTION]},
-        question_quality=QUESTION_QUALITY,
-        question_plan=QUESTION_PLAN,
-        question={"question": QUESTION, "sources": []},
-        stage_action={"detail": "24 row(s) queued."},
-        document_names=[],
-        stage_status={"stage": "questions", "working": False, "rows": {"new": 24}},
-    )
-    app = run_view("questions", catalog_api=client)
-
-    starting = [one for one in app.button if one.label == "Start"]
-    assert starting, "no Start control on the page"
-    starting[0].click().run()
-
-    assert ("stage_action", ("questions", "start", None), {}) in client.asked
-
-
-def test_the_start_control_is_dead_when_every_topic_is_already_queued(run_view) -> None:
-    """A control that would do nothing is greyed rather than hidden."""
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={"total": 1, "questions": [QUESTION]},
-            question_quality=QUESTION_QUALITY,
-            question_plan=QUESTION_PLAN,
-            question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
-            document_names=[],
-            stage_status={
-                "stage": "questions",
-                "working": True,
-                "rows": {"pending": 24},
-            },
-        ),
-    )
-
-    starting = [one for one in app.button if one.label == "Start"]
-    assert starting and starting[0].disabled
-
-
-def test_the_page_survives_a_rejection_code_it_has_never_heard_of(run_view) -> None:
-    """A gate added in the backend must not blank the page that reports it."""
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={
-                "total": 1,
-                "questions": [
-                    {**QUESTION, "status": "rejected", "rejected_reason": "invented"}
-                ],
-            },
-            question_quality={**QUESTION_QUALITY, "rejected": {"invented": 1}},
-            question_plan=QUESTION_PLAN,
-            question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
-            document_names=[],
-            stage_status={"stage": "questions", "working": False, "rows": {}},
-        ),
-    )
-
-    assert not app.exception, app.exception
-    # The gate table is a dataframe, so its rows are not in text_of().
-    tabled = " ".join(str(one.value) for one in app.dataframe)
-    assert "invented" in tabled, "the unknown gate was not listed"
-    assert "no description" in tabled, "it was listed without saying what it is"
-
-
-def test_a_question_with_no_difficulty_or_answer_still_renders(run_view) -> None:
-    """Both columns are nullable, and a page that assumes otherwise breaks."""
-    bare = {
-        **QUESTION,
-        "target_answer": None,
-        "answerable": False,
-        "difficulty": None,
-        "passage_scope": None,
-        "document_scope": None,
-        "topic_scope": None,
-        "answer_chars": None,
-        "documents": [],
-        "topics": [],
-        "facts": 0,
-    }
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={"total": 1, "questions": [bare]},
-            question_quality={
-                **QUESTION_QUALITY,
-                "difficulty": {},
-                "passage_scope": {},
-                "document_scope": {},
-                "topic_scope": {},
-            },
-            question={"question": bare, "sources": [], "thread": [bare]},
-            document_names=[],
-            stage_status={"stage": "questions", "working": False, "rows": {}},
-        ),
-    )
-
-    assert not app.exception, app.exception
-
-
-def test_the_questions_page_says_which_kinds_were_asked_for_and_written(
+def test_the_health_page_shows_a_component_s_figures_when_it_is_picked(
     run_view,
 ) -> None:
-    """A mix nobody got must be visible as a mix nobody got.
+    """Its own numbers, and what each counts."""
+    page = opened(run_view, "health")
+    page.app.session_state["health-table"] = {"selection": {"rows": [2], "columns": []}}
+    picked = View(page.app.run(), "health")
 
-    The plan decides what a run writes; the page is where somebody reads
-    whether the corpus supported it.
-    """
-    app = run_view(
-        "questions",
-        catalog_api=Answers(
-            questions={"total": 1, "questions": [QUESTION]},
-            question_quality=QUESTION_QUALITY,
-            question_plan=QUESTION_PLAN,
-            question={"question": QUESTION, "sources": [], "thread": [QUESTION]},
-            document_names=[],
-            stage_status={"stage": "questions", "working": False, "rows": {}},
+    assert "Upload Attempts" in picked.tables()
+    assert "accepted and refused" in picked.tables()
+
+
+def test_the_health_page_survives_a_backend_that_is_down(run_view) -> None:
+    """A failed backend card makes every other card unknowable."""
+    page = View(
+        run_view(
+            "health",
+            health_api=Answers(reachable=(False, "refused"), components={}),
         ),
+        "health",
     )
 
-    assert not app.exception, app.exception
-    tabled = " ".join(str(one.value) for one in app.dataframe)
-    assert "comparison" in tabled, "the kind written was not listed"
-    assert "factoid" in tabled, "a kind asked for and never written was not listed"
+    assert page.raised == []
+    assert "unreachable" in page.text()
 
 
-#: One passage, as /passages returns it in a listing.
-PASSAGE = {
-    "id": 11,
-    "doc_sha256": "a" * 64,
-    "ordinal": 3,
-    "text": "| Modell | Masse |\n| Kompakt | 4 |",
-    "page_from": 4,
-    "page_to": 5,
-    "section_path": "2 Tabellen",
-    "block_type": "table",
-    "language": "de",
-    "doc_item_refs": ["#/tables/0"],
-    "bbox": [{"page": 4, "l": 1.0, "t": 2.0, "r": 3.0, "b": 4.0}],
-    "table_count": 1,
-    "sentence_count": 2,
-}
-
-#: That passage in full, as /passages/{id} returns it.
-PASSAGE_DETAIL = {
-    "passage": PASSAGE,
-    "table_cells": [
-        {
-            "caption": "Tabelle 1",
-            "num_rows": 2,
-            "num_cols": 2,
-            "cells": [
-                {
-                    "row": 0,
-                    "col": 0,
-                    "row_span": 1,
-                    "col_span": 1,
-                    "column_header": True,
-                    "row_header": False,
-                    "text": "Modell",
-                    "line": None,
-                },
-                {
-                    "row": 1,
-                    "col": 0,
-                    "row_span": 1,
-                    "col_span": 1,
-                    "column_header": False,
-                    "row_header": True,
-                    "text": "Kompakt",
-                    "line": 1,
-                },
-            ],
-        }
-    ],
-    "sentences": [
-        {"i": 0, "start": 0, "end": 18, "predicates": 0},
-        {"i": 1, "start": 19, "end": 34, "predicates": 0},
-    ],
-    "extract_status": "extracted",
-    "extract_error": None,
-}
+# ── What each listing page put in its table ───────────────────────────────
 
 
-def passages_backend(**overrides) -> Answers:
-    """A backend that answers every call the Passages page makes."""
-    return Answers(
-        **{
-            "passages": {"total": 1, "passages": [PASSAGE]},
-            "passage": PASSAGE_DETAIL,
-            "document_names": [{"sha256": "a" * 64, "filename": "report.pdf"}],
-            "passage_types": ["table", "text"],
-            "stage_status": {"working": False, "rows": {"chunked": 1, "extracted": 1}},
-            **overrides,
-        }
-    )
+def test_the_documents_page_lists_what_the_backend_returns(run_view) -> None:
+    """The row, as a reader recognises it."""
+    tables = opened(run_view, "documents").tables()
+
+    assert "report.pdf" in tables
+    assert "Risks in focus" in tables
 
 
-def test_the_passages_page_lists_what_the_backend_returns(run_view) -> None:
-    """One row per passage, drawn from the answer and not a second call."""
-    app = run_view("passages", catalog_api=passages_backend())
+def test_the_documents_page_can_narrow_to_one_parse_state(run_view) -> None:
+    """Which is the filter the parsing page has."""
+    client = Answers(**answers())
+    page = View(run_view("documents", catalog_api=client), "documents")
 
-    assert not app.exception, app.exception
-    listed = app.dataframe[0].value
-    assert listed["#"].tolist() == [3]
-    assert listed["Pages"].tolist() == ["4–5"]
-    assert listed["Language"].tolist() == ["DE"]
+    page.choose("documents-parse_status", "failed")
 
-
-def test_the_passages_page_survives_a_page_whose_rows_have_gone(run_view) -> None:
-    """The count and the rows are two queries, so they can disagree.
-
-    A delete landing between them leaves a total with no rows, and the
-    lengths measured on those rows have nothing to measure.
-    """
-    app = run_view(
-        "passages", catalog_api=passages_backend(passages={"total": 3, "passages": []})
-    )
-
-    assert not app.exception, f"the page raised: {app.exception}"
-    assert "Failed to load" not in text_of(app), text_of(app)
+    assert [
+        one
+        for one in client.asked
+        if one[0] == "documents" and one[2].get("parse_status") == "failed"
+    ]
 
 
 def test_the_passages_page_numbers_the_sentences_a_fact_would_cite(run_view) -> None:
     """The number in the first column is what a citation refers to."""
-    app = run_view("passages", catalog_api=passages_backend())
+    tables = opened(run_view, "passages").select(0).tables()
 
-    numbered = next(
-        frame.value for frame in app.dataframe if "Claims" in frame.value.columns
-    )
-    assert numbered["#"].tolist() == [0, 1]
-    assert numbered["Text"].tolist()[0] == "| Modell | Masse |"
+    assert "Claims" in tables
 
 
-def test_the_passages_page_shows_which_row_each_cell_cites(run_view) -> None:
-    """A header cell cites nothing; a data cell cites the row it sits in."""
-    app = run_view("passages", catalog_api=passages_backend())
-
-    cells = next(
-        frame.value for frame in app.dataframe if "Cites row" in frame.value.columns
-    )
-    assert cells["Cites row"].tolist() == ["—", "1"]
-    assert cells["Header"].tolist() == ["column", "row"]
-
-
-def test_the_passages_page_reports_a_passage_extraction_could_not_read(
+def test_the_passages_page_runs_chunking_over_the_document_it_belongs_to(
     run_view,
 ) -> None:
-    """The reason, against the passage it belongs to."""
-    app = run_view(
-        "passages",
-        catalog_api=passages_backend(
-            passage={
-                **PASSAGE_DETAIL,
-                "extract_status": "failed",
-                "extract_error": "the model did not answer",
-            }
-        ),
-    )
+    """Chunking queues over a document and replaces all of its passages."""
+    page = opened(run_view, "passages").select(0)
 
-    assert not app.exception
-    assert "the model did not answer" in text_of(app)
+    assert f"start-chunking-document-{SHA}" in page.control_keys()
 
 
-def test_the_documents_page_reports_a_stage_that_failed(run_view) -> None:
-    """Parsing and chunking both record their failure on the document row."""
-    app = run_view(
-        "documents",
-        catalog_api=Answers(
-            documents={
-                "total": 1,
-                "documents": [
-                    {
-                        "sha256": "a" * 64,
-                        "filename": "report.pdf",
-                        "first_seen": "2026-09-14T10:00:00",
-                        "page_count": 12,
-                        "title": None,
-                        "language": None,
-                        "parse_status": "failed",
-                        "parse_error": "the converter puts this at 0.31",
-                        "chunk_status": "new",
-                        "chunk_error": "a failure from an earlier run",
-                        "extracted_passages": 0,
-                        "total_passages": 0,
-                        "oversized": 0,
+def test_the_facts_page_runs_extraction_over_the_passage_it_came_from(
+    run_view,
+) -> None:
+    """Extraction reads a passage and writes all of its facts together."""
+    page = opened(run_view, "facts").select(0)
+
+    assert "start-extraction-passage-11" in page.control_keys()
+
+
+def test_the_questions_page_lists_what_the_backend_returns(run_view) -> None:
+    """The question and the answer it is scored against."""
+    tables = opened(run_view, "questions").tables()
+
+    assert "48 hours" in tables
+
+
+def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> None:
+    """A person overruling a gate changes the verdict, not the question."""
+    client = Answers(**answers(questions={"total": 1, "questions": [QUESTION_DRAFT]}))
+    page = View(run_view("questions", catalog_api=client), "questions").select(0)
+
+    page.press("Accept")
+
+    assert [
+        one
+        for one in client.asked
+        if one[0] == "decide_question" and one[1][1] == "accepted"
+    ]
+
+
+def test_the_questions_page_says_when_a_cited_fact_no_longer_holds(run_view) -> None:
+    """A question resting on a rejected fact is not a question any more."""
+    page = View(
+        run_view(
+            "questions",
+            catalog_api=Answers(
+                **answers(
+                    question={
+                        "question": QUESTION,
+                        "sources": [changed(QUESTION_SOURCE, validated=False)],
+                        "thread": [],
                     }
-                ],
-            },
-            stage_status={"working": False, "rows": {}},
+                )
+            ),
         ),
-    )
+        "questions",
+    ).select(0)
 
-    assert not app.exception, app.exception
-    drawn = text_of(app)
-    assert "the converter puts this at 0.31" in drawn
-    assert "a failure from an earlier run" not in drawn, (
-        "an error from a stage that is not failed was shown as its state"
-    )
+    assert "no longer passes its checks" in page.text()

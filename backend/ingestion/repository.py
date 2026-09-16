@@ -40,13 +40,15 @@ def _passages(*where) -> ScalarSelect[int]:
     )
 
 
-def _filtered(query, search: str | None):
-    """Applies the search filter to a document query. Wildcards are escaped."""
-    if not search:
-        return query
-    return query.where(
-        matching(search, _FIRST_EVENT.c.filename, Document.title, Document.sha256)
-    )
+def _filtered(query, search: str | None, parse_status: str | None = None):
+    """Applies the search and status filters. Wildcards are escaped."""
+    if search:
+        query = query.where(
+            matching(search, _FIRST_EVENT.c.filename, Document.title, Document.sha256)
+        )
+    if parse_status:
+        query = query.where(Document.parse_status == parse_status)
+    return query
 
 
 class DocumentRepository(Repository):
@@ -155,7 +157,11 @@ class DocumentRepository(Repository):
             ]
 
     def page(
-        self, search: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        parse_status: str | None = None,
     ) -> tuple[int, list[StoredDocument]]:
         """Reads one page of documents and the total behind it.
 
@@ -163,9 +169,10 @@ class DocumentRepository(Repository):
             search: Matched against filename, title and digest.
             limit: Rows to return.
             offset: Rows to skip.
+            parse_status: Narrows to one parse state.
 
         Returns:
-            The total matching the search, and the requested page.
+            The total matching the filters, and the requested page.
         """
         listing = _filtered(
             select(
@@ -189,12 +196,14 @@ class DocumentRepository(Repository):
             # nullslast: DESC sorts NULLs first in PostgreSQL.
             .order_by(_FIRST_EVENT.c.first_seen.desc().nullslast()),
             search,
+            parse_status,
         )
         counting = _filtered(
             select(func.count())
             .select_from(Document)
             .join(_FIRST_EVENT, _FIRST_EVENT.c.sha256 == Document.sha256, isouter=True),
             search,
+            parse_status,
         )
         with self._session() as session:
             total = session.scalar(counting) or 0

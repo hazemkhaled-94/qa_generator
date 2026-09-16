@@ -1,19 +1,22 @@
-"""The queue figures and the controls that act on one item at a time.
+"""The one service a page runs, and the controls that move its queue.
 
-Each stage appears on the page showing what it produces - parsing and
-chunking on Documents, extraction on Documents, Passages and Facts, topic
-modelling on Topics.
+Each page carries exactly one stage, the one that produces what the page
+lists: parsing on Documents, chunking on Passages, extraction on Facts,
+topic modelling on Topics, generation on Questions. No page can reach
+another page's stage.
 
-Two shapes, and the split between them is deliberate. `overview` is a
-fragment that redraws itself every few seconds: it carries figures and no
-buttons, so redrawing it can interrupt nothing. `controls` carries the
-buttons and does not poll, because a strip that redraws every three seconds
-took a confirmation away mid-decision.
+Every stage offers the same two scopes. Without one the verb acts on
+everything the stage owns; with one it acts on a single document, passage or
+topic, and is drawn inside that item's own section.
 
 Nothing starts by itself. A row this stage has never been asked to do sits
 at `new`, and Start is what queues it; Stop puts back whatever has not
 begun. The stage before this one cannot do either, and neither can this one
 for the stage after.
+
+The controls redraw on a timer, which is what the loading icon is for: a
+verb only queues rows, the worker does the work, and the spinner runs until
+that stage's queue is empty again.
 """
 
 from __future__ import annotations
@@ -24,65 +27,16 @@ import streamlit as st
 
 from lib import page
 
-#: How often the figures redraw while a worker is on a queue. Long enough not
-#: to hammer the API, short enough that a long run looks alive.
+#: How often the controls redraw while a worker is on a queue. Long enough
+#: not to hammer the API, short enough that a long run looks alive.
 POLL_SECONDS = 3
 
-#: The label, then the four verbs, then the state they left the item in.
-CONTROLS = [2.3, 1.15, 1.15, 1.15, 1.15, 2.6]
-
-#: The delete buttons and the pair that confirms one. Wider than a verb
-#: column: these say what they delete rather than reading `Delete`, and a
-#: truncated label on the one irreversible control is the worst place for it.
-DANGER = [2.6, 2.1, 4.8]
-
-#: The two controls that decide one row's fate, and the space after them.
-#: Narrower than DANGER: neither deletes anything.
-VERDICT = [1.3, 1.3, 5.4]
+#: The four verbs, then the line saying where the queue stands.
+_CONTROLS = [1.2, 1.2, 1.2, 1.2, 4.0]
 
 #: The order the states are read out in, which is the order a row moves
 #: through them.
 _ORDER = ("new", "pending", "in_progress", "failed")
-
-#: What each verb is for, as the prefix its button is keyed with. The
-#: stylesheet colours on that prefix, so a control says what it does by being
-#: keyed for it and no call site has to remember to pass a style.
-#:
-#: Each is graded by what it costs if pressed by mistake. Most are queue
-#: verbs; `accept` and `reject` decide one stored row's fate and are graded
-#: the same way, because a person reads the colour and not the list:
-#:
-#:   go       starts work that was going to be done anyway
-#:   recover  re-queues only what already failed
-#:   halt     withdraws from the queue; nothing already finished is lost
-#:   redo     throws finished output away and rebuilds it
-#:   danger   deletes data, and cannot be undone
-INTENT = {
-    "start": "go",
-    "discover": "go",
-    "accept": "go",
-    "retry": "recover",
-    "stop": "halt",
-    "reject": "halt",
-    "rerun": "redo",
-}
-
-
-#: Read out in the help of every section that draws controls. The colours are
-#: graded by consequence, and a grading nobody can decode is decoration.
-COLOUR_KEY = (
-    "The controls are coloured by what pressing one costs. Green starts work "
-    "that was going to be done anyway. Blue re-queues only what already "
-    "failed. Grey withdraws from the queue, losing nothing already finished. "
-    "Amber throws finished output away and rebuilds it. Red deletes data and "
-    "cannot be undone. A control that would do nothing right now is greyed "
-    "out rather than hidden, so the row keeps its shape."
-)
-
-
-def key_for(action: str, *parts: str) -> str:
-    """Names a button so the stylesheet can colour it by what it does."""
-    return "-".join((INTENT[action], action, *parts))
 
 
 class Queue:
@@ -96,7 +50,7 @@ class Queue:
         self.done = done
 
     def describe(self, counts: dict[str, int]) -> str:
-        """Reads this queue's counts back as a sentence."""
+        """Reads this queue's counts back as one line."""
         parts = [
             f"{counts[state]:,} {state.replace('_', ' ')}"
             for state in (*_ORDER, self.done)
@@ -105,166 +59,222 @@ class Queue:
         return " · ".join(parts) or f"no {self.unit}"
 
 
-def overview(
-    client,
-    queues: list[Queue],
-    figures: Callable[[dict[str, dict[str, int]]], dict[str, tuple]],
-    *,
-    scope: tuple[str, str] | None = None,
-) -> None:
-    """Draws the page's figures and one bar per stage, and keeps drawing them.
+def busy(counts: dict[str, int]) -> bool:
+    """Reports whether this queue still has work in flight."""
+    return bool(counts.get("pending", 0) or counts.get("in_progress", 0))
 
-    A fragment that reruns on its own, so a long run moves on the page rather
-    than sitting still until somebody clicks something. Read-only: every
-    button is in `controls`, which does not poll.
 
-    `figures` turns the counts into the row of statistics the page wants,
-    because what is worth showing differs per page while the polling does
-    not.
+def service(client, queue: Queue, scope: tuple[str, str] | None = None) -> None:
+    """Draws one stage's four verbs, each live only when it would act.
+
+    `scope` is what to narrow to, as the pair the route takes: ("document",
+    sha256), ("passage", id) or ("topic", id). Without one every verb acts
+    on everything the stage owns, which is how a whole corpus is started at
+    once.
+    """
+    _polling(lambda: _verbs(client, queue, scope))
+
+
+def fit(client, queue: Queue) -> None:
+    """Draws topic modelling's three verbs, which have no per-item form.
+
+    Every topic is fitted jointly over one vocabulary, so there is no single
+    topic to start, stop or refit.
+    """
+    _polling(lambda: _fit_verbs(client, queue))
+
+
+def _polling(draw: Callable[[], None]) -> None:
+    """Redraws one set of controls every few seconds, until the queue rests.
+
+    Through page.render, because a fragment reruns on its own and so outside
+    the guard the view was called under: an unreachable backend would replace
+    the panel with a stack trace.
     """
 
-    def _figures() -> None:
-        """Draws the figures once."""
-        counts = {
-            queue.name: client.stage_status(queue.name, scope)["rows"]
-            for queue in queues
-        }
-        page.metrics(figures(counts))
-        for queue in queues:
-            rows = counts[queue.name]
-            total = sum(rows.values())
-            if total:
-                st.progress(
-                    rows.get(queue.done, 0) / total,
-                    text=f"{queue.label}: {queue.describe(rows)}",
-                )
-
-    # Through page.render, because a fragment reruns on its own and so
-    # outside the guard the view was called under: an unreachable backend
-    # replaced this panel with a stack trace.
     @st.fragment(run_every=POLL_SECONDS)
-    def _draw() -> None:
-        """Draws the figures, and goes on drawing them."""
-        page.render(_figures)
+    def drawn() -> None:
+        """Draws the controls, and goes on drawing them."""
+        page.render(draw)
 
-    _draw()
+    drawn()
 
 
-def controls(
-    client,
-    queue: Queue,
-    scope: tuple[str, str],
-    *,
-    redo: bool = True,
-) -> None:
-    """Draws the four verbs for one item, each enabled only when it would act.
-
-    `scope` is what the item is, as the pair the route takes: ("document",
-    sha256) or ("passage", id). Nothing here is corpus-wide - the same verb
-    over everything is `corpus_controls`.
-    """
-    kind, value = scope
-    unit = queue.unit
+def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
+    """Draws the four queue verbs once, for whatever scope was given."""
     counts = client.stage_status(queue.name, scope)["rows"]
     total = sum(counts.values())
     waiting = counts.get("new", 0)
     queued = counts.get("pending", 0)
     failed = counts.get("failed", 0)
-    held = counts.get("in_progress", 0)
+    everything = scope is None
+    unit = queue.unit
 
-    def key(action: str) -> str:
-        """Keys one of this item's buttons for its verb and its colour."""
-        return key_for(action, queue.name, kind, str(value))
-
-    labelled, begun, redone, halted, retried, state = st.columns(
-        CONTROLS, vertical_alignment="center"
+    begun, halted, retried, redone, state = st.columns(
+        _CONTROLS, vertical_alignment="center"
     )
-    labelled.html(f"<div class='qa-control-label'>{queue.label}</div>")
 
     if begun.button(
-        "Start",
-        key=key("start"),
+        "Start all" if everything else "Start",
+        key=_key("start", queue, scope),
+        type="primary",
         disabled=not waiting,
         width="stretch",
-        help=f"Queue the {waiting:,} {unit} of this {kind} that {queue.label} "
-        "has never been asked to do. A worker picks them up on its next poll."
+        help=f"Queues the {waiting:,} {unit} never asked for."
         if waiting
-        else f"Nothing here is waiting: every {unit} of this {kind} has "
-        "already been asked for. Use Redo to run them again.",
+        else f"No {unit} are waiting.",
     ):
         _act(client, queue.name, scope, "start")
 
-    if redo and redone.button(
-        "Redo",
-        key=key("rerun"),
-        disabled=not total,
-        width="stretch",
-        help=f"Queue every {unit} of this {kind} again, finished ones "
-        f"included, and rebuild what {queue.label} produced from them. For "
-        "when the code or the model behind the stage has changed. Whatever a "
-        "worker holds right now is skipped."
-        if total
-        else f"This {kind} has no {unit} to redo.",
-    ):
-        _act(client, queue.name, scope, "rerun")
-
     if halted.button(
         "Stop",
-        key=key("stop"),
+        key=_key("stop", queue, scope),
         disabled=not queued,
         width="stretch",
-        help=f"Take the {queued:,} queued {unit} back off the queue, to `new`."
-        + (f" The {held:,} a worker holds now still finishes." if held else "")
+        help=f"Takes the {queued:,} queued {unit} back off the queue."
         if queued
-        else f"Nothing of this {kind} is queued.",
+        else f"No {unit} are queued.",
     ):
         _act(client, queue.name, scope, "stop")
 
     if retried.button(
         "Retry",
-        key=key("retry"),
+        key=_key("retry", queue, scope),
         disabled=not failed,
         width="stretch",
-        help=f"Queue the {failed:,} failed {unit} again, clearing the error "
-        "recorded against each."
+        help=f"Queues the {failed:,} failed {unit} again."
         if failed
-        else f"Nothing of this {kind} has failed.",
+        else f"No {unit} have failed.",
     ):
         _act(client, queue.name, scope, "retry")
 
-    # Coloured rather than pilled: the counts already name the state, so a
-    # pill beside them would read "failed · 3 failed". What a pill was there
-    # for is making a failure visible without reading, which the colour does.
+    if redone.button(
+        "Redo all" if everything else "Redo",
+        key=_key("rerun", queue, scope),
+        disabled=not total,
+        width="stretch",
+        help=f"Queues every {unit} again, finished ones included, and "
+        "rebuilds what this stage made of them."
+        if total
+        else f"There are no {unit} to redo.",
+    ):
+        _act(client, queue.name, scope, "rerun")
+
+    _state(state, queue, counts, failed)
+
+
+def _fit_verbs(client, queue: Queue) -> None:
+    """Draws the three verbs a fit takes."""
+    counts = client.stage_status(queue.name)["rows"]
+    queued = counts.get("pending", 0)
+    failed = counts.get("failed", 0)
+    running = busy(counts)
+
+    begun, halted, retried, _, state = st.columns(
+        _CONTROLS, vertical_alignment="center"
+    )
+
+    if begun.button(
+        "Fit all",
+        key=_key("discover", queue, None),
+        type="primary",
+        disabled=running,
+        width="stretch",
+        help="Queues one fit over every passage, one model per language. "
+        "Replaces every stored topic."
+        if not running
+        else "A fit is already queued or running.",
+    ):
+        _act(client, queue.name, None, "discover")
+
+    if halted.button(
+        "Stop",
+        key=_key("stop", queue, None),
+        disabled=not queued,
+        width="stretch",
+        help=f"Takes the {queued:,} queued fit(s) back off the queue."
+        if queued
+        else "No fit is queued.",
+    ):
+        _act(client, queue.name, None, "stop")
+
+    if retried.button(
+        "Retry",
+        key=_key("retry", queue, None),
+        disabled=not failed,
+        width="stretch",
+        help="Queues a failed fit again." if failed else "No fit has failed.",
+    ):
+        _act(client, queue.name, None, "retry")
+
+    _state(state, queue, counts, failed)
+
+
+def _state(into, queue: Queue, counts: dict[str, int], failed: int) -> None:
+    """Writes where the queue stands, with the loading icon while it moves."""
+    icon = "<span class='qa-spin'></span>" if busy(counts) else ""
     tone = " qa-state-bad" if failed else ""
-    state.html(f"<div class='qa-control-label{tone}'>{queue.describe(counts)}</div>")
+    into.html(f"<div class='qa-state{tone}'>{icon}{queue.describe(counts)}</div>")
 
 
-def corpus_controls(
-    client, stage: str, verbs: dict[str, tuple[str, bool, str]]
-) -> None:
-    """Draws verbs that act on the whole corpus rather than on one item.
-
-    Only topic modelling uses this. The factorisation fits every topic
-    jointly over one vocabulary, so there is no single topic to start, stop or
-    refit: the stage has no scope to narrow to, and the page says so beside
-    these. The keys are the route's own verbs, which is why the first is
-    `discover` rather than `start`; it is coloured as a start either way,
-    because that is what it does.
-    """
-    columns = st.columns([1.3] * len(verbs) + [CONTROLS[-1]])
-    for index, (action, (label, enabled, explanation)) in enumerate(verbs.items()):
-        if columns[index].button(
-            label,
-            key=key_for(action, "corpus", stage),
-            disabled=not enabled,
-            width="stretch",
-            help=explanation,
-        ):
-            _act(client, stage, None, action)
+def _key(action: str, queue: Queue, scope: tuple[str, str] | None) -> str:
+    """Names a button uniquely, so two scopes of one verb are two widgets."""
+    return "-".join((action, queue.name, *(scope or ())))
 
 
 def _act(client, stage: str, scope: tuple[str, str] | None, action: str) -> None:
-    """Sends one queue action and says what it did."""
+    """Sends one queue action and says what it did.
+
+    The whole app, not just this fragment: the figures at the top of the
+    page count the same queue these verbs just moved.
+    """
     answer = client.stage_action(stage, action, scope)
     st.toast(answer.get("detail") or f"{stage}: {action}")
-    st.rerun()
+    st.rerun(scope="app")
+
+
+def removal(
+    key: str,
+    note: str,
+    buttons: dict[str, tuple[str, str, str]],
+    subject: str = "",
+) -> str | None:
+    """Draws the delete box, with its buttons inside it.
+
+    `buttons` maps a name to its label, its tooltip and the sentence the
+    confirmation asks. The first click only arms the choice; a second,
+    separately labelled one is what this returns, because none of it can be
+    undone.
+
+    `subject` is what is being deleted, so arming a deletion on one item and
+    then picking another disarms it.
+    """
+    slot = f"{key}-armed"
+    armed = st.session_state.get(slot)
+    chosen = None
+
+    with page.panel("Delete"):
+        st.html(f"<div class='qa-danger-note'>{note}</div>")
+        columns = st.columns(max(len(buttons), 3))
+        for column, (name, (label, explanation, _)) in zip(
+            columns, buttons.items(), strict=False
+        ):
+            if column.button(
+                label, key=f"danger-{key}-{name}", width="stretch", help=explanation
+            ):
+                # Remembered and acted on in this same run: the confirmation
+                # is drawn below, so arming needs no rerun to become visible.
+                st.session_state[slot] = armed = (name, subject)
+
+        if armed and armed[1] == subject and armed[0] in buttons:
+            st.warning(buttons[armed[0]][2])
+            confirm, cancel, *_ = st.columns(max(len(buttons), 3))
+            if confirm.button(
+                "Yes, delete", key=f"danger-confirm-{key}", width="stretch"
+            ):
+                del st.session_state[slot]
+                chosen = armed[0]
+            if cancel.button("Cancel", key=f"cancel-{key}", width="stretch"):
+                del st.session_state[slot]
+                st.rerun()
+    return chosen

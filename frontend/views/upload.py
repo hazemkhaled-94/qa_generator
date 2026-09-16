@@ -1,4 +1,4 @@
-"""Upload view."""
+"""Upload view. The ingestion service, and nothing else."""
 
 from __future__ import annotations
 
@@ -10,31 +10,38 @@ from lib.backend.upload import UploadApi
 
 
 def view() -> None:
-    """Renders the upload page, submitting each chosen file in turn."""
-    page.header(
-        "Upload",
-        "Add PDFs to the corpus. Nothing runs on its own: a stored file waits "
-        "at `new` until somebody picks it on the Documents page and presses "
-        "Start on its Parsing row.",
-    )
+    """Renders the upload page, submitting every chosen file at once."""
+    page.header("Upload")
 
     client = backend.upload_api()
+    held = client.counts()
 
-    page.section(
-        "Choose the files",
-        "Each file is stored under the digest of its own bytes, so uploading "
-        "one the corpus already holds is recorded and stores nothing. A file "
-        "over the size limit is refused with the reason.",
-    )
-    with st.form("upload", border=False):
+    with page.panel("Overview"):
+        page.stats(
+            {
+                "Documents": (
+                    f"{held.get('documents', 0):,}",
+                    "PDFs held in the object store.",
+                ),
+                "Uploads": (
+                    f"{held.get('upload_attempts', 0):,}",
+                    "Uploads recorded, accepted and refused alike.",
+                ),
+            }
+        )
+
+    with page.panel("Ingestion"), st.form("upload", border=False):
         files = st.file_uploader(
-            "Documents",
+            "PDFs",
             type=["pdf"],
             accept_multiple_files=True,
-            label_visibility="collapsed",
+            help="Stored under the digest of its own bytes. A file the "
+            "corpus already holds is recorded and stores nothing.",
         )
-        submit, _ = st.columns([1, 3])
-        submitted = submit.form_submit_button("Submit", type="primary", width="stretch")
+        submit, *_ = st.columns(4)
+        submitted = submit.form_submit_button(
+            "Upload all", type="primary", width="stretch"
+        )
 
     if not submitted:
         return

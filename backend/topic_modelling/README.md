@@ -379,8 +379,8 @@ stellenwegfall` one — are table headers, figure captions and
 financial-statement scaffolding, and together they hold about 19% of the
 German corpus. This is anticipated rather than surprising: it is what
 `include_in_coverage` is for, the Topics page puts the table share and
-facts-per-passage beside the checkbox to spot them by, and the exclusion is
-carried across a refit with the label. It does mean a refit needs a few
+facts-per-passage in the picked topic's own table beside the checkbox to spot
+them by, and the exclusion is carried across a refit with the label. It does mean a refit needs a few
 minutes of review.
 
 **The English model is in good shape** on the same corpus, for comparison:

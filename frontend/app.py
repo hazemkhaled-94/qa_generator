@@ -21,10 +21,7 @@ st.markdown(
 
 # Above the navigation, so every page carries it and no page repeats it.
 st.html(
-    "<div class='qa-brand'>"
-    "<div class='qa-brand-title'>Q&amp;A Generator</div>"
-    "<div class='qa-brand-sub'>Generate questions and answers from your documents</div>"
-    "</div>"
+    "<div class='qa-brand'><div class='qa-brand-title'>Q&amp;A Generator</div></div>"
 )
 
 st.navigation(

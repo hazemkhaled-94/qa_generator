@@ -1,126 +1,176 @@
-"""Shared behaviour for the view scripts.
+"""Shared layout for the view scripts.
 
 Views are functions rather than classes: Streamlit re-runs the whole script
 on every interaction, so nothing persists between calls except the HTTP
 session, which lib.backend caches.
 
-Every page is laid out the same way, top to bottom: `header`, then the
-statistics for whatever the page is about, then the toolbar
-`lib.catalog.filters` draws, then the table, then the one row a person
-picked and the controls that act on it. A view that follows that order needs
-no layout of its own.
+Every page is the same sequence of panels, top to bottom: the figures worth
+seeing on arrival, an analysis fold nobody has to open, the one service this
+page runs, search, filters, the table of everything, and the row a person
+picked. A view that follows that order needs no layout of its own.
 
-Nothing here renders a label without an explanation beside it. `metrics`,
-`section` and `findings` all take the help text as part of the value, so a
-figure cannot reach the page without saying what it counts.
+A panel is what separates one section from the next, and `panel` is the only
+way to draw one.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from typing import Any
 
 import streamlit as st
 
 log = logging.getLogger(__name__)
 
-#: What each queue status means, in one place: the same words appear on four
+#: What each queue status means, in one line. The same words appear on five
 #: pages and on the system status panel.
 STATUS_HELP = {
-    "new": "Stored but never asked for. No worker looks at a row in this "
-    "state; Start is what makes it claimable.",
-    "pending": "Queued and waiting. The next free worker will claim it.",
-    "in_progress": "Claimed by a worker right now.",
-    "failed": "The worker could not finish it; the reason is recorded on the "
-    "row. Retry puts it back on the queue.",
-    "parsed": "Converted from the uploaded file into a structured document.",
-    "chunked": "Split into passages, each with its sentences and lemmas read.",
-    "extracted": "Read for facts. Facts that failed a check are stored too.",
-    "modelled": "Fitted into the topic model currently stored.",
-    "generated": "Questions have been written for this topic. Questions a "
-    "gate rejected are stored too.",
+    "new": "Stored, never asked for.",
+    "pending": "Queued, waiting for a worker.",
+    "in_progress": "Held by a worker now.",
+    "failed": "The worker could not finish it.",
+    "parsed": "Converted into a structured document.",
+    "chunked": "Split into passages.",
+    "extracted": "Read for facts.",
+    "modelled": "Fitted into the stored topic model.",
+    "generated": "Questions have been written for it.",
 }
 
 
 def share(part: int, whole: int) -> str:
-    """Renders a count as itself and its share of a whole, in one string.
-
-    For running text and table cells. Every page states a proportion this
-    way, so 0 of 0 reads as 0 rather than as a division by zero or as 100%.
-    """
+    """Renders a count as itself and its share of a whole, in one string."""
     if not whole:
         return f"{part:,}"
     return f"{part:,} ({part / whole:.0%})"
 
 
-def portion(part: int, whole: int) -> tuple[str, str]:
-    """Splits a proportion into the figure and the line beneath it.
+def header(title: str) -> None:
+    """Renders the page's title."""
+    st.html(f"<div class='qa-page-title'>{title}</div>")
 
-    For `metrics`, which has room for a four-digit count or a percentage but
-    not both: `2,469 (75%)` was truncated to `2,469 (7…` at five figures to a
-    row. Splat it into the value: `(*portion(a, b), "what it counts")`.
+
+@contextmanager
+def panel(title: str) -> Iterator[Any]:
+    """Opens one bordered section, labelled.
+
+    The label is drawn inside the border rather than above it, so a section
+    and its heading cannot drift apart.
     """
-    if not whole:
-        return f"{part:,}", "of nothing yet"
-    return f"{part:,}", f"{part / whole:.0%} of {whole:,}"
+    box = st.container(border=True)
+    with box:
+        st.html(f"<div class='qa-panel-label'>{title}</div>")
+        yield box
 
 
-def header(title: str, description: str | None = None) -> None:
-    """Renders the page's title block."""
-    st.html(
-        f"<div class='qa-page-title'>{title}</div>"
-        + (f"<div class='qa-page-sub'>{description}</div>" if description else "")
+def stats(values: Mapping[str, tuple[str, str]]) -> None:
+    """Renders one row of figures, each with the line that says what it is.
+
+    Keyed by label, valued by `(figure, what it counts)`, so a caller cannot
+    add a figure without saying what it is.
+    """
+    for column, (label, (value, explanation)) in zip(
+        st.columns(len(values)), values.items(), strict=True
+    ):
+        column.metric(label, value, help=explanation, border=True)
+
+
+def attributes(rows: Mapping[str, Any]) -> None:
+    """Renders everything held about one item, as a two-column table."""
+    st.dataframe(
+        {"Field": list(rows), "Value": [written(one) for one in rows.values()]},
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Field": st.column_config.TextColumn(width="small"),
+            "Value": st.column_config.TextColumn(width="large"),
+        },
     )
 
 
-def section(title: str, help: str) -> None:
-    """Renders a section label with the tooltip explaining what it covers.
+def written(value: Any) -> str:
+    """Renders one value the way a table cell should read it.
 
-    `st.markdown` rather than `st.subheader`: it is the heading call that
-    carries `help`, and the stylesheet gives the h5 it emits the section
-    look.
+    Everything becomes a string: a column mixing a number with a dash is not
+    a column a table can draw, and `None` should read as an em dash rather
+    than as the word None.
     """
-    st.markdown(f"##### {title}", help=help)
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(one) for one in value) or "—"
+    return str(value)
 
 
-def metrics(values: dict[str, tuple]) -> None:
-    """Renders one row of figures, each with the tooltip that explains it.
+def table(
+    rows: list[dict],
+    key: str,
+    column_config: dict | None = None,
+) -> int | None:
+    """Draws the page's table and returns which row was picked, if any.
 
-    Keyed by label, valued by `(figure, explanation)` or by `(figure, line
-    beneath it, explanation)`, so a caller cannot add a figure without saying
-    what it is. The explanation is always last.
+    Nothing below the table is drawn until a row is chosen, so this returns
+    None on arrival and a position into `rows` afterwards.
 
-    The second line is drawn as a delta with its colouring off: it is a
-    second reading of the same figure, not a change in it, so an arrow and a
-    green would both be lies.
+    A position rather than an id: the selection Streamlit hands back is
+    positional, and the caller already holds the rows it passed in.
     """
-    columns = st.columns(len(values))
-    for column, (label, spec) in zip(columns, values.items(), strict=True):
-        value, beneath, explanation = (
-            spec if len(spec) == 3 else (spec[0], None, spec[1])
-        )
-        column.metric(
-            label,
-            value,
-            delta=beneath,
-            delta_color="off",
-            help=explanation,
-            border=True,
-        )
+    picked = st.dataframe(
+        rows,
+        width="stretch",
+        hide_index=True,
+        column_config=column_config,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=key,
+    )
+    chosen = picked["selection"]["rows"]
+    # Guarded, not trusted: a selection outlives the rows it was made on, so
+    # a filter that shortens the page leaves an index past the end of it.
+    if not chosen or chosen[0] >= len(rows):
+        return None
+    return chosen[0]
 
 
-def findings(title: str, help: str, rows: list[dict[str, str]]) -> None:
+def queue_rows(
+    unit: str, counts: Mapping[str, int], states: tuple[str, ...]
+) -> list[dict[str, str]]:
+    """Builds the findings rows describing one stage's queue.
+
+    The same five columns every other check in the fold carries, so one
+    table can hold the queue and the quality checks together. Only `failed`
+    has a verdict: the rest are where work is, not whether it went well.
+    """
+    total = sum(counts.values())
+    return [
+        {
+            "Check": f"{unit} {state.replace('_', ' ')}",
+            "Value": share(counts.get(state, 0), total),
+            "Should be": "0" if state == "failed" else "—",
+            "State": ("Attention" if counts.get(state) else "OK")
+            if state == "failed"
+            else "—",
+            "What it means": STATUS_HELP[state],
+        }
+        for state in states
+    ]
+
+
+def findings(rows: list[dict[str, str]]) -> None:
     """Renders what a stage's own numbers say about themselves, as a table.
 
-    The place where a warning used to be a coloured box with one sentence in
-    it. A reader needs the measurement, what it should be and what it means
-    to judge whether anything is wrong, so all three are columns and every
-    check is listed - the ones that passed included, since a check missing
+    Every check is listed, the ones that passed included: a check missing
     from a list is indistinguishable from a check nobody wrote.
     """
     if not rows:
         return
-    section(title, help)
     st.dataframe(
         rows,
         width="stretch",
@@ -133,12 +183,7 @@ def findings(title: str, help: str, rows: list[dict[str, str]]) -> None:
 
 
 def render(view: Callable[[], None]) -> None:
-    """Runs one page, reporting a failure as a message not a traceback.
-
-    Every view module ends with a call to this. Streamlit runs each view as
-    a script, so an escaping exception would replace the page with a stack
-    trace.
-    """
+    """Runs one page, reporting a failure as a message not a traceback."""
     try:
         view()
     except Exception as exc:

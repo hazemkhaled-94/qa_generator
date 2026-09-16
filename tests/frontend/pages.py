@@ -1,15 +1,112 @@
-"""Page objects over the Streamlit views.
+"""One page object over every view, and the answers each view needs.
 
-One class per page. It holds the selectors - which element, which key, which
-label - so a test says what a reader does and what they see, and a change to
-the layout is one edit here rather than one per test.
+Every page is now the same shape - overview, analysis, one service, search,
+filters, the table, and the row a person picked - so one class covers all of
+them. It holds the selectors, so a test says what a reader does and what
+they see, and a change to the layout is one edit here.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, ClassVar
 
-#: One fitted topic, as GET /topics returns it.
+#: The digest every fixture document carries.
+SHA = "a" * 64
+
+#: A queue with something in every state, so a page's figures have something
+#: to divide by and every control has a reason to be live.
+STATUS: dict[str, Any] = {
+    "stage": "any",
+    "working": False,
+    "rows": {"new": 2, "pending": 1, "in_progress": 1, "failed": 1},
+}
+
+#: A queue at rest, with nothing left to do.
+IDLE: dict[str, Any] = {"stage": "any", "working": False, "rows": {}}
+
+
+def status(**rows: int) -> dict:
+    """One stage's queue, holding exactly what a test names."""
+    return {"stage": "any", "working": False, "rows": rows}
+
+
+DOCUMENT = {
+    "sha256": SHA,
+    "filename": "report.pdf",
+    "first_seen": "2026-09-01T10:00:00",
+    "page_count": 12,
+    "title": "Risks in focus",
+    "language": "en",
+    "parse_status": "parsed",
+    "parse_error": None,
+    "chunk_status": "chunked",
+    "chunk_error": None,
+    "extracted_passages": 8,
+    "total_passages": 10,
+    "oversized": 0,
+}
+
+PASSAGE = {
+    "id": 11,
+    "doc_sha256": SHA,
+    "ordinal": 3,
+    "text": "Standard requests are answered within 48 hours on working days.",
+    "page_from": 2,
+    "page_to": 2,
+    "section_path": "Service > Response times",
+    "block_type": "paragraph",
+    "language": "en",
+    "doc_item_refs": ["#/texts/7"],
+    "bbox": [{"page": 2, "l": 1, "t": 2, "r": 3, "b": 4}],
+    "table_count": 0,
+    "sentence_count": 1,
+}
+
+PASSAGE_DETAIL = {
+    "passage": PASSAGE,
+    "table_cells": [],
+    "sentences": [{"i": 1, "start": 0, "end": 62, "predicates": 2}],
+    "extract_status": "extracted",
+    "extract_error": None,
+}
+
+FACT = {
+    "id": 1,
+    "statement": "A standard request is answered within 48 hours.",
+    "evidence_text": "Standard requests are answered within 48 hours on working days.",
+    "kind": "atomic",
+    "extraction_method": "llm",
+    "validated": True,
+    "rejection_code": None,
+    "validation_error": None,
+    "statement_predicates": 1,
+    "evidence_predicates": 2,
+    "units_added": [],
+    "unresolved_references": [],
+    "passages": [
+        {
+            "passage_id": 11,
+            "doc_sha256": SHA,
+            "ordinal": 3,
+            "page_from": 2,
+            "position": 0,
+        }
+    ],
+}
+
+FACT_QUALITY = {
+    "total": 1,
+    "validated": 1,
+    "mean_statement_chars": 46.0,
+    "mean_evidence_chars": 63.0,
+    "mean_statement_predicates": 1.0,
+    "mean_evidence_predicates": 2.0,
+    "facts_per_passage": 4.0,
+    "rejected": {},
+    "kinds": {"atomic": 1},
+}
+
 TOPIC = {
     "id": 1,
     "language": "de",
@@ -26,7 +123,6 @@ TOPIC = {
     "validated_facts": 50,
 }
 
-#: One language's entry in GET /topics/fit.
 LANGUAGE_FIT = {
     "language": "de",
     "topics": 2,
@@ -38,7 +134,6 @@ LANGUAGE_FIT = {
     "memberships": 60,
 }
 
-#: A healthy model of two topics in one language.
 FIT = {
     "status": "modelled",
     "error": None,
@@ -48,48 +143,166 @@ FIT = {
     "passages_without_language": 0,
 }
 
+QUESTION = {
+    "id": 1,
+    "question_text": "Within how long is a standard request answered?",
+    "target_answer": "48 hours",
+    "answerable": True,
+    "difficulty": "easy",
+    "passage_scope": "single_passage",
+    "document_scope": "single_document",
+    "topic_scope": "single_topic",
+    "answer_chars": 8,
+    "language": "en",
+    "status": "accepted",
+    "rejected_reason": None,
+    "created_at": "2026-09-14T11:00:00",
+    "facts": 1,
+    "documents": [SHA],
+    "topics": ["de #0"],
+    "thread_position": 1,
+    "follows_id": None,
+    "question_type": "factoid",
+    "answer_form": "value",
+    "planned_difficulty": "easy",
+}
 
-def topic(**changed: Any) -> dict:
-    """One topic, with whatever a test needs changed."""
-    return {**TOPIC, **changed}
+QUESTION_SOURCE = {
+    "fact_id": 1,
+    "statement": FACT["statement"],
+    "evidence_text": FACT["evidence_text"],
+    "validated": True,
+    "passage_id": 11,
+    "ordinal": 3,
+}
+
+QUESTION_QUALITY = {
+    "total": 1,
+    "accepted": 1,
+    "draft": 0,
+    "unanswerable": 0,
+    "followups": 0,
+    "topics_covered": 1,
+    "topics_in_coverage": 1,
+    "mean_question_chars": 47.0,
+    "mean_answer_chars": 8.0,
+    "rejected": {},
+    "difficulty": {"easy": 1},
+    "passage_scope": {"single_passage": 1},
+    "document_scope": {"single_document": 1},
+    "topic_scope": {"single_topic": 1},
+    "question_type": {"factoid": 1},
+    "answer_form": {"value": 1},
+    "planned_difficulty": {"easy": 1},
+    "planned_met": 1,
+}
+
+PLAN = {
+    "types": {"factoid": 2, "reason": 1},
+    "difficulty": {"easy": 1},
+    "followup_types": [],
+    "per_topic": 5,
+    "unanswerable_share": 0.1,
+    "followup_share": 0.2,
+    "max_followups": 2,
+    "answer_chars": {"value": [2, 80]},
+}
 
 
-def language_fit(**changed: Any) -> dict:
-    """One language's fit state, with whatever a test needs changed."""
-    return {**LANGUAGE_FIT, **changed}
+def changed(base: dict, **fields: Any) -> dict:
+    """One fixture row, with whatever a test needs different."""
+    return {**base, **fields}
 
 
-def fit(languages: list[dict] | None = None, **changed: Any) -> dict:
-    """The model's state, with whatever a test needs changed."""
+def resting(passage_id: int, ordinal: int, position: int, **fields: Any) -> dict:
+    """One further passage a fact rests on, as GET /facts returns it."""
     return {
-        **FIT,
-        "languages": [LANGUAGE_FIT] if languages is None else languages,
-        **changed,
+        "passage_id": passage_id,
+        "doc_sha256": fields.pop("doc_sha256", "b" * 64),
+        "ordinal": ordinal,
+        "page_from": fields.pop("page_from", None),
+        "position": position,
+        **fields,
     }
 
 
-class TopicsPage:
-    """The Topics view, as a reader sees and works it."""
+#: Every backend call the catalogue pages make, and a default answer for
+#: each. One dictionary, because one client serves five pages and a page
+#: that started calling something new should not need a new fixture.
+CATALOG: dict[str, Any] = {
+    "stage_status": lambda *args, **kwargs: STATUS,
+    "stage_action": {"detail": "1 row(s) queued.", "rows": 1},
+    "documents": {"total": 1, "documents": [DOCUMENT]},
+    "document_names": [{"sha256": SHA, "filename": "report.pdf"}],
+    "delete": {
+        "sha256": SHA,
+        "document": True,
+        "passages": 10,
+        "file": True,
+        "parsed": True,
+    },
+    "passages": {"total": 1, "passages": [PASSAGE]},
+    "passage": PASSAGE_DETAIL,
+    "passage_types": ["paragraph", "table"],
+    "facts": {"total": 1, "facts": [FACT]},
+    "fact_quality": FACT_QUALITY,
+    "topics": [TOPIC],
+    "topic_fit": FIT,
+    "topic_visualisation": None,
+    "describe_topic": TOPIC,
+    "delete_topics": {"topics": 2, "memberships": 60, "labels": 1},
+    "questions": {"total": 1, "questions": [QUESTION]},
+    "question": {"question": QUESTION, "sources": [QUESTION_SOURCE], "thread": []},
+    "question_quality": QUESTION_QUALITY,
+    "question_plan": PLAN,
+    "decide_question": QUESTION,
+}
 
-    #: Every backend call the page makes, and a default answer for each.
-    ANSWERS: ClassVar[dict[str, Any]] = {
-        "topics": [TOPIC],
-        "topic_fit": FIT,
-        "topic_visualisation": None,
-        "describe_topic": TOPIC,
-        "delete_topics": {"topics": 2, "memberships": 60, "labels": 1},
-        "stage_action": {"detail": "1 row(s) queued.", "rows": 1},
-        "stage_status": {"stage": "topics", "working": False, "rows": {}},
-    }
+#: The stage each page is allowed to run, and nothing else.
+OWNED = {
+    "documents": "parsing",
+    "passages": "chunking",
+    "facts": "extraction",
+    "topics": "topics",
+    "questions": "questions",
+}
 
-    def __init__(self, app) -> None:
-        """Wraps a run of the view."""
+#: The pages that list something and let a row be picked.
+LISTING = tuple(OWNED)
+
+
+def answers(**replaced: Any) -> dict:
+    """The scripted catalogue backend, with whatever a test needs changed."""
+    return {**CATALOG, **replaced}
+
+
+class View:
+    """Any view, as a reader sees and works it."""
+
+    #: What each page's table is keyed with, which is what a row is picked
+    #: through.
+    TABLES: ClassVar[dict[str, str]] = {name: f"{name}-table" for name in LISTING}
+
+    def __init__(self, app, name: str, selected: int | None = None) -> None:
+        """Wraps a run of one view, remembering which row is picked."""
         self.app = app
+        self.name = name
+        self.selected = selected
 
-    @classmethod
-    def answers(cls, **changed: Any) -> dict:
-        """The scripted backend, with whatever a test needs changed."""
-        return {**cls.ANSWERS, **changed}
+    def _rerun(self) -> View:
+        """Runs the script again, with whatever row was picked still picked.
+
+        A dataframe selection is real widget state in a browser and
+        survives a rerun. AppTest has no click for one, so it is written
+        straight into session state - and written again here, because a
+        value Streamlit never registered as a widget's does not survive the
+        run that read it.
+        """
+        if self.selected is not None:
+            self.app.session_state[self.TABLES[self.name]] = {
+                "selection": {"rows": [self.selected], "columns": []}
+            }
+        return View(self.app.run(), self.name, self.selected)
 
     # ── What the page rendered ───────────────────────────────────────────
 
@@ -115,17 +328,29 @@ class TopicsPage:
             parts += [one.value for one in getattr(self.app, kind)]
         return " ".join(str(one) for one in parts)
 
-    def tables(self) -> str:
-        """Every dataframe's contents in full, as one string.
+    def panels(self) -> list[str]:
+        """Each section's label, in the order the page drew them."""
+        return re.findall(r"<div class='qa-panel-label'>(.*?)</div>", self.html())
 
-        `to_string`, because a DataFrame's repr elides both columns and rows.
+    def html(self) -> str:
+        """Every panel label, state line and note, as one string.
+
+        These are drawn with `st.html`, which none of the prose accessors
+        reach.
+        """
+        return " ".join(str(one.value) for one in self.app.get("html"))
+
+    def tables(self) -> str:
+        """Every table's contents in full, as one string.
+
+        `to_string`, because a DataFrame's repr elides columns and rows.
         """
         return " ".join(
             one.value.to_string() if hasattr(one.value, "to_string") else str(one.value)
             for one in self.app.dataframe
         )
 
-    def metrics(self) -> dict[str, str]:
+    def stats(self) -> dict[str, str]:
         """Every figure on the page, by its label."""
         return {one.label: one.value for one in self.app.metric}
 
@@ -137,9 +362,21 @@ class TopicsPage:
         """Every control, by its label."""
         return {one.label: one for one in self.app.button}
 
+    def control_keys(self) -> list[str]:
+        """Every control's key, which says what the control does."""
+        return [one.key for one in self.app.button]
+
     def button(self, label: str):
         """One control by label, or None if the page does not offer it."""
         return self.buttons().get(label)
+
+    def progress_bars(self) -> list[Any]:
+        """Every progress bar, of which there should be none anywhere."""
+        return list(self.app.get("progress"))
+
+    def folds(self) -> list[str]:
+        """Every expander's label."""
+        return [one.label for one in self.app.get("expander")]
 
     def embedded(self) -> list[Any]:
         """The figure, which `components.html` renders as an iframe."""
@@ -149,25 +386,38 @@ class TopicsPage:
         """What the page reported as a transient message."""
         return [str(one.value) for one in self.app.get("toast")]
 
+    def widget_keys(self) -> set[str]:
+        """Every input's key, which is how search is told from a filter."""
+        found = set()
+        for kind in ("selectbox", "text_input", "number_input", "checkbox"):
+            found |= {one.key for one in getattr(self.app, kind) if one.key}
+        return found
+
     # ── What a reader does ───────────────────────────────────────────────
 
-    def press(self, label: str) -> TopicsPage:
+    def press(self, label: str) -> View:
         """Presses one control and re-runs the page."""
         found = self.button(label)
         assert found is not None, f"no {label!r} control: {sorted(self.buttons())}"
-        return TopicsPage(found.click().run())
+        found.click()
+        return self._rerun()
 
-    def choose_language(self, language: str) -> TopicsPage:
-        """Picks which language's figure to draw."""
-        self.app.selectbox("topics-map-language").select(language)
-        return TopicsPage(self.app.run())
+    def select(self, row: int = 0) -> View:
+        """Picks one row out of the page's table."""
+        self.selected = row
+        return self._rerun()
 
-    def type_label(self, topic_id: int, label: str) -> TopicsPage:
-        """Types a name for one topic."""
-        self.app.text_input(f"topics-label-{topic_id}").set_value(label)
-        return TopicsPage(self.app.run())
+    def choose(self, key: str, value: Any) -> View:
+        """Picks a value in one of the page's pickers."""
+        self.app.selectbox(key).select(value)
+        return self._rerun()
 
-    def clear_coverage(self, topic_id: int) -> TopicsPage:
-        """Takes one topic out of coverage reporting."""
-        self.app.checkbox(f"topics-coverage-{topic_id}").uncheck()
-        return TopicsPage(self.app.run())
+    def type_in(self, key: str, value: str) -> View:
+        """Types into one of the page's inputs."""
+        self.app.text_input(key).set_value(value)
+        return self._rerun()
+
+    def uncheck(self, key: str) -> View:
+        """Clears one of the page's checkboxes."""
+        self.app.checkbox(key).uncheck()
+        return self._rerun()

@@ -71,7 +71,11 @@ class IngestService:
         return self._max_file_size_bytes
 
     def documents(
-        self, search: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        parse_status: str | None = None,
     ) -> tuple[int, list[StoredDocument]]:
         """Lists one page of what has been ingested, and the total behind it.
 
@@ -79,11 +83,12 @@ class IngestService:
             search: Matched against filename, title and digest.
             limit: Rows to return.
             offset: Rows to skip.
+            parse_status: Narrows to one parse state.
 
         Returns:
-            The total matching the search, and the requested page.
+            The total matching the filters, and the requested page.
         """
-        return self._repository.page(search, limit, offset)
+        return self._repository.page(search, limit, offset, parse_status)
 
     def document_names(self) -> list[DocumentName]:
         """Lists every document by the name it arrived under."""

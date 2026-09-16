@@ -61,3 +61,18 @@ def run_view(monkeypatch):
         return app.run()
 
     return run
+
+
+@pytest.fixture
+def open_view(run_view):
+    """Opens one view as the page object a test works it through."""
+    from pages import View, answers
+
+    def opened(name: str, client: Answers | None = None, **replaced) -> View:
+        """Opens `frontend/views/{name}.py` with the catalogue stubbed."""
+        return View(
+            run_view(name, catalog_api=client or Answers(**answers(**replaced))),
+            name,
+        )
+
+    return opened

@@ -81,17 +81,20 @@ Once it reports ready:
 
 | Service | URL | Purpose |
 |---|---|---|
-| Frontend | http://localhost:8501 | Upload documents, browse passages and facts, view system status |
+| Frontend | http://localhost:8501 | Run each stage, browse what it produced, view system status |
 | API | http://localhost:8000/docs | OpenAPI documentation |
 | Phoenix | http://localhost:6006 | Traces — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
 | Grafana | http://localhost:3001 | Logs — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
 | Adminer | http://localhost:9001 | Database browser |
 
-Upload a PDF from the frontend, then pick it in the table on the Documents
-page and press **Start** on the Parsing row: nothing runs until it is asked
-to. Every control there acts on the document you picked and on nothing else,
-so one document can be re-run or deleted while the rest of a corpus is
-mid-flight. The System health page reports the state of every component.
+Upload a PDF on the Upload page, then go to Documents and press **Start
+all**: nothing runs until it is asked to. Each page runs exactly one stage —
+Documents parses, Passages chunks, Facts extracts, Topics fits, Questions
+writes — so the corpus moves one page at a time, in that order. Pick a row
+in any table to see everything held about it and to run that stage over that
+row alone, so one document can be re-run or deleted while the rest of a
+corpus is mid-flight. The System health page reports the state of every
+component.
 
 ## Common commands
 
@@ -359,8 +362,11 @@ PostgreSQL's `max_connections`.
 `/documents`, `/passages`, `/facts` and `/questions` take `q` for a
 case-insensitive substring and `limit`/`offset` to page; the last three also
 take `document` to narrow to one digest, and `/questions` takes `topic` as
-well. The frontend renders each as a page of its own and filters nothing
-itself.
+well. Each also takes the filters its page offers — `parse_status` on
+`/documents`, `block_type` on `/passages`, `kind` and `method` on `/facts`,
+and the six on `/questions`. The frontend renders each as a page of its own
+and filters nothing itself, apart from `/topics`, which returns every topic
+at once because one fit produces a list a person can read.
 
 `/questions` is the one path that is both a stage and its output. Every other
 stage is a verb with its product under a noun — `/extraction` and `/facts` —
@@ -390,6 +396,44 @@ and the two workers would fight over one row.
 A fact or a question reaches its topics by joining through its passages —
 `fact_passages` to `passage_topics` — rather than holding a topic of its
 own, so no two rows can disagree about which topic a passage is in.
+
+## The pages
+
+One page per stage, and a page runs that stage and no other:
+
+| Page | Lists | Runs | Over |
+|---|---|---|---|
+| Upload | — | ingestion | the files you choose |
+| Documents | documents | parsing | a document |
+| Passages | passages | chunking | a document |
+| Facts | facts | extraction | a passage |
+| Topics | topics | topic modelling | the whole corpus |
+| Questions | questions | question generation | a topic |
+| System health | components | nothing | — |
+
+A page lists what its stage produces and runs the stage that produced it.
+The queue's unit is not always the row: chunking replaces all of a
+document's passages at once, and extraction reads a passage and writes all
+of its facts together, so a row picked on those pages is run through the
+thing its stage actually queues over. The page says so where it offers the
+control.
+
+Every page is the same sequence of panels: the few figures worth seeing on
+arrival, an `Analysis` fold nobody has to open, the stage's controls, the
+search box, the filters, the table, and — only once a row is picked —
+everything held about that row, as one table of every field it has. Two
+pages carry a delete box, because two things can be deleted: a document
+with or without what was derived from it, and the topics, all at once. A
+passage, a fact and a question have no delete: a passage belongs to its
+document, and a rejected question is kept because the share that was thrown
+away is the evidence behind the coverage report.
+
+Each stage can be run over everything it owns or over the one row picked.
+Nothing on a page can reach another page's stage, and no verb does the work:
+they move rows between statuses and a worker picks up what became
+claimable. While a stage has anything queued or in hand its panel carries a
+spinner and its counts, and redraws every few seconds until the queue is
+empty; the page stays usable throughout, and Stop stays live.
 
 ## What a fact is
 
@@ -431,7 +475,8 @@ say whether the model is decomposing or summarising: claims per statement,
 which should be 1, and claims per statement against claims per cited sentence,
 which should sit well above 1. A sentence usually carries several claims; if a
 statement keeps all of them, the passage was restated rather than broken up.
-The Facts page shows all of it and says plainly when a number is wrong.
+The Facts page shows all of it in its Analysis fold, and says plainly
+when a number is wrong.
 
 A table is read by a deterministic cell reader, not by the model. It cites the
 numbered rendered row its own value sits in, so a table citation is an index
@@ -572,8 +617,9 @@ cannot be cross-document however it is phrased:
 
 The band the plan asked for is stored as `planned_difficulty` beside the
 `difficulty` the question turned out to be. The two disagree when the writer
-cited fewer facts than it was offered, and the share that agree is on the
-Questions page: it is a measurement of the plan, not a fault in the row.
+cited fewer facts than it was offered, and the share that agree is in the
+Questions page's Analysis fold: it is a measurement of the plan, not a fault
+in the row.
 
 A topic sitting in one document has no cross-document question in it. The deal
 falls back to the widest sample it can give — the nearest passage of the same
@@ -679,7 +725,7 @@ The length bounds are per form and measured rather than guessed: a floor of 15
 on values refused 41% of the answers this corpus had accepted — `70%`, `2025`
 and `Bafin` among them, which are the most unambiguously scoreable answers
 there are. One line in `backend.env` changes any of them, and the share each
-refuses is on the Questions page either way.
+refuses is in the Questions page's Analysis fold either way.
 
 There is **no gate for "the question is its own fact rearranged"**, and that is
 a finding rather than an omission. One was written, in two formulations, and
@@ -788,8 +834,8 @@ twelve topics: c_v 0.522 per passage against 0.396 per sentence.
 
 Each fit also draws every language it fitted as a
 [pyLDAvis](https://github.com/bmabey/pyLDAvis) figure and stores it in the
-`export` bucket under `topics/<language>.html`. Read it on the Topics page,
-at `GET /topics/visualisation/{language}`, or as a file with
+`export` bucket under `topics/<language>.html`. Read it in the Topics page's
+Analysis fold, at `GET /topics/visualisation/{language}`, or as a file with
 `make topics-visualise`.
 
 The figure is drawn during the fit rather than on demand, because it needs the
@@ -1065,9 +1111,14 @@ and it applies to both themes — which is what pinned the app to light before.
 against the `color-scheme` Streamlit sets on the app container from the theme
 it actually settled on. So the custom styling follows the chrome whichever way
 the chrome was decided — a `prefers-color-scheme` media query would have got
-the menu wrong, staying light while everything around it went dark. Only the
-five accent hues are written twice; the neutrals are mixed from `currentColor`
-and each border and wash from its own hue, so they need no second value.
+the menu wrong, staying light while everything around it went dark. Two hues
+are written twice, the brand purple and the red that only deletion uses; the
+neutrals are mixed from `currentColor`, so they need no second value.
+
+Colour carries one meaning. Purple fills the one control that commits
+something in a group — Start, Fit, Save, Accept — and red is spent only on
+deletion. Everything else is an outlined button, and a control that would do
+nothing right now is greyed rather than hidden, so a row keeps its shape.
 
 The topic map stays on white in either theme. It is a pyLDAvis document inside
 an iframe, so nothing outside it can restyle it; it is framed and given a

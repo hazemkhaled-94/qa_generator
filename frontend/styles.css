@@ -4,66 +4,32 @@
    against the `color-scheme` of the element using it. Streamlit sets that on
    the app container to the theme it actually settled on, so these follow
    whether the reader chose from the toolbar menu or the browser reported a
-   preference. A prefers-color-scheme media query would only have caught the
-   second, and would have disagreed with the chrome the moment anyone used
-   the menu.
+   preference.
 
-   Only the five accent hues need a pair at all. Everything neutral is mixed
-   from `currentColor` — whatever Streamlit set the text to — so it follows
-   the theme with no second value to keep in step, and every border and wash
-   is mixed from its own hue for the same reason. A theme is seven pairs,
-   not forty values. */
+   Two hues only: the brand purple, and a red the delete controls own.
+   Everything neutral is mixed from `currentColor` — whatever Streamlit set
+   the text to — so it follows the theme with no second value to keep in
+   step. */
 
 :root {
-  /* Both, so the page itself — scrollbars, and anything outside the app
-     container — follows along rather than staying stubbornly light. */
   color-scheme: light dark;
 
   /* currentColor resolves where a var() is used, not where it is declared,
      so each of these takes the text colour of the element using it. */
   --qa-ink: currentColor;
-  --qa-muted: color-mix(in srgb, currentColor 60%, transparent);
-  --qa-border: color-mix(in srgb, currentColor 15%, transparent);
-  --qa-surface: color-mix(in srgb, currentColor 3%, transparent);
-  --qa-radius: 10px;
+  --qa-muted: color-mix(in srgb, currentColor 58%, transparent);
+  --qa-border: color-mix(in srgb, currentColor 14%, transparent);
+  --qa-radius: 8px;
 
-  /* One hue per thing a control does, graded by what pressing it by mistake
-     would cost. Each reads against its own theme's background at well above
-     the 4.5:1 text minimum; the dark half is lifted because a hue chosen for
-     white cannot also serve on near-black — #15683A on #131019 is 1.7:1, and
-     no single colour clears 4.5:1 against both.
-
-     go      — starts work that was going to be done anyway
-     recover — re-queues only what already failed
-     halt    — withdraws from the queue; nothing finished is lost
-     redo    — throws finished output away and rebuilds it
-     danger  — deletes data, and cannot be undone */
-  --qa-go: light-dark(#15683A, #4FBF82);
-  --qa-recover: light-dark(#1B4F9E, #7FB0F0);
-  --qa-halt: light-dark(#3D4453, #A9B2C4);
-  --qa-redo: light-dark(#8A5A00, #E0AE4E);
+  /* The brand accent, lifted on dark: #A100FF on near-black is too close to
+     the ground to serve as an accent. */
+  --qa-accent: light-dark(#A100FF, #B77DFF);
+  /* Deletion, and nothing else. */
   --qa-danger: light-dark(#A32020, #F08A8A);
-
-  /* Read on top of a filled accent button, so it flips as the accent does. */
+  --qa-danger-line: color-mix(in srgb, var(--qa-danger) 40%, transparent);
+  --qa-danger-wash: color-mix(in srgb, var(--qa-danger) 10%, transparent);
   --qa-on-accent: light-dark(#FFFFFF, #131019);
-  /* Which way a hover moves an accent. Light darkens; dark lightens. */
   --qa-shade: light-dark(#000000, #FFFFFF);
-}
-
-/* Mixed from the hue above, so they follow whichever palette is active.
-   `go` gets no line: it is the one control drawn filled, so it never has an
-   outline to colour. */
-:root {
-  --qa-recover-line: color-mix(in srgb, var(--qa-recover) 42%, transparent);
-  --qa-halt-line: color-mix(in srgb, var(--qa-halt) 42%, transparent);
-  --qa-redo-line: color-mix(in srgb, var(--qa-redo) 42%, transparent);
-  --qa-danger-line: color-mix(in srgb, var(--qa-danger) 42%, transparent);
-
-  --qa-go-wash: color-mix(in srgb, var(--qa-go) 12%, transparent);
-  --qa-recover-wash: color-mix(in srgb, var(--qa-recover) 12%, transparent);
-  --qa-halt-wash: color-mix(in srgb, var(--qa-halt) 12%, transparent);
-  --qa-redo-wash: color-mix(in srgb, var(--qa-redo) 12%, transparent);
-  --qa-danger-wash: color-mix(in srgb, var(--qa-danger) 12%, transparent);
 }
 
 .block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 1320px; }
@@ -71,192 +37,116 @@ header[data-testid="stHeader"] { background: transparent; }
 /* The toolbar menu stays: it is where the light/dark toggle lives. */
 footer { visibility: hidden; }
 
-.pill {
-  display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
-  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* ── Brand and page title ───────────────────────────────────────────── */
+
+.qa-brand {
+  border-bottom: 1px solid var(--qa-border);
+  padding-bottom: .7rem; margin-bottom: 1.2rem;
 }
-.pill-ok { background: var(--qa-go-wash); color: var(--qa-go); }
-.pill-no { background: var(--qa-danger-wash); color: var(--qa-danger); }
+.qa-brand-title {
+  font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--qa-ink);
+}
+.qa-page-title {
+  font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--qa-ink); margin: 0 0 1rem;
+}
 
-.qa-muted { color: var(--qa-muted); font-size: 0.82rem; }
+/* ── Panels: one per section, which is what separates them ──────────── */
 
-/* The line under a figure is a second reading of that figure — `75% of
-   3,327` under `2,479` — and never a change in it. st.metric draws its delta
-   with a direction arrow and offers no way to turn one off, and an arrow
-   pointing up beside `Rejected` says something untrue, so the icon goes. */
-[data-testid="stMetricDelta"] svg { display: none; }
-[data-testid="stMetricDelta"] { gap: 0; font-size: 0.74rem; }
+.qa-panel-label {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .1rem;
+}
 
-/* Every figure box the same size, whatever it carries.
+/* Streamlit draws a bordered container as a vertical block carrying its own
+   border class. Tightened: the default padding is built for a card holding a
+   form, and a page of seven of them reads as a stack of cards rather than as
+   one page with sections. */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: var(--qa-radius);
+}
+[data-testid="stVerticalBlockBorderWrapper"] > div > [data-testid="stVerticalBlock"] {
+  gap: .55rem;
+}
 
-   Two things make them differ: only some figures have a second line, and a
-   long label wraps to two. A column is already a flex item that stretches to
-   the tallest in its row, so the fix is to let it — and then to fill it from
-   the inside, which a min-height guess could not do for a label that wraps.
+/* ── Figures: small, because only the important ones are here ───────── */
 
-   The column's own height is deliberately not set here. `height: 100%` on it
-   resolves against a row whose height is its content, so it computes to auto
-   and overrides the very stretch it was meant to produce: the boxes went on
-   differing by exactly the height of one delta line. */
+[data-testid="stMetric"] { padding: .45rem .6rem; }
+[data-testid="stMetricLabel"] p {
+  font-size: 0.7rem !important; font-weight: 600;
+  letter-spacing: 0.02em; color: var(--qa-muted);
+}
+[data-testid="stMetricValue"] {
+  font-size: 1.25rem !important; font-weight: 700; line-height: 1.25;
+}
+/* Every figure box the same height whatever its label wraps to. */
 [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
-[data-testid="stColumn"]
-  [data-testid="stElementContainer"]:has([data-testid="stMetric"], .qa-card),
-[data-testid="stElementContainer"]:has(.qa-card) > [data-testid="stHtml"],
+[data-testid="stColumn"] [data-testid="stElementContainer"]:has([data-testid="stMetric"]),
 [data-testid="stMetric"] {
   height: 100%;
 }
-/* The second line sits at the bottom, so the figures above it line up across
-   a row whether or not a given box has one. */
-[data-testid="stMetric"] { display: flex; flex-direction: column; }
-[data-testid="stMetric"] [data-testid="stMetricDelta"] { margin-top: auto; }
 
-/* The topic map is a pyLDAvis document inside an iframe: self-contained, and
-   light whatever the page is, because no style out here reaches into it.
-   Given a plate of its own so it reads as a figure deliberately printed on
-   white, rather than as the one panel that failed to follow the theme. */
-[data-testid="stIFrame"] {
-  background: #FFFFFF;
-  border: 1px solid var(--qa-border);
-  border-radius: var(--qa-radius);
+/* ── The state line beside a service's controls ─────────────────────── */
+
+.qa-state {
+  font-size: 0.78rem; color: var(--qa-muted); padding-top: .5rem;
+  display: flex; align-items: center; gap: .45rem;
+}
+.qa-state-bad { color: var(--qa-danger); }
+
+/* The loading icon. Shown for as long as the service has work in flight;
+   the panel around it redraws on a timer, so it stops when the queue does. */
+.qa-spin {
+  width: .72rem; height: .72rem; flex: none; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--qa-accent) 25%, transparent);
+  border-top-color: var(--qa-accent);
+  animation: qa-spin 0.8s linear infinite;
+}
+@keyframes qa-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .qa-spin { animation-duration: 2.4s; }
 }
 
-.qa-brand { border-bottom: 1px solid var(--qa-border); padding-bottom: .9rem; margin-bottom: 1.6rem; }
-.qa-brand-title {
-  font-size: 1.45rem; font-weight: 700; letter-spacing: -0.01em; color: var(--qa-ink);
-}
-.qa-brand-sub { color: var(--qa-muted); font-size: 0.9rem; margin-top: .15rem; }
+/* ── Deletion: the one place a second colour is spent ───────────────── */
 
-/* Page header: same title block on every page. */
-.qa-page-title {
-  font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; color: var(--qa-ink);
-  margin: 0;
-}
-.qa-page-sub {
-  color: var(--qa-muted); font-size: 0.85rem; margin-top: .2rem; max-width: 78ch;
+.qa-danger-note { color: var(--qa-danger); font-size: 0.78rem; }
+
+[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-danger-note) {
+  border-color: var(--qa-danger-line) !important;
+  background: var(--qa-danger-wash);
 }
 
-/* Status card, one per component on System health. */
-.qa-card {
-  border: 1px solid var(--qa-border); border-radius: var(--qa-radius);
-  background: var(--qa-surface); padding: .7rem .8rem; height: 100%;
-}
-.qa-card-label {
-  font-size: 0.78rem; font-weight: 600; color: var(--qa-ink);
-  overflow-wrap: anywhere;
-}
-.qa-card-detail {
-  color: var(--qa-muted); font-size: 0.76rem; margin-top: .35rem;
-  overflow-wrap: anywhere;
-}
-.qa-card-pill { margin-top: .35rem; }
-
-/* Section label above a group of metrics. The h5 form is what page.section
-   emits: st.markdown is the only heading call that carries a `help` tooltip,
-   and every label on the page is required to have one. */
-.qa-section,
-.stMarkdown h5 {
-  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .2rem;
-}
-
-/* Controls, coloured by what they do.
-
-   Keyed, not typed: Streamlit offers `primary` and `secondary` and nothing
-   else, and four verbs all drawn secondary were the same button four times.
-   The key a widget is given is already on its container as `st-key-<key>`,
-   and lib.stage keys every control with its intent, so a control is coloured
-   by what it does and no call site passes a style.
-
-   Every rule below is :not(:disabled). A disabled control does nothing, so
-   colouring it would promise an action that is not on offer; disabled stays
-   Streamlit's own grey, identical for all five. */
-
-/* Transparent, not white: an outlined control sits on whatever the page is,
-   which is the one thing that differs between the two themes. */
-[class*="st-key-recover-"] button:not(:disabled),
-[class*="st-key-halt-"] button:not(:disabled),
-[class*="st-key-redo-"] button:not(:disabled),
+/* Keyed, not typed: Streamlit offers `primary` and `secondary` and neither
+   is red. The key a widget is given is already on its container as
+   `st-key-<key>`, so a control is coloured by being keyed for what it does
+   and no call site passes a style. Disabled stays Streamlit's own grey: a
+   control that does nothing should not promise an action. */
 [class*="st-key-danger-"] button:not(:disabled) {
   background: transparent !important;
-}
-
-[class*="st-key-recover-"] button:not(:disabled) {
-  border-color: var(--qa-recover-line) !important;
-  color: var(--qa-recover) !important;
-}
-[class*="st-key-recover-"] button:hover:not(:disabled) {
-  border-color: var(--qa-recover) !important;
-  background: var(--qa-recover-wash) !important;
-}
-
-[class*="st-key-halt-"] button:not(:disabled) {
-  border-color: var(--qa-halt-line) !important;
-  color: var(--qa-halt) !important;
-}
-[class*="st-key-halt-"] button:hover:not(:disabled) {
-  border-color: var(--qa-halt) !important;
-  background: var(--qa-halt-wash) !important;
-}
-
-[class*="st-key-redo-"] button:not(:disabled) {
-  border-color: var(--qa-redo-line) !important;
-  color: var(--qa-redo) !important;
-}
-[class*="st-key-redo-"] button:hover:not(:disabled) {
-  border-color: var(--qa-redo) !important;
-  background: var(--qa-redo-wash) !important;
-}
-
-[class*="st-key-danger-"] button:not(:disabled) {
   border-color: var(--qa-danger-line) !important;
   color: var(--qa-danger) !important;
 }
 [class*="st-key-danger-"] button:hover:not(:disabled) {
   border-color: var(--qa-danger) !important;
-  background: var(--qa-danger-wash) !important;
+  background: color-mix(in srgb, var(--qa-danger) 12%, transparent) !important;
 }
-
-/* Filled, not outlined: the two that commit something. Start is the action a
-   row is there for, and the second delete click is the irreversible one, so
-   neither should look like the three beside it. The text on them flips with
-   the theme, because the accent under it does. */
-[class*="st-key-go-"] button:not(:disabled),
-[class*="st-key-danger-confirm"] button:not(:disabled) {
-  color: var(--qa-on-accent) !important;
-}
-[class*="st-key-go-"] button:not(:disabled) {
-  background: var(--qa-go) !important;
-  border-color: var(--qa-go) !important;
-}
-[class*="st-key-go-"] button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--qa-go) 84%, var(--qa-shade)) !important;
-  border-color: color-mix(in srgb, var(--qa-go) 84%, var(--qa-shade)) !important;
-}
+/* The second click, which is the irreversible one. */
 [class*="st-key-danger-confirm"] button:not(:disabled) {
   background: var(--qa-danger) !important;
-  border-color: var(--qa-danger) !important;
+  color: var(--qa-on-accent) !important;
 }
 [class*="st-key-danger-confirm"] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--qa-danger) 84%, var(--qa-shade)) !important;
-  border-color: color-mix(in srgb, var(--qa-danger) 84%, var(--qa-shade)) !important;
 }
 
-/* Where the delete buttons sit, so they are never next to a stage control. */
-.qa-danger-zone {
-  border: 1px solid var(--qa-danger-line); border-radius: var(--qa-radius);
-  background: var(--qa-danger-wash); padding: .6rem .8rem; margin-bottom: .6rem;
-}
-.qa-danger-title {
-  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--qa-danger);
-}
-.qa-danger-detail { color: var(--qa-muted); font-size: 0.78rem; margin-top: .25rem; }
+/* ── The topic map ──────────────────────────────────────────────────── */
 
-/* Label beside one item's controls: the stage's name on the left, the state
-   its verbs left the item in on the right. */
-.qa-control-label {
-  font-size: 0.8rem; font-weight: 600; color: var(--qa-ink);
-  padding-top: .45rem;
+/* A pyLDAvis document inside an iframe: self-contained, and light whatever
+   the page is, because no style out here reaches into it. Given a plate of
+   its own so it reads as a figure deliberately printed on white. */
+[data-testid="stIFrame"] {
+  background: #FFFFFF;
+  border: 1px solid var(--qa-border);
+  border-radius: var(--qa-radius);
 }
-.qa-state-bad { color: var(--qa-danger); }

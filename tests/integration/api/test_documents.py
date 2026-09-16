@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import pytest
 from seed import digest
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
+from database.qa_generator import Document
 
 pytestmark = pytest.mark.integration
 
@@ -93,6 +97,31 @@ def test_the_listing_can_be_searched(client, pdf) -> None:
     assert listed["documents"][0]["filename"] == "annual-report.pdf"
 
 
+def test_the_listing_can_be_narrowed_to_one_parse_state(client, pdf, engine) -> None:
+    """The filter the Documents page offers beside its search box."""
+    upload(client, pdf, name="done.pdf")
+    upload(client, pdf.replace(b"200 200", b"300 300"), name="waiting.pdf")
+    with Session(engine) as session:
+        session.execute(
+            update(Document)
+            .where(Document.sha256 == _digest_of(client, "done.pdf"))
+            .values(parse_status="parsed")
+        )
+        session.commit()
+
+    parsed = client.get("/documents", params={"parse_status": "parsed"}).json()
+    waiting = client.get("/documents", params={"parse_status": "new"}).json()
+
+    assert [one["filename"] for one in parsed["documents"]] == ["done.pdf"]
+    assert [one["filename"] for one in waiting["documents"]] == ["waiting.pdf"]
+
+
+def _digest_of(client, filename: str) -> str:
+    """The digest the catalogue holds one uploaded file under."""
+    listed = client.get("/documents").json()["documents"]
+    return next(one["sha256"] for one in listed if one["filename"] == filename)
+
+
 @pytest.mark.parametrize(
     ("params", "status"),
     [
@@ -100,6 +129,7 @@ def test_the_listing_can_be_searched(client, pdf) -> None:
         ({"limit": 501}, 422),
         ({"offset": -1}, 422),
         ({"q": "x" * 201}, 422),
+        ({"parse_status": "invented"}, 422),
         ({"limit": 500, "offset": 0}, 200),
     ],
 )

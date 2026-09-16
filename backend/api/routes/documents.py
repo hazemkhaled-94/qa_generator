@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import APIRouter, Query, Request, Response, UploadFile
 
@@ -34,6 +35,11 @@ _ERROR_STATUS: dict[str, int] = {
 #: an object key.
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
+#: The states `parse_status` may be narrowed to. A Literal rather than a free
+#: string, so the OpenAPI document lists them and the frontend's picker cannot
+#: drift from what the backend accepts.
+ParseStatus = Literal["new", "pending", "in_progress", "parsed", "failed"]
+
 router = APIRouter(tags=["documents"])
 
 
@@ -48,11 +54,12 @@ class DocumentPage:
 @router.get("/documents")
 def list_documents(
     q: str | None = Query(default=None, max_length=200),
+    parse_status: ParseStatus | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> DocumentPage:
     """Lists stored documents and where each has reached in the pipeline."""
-    total, rows = ingest_service.documents(q, limit, offset)
+    total, rows = ingest_service.documents(q, limit, offset, parse_status)
     return DocumentPage(total=total, documents=rows)
 
 

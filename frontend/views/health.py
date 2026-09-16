@@ -1,17 +1,10 @@
-"""System health view."""
+"""System health view. Runs nothing: it only reports."""
 
 from __future__ import annotations
-
-from html import escape
-from itertools import batched
 
 import streamlit as st
 
 from lib import backend, config, page
-
-#: Cards per row. Fixed, so a card is the same width however many components
-#: the backend reports and a new one wraps instead of squeezing the rest.
-_PER_ROW = 4
 
 #: What a service's own figures count, keyed by the service and the name it
 #: reports the figure under. Both parts are needed: `documents` is a bucket
@@ -19,122 +12,107 @@ _PER_ROW = 4
 #: here and a queue status everywhere else.
 #:
 #: Queue statuses are explained once in page.STATUS_HELP and shared with the
-#: four pipeline pages, so nothing is worded twice.
+#: five pipeline pages, so nothing is worded twice.
 _COUNTS = {
-    ("object_store", "documents"): "Objects in the bucket holding uploaded "
-    "files, one per stored document. Should match ingestion's document count.",
-    ("object_store", "parsed"): "Objects in the bucket holding converted "
-    "documents, one per document parsing has finished.",
-    ("object_store", "export"): "Objects in the bucket holding generated "
-    "datasets and coverage reports. Nothing writes to it yet.",
-    ("ingestion", "documents"): "Documents in the catalogue, whatever stage "
-    "each has reached.",
-    ("ingestion", "upload_attempts"): "Uploads recorded, accepted and refused "
-    "alike. Higher than the document count is normal: re-uploading a file "
-    "already held is recorded and stores nothing.",
-    ("chunking", "passages"): "Passages chunking has produced across every "
-    "document. This is the unit extraction queues over.",
-    ("extraction", "facts"): "Facts extraction has written, including those "
-    "that failed a check. Rejected facts are kept so the failure rate can be "
-    "measured.",
-    ("extraction", "validated"): "Facts that passed every check. Only these "
-    "are usable for question generation.",
-    ("topic_modelling", "memberships"): "Passage-to-topic links held. A "
-    "passage belongs to several topics with a weight on each, so this is well "
-    "above the passage count.",
-    ("topic_modelling", "passages_with_a_topic"): "Passages placed in at "
-    "least one topic. Passages below this and the corpus total sit outside "
-    "every topic-weighted report.",
+    ("object_store", "documents"): "Objects holding uploaded files.",
+    ("object_store", "parsed"): "Objects holding converted documents.",
+    ("object_store", "export"): "Objects holding datasets and reports.",
+    ("ingestion", "documents"): "Documents in the catalogue.",
+    ("ingestion", "upload_attempts"): "Uploads recorded, accepted and refused.",
+    ("chunking", "passages"): "Passages chunking has produced.",
+    ("extraction", "facts"): "Facts written, rejected ones included.",
+    ("extraction", "validated"): "Facts that passed every check.",
+    ("topic_modelling", "memberships"): "Passage-to-topic links held.",
+    ("topic_modelling", "passages_with_a_topic"): "Passages in at least one topic.",
 }
-
-
-def card(column, label: str, ok: bool, detail: str) -> None:
-    """Renders one status card."""
-    pill = "pill-ok" if ok else "pill-no"
-    column.html(
-        "<div class='qa-card'>"
-        f"<div class='qa-card-label'>{escape(label)}</div>"
-        f"<div class='qa-card-pill'><span class='pill {pill}'>"
-        f"{'ok' if ok else 'failed'}</span></div>"
-        f"<div class='qa-card-detail'>{escape(detail)}</div>"
-        "</div>"
-    )
 
 
 def view() -> None:
     """Renders the system health page.
 
-    Draws a card per component the backend reports, then its numbers, so a
-    new component appears without a change here.
+    Draws a row per component the backend reports, so a new component
+    appears without a change here.
     """
-    page.header(
-        "System health",
-        "Whether every component behind the API is reachable, and what each "
-        "one currently holds.",
-    )
+    page.header("System health")
 
     client = backend.health_api()
     api_ok, api_message = client.reachable()
     components = client.components()
 
-    page.section(
-        "Components",
-        "One card per thing the backend depends on. `ok` means it answered; "
-        "`failed` means it did not, and the reason is on the card. The "
-        "frontend holds one address and reaches everything else through it, "
-        "so a failed backend card makes every other card unknowable.",
-    )
-    cards = [("Backend", api_ok, f"{config.BACKEND_URL} — {api_message}")]
-    cards += [
-        (name.replace("_", " ").title(), state["ok"], state["detail"])
+    rows = [
+        {
+            "Component": "Backend",
+            "State": "ok" if api_ok else "failed",
+            "Detail": f"{config.BACKEND_URL} — {api_message}",
+            "Figures": 0,
+        }
+    ]
+    rows += [
+        {
+            "Component": name.replace("_", " ").title(),
+            "State": "ok" if state["ok"] else "failed",
+            "Detail": state["detail"],
+            "Figures": len(state["metrics"]),
+        }
         for name, state in components.items()
     ]
 
-    for row in batched(cards, _PER_ROW):
-        # strict=False: the last row is short, and its cards keep the width
-        # the full rows have rather than spreading to fill it.
-        for column, (label, ok, detail) in zip(st.columns(_PER_ROW), row, strict=False):
-            card(column, label, ok, detail)
+    with page.panel("Overview"):
+        page.stats(
+            {
+                "Components": (f"{len(rows):,}", "Things the backend depends on."),
+                "Failed": (
+                    f"{sum(1 for one in rows if one['State'] == 'failed'):,}",
+                    "Components that did not answer.",
+                ),
+            }
+        )
 
-    if not components:
-        st.warning("The backend is unreachable, so there is nothing to report.")
+    with page.panel(f"Components · {len(rows):,}"):
+        picked = page.table(
+            rows,
+            key="health-table",
+            column_config={"Detail": st.column_config.TextColumn(width="large")},
+        )
+        if not components:
+            st.caption("The backend is unreachable, so there is nothing to report.")
+
+    if picked is None:
+        return
+    name = list(components)[picked - 1] if picked else None
+    if name is None:
         return
 
-    for name, state in components.items():
-        if not state["metrics"]:
-            continue
-        st.divider()
-        page.section(
-            name.replace("_", " ").title(),
-            f"What this service holds right now. {state['detail']}",
-        )
-        page.metrics(
-            {
-                label.replace("_", " ").title(): (
-                    "—" if value is None else f"{value:,}",
-                    _explain(name, label),
-                )
-                for label, value in state["metrics"].items()
-            }
+    with page.panel(name.replace("_", " ").title()):
+        figures = components[name]["metrics"]
+        if not figures:
+            st.caption("This component reports no figures.")
+            return
+        st.dataframe(
+            [
+                {
+                    "Figure": label.replace("_", " ").title(),
+                    "Count": page.written(value),
+                    "What it counts": _explain(name, label),
+                }
+                for label, value in figures.items()
+            ],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "What it counts": st.column_config.TextColumn(width="large")
+            },
         )
 
 
 def _explain(service: str, label: str) -> str:
-    """Says what one of a service's own numbers counts.
-
-    The labels come from the backend rather than from here, so a figure this
-    page has no wording for still gets an explanation naming where it came
-    from rather than no tooltip at all.
-    """
+    """Says what one of a service's own numbers counts."""
     named = _COUNTS.get((service, label))
     if named is not None:
         return named
     if label in page.STATUS_HELP:
         return f"{service.replace('_', ' ').capitalize()}: {page.STATUS_HELP[label]}"
-    return (
-        f"Reported by the {service.replace('_', ' ')} service under the name "
-        f"`{label}`. This page has no wording for it."
-    )
+    return f"Reported by {service.replace('_', ' ')} as `{label}`."
 
 
 page.render(view)

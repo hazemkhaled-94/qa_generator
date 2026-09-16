@@ -1,4 +1,4 @@
-"""Questions view."""
+"""Questions view. Runs question generation, and no other stage."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import streamlit as st
 
 from lib import backend, catalog, page, stage
 
+#: The one stage this page runs. It queues over topics, which the Topics
+#: page fits; nothing here can fit them.
 _QUESTIONS = stage.Queue("questions", "Question generation", "topics", "generated")
 
-#: The columns the search box can look in, by the heading each one carries in
+#: The columns the search box can look in, by the heading each carries in
 #: the table below, mapped to the name /questions takes.
 _FIELDS = {
     "Question and answer": "both",
@@ -16,861 +18,360 @@ _FIELDS = {
     "Answer": "answer",
 }
 
-#: Every gate a question is put through, by the code it is rejected under:
-#: what the gate tests, and what a count above zero means. Listed whether or
-#: not anything failed it, because a gate missing from a list cannot be told
-#: apart from a gate nobody wrote.
+#: Every gate a question is put through, by the code it is rejected under,
+#: and what the gate tests. Listed whether or not anything failed it.
 _GATES = {
-    "malformed": (
-        "Well formed",
-        (
-            "The question is a question, in the language of its facts, with a "
-            "target answer when it claims to have one."
-        ),
-        (
-            "The model returned something that is not a usable question: no "
-            "question mark, no target answer, the wrong language, or the fact "
-            "handed straight back. Cheap to detect and cheap to fix in the "
-            "prompt."
-        ),
-    ),
-    "answer_too_short": (
-        "Answer is worth scoring",
-        (
-            "The target answer is at least as long as its form is held to by "
-            "QUESTIONS_ANSWER_CHARS."
-        ),
-        (
-            "Answers too thin to score a chatbot against. Lower the floor for "
-            "that form if the answers being refused are bare values like `70%` "
-            "or `2025`, which are the most scoreable answers there are."
-        ),
-    ),
-    "answer_too_long": (
-        "Answer is the size asked for",
-        (
-            "The target answer is within the ceiling its form is held to by "
-            "QUESTIONS_ANSWER_CHARS."
-        ),
-        (
-            "Answers longer than the form allows - usually a value question "
-            "answered with a paragraph. The question was probably too broad "
-            "for its kind."
-        ),
-    ),
-    "wrong_form": (
-        "Answer has the right shape",
-        (
-            "A value names a thing, an explanation explains one. Read off the "
-            "answer's parse, not judged."
-        ),
-        (
-            "Answers of the wrong shape for the kind of question asked: a "
-            "value that describes an action, or an explanation that names a "
-            "thing without explaining anything. A high share for one kind "
-            "means that kind's prompt is not landing."
-        ),
-    ),
-    "wrong_type": (
-        "Asks what it was asked to ask",
-        (
-            "The verifier says the question asks for the kind of thing its "
-            "type asks for."
-        ),
-        (
-            "Questions written into a `reason` or `comparison` slot that ask "
-            "something else. They are not bad questions, but counting them as "
-            "their slot would report a mix nobody got. Only an independent "
-            "verifier may reject one."
-        ),
-    ),
-    "unanchored": (
-        "Could have been asked cold",
-        (
-            "The verifier says somebody who never read the passage could tell "
-            "what is being asked."
-        ),
-        (
-            "Questions naming nothing a searcher would know - `What specific "
-            "components are included?`. Nobody could have typed them without "
-            "the passage in front of them. Not applied to a follow-up, which "
-            "is supposed to lean on its thread."
-        ),
-    ),
-    "leaks_source": (
-        "Does not name its source",
-        (
-            "The question asks what it wants to know without saying which "
-            "document, report or section holds the answer."
-        ),
-        (
-            "Questions that cite their own source: `Laut den 'Risiken im Fokus "
-            "2026', ...`, `Gemäß der MaRisk, ...`. Nobody asks a service desk "
-            "a question while telling it which file to open, and a question "
-            "carrying its own source has already done the retrieving it was "
-            "written to measure. A high share means the writer is treating the "
-            "passage as something to cite rather than as context."
-        ),
-    ),
-    "duplicate": (
-        "Not already asked",
-        (
-            "The question is far enough from every question already accepted "
-            "to be worth asking separately."
-        ),
-        (
-            "Near-copies of questions already in the set. A benchmark that "
-            "asks the same thing twice weights that thing twice. A high share "
-            "means the topic has fewer distinct facts than "
-            "QUESTIONS_PER_TOPIC asks for."
-        ),
-    ),
-    "not_recoverable": (
-        "Answer is recoverable",
-        (
-            "A second model, shown only the cited passages, got the target "
-            "answer back out of them."
-        ),
-        (
-            "The answer cannot be found in the evidence the question cites, so "
-            "no chatbot could be expected to find it either. These are the "
-            "most damaging failures: the question looks answerable and is "
-            "not, and marking a chatbot wrong on one is marking it wrong for "
-            "being right."
-        ),
-    ),
-    "answerable_after_all": (
-        "Unanswerable really is",
-        (
-            "A question written to have no answer does not turn out to have "
-            "one in the corpus."
-        ),
-        (
-            "Questions meant to test whether a chatbot admits ignorance, which "
-            "the corpus answers anyway. Scoring a chatbot down for answering "
-            "one is scoring it down for reading."
-        ),
-    ),
-    "source_changed": (
-        "Evidence still holds",
-        (
-            "Every fact the question rests on still passes its own checks, and "
-            "is still spread the way the question's difficulty says."
-        ),
-        (
-            "The facts moved after the question was written - re-judged and "
-            "now rejected, or a citation deleted by a re-extraction. Found by "
-            "`make questions-reverify`, which calls no model."
-        ),
-    ),
+    "malformed": "The question is a question, in the language of its facts.",
+    "answer_too_short": "The answer clears the floor its form is held to.",
+    "answer_too_long": "The answer is within the ceiling its form is held to.",
+    "wrong_form": "A value names a thing, an explanation explains one.",
+    "wrong_type": "The question asks for the kind of thing its type asks for.",
+    "unanchored": "Somebody who never read the passage could tell what is asked.",
+    "leaks_source": "The question does not say which document holds the answer.",
+    "duplicate": "The question is far enough from every question accepted.",
+    "not_recoverable": "A second model got the answer out of the cited passages.",
+    "answerable_after_all": "A question written to have no answer has none.",
+    "source_changed": "Every fact the question rests on still passes its checks.",
 }
 
-#: The three criteria a question is classified by, and what each value means.
-#: Each says something different about what a chatbot has to do, and each is
-#: read off the facts the question cites rather than judged.
+#: The three criteria a question is classified by, as the wider value of
+#: each: what a chatbot has to reach across to answer it.
 _CRITERIA = {
-    "passage_scope": (
-        "Passages",
-        {
-            "single_passage": ("One", "Answerable from a single passage."),
-            "multi_passage": ("Two or more", "Needs more than one passage."),
-        },
-    ),
-    "document_scope": (
-        "Documents",
-        {
-            "single_document": ("One", "Answerable within a single document."),
-            "cross_document": (
-                "Two or more",
-                (
-                    "Needs passages from two different documents. The scope a "
-                    "retriever cannot fake: no one chunk holds the answer."
-                ),
-            ),
-        },
-    ),
-    "topic_scope": (
-        "Subjects",
-        {
-            "single_topic": ("One", "Stays inside one subject."),
-            "multi_topic": (
-                "Two or more",
-                (
-                    "Bridges two subjects. Available because a passage usually "
-                    "sits in several topics above the weight floor, and the corpus "
-                    "itself is what says the two meet."
-                ),
-            ),
-        },
-    ),
+    "passage_scope": ("Passages", "multi_passage", "Needs more than one passage."),
+    "document_scope": ("Documents", "cross_document", "Needs two documents."),
+    "topic_scope": ("Subjects", "multi_topic", "Bridges two subjects."),
 }
 
-#: What each difficulty band means. Derived from the three criteria above, a
-#: long answer and being a follow-up: each is worth a point and the band is
-#: the total, so nobody has to agree with a judgement to use it.
+#: What each difficulty band is. Five things make a question harder: the
+#: three criteria, a long answer, and being a follow-up.
 _DIFFICULTY = {
     "easy": "None or one of the five things that make a question harder.",
     "medium": "Two or three of them.",
     "hard": "Four or five of them.",
 }
 
-#: Every kind of question that can be asked, and what each one asks for. All
-#: of them are question FORMS rather than subjects, so the same list applies
-#: to any corpus. QUESTIONS_TYPE_MIX decides which are written.
+#: Every kind of question that can be asked, and what each asks for.
 _TYPES = {
-    "factoid": "One checkable value: how many, how much, by when, what limit.",
-    "definition": "What a named thing or status is, as the material defines it.",
+    "factoid": "One checkable value.",
+    "definition": "What a named thing or status is.",
     "entity": "Who does, decides, owns or must be told something.",
     "enumeration": "Which things belong to a named set.",
     "condition": "When, or under what circumstances, something applies.",
-    "reason": "Why something is required, done, or the way it is.",
-    "procedure": "How something is done, or in what order the steps go.",
+    "reason": "Why something is required or done.",
+    "procedure": "How something is done, or in what order.",
     "consequence": "What happens when something is or is not done.",
-    "comparison": "How two named things differ. Needs two passages.",
-    "aggregation": "A total no single fact states. Needs two passages.",
-    "temporal": "What changed between two periods. Needs two passages.",
+    "comparison": "How two named things differ.",
+    "aggregation": "A total no single fact states.",
+    "temporal": "What changed between two periods.",
 }
 
-#: What each answer form is, which is what the length bounds and the shape
-#: gates are applied against.
+#: What each answer form is, which the length bounds are applied against.
 _FORMS = {
     "value": "A short noun phrase: a value, an amount, a date, a name.",
     "list": "Several short items.",
     "explanation": "One or two sentences of prose.",
 }
 
-#: What a healthy unanswerable share looks like. Too few and nothing tests
-#: whether a chatbot admits ignorance; too many and the benchmark is mostly
-#: about refusing.
+#: What a healthy unanswerable share looks like.
 _UNANSWERABLE_FLOOR = 0.05
+
+#: The turn filter, by the value `follows` takes.
+_TURNS = {"Opening": False, "Follow-up": True}
 
 
 def view() -> None:
     """Renders the questions page."""
-    page.header(
-        "Questions",
-        "The test questions written from the verified facts, with the answer "
-        "each is scored against. Questions a gate rejected are listed too: the "
-        "share that failed is how generation is judged. Pick one from the "
-        "table to read the facts behind it and to accept or reject it.",
-    )
+    page.header("Questions")
 
     client = backend.catalog_api()
-    page.section(
-        "Generation across the whole corpus",
-        "Every topic in the corpus, not only the ones the filters below "
-        "select. Generation queues over topics, so these count topics rather "
-        "than questions. They refresh on their own every few seconds.",
-    )
-    stage.overview(client, [_QUESTIONS], _corpus_figures)
-    _queue_controls(client)
+    overview, analysis, service = st.container(), st.container(), st.container()
 
-    st.divider()
-    bar = catalog.filters(
+    words, field = catalog.search("questions", _FIELDS)
+    chosen, pager = catalog.filters(
         "questions",
-        client.document_names(),
-        types=["accepted", "rejected", "draft"],
-        type_label="State",
-        fields=_FIELDS,
+        {
+            "status": (
+                "States",
+                ["accepted", "rejected", "draft"],
+                "Whether the gates, or a person, accepted it.",
+            ),
+            "question_type": ("Kinds", list(_TYPES), "What the question asks for."),
+            "answer_form": ("Shapes", list(_FORMS), "The shape the answer takes."),
+            "difficulty": (
+                "Difficulties",
+                list(_DIFFICULTY),
+                "The band the question turned out to be.",
+            ),
+            "follows": ("Turns", list(_TURNS), "Whether it follows another."),
+        },
+        documents=client.document_names(),
     )
 
     where = {
-        "document": bar.document,
-        "q": bar.search,
-        "field": bar.field,
-        "status": bar.block_type,
-        **_narrowing(),
+        "document": chosen["document"],
+        "q": words,
+        "field": field,
+        "status": chosen["status"],
+        "question_type": chosen["question_type"],
+        "answer_form": chosen["answer_form"],
+        "difficulty": chosen["difficulty"],
+        "follows": _TURNS.get(chosen["follows"] or ""),
     }
     total, rows = catalog.paged(
         "questions",
-        bar.page,
+        pager,
         lambda limit, offset: client.questions(**where, limit=limit, offset=offset),
         "questions",
     )
-    if not total:
-        st.info(
-            f"No questions whose {catalog.field_name(_FIELDS, bar.field)} matches."
-            if bar.search
-            else "No questions match."
-            if bar.document or bar.block_type
-            else "No questions yet. Start generation above, once the topics "
-            "are fitted and the facts extracted."
-        )
-        return
-
     quality = client.question_quality(**where)
-    page.findings(
-        "Every kind of question, asked for and written",
-        "One row per kind. `Asked for` is the weight QUESTIONS_TYPE_MIX gives "
-        "it as a share of the run; `Written` is the share of this filtered "
-        "set that came out as that kind, rejected questions included. A kind "
-        "the corpus does not support - a reason, where the material states "
-        "rules and never says why - comes out below its weight whatever the "
-        "weight says.",
-        _kinds(quality, client.question_plan()),
-    )
+    counts = client.stage_status("questions")["rows"]
 
-    page.section(
-        "Quality of the questions these filters select",
-        "Measured over every question matching the search, the document and "
-        "the state chosen above - the whole filtered set, not just the page of "
-        "rows below. Rejected questions are counted in every figure here, "
-        "which is the point: the share that failed is how generation is "
-        "judged.",
-    )
-    page.metrics(_quality_figures(quality))
-    page.metrics(_criteria_figures(quality))
-    page.metrics(_difficulty_figures(quality))
-    page.findings(
-        "Every gate, and what it found",
-        "A question is stored whether or not it passed. Each row is one gate, "
-        "the number of questions in this filtered set it rejected, and what a "
-        "count above zero means for the benchmark. A row reading OK rejected "
-        "nothing.",
-        _gates(quality),
-    )
-
-    st.dataframe(
-        [
+    with overview, page.panel("Overview"):
+        page.stats(
             {
-                "State": row["status"],
-                "Failed gate": _GATES.get(row["rejected_reason"], ("—",))[0]
-                if row["rejected_reason"]
-                else "—",
-                "Kind": row["question_type"] or "—",
-                "Answer shape": row["answer_form"] or "—",
-                "Answerable": "yes" if row["answerable"] else "no",
-                "Difficulty": row["difficulty"] or "—",
-                "Planned": row["planned_difficulty"] or "—",
-                "Passages": "1" if row["passage_scope"] == "single_passage" else "2+",
-                "Documents": "1"
-                if row["document_scope"] == "single_document"
-                else "2+",
-                "Subjects": "1" if row["topic_scope"] == "single_topic" else "2+",
-                "Turn": row["thread_position"],
-                "Question": row["question_text"],
-                "Answer": row["target_answer"] or "—",
-                "Cites": row["facts"],
+                "Questions": (
+                    f"{quality['total']:,}",
+                    "Questions matching, rejected ones included.",
+                ),
+                "Accepted": (
+                    page.share(quality["accepted"], quality["total"]),
+                    "Cleared every gate, or a person said so.",
+                ),
+                "Unanswerable": (
+                    page.share(quality["unanswerable"], quality["total"]),
+                    "Written to have no answer in the corpus.",
+                ),
+                "Subjects covered": (
+                    page.share(
+                        quality["topics_covered"], quality["topics_in_coverage"]
+                    ),
+                    "Topics counted in coverage that generation has finished.",
+                ),
             }
-            for row in rows
-        ],
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Question": st.column_config.TextColumn(width="large"),
-            "Answer": st.column_config.TextColumn(width="medium"),
-        },
-    )
-
-    st.divider()
-    chosen = st.selectbox(
-        "Question to inspect",
-        rows,
-        format_func=lambda r: f"{r['status']} · {r['question_text'][:70]}",
-        help="Everything below this point applies to this question and to the "
-        "facts it was written from.",
-    )
-    if chosen is not None:
-        _detail(client, chosen)
-
-
-def _narrowing() -> dict[str, str | bool | None]:
-    """Draws the four pickers the toolbar has no slot for, and reads them.
-
-    A second row rather than more slots on the shared toolbar: every listing
-    page draws that one, and these four are this page's alone.
-    """
-    kind_slot, form_slot, band_slot, turn_slot = st.columns(4)
-    kind = kind_slot.selectbox(
-        "Kind",
-        ["All kinds", *_TYPES],
-        key="questions-kind",
-        help="What the question asks for. "
-        + " ".join(f"`{name}`: {what}" for name, what in _TYPES.items()),
-    )
-    form = form_slot.selectbox(
-        "Answer shape",
-        ["All shapes", *_FORMS],
-        key="questions-form",
-        help="The shape the answer takes, which is what its length bounds and "
-        "the shape gate are applied against. "
-        + " ".join(f"`{name}`: {what}" for name, what in _FORMS.items()),
-    )
-    band = band_slot.selectbox(
-        "Difficulty",
-        ["All difficulties", *_DIFFICULTY],
-        key="questions-band",
-        help="The band the question turned out to be, derived from how far "
-        "its evidence is spread, how long its answer is and whether it "
-        "follows another.",
-    )
-    turn = turn_slot.selectbox(
-        "Turn",
-        ["All turns", "Opening questions", "Follow-ups"],
-        key="questions-turn",
-        help="A follow-up is a question asked after another in a thread. It "
-        "may lean on the conversation, which is what it is for.",
-    )
-    return {
-        "question_type": kind if kind in _TYPES else None,
-        "answer_form": form if form in _FORMS else None,
-        "difficulty": band if band in _DIFFICULTY else None,
-        "follows": {"Opening questions": False, "Follow-ups": True}.get(turn),
-    }
-
-
-def _kinds(quality: dict, plan: dict) -> list[dict[str, str]]:
-    """One row per kind of question: what it was asked for, what came out."""
-    written = quality["question_type"]
-    total = sum(written.values())
-    weights = plan.get("types", {})
-    asked = sum(weights.values()) or 1
-    return [
-        {
-            "Kind": name,
-            "Asked for": f"{weights.get(name, 0) / asked:.0%}",
-            "Written": page.share(written.get(name, 0), total),
-            "Count": f"{written.get(name, 0):,}",
-            "What it asks for": what,
-        }
-        for name, what in _TYPES.items()
-        if weights.get(name) or written.get(name)
-    ]
-
-
-def _corpus_figures(counts: dict[str, dict[str, int]]) -> dict[str, tuple]:
-    """Names the corpus-wide generation figures at the top of this page."""
-    rows = counts["questions"]
-    topics = sum(rows.values())
-    return {
-        "Topics in corpus": (
-            f"{topics:,}",
-            (
-                "Every topic the model fitted. This is the unit generation "
-                "queues over, so it is the size of the queue when everything "
-                "has been asked for. Fitting the topics again returns all of "
-                "them to `new`."
-            ),
-        ),
-        "Questions written": (
-            *page.portion(rows.get("generated", 0), topics),
-            (
-                "Topics generation has finished, as a share of every topic. A "
-                "topic counts as finished whether or not the questions it "
-                "yielded passed their gates, and a topic taken out of coverage "
-                "finishes with nothing written."
-            ),
-        ),
-        "Queued": (
-            f"{rows.get('pending', 0) + rows.get('in_progress', 0):,}",
-            "Topics waiting for a worker or held by one right now.",
-        ),
-        "Not started": (f"{rows.get('new', 0):,}", page.STATUS_HELP["new"]),
-        "Failed": (
-            f"{rows.get('failed', 0):,}",
-            page.STATUS_HELP["failed"]
-            + " This is the worker failing on a topic, which is not the same "
-            "as a question failing a gate - that is the table below.",
-        ),
-    }
-
-
-def _quality_figures(quality: dict) -> dict[str, tuple]:
-    """Names the headline quality figures for the filtered set."""
-    total = quality["total"]
-    rejected = sum(quality["rejected"].values())
-    return {
-        "Questions matching": (
-            f"{total:,}",
-            (
-                "Questions matching every filter above at once, rejected ones "
-                "included. This is what the pager counts through."
-            ),
-        ),
-        "Passed every gate": (
-            *page.portion(quality["accepted"], total),
-            (
-                "Questions that are well formed, that no earlier question "
-                "already asks, and whose answer a second model got back out of "
-                "the cited passages. Only these belong in the benchmark."
-            ),
-        ),
-        "Rejected": (
-            *page.portion(rejected, total),
-            (
-                "Questions that failed at least one gate. They are kept rather "
-                "than discarded so the failure rate can be measured; the table "
-                "below says which gate each failed."
-            ),
-        ),
-        "Unanswerable": (
-            *page.portion(quality["unanswerable"], total),
-            (
-                "Questions written to have no answer in the corpus, which test "
-                "whether a chatbot admits ignorance instead of inventing "
-                "something. QUESTIONS_UNANSWERABLE_SHARE sets how many are "
-                "attempted; this is how many survived their gates."
-            ),
-        ),
-        "Subjects covered": (
-            *page.portion(quality["topics_covered"], quality["topics_in_coverage"]),
-            (
-                "Topics counted in coverage that generation has finished. A "
-                "topic taken out of coverage on the Topics page is in neither "
-                "number, which is how a topic that is not a subject stops "
-                "being counted as a gap."
-            ),
-        ),
-    }
-
-
-def _criteria_figures(quality: dict) -> dict[str, tuple]:
-    """Names the three criteria, each as the share that is more than one."""
-    figures = {}
-    for column, (label, values) in _CRITERIA.items():
-        counts = quality[column]
-        total = sum(counts.values())
-        wider = next(name for name in values if name.startswith(("multi", "cross")))
-        figures[label] = (
-            *page.portion(counts.get(wider, 0), total),
-            values[wider][1] + " This is the share of the set that needs that.",
         )
-    return {
-        **figures,
-        "Follow-ups": (
-            *page.portion(quality["followups"], quality["total"]),
-            (
-                "Questions asked after another in a thread. These may lean on "
-                "the conversation - `And for urgent requests?` - so a chatbot "
-                "answering one has to carry the thread. The phrasing gate is "
-                "not applied to them, because not standing alone is the point."
-            ),
-        ),
-        "Answer length": (
-            f"{quality['mean_answer_chars']:.0f}",
-            "characters, mean",
-            (
-                "Mean length of the target answers. Above "
-                "QUESTIONS_LONG_ANSWER_CHARS an answer counts towards the "
-                "difficulty band: a chatbot has to produce more of the right "
-                "thing and a grader has more to disagree about."
-            ),
-        ),
-    }
 
+    with analysis, st.expander("Analysis"):
+        page.findings(_analysis(quality, counts, client.question_plan()))
 
-def _difficulty_figures(quality: dict) -> dict[str, tuple]:
-    """Names the difficulty bands, and the two figures that read beside them."""
-    bands = quality["difficulty"]
-    total = sum(bands.values())
-    figures = {
-        band.capitalize(): (
-            *page.portion(bands.get(band, 0), total),
-            explanation
-            + " Derived from the three criteria above, a long answer and being "
-            "a follow-up; each is worth a point and the band is the total.",
+    with service, page.panel("Question generation"):
+        stage.service(client, _QUESTIONS)
+
+    with page.panel(f"Questions · {total:,}"):
+        if not rows:
+            st.caption("Nothing matches.")
+            return
+        picked = page.table(
+            [
+                {
+                    "State": row["status"],
+                    "Failed gate": row["rejected_reason"] or "—",
+                    "Kind": row["question_type"] or "—",
+                    "Answer shape": row["answer_form"] or "—",
+                    "Answerable": "yes" if row["answerable"] else "no",
+                    "Difficulty": row["difficulty"] or "—",
+                    "Passages": "1"
+                    if row["passage_scope"] == "single_passage"
+                    else "2+",
+                    "Documents": "1"
+                    if row["document_scope"] == "single_document"
+                    else "2+",
+                    "Turn": row["thread_position"],
+                    "Question": row["question_text"],
+                    "Answer": row["target_answer"] or "—",
+                }
+                for row in rows
+            ],
+            key="questions-table",
+            column_config={
+                "Question": st.column_config.TextColumn(width="large"),
+                "Answer": st.column_config.TextColumn(width="medium"),
+            },
         )
-        for band, explanation in _DIFFICULTY.items()
-    }
-    return {
-        **figures,
-        "Question length": (
-            f"{quality['mean_question_chars']:.0f}",
-            "characters, mean",
-            (
-                "Mean length of the questions in this set. A long mean usually "
-                "means the model is restating its facts rather than asking "
-                "about them."
-            ),
-        ),
-        "Band as planned": (
-            *page.portion(quality["planned_met"], quality["total"]),
-            (
-                "Questions whose band is the one QUESTIONS_DIFFICULTY_MIX "
-                "asked for. The plan decides how wide a sample the writer is "
-                "offered; the band is still read off what the question turned "
-                "out to cite, so a writer that answered one passage of two "
-                "lands below the band it was given. A low share means the "
-                "material does not support the spread being asked for."
-            ),
-        ),
-        "Not yet judged": (
-            f"{quality['draft']:,}",
-            (
-                "Questions stored without a verdict. The gates accept or "
-                "reject every question they see, so this should be 0; anything "
-                "here was written by something that did not run them."
-            ),
-        ),
-    }
+
+    if picked is not None:
+        _detail(client, rows[picked])
 
 
-def _gates(quality: dict) -> list[dict[str, str]]:
-    """Builds one row per gate, whether or not anything failed it."""
+def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:
+    """Builds the fold: the queue, the gates, the kinds and the spread."""
     total = quality["total"]
     rejected = quality["rejected"]
-    rows = [
+
+    rows = page.queue_rows(
+        "Topics", counts, ("new", "pending", "in_progress", "generated", "failed")
+    )
+    rows += [
         {
-            "Check": name,
-            "Failed": page.share(rejected.get(code, 0), total),
+            "Check": code,
+            "Value": page.share(rejected.get(code, 0), total),
             "Should be": "0",
             "State": "OK" if not rejected.get(code) else "Attention",
-            "What it means": tests if not rejected.get(code) else consequence,
+            "What it means": tests,
         }
-        for code, (name, tests, consequence) in _GATES.items()
+        for code, tests in _GATES.items()
     ]
 
-    # Not a gate: no single question fails for being the only answerable one,
-    # the set does. A benchmark with no unanswerable questions measures
-    # nothing about a chatbot's willingness to say it does not know.
+    # Not a gate: no single question fails for being the only answerable
+    # one, the set does.
     share = quality["unanswerable"] / total if total else 0
     rows.append(
         {
             "Check": "Some are unanswerable",
-            "Failed": f"{share:.0%}",
+            "Value": f"{share:.0%}",
             "Should be": f"above {_UNANSWERABLE_FLOOR:.0%}",
             "State": "OK" if share >= _UNANSWERABLE_FLOOR else "Attention",
-            "What it means": "Enough questions have no answer in the corpus to "
-            "test whether a chatbot admits it."
-            if share >= _UNANSWERABLE_FLOOR
-            else "Almost nothing here tests whether a chatbot says it does not "
-            "know. Raise QUESTIONS_UNANSWERABLE_SHARE, or check whether the "
-            "unanswerable ones are being rejected as answerable after all.",
+            "What it means": "Enough questions have no answer to test whether "
+            "a chatbot admits it.",
         }
     )
-
-    unknown = set(rejected) - set(_GATES)
     rows += [
         {
             "Check": code,
-            "Failed": page.share(rejected[code], total),
+            "Value": page.share(rejected[code], total),
             "Should be": "0",
             "State": "Attention",
-            "What it means": "A rejection code this page has no description "
-            "for. It was added to the gates in the backend without being "
-            "added here.",
+            "What it means": "A rejection code this page has no name for.",
         }
-        for code in sorted(unknown)
+        for code in sorted(set(rejected) - set(_GATES))
     ]
+
+    weights = plan.get("types", {})
+    asked = sum(weights.values()) or 1
+    written = quality["question_type"]
+    rows += [
+        {
+            "Check": f"Kind: {name}",
+            "Value": page.share(written.get(name, 0), sum(written.values())),
+            "Should be": f"{weights.get(name, 0) / asked:.0%} asked for",
+            "State": "—",
+            "What it means": what,
+        }
+        for name, what in _TYPES.items()
+        if weights.get(name) or written.get(name)
+    ]
+    rows += [
+        {
+            "Check": label,
+            "Value": page.share(
+                quality[column].get(wider, 0), sum(quality[column].values())
+            ),
+            "Should be": "—",
+            "State": "—",
+            "What it means": what,
+        }
+        for column, (label, wider, what) in _CRITERIA.items()
+    ]
+    rows += [
+        {
+            "Check": band.capitalize(),
+            "Value": page.share(
+                quality["difficulty"].get(band, 0), sum(quality["difficulty"].values())
+            ),
+            "Should be": "—",
+            "State": "—",
+            "What it means": what,
+        }
+        for band, what in _DIFFICULTY.items()
+    ]
+    rows.append(
+        {
+            "Check": "Band as planned",
+            "Value": page.share(quality["planned_met"], total),
+            "Should be": "—",
+            "State": "—",
+            "What it means": "Questions whose band is the one the plan asked for.",
+        }
+    )
     return rows
 
 
-def _queue_controls(client) -> None:
-    """Draws the four queue verbs, which act on every topic at once."""
-    counts = client.stage_status("questions")["rows"]
-    waiting = counts.get("new", 0)
-    queued = counts.get("pending", 0)
-    failed = counts.get("failed", 0)
-    total = sum(counts.values())
-
-    page.section(
-        "Write the questions",
-        "These four act on every topic at once. " + stage.COLOUR_KEY,
-    )
-    st.caption(
-        "A question's subject is a topic, so generation queues over topics "
-        "rather than over documents. It writes only about the facts no "
-        "accepted question already rests on, which is what makes Redo cheap: "
-        "after the topics are fitted again every topic reads `new`, and a "
-        "second run writes only what the first did not."
-    )
-    stage.corpus_controls(
-        client,
-        "questions",
-        {
-            "start": (
-                "Start",
-                bool(waiting),
-                f"Queue the {waiting:,} topic(s) generation has never been "
-                "asked to do. A worker picks them up on its next poll."
-                if waiting
-                else "Every topic has already been asked for. Use Redo to "
-                "write again for topics that are finished.",
-            ),
-            "rerun": (
-                "Redo",
-                bool(total),
-                "Queue every topic again, finished ones included. Facts an "
-                "accepted question already rests on are skipped, so this tops "
-                "up rather than starting over."
-                if total
-                else "There are no topics yet. Fit them on the Topics page.",
-            ),
-            "stop": (
-                "Stop",
-                bool(queued),
-                f"Take the {queued:,} queued topic(s) back off the queue. "
-                "Whatever a worker holds right now still finishes."
-                if queued
-                else "Nothing is queued.",
-            ),
-            "retry": (
-                "Retry",
-                bool(failed),
-                f"Queue the {failed:,} failed topic(s) again, clearing the "
-                "error recorded against each."
-                if failed
-                else "Nothing has failed.",
-            ),
-        },
-    )
-
-
 def _detail(client, question: dict) -> None:
-    """Shows one question in full, its facts, and the accept/reject controls."""
+    """Shows everything held about one question, and decides its fate."""
     detail = client.question(question["id"])
-    gate = _GATES.get(question["rejected_reason"])
 
-    page.section(
-        "The question, and what it rests on",
-        "This question as it is stored, and every fact it was written from.",
-    )
-    page.metrics(
-        {
-            "State": (
-                question["status"],
-                (
-                    "`accepted` cleared every gate, `rejected` did not, and "
-                    "`draft` has not been judged. A person can overrule the "
-                    "gates with the controls below."
-                ),
-            ),
-            "Failed gate": (
-                gate[0] if gate else "—",
-                gate[1] if gate else "This question failed no gate.",
-            ),
-            "Answerable": (
-                "yes" if question["answerable"] else "no",
-                (
-                    "`no` means the question was written to have no answer in "
-                    "the corpus, and a chatbot is scored on saying so rather "
-                    "than on what it answers."
-                ),
-            ),
-            "Kind": (
-                question["question_type"] or "—",
-                _TYPES.get(
-                    question["question_type"] or "",
-                    "What this question was asked to ask for.",
-                ),
-            ),
-            "Difficulty": (
-                question["difficulty"] or "—",
-                f"The plan asked for {question['planned_difficulty'] or '—'}. "
-                + _DIFFICULTY.get(
-                    question["difficulty"] or "",
-                    "Read off how far the facts behind this question are spread.",
-                ),
-            ),
-            "Language": (
-                question["language"],
-                (
-                    "The language the question is written in, which is the "
-                    "language of the facts it came from."
-                ),
-            ),
-        }
-    )
-
-    st.markdown("**Question**", help="What would be put to the chatbot, word for word.")
-    st.text(question["question_text"])
-    st.markdown(
-        "**Target answer**",
-        help="What the chatbot's answer is scored against. Absent for an "
-        "unanswerable question, which is scored on whether the chatbot "
-        "recognises it has no answer.",
-    )
-    st.text(question["target_answer"] or "— none; this question has no answer")
-
-    if question["documents"]:
-        st.caption(
-            "Documents: " + ", ".join(one[:12] + "…" for one in question["documents"]),
-            help="The documents the cited facts came from. Two of them is what "
-            "makes this a cross-document question.",
-        )
-    if question["topics"]:
-        st.caption(
-            "Topics: " + ", ".join(question["topics"]),
-            help="The subject each cited passage counts towards, which is how "
-            "coverage is measured.",
-        )
-
-    page.section(
-        "Facts cited",
-        "Every fact this question was written from. The verifier was shown "
-        "these passages and nothing else, which is what the recoverability "
-        "gate means by an answer being in the corpus.",
-    )
-    st.dataframe(
-        [
+    with page.panel(f"Question {question['id']}"):
+        page.attributes(
             {
-                "Passage": source["ordinal"],
-                "Fact still holds": "yes" if source["validated"] else "no",
-                "Statement": source["statement"],
-                "Cited": source["evidence_text"],
+                "Id": question["id"],
+                "State": question["status"],
+                "Failed gate": question["rejected_reason"],
+                "Kind": question["question_type"],
+                "Answer shape": question["answer_form"],
+                "Answerable": question["answerable"],
+                "Difficulty": question["difficulty"],
+                "Planned difficulty": question["planned_difficulty"],
+                "Passages": question["passage_scope"],
+                "Documents": question["document_scope"],
+                "Subjects": question["topic_scope"],
+                "Answer characters": question["answer_chars"],
+                "Language": question["language"],
+                "Turn": question["thread_position"],
+                "Follows": question["follows_id"],
+                "Facts cited": question["facts"],
+                "From documents": [one[:12] + "…" for one in question["documents"]],
+                "From topics": question["topics"],
+                "Written": question["created_at"],
+                "Question": question["question_text"],
+                "Target answer": question["target_answer"],
             }
-            for source in detail["sources"]
-        ],
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Statement": st.column_config.TextColumn(width="large"),
-            "Cited": st.column_config.TextColumn(width="medium"),
-        },
-    )
-    if any(not source["validated"] for source in detail["sources"]):
-        st.warning(
-            "A fact this question rests on no longer passes its own checks. "
-            "`make questions-reverify` rejects every question in that state."
         )
 
-    if len(detail.get("thread") or []) > 1:
-        page.section(
-            "The conversation this sits in",
-            "A follow-up may lean on what was asked before it, so it is scored "
-            "with the thread replayed rather than on its own. The phrasing gate "
-            "is not applied to one for the same reason.",
-        )
+        st.caption("Facts cited")
         st.dataframe(
             [
                 {
-                    "Turn": turn["thread_position"],
-                    "State": turn["status"],
-                    "Question": turn["question_text"],
-                    "Answer": turn["target_answer"] or "—",
+                    "Passage": source["ordinal"],
+                    "Fact still holds": "yes" if source["validated"] else "no",
+                    "Statement": source["statement"],
+                    "Cited": source["evidence_text"],
                 }
-                for turn in detail["thread"]
+                for source in detail["sources"]
             ],
             width="stretch",
             hide_index=True,
             column_config={
-                "Question": st.column_config.TextColumn(width="large"),
+                "Statement": st.column_config.TextColumn(width="large"),
+                "Cited": st.column_config.TextColumn(width="medium"),
             },
         )
+        if any(not source["validated"] for source in detail["sources"]):
+            st.warning("A fact this question rests on no longer passes its checks.")
 
-    _verdict(client, question)
+        if len(detail.get("thread") or []) > 1:
+            st.caption("The thread this sits in")
+            st.dataframe(
+                [
+                    {
+                        "Turn": turn["thread_position"],
+                        "State": turn["status"],
+                        "Question": turn["question_text"],
+                        "Answer": turn["target_answer"] or "—",
+                    }
+                    for turn in detail["thread"]
+                ],
+                width="stretch",
+                hide_index=True,
+                column_config={"Question": st.column_config.TextColumn(width="large")},
+            )
+
+        _verdict(client, question)
 
 
 def _verdict(client, question: dict) -> None:
     """Draws the two controls that decide one question's fate."""
-    page.section(
-        "Accept or reject this question",
-        "Overrules the gates for this one question. Nothing is deleted either "
-        "way: a rejected question keeps its row, because the share that was "
-        "thrown away is the evidence behind the coverage report. " + stage.COLOUR_KEY,
-    )
     accepted = question["status"] == "accepted"
-    accept, reject, _ = st.columns(stage.VERDICT, vertical_alignment="center")
+    rejected = question["status"] == "rejected"
+    accept, reject, *_ = st.columns([1.2, 1.2, 4.0], vertical_alignment="center")
 
     if accept.button(
         "Accept",
-        key=stage.key_for("accept", "question", str(question["id"])),
+        key=f"accept-{question['id']}",
+        type="primary",
         disabled=accepted,
         width="stretch",
-        help="Puts this question in the benchmark and clears whichever gate "
-        "rejected it."
+        help="Puts this question in the benchmark and clears the gate that rejected it."
         if not accepted
-        else "This question is already accepted.",
+        else "Already accepted.",
     ):
         client.decide_question(question["id"], "accepted")
         st.toast(f"Question {question['id']} accepted.")
@@ -878,13 +379,12 @@ def _verdict(client, question: dict) -> None:
 
     if reject.button(
         "Reject",
-        key=stage.key_for("reject", "question", str(question["id"])),
-        disabled=question["status"] == "rejected",
+        key=f"reject-{question['id']}",
+        disabled=rejected,
         width="stretch",
-        help="Takes this question out of the benchmark and keeps the row, so "
-        "it still counts towards the drop rate."
-        if question["status"] != "rejected"
-        else "This question is already rejected.",
+        help="Takes it out of the benchmark and keeps the row."
+        if not rejected
+        else "Already rejected.",
     ):
         client.decide_question(question["id"], "rejected")
         st.toast(f"Question {question['id']} rejected.")

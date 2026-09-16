@@ -1,110 +1,103 @@
 """The Facts page, run against a scripted backend.
 
-A page that raises renders a Streamlit traceback and nothing else, so every
-test here asserts the page rendered as well as what it said.
+What the page does with an answer, including the answers that are refusals.
+The rules it shares with every other page are in test_views.py; this covers
+what only extraction has: four readings of one corpus, and a check per
+reading.
 """
 
 from __future__ import annotations
 
 import pytest
-import requests
 from conftest import Answers
-from facts_page import FACT, FactsPage, fact, page_of, quality, resting
+from pages import FACT, FACT_QUALITY, View, answers, changed, resting
 
 pytestmark = pytest.mark.frontend
 
-#: What the backend answers when it is down.
-UNREACHABLE = requests.exceptions.ConnectionError("connection refused")
+
+def page_of(*facts: dict) -> dict:
+    """One page of facts, and the total behind it."""
+    return {"total": len(facts), "facts": list(facts)}
 
 
 @pytest.fixture
-def page(run_view):
+def page(open_view):
     """Runs the Facts view against whatever the backend is scripted to say."""
 
-    def run(**changed) -> FactsPage:
+    def run(**replaced) -> View:
         """Runs the page with these answers replacing the defaults."""
-        return FactsPage(
-            run_view("facts", catalog_api=Answers(**FactsPage.answers(**changed)))
-        )
+        return open_view("facts", **replaced)
 
     return run
 
 
-def test_an_empty_corpus_says_what_to_do_first(page) -> None:
-    """The first thing a new deployment shows."""
-    drawn = page(facts=page_of())
-
-    assert not drawn.raised, drawn.raised
-    assert "No facts yet" in drawn.text(), drawn.text()
-
-
-def test_a_backend_that_is_down_is_reported_rather_than_raised(page) -> None:
-    """The reader is told, not shown a stack."""
-    drawn = page(facts=UNREACHABLE, fact_quality=UNREACHABLE)
-
-    assert not drawn.raised, drawn.raised
-    assert drawn.text()
+# ── The four readings ─────────────────────────────────────────────────────
 
 
 def test_every_reading_is_offered_as_a_filter(page) -> None:
-    """A reader looks at one kind at a time, or at all of them."""
-    drawn = page()
+    """Atomic, summary, outline and bridge, each choosable on its own."""
+    offered = page().app.selectbox("facts-kind").options
 
-    assert drawn.readings() == [
-        "All kinds",
-        "Atomic",
-        "Summary",
-        "Outline",
-        "Bridge",
+    assert offered == [
+        "All readings",
+        "atomic",
+        "summary",
+        "outline",
+        "bridge",
     ]
 
 
 def test_each_reading_is_explained_where_it_is_chosen(page) -> None:
-    """A vocabulary a reader cannot look up is a vocabulary nobody uses."""
-    drawn = page()
+    """A reader picking one should not have to know what it means."""
+    said = page().app.selectbox("facts-kind").help
 
-    for said in ("one sentence", "whole passage", "one bullet each", "no single"):
-        assert said in drawn.helps(), said
+    for reading in ("Atomic", "Summary", "Outline", "Bridge"):
+        assert reading in said
+
+
+def test_choosing_a_reading_narrows_what_is_asked_for(open_view) -> None:
+    """The backend filters; the page does not."""
+    client = Answers(**answers())
+
+    page = open_view("facts", client).choose("facts-kind", "summary")
+
+    assert page.raised == []
+    assert [one for one in client.asked if one[2].get("kind") == "summary"]
 
 
 def test_the_corpus_is_counted_by_reading(page) -> None:
-    """How much of the corpus each reading covers."""
-    drawn = page(
-        facts=page_of(fact(), fact(id=2, kind="summary")),
-        fact_quality=quality(total=2, validated=2, kinds={"atomic": 1, "summary": 1}),
-    )
+    """Each reading is a row in the fold, whether or not any were drawn."""
+    tables = page(
+        fact_quality=changed(
+            FACT_QUALITY, total=4, kinds={"atomic": 2, "summary": 1, "bridge": 1}
+        )
+    ).tables()
 
-    figures = drawn.metrics()
-    assert figures["Atomic"] == "1"
-    assert figures["Summary"] == "1"
-    assert figures["Outline"] == "0"
-    assert figures["Bridge"] == "0"
+    for reading in ("Atomic facts", "Summary facts", "Outline facts", "Bridge facts"):
+        assert reading in tables
 
 
 def test_the_kind_a_fact_was_stored_under_is_shown_in_the_table(page) -> None:
     """So a reader can tell a summary from a claim without opening it."""
-    drawn = page(
-        facts=page_of(fact(), fact(id=2, kind="bridge", statement="A bridge.")),
-        fact_quality=quality(total=2, kinds={"atomic": 1, "bridge": 1}),
-    )
+    tables = page(facts=page_of(changed(FACT, kind="summary"))).tables()
 
-    assert "Atomic" in drawn.tables()
-    assert "Bridge" in drawn.tables()
+    assert "Summary" in tables
 
 
-def test_choosing_a_reading_narrows_what_is_asked_for(run_view) -> None:
-    """Every figure and row below is the one kind, not all of them."""
-    client = Answers(**FactsPage.answers())
-    drawn = FactsPage(run_view("facts", catalog_api=client)).choose_reading("Summary")
+def test_a_reading_the_page_has_no_description_for_is_still_counted(page) -> None:
+    """A kind added to the backend should not vanish from the figures."""
+    drawn = page(facts=page_of(changed(FACT, kind="invented")))
 
-    assert not drawn.raised, drawn.raised
-    listed = [call for call in client.asked if call[0] == "facts"]
-    assert listed[-1][2]["kind"] == "summary", listed[-1]
+    assert drawn.raised == []
+    assert "invented" in drawn.tables()
+
+
+# ── The checks ────────────────────────────────────────────────────────────
 
 
 def test_every_check_is_listed_whether_or_not_anything_failed_it(page) -> None:
-    """A check missing from a list cannot be told apart from one nobody wrote."""
-    drawn = page()
+    """A check missing from a list cannot be told from one nobody wrote."""
+    tables = page().tables()
 
     for check in (
         "Citation resolves",
@@ -117,81 +110,108 @@ def test_every_check_is_listed_whether_or_not_anything_failed_it(page) -> None:
         "Two points or more",
         "Rests on two passages",
     ):
-        assert check in drawn.tables(), check
+        assert check in tables, check
 
 
 def test_each_check_says_which_kinds_face_it(page) -> None:
-    """A check no kind in view faces reads 0 because nothing asked it."""
-    drawn = page()
+    """An outline is exempt from the verb check, which the row has to say."""
+    tables = page().tables()
 
-    assert "summary, outline" in drawn.tables()
-    assert "atomic, bridge" in drawn.tables()
-
-
-def test_decomposition_is_not_measured_over_a_mixed_set(page) -> None:
-    """A summary keeps the claims its passage carried on purpose."""
-    drawn = page()
-
-    assert "Only atomic facts are decomposed" in drawn.tables()
+    assert "Applies to atomic, summary, bridge" in tables
+    assert "Applies to every kind" in tables
 
 
-def test_decomposition_is_measured_once_one_reading_is_chosen(run_view) -> None:
-    """Which is the figure that says whether the model decomposed at all."""
-    drawn = FactsPage(
-        run_view("facts", catalog_api=Answers(**FactsPage.answers()))
-    ).choose_reading("Atomic")
+def test_a_check_nothing_failed_reads_as_ok(page) -> None:
+    """And one something failed does not."""
+    tables = page(
+        fact_quality=changed(FACT_QUALITY, total=2, validated=1, rejected={"copied": 1})
+    ).tables()
 
-    assert "2.0×" in drawn.tables(), drawn.tables()
+    assert "Attention" in tables
 
 
-def test_a_reading_the_page_has_no_description_for_is_still_counted(page) -> None:
-    """Added to the backend without being added here."""
-    drawn = page(fact_quality=quality(rejected={"invented_code": 1}))
+def test_a_rejection_code_the_page_has_never_heard_of_is_still_reported(page) -> None:
+    """A check added to the backend should not disappear from the report."""
+    drawn = page(fact_quality=changed(FACT_QUALITY, total=2, rejected={"brand_new": 1}))
 
-    assert "invented_code" in drawn.tables()
-    assert "no description" in drawn.tables()
+    assert drawn.raised == []
+    assert "brand_new" in drawn.tables()
 
 
 def test_a_refused_fact_names_the_check_it_failed(page) -> None:
-    """Kept rather than discarded, so a reader can see why."""
-    refused = fact(
-        id=2,
-        kind="outline",
-        statement="- One point",
-        validated=False,
-        rejection_code="not_listed",
-        validation_error="the outline holds 1 point(s)",
-    )
-    drawn = page(
-        facts=page_of(refused),
-        fact_quality=quality(
-            total=1, validated=0, kinds={"outline": 1}, rejected={"not_listed": 1}
-        ),
+    """In the table, so a reader need not open it to know why."""
+    tables = page(
+        facts=page_of(
+            changed(
+                FACT,
+                validated=False,
+                rejection_code="unsupported_addition",
+                validation_error="added 70%",
+            )
+        )
+    ).tables()
+
+    assert "Nothing invented" in tables
+
+
+def test_the_reason_a_fact_was_refused_is_on_the_fact(page) -> None:
+    """Opened, it says what it added rather than only that it added."""
+    tables = (
+        page(
+            facts=page_of(
+                changed(
+                    FACT,
+                    validated=False,
+                    rejection_code="unsupported_addition",
+                    validation_error="added 70%",
+                    units_added=["70%"],
+                )
+            )
+        )
+        .select(0)
+        .tables()
     )
 
-    assert "Two points or more" in drawn.tables()
+    assert "added 70%" in tables
+    assert "70%" in tables
+
+
+# ── Decomposition, which no single fact can fail ──────────────────────────
+
+
+def test_decomposition_is_not_measured_over_a_mixed_set(page) -> None:
+    """A summary keeps every claim its passage carried, on purpose."""
+    tables = page().tables()
+
+    assert "Measured over atomic facts" in tables
+
+
+def test_decomposition_is_measured_once_one_reading_is_chosen(open_view) -> None:
+    """With Atomic picked, the ratio is a number and has a verdict."""
+    page = open_view("facts").choose("facts-kind", "atomic")
+
+    assert "2.0×" in page.tables()
+
+
+# ── What a fact rests on ──────────────────────────────────────────────────
 
 
 def test_a_fact_resting_on_several_passages_names_them_all(page) -> None:
-    """One passage's evidence would not say what the claim was drawn from."""
-    drawn = page(
-        facts=page_of(
-            fact(
-                id=7,
-                kind="bridge",
-                statement="A bridge.",
-                passages=[FACT["passages"][0], resting(22, ordinal=9, position=1)],
-            )
-        ),
-        fact_quality=quality(kinds={"bridge": 1}),
+    """A bridge cites a span in each of the passages it was shown."""
+    bridge = changed(
+        FACT,
+        kind="bridge",
+        passages=[FACT["passages"][0], resting(12, 9, 1, page_from=4)],
     )
+    tables = page(facts=page_of(bridge)).select(0).tables()
 
-    assert "Rests on passages: 3 (id 11), 9 (id 22)" in drawn.text(), drawn.text()
+    assert "3, 9" in tables
 
 
-def test_the_listing_carries_the_passages_so_none_are_asked_for(run_view) -> None:
-    """Every kind names its passages on the row; no second call is made."""
-    client = Answers(**FactsPage.answers())
-    run_view("facts", catalog_api=client)
+def test_the_listing_carries_the_passages_so_none_are_asked_for(open_view) -> None:
+    """One request for the page, not one per row on it."""
+    client = Answers(**answers())
 
-    assert not [call for call in client.asked if call[0] == "fact_passages"]
+    open_view("facts", client).select(0)
+
+    assert not [one for one in client.asked if one[0] == "passage"]
