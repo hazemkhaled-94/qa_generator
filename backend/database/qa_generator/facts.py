@@ -11,7 +11,6 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
-    ForeignKey,
     Index,
     Integer,
     Text,
@@ -26,12 +25,11 @@ from database.qa_generator.outcomes import FactKind, Rejection, one_of
 
 if TYPE_CHECKING:
     from database.qa_generator.fact_passages import FactPassage
-    from database.qa_generator.passages import Passage
     from database.qa_generator.question_facts import QuestionFact
 
 
 class Fact(Base):
-    """One atomic statement drawn from one passage, with its source span."""
+    """One statement drawn from the passages listed in fact_passages."""
 
     __tablename__ = "facts"
     __table_args__ = (
@@ -57,9 +55,6 @@ class Fact(Base):
         ),
         CheckConstraint(one_of("kind", FactKind), name="facts_kind_valid"),
         CheckConstraint(
-            "evidence_end >= evidence_start", name="facts_evidence_span_ordered"
-        ),
-        CheckConstraint(
             f"rejection_code IS NULL OR {one_of('rejection_code', Rejection)}",
             name="facts_rejection_code_valid",
         ),
@@ -67,28 +62,19 @@ class Fact(Base):
             "validated = (rejection_code IS NULL)", name="facts_verdict_agrees"
         ),
         {
-            "comment": "One atomic statement drawn from one passage, with the "
-            "source span supporting it. The unit a question is generated from "
-            "and scored against."
+            "comment": "One statement and the verdicts the checks reached on it. "
+            "Which passages it rests on, and where in each, is fact_passages. The "
+            "unit a question is generated from and scored against."
         },
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    passage_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("passages.id", ondelete="CASCADE"),
-        index=True,
-        comment="The passage this fact was drawn from, and the route to both its "
-        "document and its topics. On a bridge fact this is the anchor, the first "
-        "of the passages listed in fact_passages.",
-    )
     kind: Mapped[str] = mapped_column(
         Text,
         server_default=FactKind.ATOMIC,
         comment="atomic | summary | outline | bridge. Decides which checks the "
-        "statement is held to and what its evidence is: an atomic fact cites "
-        "sentences, a summary and an outline stand in for the whole passage, and a "
-        "bridge rests on the passages in fact_passages.",
+        "statement is held to and how many passages it rests on: atomic, summary "
+        "and outline rest on one, a bridge on two or more.",
     )
     statement: Mapped[str] = mapped_column(
         Text,
@@ -98,22 +84,9 @@ class Fact(Base):
     )
     evidence_text: Mapped[str] = mapped_column(
         Text,
-        comment="The cited sentences of the passage, resolved from "
-        "evidence_sentence_ids.",
-    )
-    evidence_sentence_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer),
-        comment="Which of passages.sentences the claim was drawn from. What the "
-        "extractor chooses; the span below is resolved from it, so a citation is "
-        "exact by construction rather than by searching for a quote. Every "
-        "sentence of the passage on a summary, an outline or a bridge.",
-    )
-    evidence_start: Mapped[int] = mapped_column(
-        Integer,
-        comment="Offset of the evidence's first character within passages.text.",
-    )
-    evidence_end: Mapped[int] = mapped_column(
-        Integer, comment="Offset one past the evidence's last character."
+        comment="Every span in fact_passages, resolved and joined in position "
+        "order. The denormalised copy the search index reads; the spans "
+        "themselves are the record.",
     )
     extraction_method: Mapped[str] = mapped_column(Text, comment="llm | deterministic.")
     extraction_model: Mapped[str | None] = mapped_column(
@@ -179,7 +152,6 @@ class Fact(Base):
         comment="When the fact was extracted.",
     )
 
-    passage: Mapped[Passage] = relationship(back_populates="facts")
     passage_links: Mapped[list[FactPassage]] = relationship(
         back_populates="fact", cascade="all, delete-orphan", passive_deletes=True
     )

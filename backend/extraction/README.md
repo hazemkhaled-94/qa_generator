@@ -198,8 +198,12 @@ addition.
 
 One transaction. The passage's existing facts are deleted and the new ones
 written, scoped to that passage so two workers on two passages of one
-document do not delete each other's work. Bridge facts anchored to the
+document do not delete each other's work. Bridge facts resting on the
 passage are *not* deleted: they belong to the bridge pass.
+
+Every fact is written with one `fact_passages` row per passage it rests on
+— one row for an atomic fact, a summary and an outline. That link is the
+only route from a fact to a passage, and so to a document and to a topic.
 
 ### Step 7 — The bridge pass
 
@@ -228,13 +232,20 @@ NOTHING reads is the cited spans rather than the whole of every passage, and
 were named: a claim naming two and citing a real sentence in only one of them
 rests on one passage.
 
-A bridge is stored anchored to the first passage it cites. That anchor is its
-`passage_id`, so it lists, filters, cascades and joins exactly like every
-other fact, and its own evidence columns hold the span it cited there. The
-rest is in `fact_passages`, one row per passage with the sentences and the
-span in each. A trigger deletes a bridge that falls below two passages,
-because re-chunking one side of it cascades to the link table and not to the
-fact, which would otherwise leave a claim bridging nothing.
+A bridge is stored the same way every other kind is, with more rows: one
+`fact_passages` row per passage it cites, in the order the model was shown
+them, each carrying the sentences and the span in that passage. Nothing
+marks one of them as special, because nothing makes one of them special —
+"the first position the model happened to be shown it in" is a mechanism,
+not a meaning. `evidence_text` on the fact is every span joined in that
+order, which is what the search index reads.
+
+A trigger deletes a fact once **any** passage it rests on is gone.
+Re-chunking cascades to the link table and not to the fact, and a foreign
+key cascades parent to child and never the reverse, so without it a claim
+would outlive its evidence. The rule is the same for all four kinds: the
+spans are the whole of what a fact rests on, so losing one is losing part
+of the claim.
 
 A bridge drawn under prompt version 1 recorded no sentence numbers, so its
 `fact_passages` rows carry no citation. Nothing can fill them in. Such a row
@@ -276,11 +287,13 @@ call.
 **Writes**
 
 - `facts` — one row per statement, refused ones included. Statement,
-  evidence text and span, cited sentence ids, kind, method, verdict,
-  rejection code and message, everything the checks read, and full
-  provenance: model, prompt version, temperature, spaCy model and version.
-- `fact_passages` — one row per passage a bridge rests on, anchor first, each
-  carrying the sentences and the span the claim rests on there.
+  evidence text, kind, method, verdict, rejection code and message,
+  everything the checks read, and full provenance: model, prompt version,
+  temperature, spaCy model and version.
+- `fact_passages` — one row per passage the fact rests on, in the order the
+  model was shown them, each carrying the sentences and the span the claim
+  rests on there. One row for an atomic fact, a summary and an outline, two
+  or more for a bridge.
 - `passages.extract_status`, `extract_error`, `extract_claimed_at`.
 
 **Serves**
@@ -289,17 +302,21 @@ call.
 |---|---|
 | `GET /facts` | One page of facts, narrowed by document, kind, method and a text search |
 | `GET /facts/quality` | The figures under that same filter |
-| `GET /facts/{id}/passages` | The passages a bridge rests on |
+| `GET /facts/{id}/passages` | The passages one fact rests on, which every `GET /facts` row carries too |
 | `GET /extraction/status` | The queue depth, and whether a worker is on it |
 | `POST /extraction/{action}` | `start`, `stop`, `retry`, `rerun` |
 | `GET\|POST /extraction/{scope}/{value}/…` | The same, narrowed to one document or one passage |
 
-**Invariant every reader can rely on:** for every fact,
-`passages.text[evidence_start:evidence_end] == evidence_text`, where the
-passage is `facts.passage_id`. It holds for all four kinds. A bridge carries
-the same invariant once per passage in `fact_passages`:
-`passages.text[evidence_start:evidence_end] == the text it was read in`, for
-every row whose citation was recorded.
+**Invariant every reader can rely on:** for every row of `fact_passages`
+whose citation was recorded,
+`passages.text[evidence_start:evidence_end] == the text the claim was read
+in`, where the passage is `fact_passages.passage_id`. It holds once per row
+and for all four kinds, which is one assertion per passage rather than one
+per fact. `facts.evidence_text` is those spans joined in position order.
+
+A row carries no citation when the claim named no sentence that passage
+has: a fact refused as `evidence_absent`, and a bridge drawn under prompt
+version 1. Neither is offered to question generation.
 
 ## Configuration
 

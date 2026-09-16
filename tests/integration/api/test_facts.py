@@ -10,7 +10,7 @@ import pytest
 from seed import digest, document, fact, passage
 from sqlalchemy.orm import Session
 
-from database.qa_generator import FactKind, FactPassage, Rejection
+from database.qa_generator import FactKind, Rejection
 
 pytestmark = pytest.mark.integration
 
@@ -27,7 +27,9 @@ def produced(client, engine):
         session.add_all([first, second])
         session.flush()
 
-        bridge = fact(first.id, statement="Both name a way in.", kind=FactKind.BRIDGE)
+        bridge = fact(
+            first.id, second.id, statement="Both name a way in.", kind=FactKind.BRIDGE
+        )
         session.add_all(
             [
                 fact(first.id, statement="Answered within 48 hours."),
@@ -50,13 +52,6 @@ def produced(client, engine):
                     extraction_method="deterministic",
                 ),
                 bridge,
-            ]
-        )
-        session.flush()
-        session.add_all(
-            [
-                FactPassage(fact_id=bridge.id, passage_id=first.id, position=0),
-                FactPassage(fact_id=bridge.id, passage_id=second.id, position=1),
             ]
         )
         session.commit()
@@ -154,18 +149,21 @@ def test_a_bridge_names_the_passages_it_rests_on(produced) -> None:
     assert answered["passages"] == [ids["first"], ids["second"]]
 
 
-def test_another_kind_rests_on_no_group(produced) -> None:
-    """The listing already names the one passage it rests on."""
-    client, _ = produced
+def test_another_kind_names_the_one_passage_it_rests_on(produced) -> None:
+    """The same route as a bridge's, with one passage rather than two."""
+    client, ids = produced
     atomic = next(
         one
         for one in client.get("/facts", params={"kind": "atomic"}).json()["facts"]
-        if one["validated"]
+        if one["validated"] and one["statement"] == "Answered within 48 hours."
     )
 
     answered = client.get(f"/facts/{atomic['id']}/passages").json()
 
-    assert answered["passages"] == []
+    assert answered["passages"] == [ids["first"]]
+    assert [one["passage_id"] for one in atomic["passages"]] == [ids["first"]], (
+        "and the listing carries them, so the page need not ask"
+    )
 
 
 def test_a_fact_that_does_not_exist_rests_on_nothing(produced) -> None:

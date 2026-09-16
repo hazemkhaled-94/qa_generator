@@ -7,7 +7,14 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from database.qa_generator import Fact, Passage, PassageTopic, Status, Topic
+from database.qa_generator import (
+    Fact,
+    FactPassage,
+    Passage,
+    PassageTopic,
+    Status,
+    Topic,
+)
 from database.qa_generator.passage_topics import DOMINANT as _DOMINANT
 from database.qa_generator.repository import Repository
 from stages import Columns, StageQueue
@@ -456,11 +463,14 @@ class TopicCatalog(Repository):
             }
             drawn = dict(
                 session.execute(
-                    select(_DOMINANT.c.topic_id, func.count(Fact.id))
+                    # Distinct: a bridge rests on several passages, and two
+                    # of them dominant in one topic would count it twice.
+                    select(_DOMINANT.c.topic_id, func.count(func.distinct(Fact.id)))
                     .join(
-                        Fact,
-                        (Fact.passage_id == _DOMINANT.c.passage_id) & Fact.validated,
+                        FactPassage,
+                        FactPassage.passage_id == _DOMINANT.c.passage_id,
                     )
+                    .join(Fact, (Fact.id == FactPassage.fact_id) & Fact.validated)
                     .group_by(_DOMINANT.c.topic_id)
                 ).all()
             )

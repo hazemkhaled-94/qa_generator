@@ -22,7 +22,6 @@ def same(first, again) -> None:
     assert again.validated == first.validated
     assert again.rejection_code == first.rejection_code
     assert again.evidence_text == first.evidence_text
-    assert again.evidence_sentence_ids == first.evidence_sentence_ids
     assert again.units_added == first.units_added
     assert again.kind == first.kind
     assert again.citations == first.citations
@@ -53,7 +52,9 @@ def test_a_second_judgement_reaches_the_first_verdict(statement, cited, kind) ->
     again = checker.check(
         prose,
         CandidateFact(
-            first.statement, tuple(first.evidence_sentence_ids), kind=first.kind
+            first.statement,
+            tuple(first.citations[0].sentence_ids or ()),
+            kind=first.kind,
         ),
         first.extraction_method,
     )
@@ -92,6 +93,8 @@ def test_a_bridge_is_judged_the_same_way_from_its_stored_group(
     # the link table held for this fact.
     held = [one.passage_id for one in first.citations]
     stored = [one for one in offered if one.id in held]
+    # A refusal that resolved nowhere still names the group it was read
+    # from, and the link rows carry no span, which is what comes back.
     again = checker.check_bridge(
         stored,
         CandidateFact(
@@ -99,7 +102,7 @@ def test_a_bridge_is_judged_the_same_way_from_its_stored_group(
             (),
             kind=FactKind.BRIDGE,
             passages=tuple(
-                Cited(position=position, sentences=tuple(one.sentence_ids))
+                Cited(position=position, sentences=tuple(one.sentence_ids or ()))
                 for position, one in enumerate(first.citations)
             ),
         ),

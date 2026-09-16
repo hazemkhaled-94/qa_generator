@@ -116,10 +116,6 @@ class CatalogApi(Endpoint):
         """Fetches how well extraction is doing, under the same filter."""
         return self._query("/facts/quality", filters)
 
-    def fact_passages(self, fact_id: int) -> dict:
-        """Fetches the passages one bridge fact rests on."""
-        return self._request("GET", f"/facts/{fact_id}/passages").json()
-
     def questions(self, **filters) -> dict:
         """Fetches one page of questions."""
         return self._query("/questions", filters)

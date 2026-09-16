@@ -65,13 +65,10 @@ def test_a_fact_arrives_atomic_when_nothing_says_otherwise(session, passages) ->
     """Which is what the server default backfilled the existing corpus with."""
     session.execute(
         text(
-            "INSERT INTO facts (passage_id, statement, evidence_text, "
-            "evidence_sentence_ids, evidence_start, evidence_end, "
-            "extraction_method, validated, units_statement, units_added, "
-            "unresolved_references) VALUES (:p, 'A claim.', 'A claim.', "
-            "'{0}', 0, 8, 'llm', true, '{}', '{}', '{}')"
-        ),
-        {"p": passages[0]},
+            "INSERT INTO facts (statement, evidence_text, extraction_method, "
+            "validated, units_statement, units_added, unresolved_references) "
+            "VALUES ('A claim.', 'A claim.', 'llm', true, '{}', '{}', '{}')"
+        )
     )
     session.flush()
 
@@ -96,15 +93,7 @@ def test_every_new_rejection_code_is_accepted(session, passages, code) -> None:
 def test_a_bridge_records_the_passages_it_rests_on(session, passages) -> None:
     """One row per passage, ordered by the position it was shown in."""
     anchor, other = passages
-    row = fact(anchor, kind=FactKind.BRIDGE)
-    session.add(row)
-    session.flush()
-    session.add_all(
-        [
-            FactPassage(fact_id=row.id, passage_id=anchor, position=0),
-            FactPassage(fact_id=row.id, passage_id=other, position=1),
-        ]
-    )
+    session.add(fact(anchor, other, kind=FactKind.BRIDGE))
     session.flush()
 
     held = session.execute(
@@ -113,13 +102,23 @@ def test_a_bridge_records_the_passages_it_rests_on(session, passages) -> None:
     assert list(held) == [anchor, other]
 
 
+@pytest.mark.parametrize("kind", [FactKind.ATOMIC, FactKind.SUMMARY])
+def test_every_other_kind_records_the_one_passage_it_rests_on(
+    session, passages, kind
+) -> None:
+    """The link table is the only route to a passage, for every kind."""
+    session.add(fact(passages[0], kind=kind))
+    session.flush()
+
+    held = session.execute(text("SELECT passage_id, position FROM fact_passages")).all()
+    assert held == [(passages[0], 0)]
+
+
 def test_one_passage_cannot_be_named_twice_by_one_fact(session, passages) -> None:
     """The same passage twice is one passage, and bridges nothing."""
     anchor = passages[0]
     row = fact(anchor, kind=FactKind.BRIDGE)
     session.add(row)
-    session.flush()
-    session.add(FactPassage(fact_id=row.id, passage_id=anchor, position=0))
     session.flush()
 
     refuses(
@@ -147,15 +146,7 @@ def test_deleting_a_document_takes_the_bridges_that_rested_on_it(
 ) -> None:
     """One delete, and nothing derived from it survives."""
     anchor, other = passages
-    row = fact(anchor, kind=FactKind.BRIDGE)
-    session.add(row)
-    session.flush()
-    session.add_all(
-        [
-            FactPassage(fact_id=row.id, passage_id=anchor, position=0),
-            FactPassage(fact_id=row.id, passage_id=other, position=1),
-        ]
-    )
+    session.add(fact(anchor, other, kind=FactKind.BRIDGE))
     session.flush()
 
     session.execute(text("DELETE FROM documents"))
@@ -171,4 +162,19 @@ def test_the_orphan_trigger_is_installed(engine, database) -> None:
         triggers = set(
             connection.execute(text("SELECT tgname FROM pg_trigger")).scalars()
         )
-    assert "fact_passages_delete_orphan_bridge" in triggers, sorted(triggers)
+    assert "fact_passages_delete_orphan_fact" in triggers, sorted(triggers)
+
+
+def test_losing_any_passage_a_fact_rests_on_takes_the_fact(session, passages) -> None:
+    """A claim outliving half its evidence would be a claim nobody can check."""
+    anchor, other = passages
+    session.add(fact(anchor, other, kind=FactKind.BRIDGE))
+    session.add(fact(anchor))
+    session.flush()
+
+    # The second passage, not the one either fact opens on.
+    session.execute(text("DELETE FROM passages WHERE id = :id"), {"id": other})
+    session.flush()
+
+    assert session.execute(text("SELECT count(*) FROM facts")).scalar() == 1
+    assert session.execute(text("SELECT kind FROM facts")).scalar() == FactKind.ATOMIC

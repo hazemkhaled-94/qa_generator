@@ -224,12 +224,15 @@ class TestBridges:
                 )
             )
 
-    def test_no_other_kind_records_a_group(self, store, corpus) -> None:
-        """Every other kind rests on its anchor alone."""
+    def test_every_other_kind_records_the_one_passage_it_rests_on(
+        self, store, corpus
+    ) -> None:
+        """The link table is the only route to a passage, for every kind."""
         first = corpus["a"][0]
         store.store(first, checked(first, kind=FactKind.SUMMARY))
 
-        assert store.links() == []
+        ((fact_id, *_),) = store.rows("id")
+        assert store.links() == [(fact_id, first, 0)]
 
     def test_re_reading_a_passage_leaves_its_bridges_alone(self, store, corpus) -> None:
         """They are the bridge pass's to write and to replace."""
@@ -258,7 +261,9 @@ class TestBridges:
 
         assert store.catalog.clear_bridges() == 1
         assert [row[0] for row in store.rows("kind")] == [FactKind.ATOMIC]
-        assert store.links() == [], "the links went with the fact"
+        assert [row[1] for row in store.links()] == [anchor], (
+            "the bridge's links went with it, and the atomic fact kept its own"
+        )
 
     def test_clearing_narrows_to_the_passages_a_scope_names(
         self, store, corpus
@@ -284,9 +289,11 @@ class TestBridges:
             ),
         )
 
+        # Both rest on a passage of a, so both go: a scope names the
+        # passages a bridge rests on and not the one it opens with.
         removed = store.catalog.clear_bridges(Passage.doc_sha256 == digest("a"))
-        assert removed == 1
-        assert [row[0] for row in store.rows("statement")] == ["From b."]
+        assert removed == 2
+        assert store.rows("statement") == []
 
     def test_losing_a_passage_deletes_the_bridge_that_needed_it(
         self, store, corpus
@@ -461,8 +468,10 @@ class TestListing:
         assert total == 3
         assert rows == []
 
-    def test_a_bridge_is_listed_against_its_anchor(self, store, corpus) -> None:
-        """So the row names a passage a reader can open."""
+    def test_a_bridge_is_listed_once_with_every_passage_it_rests_on(
+        self, store, corpus
+    ) -> None:
+        """One row, naming both passages a reader can open."""
         anchor, other = corpus["a"][0], corpus["b"][0]
         store.bridges(
             checked(
@@ -470,9 +479,27 @@ class TestListing:
             )
         )
 
-        _, (row,) = store.catalog.page()
-        assert row.passage_id == anchor
+        total, (row,) = store.catalog.page()
+        assert total == 1, "a bridge is not multiplied by its passages"
+        assert [one.passage_id for one in row.passages] == [anchor, other]
+        assert [one.position for one in row.passages] == [0, 1]
         assert row.kind == FactKind.BRIDGE
+
+    def test_a_bridge_is_listed_under_either_of_its_documents(
+        self, store, corpus
+    ) -> None:
+        """A reader filtering to the second wants the facts its passages hold."""
+        from seed import digest
+
+        anchor, other = corpus["a"][0], corpus["b"][0]
+        store.bridges(
+            checked(
+                anchor, "A bridge.", kind=FactKind.BRIDGE, passage_ids=[anchor, other]
+            )
+        )
+
+        assert store.catalog.page(document=digest("a"))[0] == 1
+        assert store.catalog.page(document=digest("b"))[0] == 1
 
     def test_the_passages_of_a_bridge_are_read_back_in_order(
         self, store, corpus
@@ -488,13 +515,15 @@ class TestListing:
 
         assert store.catalog.passages_of(fact_id) == [anchor, other]
 
-    def test_another_kind_rests_on_no_group(self, store, corpus) -> None:
-        """The listing already names the one passage it rests on."""
+    def test_another_kind_names_the_one_passage_it_rests_on(
+        self, store, corpus
+    ) -> None:
+        """The same route as a bridge's, with one row rather than two."""
         first = corpus["a"][0]
         store.store(first, checked(first))
         ((fact_id,),) = store.rows("id")
 
-        assert store.catalog.passages_of(fact_id) == []
+        assert store.catalog.passages_of(fact_id) == [first]
 
 
 class TestQuality:

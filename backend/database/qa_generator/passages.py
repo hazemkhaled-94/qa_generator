@@ -26,7 +26,6 @@ from database.qa_generator.status import Status, check, queued
 if TYPE_CHECKING:
     from database.qa_generator.documents import Document
     from database.qa_generator.fact_passages import FactPassage
-    from database.qa_generator.facts import Fact
     from database.qa_generator.passage_topics import PassageTopic
 
 
@@ -97,8 +96,8 @@ class Passage(Base):
     )
     text: Mapped[str] = mapped_column(
         Text,
-        comment="The passage content. Evidence offsets on facts are relative to "
-        "this string.",
+        comment="The passage content. The evidence offsets in fact_passages are "
+        "relative to this string.",
     )
     language: Mapped[str | None] = mapped_column(
         CHAR(2),
@@ -166,10 +165,8 @@ class Passage(Base):
     topic_links: Mapped[list[PassageTopic]] = relationship(
         back_populates="passage", cascade="all, delete-orphan", passive_deletes=True
     )
-    facts: Mapped[list[Fact]] = relationship(
-        back_populates="passage", cascade="all, delete-orphan", passive_deletes=True
-    )
-    #: The bridge facts resting on this passage without being anchored to it.
+    #: Every fact resting on this passage, of any kind. Deleting the passage
+    #: deletes these rows, and a trigger on them deletes the facts.
     fact_links: Mapped[list[FactPassage]] = relationship(
         back_populates="passage", cascade="all, delete-orphan", passive_deletes=True
     )

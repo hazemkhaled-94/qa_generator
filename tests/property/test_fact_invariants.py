@@ -92,15 +92,22 @@ def test_a_verdict_and_its_code_always_agree(statement, cited, kind) -> None:
 @settings(max_examples=100, deadline=None)
 @pytest.mark.nlp
 def test_an_evidence_span_always_resolves_in_its_passage(statement, cited) -> None:
-    """The invariant every reader of the facts table relies on."""
+    """The invariant every reader of fact_passages relies on."""
     under = passage()
     checked = FactChecker(DIGEST_SHARE).check(
         under, CandidateFact(statement, tuple(cited)), "llm"
     )
 
-    assert checked.evidence_end >= checked.evidence_start
-    assert under.text[checked.evidence_start : checked.evidence_end] == (
-        checked.evidence_text
+    assert [one.passage_id for one in checked.citations] == [under.id]
+    for one in checked.citations:
+        if one.sentence_ids is None:
+            assert one.start is None and one.end is None
+        else:
+            assert 0 <= one.start <= one.end <= len(under.text)
+    assert checked.evidence_text == "\n".join(
+        under.text[one.start : one.end]
+        for one in checked.citations
+        if one.sentence_ids is not None
     )
 
 
@@ -133,6 +140,12 @@ def test_a_bridge_records_only_passages_it_was_offered(statement, rests_on) -> N
     rested = [one.passage_id for one in checked.citations]
     assert set(rested) <= held
     assert len(rested) == len(set(rested))
+    by_id = {one.id: one for one in offered}
+    assert checked.evidence_text == "\n".join(
+        by_id[one.passage_id].text[one.start : one.end]
+        for one in checked.citations
+        if one.sentence_ids is not None
+    )
     # Never validated, rather than always `not_bridging`: an empty statement
     # resting on one passage is refused by `asserts_nothing` first, and which
     # check fires first is the order, not the invariant.

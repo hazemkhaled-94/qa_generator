@@ -23,11 +23,29 @@ FACT = {
     "evidence_predicates": 2,
     "units_added": [],
     "unresolved_references": [],
-    "passage_id": 11,
-    "doc_sha256": "a" * 64,
-    "ordinal": 3,
-    "page_from": 2,
+    "passages": [
+        {
+            "passage_id": 11,
+            "doc_sha256": "a" * 64,
+            "ordinal": 3,
+            "page_from": 2,
+            "position": 0,
+        }
+    ],
 }
+
+
+def resting(passage_id: int, ordinal: int, position: int, **changed: Any) -> dict:
+    """One further passage a fact rests on, as GET /facts returns it."""
+    return {
+        "passage_id": passage_id,
+        "doc_sha256": changed.pop("doc_sha256", "b" * 64),
+        "ordinal": ordinal,
+        "page_from": changed.pop("page_from", None),
+        "position": position,
+        **changed,
+    }
+
 
 #: What GET /facts/quality returns for one clean atomic corpus.
 QUALITY = {
@@ -66,7 +84,6 @@ class FactsPage:
         "document_names": [{"sha256": "a" * 64, "filename": "report.pdf"}],
         "facts": page_of(FACT),
         "fact_quality": QUALITY,
-        "fact_passages": {"fact": 1, "passages": []},
         "stage_status": {"stage": "extraction", "working": False, "rows": {}},
         "stage_action": {"detail": "1 row(s) queued.", "rows": 1},
     }

@@ -241,8 +241,8 @@ def view() -> None:
     st.dataframe(
         [
             {
-                "Passage": row["ordinal"],
-                "Page": row["page_from"] if row["page_from"] is not None else "—",
+                "Passage": _ordinals(row),
+                "Page": _pages(row),
                 "Kind": _KINDS.get(row["kind"], (row["kind"],))[0],
                 "Method": row["extraction_method"],
                 "Passed": "yes" if row["validated"] else "no",
@@ -266,12 +266,25 @@ def view() -> None:
     chosen = st.selectbox(
         "Fact to inspect",
         rows,
-        format_func=lambda r: f"passage {r['ordinal']} · {r['statement'][:70]}",
+        format_func=lambda r: f"passage {_ordinals(r)} · {r['statement'][:70]}",
         help="Everything below this point applies to this fact and to the "
-        "passage it was drawn from.",
+        "passage(s) it was drawn from.",
     )
     if chosen is not None:
         _detail(client, chosen)
+
+
+def _ordinals(fact: dict) -> str:
+    """Where each passage a fact rests on sits in its own document."""
+    return ", ".join(str(one["ordinal"]) for one in fact["passages"]) or "—"
+
+
+def _pages(fact: dict) -> str:
+    """The pages a fact rests on, each named once."""
+    found = dict.fromkeys(
+        one["page_from"] for one in fact["passages"] if one["page_from"] is not None
+    )
+    return ", ".join(str(one) for one in found) or "—"
 
 
 def _kind_picker() -> str | None:
@@ -513,13 +526,16 @@ def _decomposition(quality: dict) -> str:
 
 def _detail(client, fact: dict) -> None:
     """Shows one fact in full and offers to read its passage again."""
-    scope = ("passage", str(fact["passage_id"]))
+    held = fact["passages"]
+    scope = ("passage", str(held[0]["passage_id"]))
     check = _CHECKS.get(fact["rejection_code"])
     label, what = _KINDS.get(fact["kind"], (fact["kind"], "An unrecognised kind."))
 
     page.section(
-        f"{label} fact from passage {fact['ordinal']}",
-        "This fact as it is stored, and the passage it came from.",
+        f"{label} fact from passage {_ordinals(fact)}"
+        if len(held) == 1
+        else f"{label} fact across passages {_ordinals(fact)}",
+        "This fact as it is stored, and the passage(s) it came from.",
     )
     page.metrics(
         {
@@ -570,13 +586,13 @@ def _detail(client, fact: dict) -> None:
         "**Evidence cited**",
         help="The passage text this claim says it rests on. A claim asserting "
         "anything not present here failed the `Nothing invented` check. A "
-        "summary and an outline cite their whole passage; a bridge cites the "
-        "whole of the first of the passages below.",
+        "summary and an outline cite their whole passage; a bridge cites a "
+        "span in each of the passages below, one per line.",
     )
     st.text(fact["evidence_text"])
 
-    if fact["kind"] == "bridge":
-        _bridged(client, fact)
+    if len(held) > 1:
+        _across(held)
 
     if fact["validation_error"]:
         st.error(f"Rejection reason: {fact['validation_error']}")
@@ -612,14 +628,15 @@ def _detail(client, fact: dict) -> None:
     stage.controls(client, _EXTRACTION, scope)
 
 
-def _bridged(client, fact: dict) -> None:
-    """Names the passages a bridge fact rests on, anchor first."""
-    held = client.fact_passages(fact["id"])["passages"]
+def _across(held: list[dict]) -> None:
+    """Names the passages a fact resting on several was drawn from."""
     st.caption(
-        "Rests on passage(s): " + ", ".join(str(one) for one in held),
+        "Rests on passages: "
+        + ", ".join(f"{one['ordinal']} (id {one['passage_id']})" for one in held),
         help="Every passage this claim was drawn from, in the order the model "
-        "was shown them. The first is the anchor, and is the one the evidence "
-        "above and the controls below apply to.",
+        "was shown them, each by its position in its own document. The "
+        "evidence above carries one span per passage, in this order; the "
+        "controls below apply to the first.",
     )
 
 

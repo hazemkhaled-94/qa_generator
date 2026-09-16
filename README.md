@@ -387,8 +387,8 @@ generation's. Every operation on the second carries `topic_index IS NOT NULL`,
 because without it `start` would queue the asking as though it were a subject
 and the two workers would fight over one row.
 
-A fact or a question reaches its topics by joining through its passage —
-`facts.passage_id` to `passage_topics` — rather than holding a topic of its
+A fact or a question reaches its topics by joining through its passages —
+`fact_passages` to `passage_topics` — rather than holding a topic of its
 own, so no two rows can disagree about which topic a passage is in.
 
 ## What a fact is
@@ -911,10 +911,10 @@ PyPI's build, which has no CUDA variant to avoid.
 | `backend/blob_store/` | Object storage clients, one module per bucket |
 | `backend/nlp/` | The spaCy pipelines, and reading sentences, claims and vocabulary out of text |
 | `backend/api/` | The HTTP surface the frontend and the orchestrator call |
-| `backend/ingestion/` | Upload validation, hashing and storage — see [Intake](docs/intake.md) |
-| `backend/preprocessing/parsing/` | A stored file becomes a structured document — see [Intake](docs/intake.md) |
-| `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas — see [Intake](docs/intake.md) |
-| `backend/extraction/` | Those passages become facts citing a sentence |
+| `backend/ingestion/` | Upload validation, hashing and storage — see its own [README](backend/ingestion/README.md) |
+| `backend/preprocessing/parsing/` | A stored file becomes a structured document — see its own [README](backend/preprocessing/parsing/README.md) |
+| `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas — see its own [README](backend/preprocessing/chunking/README.md) |
+| `backend/extraction/` | Those passages become facts citing a sentence — see its own [README](backend/extraction/README.md) |
 | `backend/topic_modelling/` | Each language becomes topics over its own vocabulary — see its own [README](backend/topic_modelling/README.md) |
 | `backend/question_generation/` | Each topic's facts become questions with known answers |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |

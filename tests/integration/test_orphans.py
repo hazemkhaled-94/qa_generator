@@ -51,15 +51,20 @@ def corpus(engine, database):
         )
         fact = connection.execute(
             text(
-                "INSERT INTO facts (passage_id, statement, evidence_text, "
-                "evidence_sentence_ids, evidence_start, evidence_end, "
-                "extraction_method, validated, units_statement, units_added, "
-                "unresolved_references) VALUES (:passage, 'A claim.', "
-                "'A passage.', '{0}', 0, 10, 'llm', true, '{}', '{}', '{}') "
-                "RETURNING id"
-            ),
-            {"passage": passage},
+                "INSERT INTO facts (statement, evidence_text, extraction_method, "
+                "validated, units_statement, units_added, unresolved_references) "
+                "VALUES ('A claim.', 'A passage.', 'llm', true, '{}', '{}', "
+                "'{}') RETURNING id"
+            )
         ).scalar_one()
+        connection.execute(
+            text(
+                "INSERT INTO fact_passages (fact_id, passage_id, position, "
+                "sentence_ids, evidence_start, evidence_end) "
+                "VALUES (:fact, :passage, 0, '{0}', 0, 10)"
+            ),
+            {"fact": fact, "passage": passage},
+        )
         question = connection.execute(
             text(
                 "INSERT INTO questions (question_text, target_answer, "
