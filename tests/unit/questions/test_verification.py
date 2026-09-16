@@ -17,6 +17,7 @@ from question_generation.verification import (
     QuestionChecker,
     Reading,
     agrees,
+    anchored,
     near_verdict,
     structural,
 )
@@ -601,11 +602,14 @@ def test_a_question_nobody_could_have_asked_cold_is_refused() -> None:
     """The verifier's judgement, on the call it was already making.
 
     A question can be perfectly answerable by the passages it cites and
-    still be one nobody would type, which no structural check can see.
+    still be one nobody would type. The structural half only says the
+    question is thin enough for the judgement to be worth holding.
     """
     recording = Recording(recovers="4 kg", stands_alone=False)
 
-    result = build(recording).check(candidate())
+    result = build(recording).check(
+        candidate(question_text="What specific components are included?")
+    )
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
     assert recording.verified == 1, "it must not cost a second call"
@@ -617,7 +621,7 @@ def test_an_unanchored_unanswerable_question_is_refused_too() -> None:
 
     result = build(recording).check(
         candidate(
-            question_text="Wie schwer ist es auf dem Mars?",
+            question_text="What specific components are included?",
             target_answer=None,
             answerable=False,
         )
@@ -634,7 +638,9 @@ def test_the_phrasing_judgement_is_made_before_the_answer_is() -> None:
     """
     recording = Recording(recovers=None, stands_alone=False)
 
-    result = build(recording).check(candidate())
+    result = build(recording).check(
+        candidate(question_text="What specific components are included?")
+    )
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
 
@@ -788,7 +794,9 @@ def test_a_root_question_is_still_judged_on_standing_alone() -> None:
     """The exemption is for follow-ups and for nothing else."""
     recording = Recording(recovers="4 kg", stands_alone=False)
 
-    result = build(recording).check(candidate())
+    result = build(recording).check(
+        candidate(question_text="What specific components are included?")
+    )
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
 
@@ -1292,3 +1300,69 @@ def test_the_target_answer_may_restate_the_question_without_disagreeing() -> Non
         OVERLAP,
         question,
     )
+
+
+# ── The measurement behind the phrasing opinion ───────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("question", "language"),
+    [
+        ("What specific components are included?", "en"),
+        ("For which models do the requirements apply?", "en"),
+        ("Which criteria are used?", "en"),
+        ("Welche spezifischen Komponenten sind enthalten?", "de"),
+    ],
+)
+def test_a_question_naming_nothing_is_thin_enough_to_reject(question, language) -> None:
+    """The two the gate exists for, and two of the same shape."""
+    assert not anchored(question, language)
+
+
+@pytest.mark.parametrize(
+    ("question", "language"),
+    [
+        (
+            (
+                "Wann wurde die Erlaubnis des Versicherers nach Eröffnung "
+                "des endgültigen Insolvenzverfahrens widerrufen?"
+            ),
+            "de",
+        ),
+        ("Für welche Ziele setzt sich die Bafin ein?", "de"),
+        ("Wozu nutzt die BaFin das DORA-Informationsregister?", "de"),
+        ("What fee applies to a banking licence application?", "en"),
+        ("Wie hoch war der Anteil der überschuldeten Verbraucher?", "de"),
+    ],
+)
+def test_a_question_naming_something_is_never_called_unanchored(
+    question, language
+) -> None:
+    """Real rows the verifier called unanchored, every one of them anchored.
+
+    A name, a number, or three things. The first names five, the second and
+    third name a party, and the gate may not overrule that.
+    """
+    assert anchored(question, language)
+
+
+def test_the_verifier_cannot_reject_a_question_that_names_something() -> None:
+    """An opinion needs a measurement behind it, not only a second model."""
+    recording = Recording(recovers="4 kg", stands_alone=False)
+
+    result = build(recording).check(
+        candidate(question_text="What fee applies to a banking licence application?")
+    )
+
+    assert result.accepted, "the verifier overruled the question's own subjects"
+
+
+def test_the_verifier_still_rejects_a_question_that_names_nothing() -> None:
+    """Narrowing the gate must not turn it off."""
+    recording = Recording(recovers="4 kg", stands_alone=False)
+
+    result = build(recording).check(
+        candidate(question_text="What specific components are included?")
+    )
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED

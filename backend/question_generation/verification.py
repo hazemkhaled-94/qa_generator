@@ -380,6 +380,34 @@ def structural(
     return None
 
 
+#: How many things a question has to be about before it is taken to name
+#: something, when it names no name and no number. Measured over twelve
+#: questions: the ones nobody could have asked cold carry one or two content
+#: words - `What specific components are included?`, `Which criteria are
+#: used?` - and the ones a person would type carry four or five.
+_NAMES_SOMETHING = 3
+
+
+def anchored(question: str, language: str | None) -> bool:
+    """Whether a question names anything on its own, read off its parse.
+
+    The measurement behind an opinion. `unanchored` is the verifier's
+    judgement and the verifier is wrong about it often enough to matter: over
+    one topic it rejected six questions naming a party, a period and a duty
+    apiece, four of them unanswerable ones where a model that could not find
+    the answer reports that the question named nothing. Asking it to copy the
+    subject out instead fixed most of that and not all.
+
+    So the judgement may only reject a question this also calls thin. A
+    question naming a name or a number names something specific; so does one
+    about three or more things. `What specific components are included?` is
+    about two and names neither.
+    """
+    return bool(claim(question, language).units) or (
+        len(content(question, language)) >= _NAMES_SOMETHING
+    )
+
+
 def near_verdict(
     near: Neighbour | None, *, answerable: bool, threshold: float
 ) -> tuple[str, str] | None:
@@ -684,10 +712,20 @@ class QuestionChecker:
                 leak[1],
             )
 
-        if not read.stands_alone and not candidate.follows:
+        # The verifier's opinion, and only where the question is thin enough
+        # for it to be worth holding. A question naming a name, a number or
+        # three things was asked about something, whatever the verifier made
+        # of it.
+        if (
+            not read.stands_alone
+            and not candidate.follows
+            and not anchored(candidate.question_text, candidate.group.language)
+        ):
             reason = (
                 "the verifier says it names nothing a person searching would "
-                "know, so it could not have been asked without the passage"
+                "know, and it names no name, no number and fewer than "
+                f"{_NAMES_SOMETHING} things, so it could not have been asked "
+                "without the passage"
             )
             if self._judge_phrasing:
                 return QuestionRejection.UNANCHORED, reason
