@@ -186,6 +186,14 @@ def _is_heading(passage: PassageToExtract) -> bool:
     )
 
 
+#: Block types that say where something is rather than what it says. A table
+#: of contents yields "Das Team managen beginnt auf Seite 69"; the index this
+#: corpus renders as a code block yielded 95 facts of the form "Der Lehrplan
+#: umfasst das Thema X" from four passages. Both are navigation, and a
+#: question asked of either measures a reader's page-turning.
+_NAVIGATION = frozenset({"document_index", "code"})
+
+
 def skipped(passage: PassageToExtract) -> str | None:
     """Says why a passage is not worth a model call.
 
@@ -200,6 +208,8 @@ def skipped(passage: PassageToExtract) -> str | None:
     # produced a fact per cell, every one citing a row that did not exist.
     if not passage.sentences:
         return "no sentences"
+    if passage.block_type in _NAVIGATION:
+        return f"{passage.block_type}: navigation rather than content"
     if passage.block_type in ("table",):
         return None
     if _is_heading(passage):
