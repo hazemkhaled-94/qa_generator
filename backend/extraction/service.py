@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import logging
+from itertools import zip_longest
 from typing import ClassVar
 
-from extraction.extractors import ExtractionFailed, ExtractorRegistry
+from database.qa_generator import FactKind
+from extraction.extractors import (
+    BridgeExtractor,
+    DigestExtractor,
+    ExtractionFailed,
+    ExtractorRegistry,
+)
 from extraction.models import CheckedFact, PassageToExtract
 from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import FactChecker
@@ -19,14 +26,20 @@ span = tracer(__name__)
 #: How many re-judged facts to write at once.
 _REJUDGE_BATCH = 500
 
+#: How many claims a passage must carry before a digest is asked for.
+_DIGESTIBLE = 2
+
 
 def revalidate(catalog: FactCatalog, within=None) -> int:
     """Judges every stored fact again, without calling the model.
 
-    What the model wrote is the record of one extraction and is kept; what
-    the checks read off it is derived, and is replaced with what today's
-    checks read. This is what applies a change to the checks to facts that
-    were extracted before it.
+    Args:
+        catalog: Where the facts are read from and written back to.
+        within: A condition narrowing which facts are re-judged, or None for
+            all of them.
+
+    Returns:
+        How many facts were written back.
     """
     checker = FactChecker()
     verdicts: list[tuple[int, CheckedFact]] = []
@@ -38,12 +51,104 @@ def revalidate(catalog: FactCatalog, within=None) -> int:
         written += catalog.rejudge(verdicts)
         verdicts.clear()
 
-    for fact_id, passage, candidate, method in catalog.judged(within):
-        verdicts.append((fact_id, checker.check(passage, candidate, method)))
+    for fact_id, passages, candidate, method in catalog.judged(within):
+        verdicts.append((fact_id, _rejudge(checker, passages, candidate, method)))
         if len(verdicts) >= _REJUDGE_BATCH:
             flush()
     flush()
     log.info("re-judged %d fact(s)", written)
+    return written
+
+
+def _rejudge(
+    checker: FactChecker,
+    passages: list[PassageToExtract],
+    candidate,
+    method: str,
+) -> CheckedFact:
+    """Judges one stored fact against the passages it was drawn from."""
+    if candidate.kind == FactKind.BRIDGE:
+        return checker.check_bridge(passages, candidate)
+    return checker.check(passages[0], candidate, method)
+
+
+def grouped(
+    passages: list[PassageToExtract], wanted: int, size: int
+) -> list[list[PassageToExtract]]:
+    """Splits one topic's passages into the groups a bridge is read from.
+
+    Documents are taken in turn, and the groups are strided over the whole
+    topic rather than taken from its start.
+
+    Args:
+        passages: The topic's passages, in document and reading order.
+        wanted: The most groups to return.
+        size: How many passages one group holds.
+
+    Returns:
+        Up to `wanted` groups of exactly `size` passages. Empty when the
+        topic holds fewer than `size`.
+    """
+    if size < 2 or wanted < 1 or len(passages) < size:
+        return []
+
+    by_document: dict[str | None, list[PassageToExtract]] = {}
+    for passage in passages:
+        by_document.setdefault(passage.doc_sha256, []).append(passage)
+
+    interleaved = [
+        passage
+        for taken in zip_longest(*by_document.values())
+        for passage in taken
+        if passage is not None
+    ]
+    whole = [
+        interleaved[at : at + size]
+        for at in range(0, len(interleaved) - size + 1, size)
+    ]
+    return whole[:: max(1, len(whole) // wanted)][:wanted]
+
+
+def bridge(
+    catalog: FactCatalog,
+    extractor: BridgeExtractor,
+    checker: FactChecker,
+    groups_per_topic: int,
+    size: int,
+    within=None,
+) -> int:
+    """Writes the bridge facts a corpus's topics offer.
+
+    One model call per group. Every bridge in scope is deleted first, so a
+    second run replaces what the first wrote instead of adding to it.
+
+    Args:
+        catalog: Where the groups are read from and the facts written to.
+        extractor: The model-backed reader of a group.
+        checker: What judges what it proposed.
+        groups_per_topic: How many groups one topic is worth.
+        size: How many passages one group holds.
+        within: A condition narrowing which passages are read, or None.
+
+    Returns:
+        How many bridge facts were stored, refused ones included.
+    """
+    log.info("replacing %d bridge fact(s)", catalog.clear_bridges(within))
+    written = 0
+    for topic_id, passages in catalog.by_topic(within):
+        for offered in grouped(passages, groups_per_topic, size):
+            try:
+                proposed = extractor.extract(offered)
+            except ExtractionFailed as exc:
+                log.warning("topic %d: a group failed: %s", topic_id, exc)
+                continue
+            written += catalog.add_bridges(
+                [
+                    checker.check_bridge(offered, candidate, extractor.provenance)
+                    for candidate in proposed
+                ]
+            )
+    log.info("wrote %d bridge fact(s)", written)
     return written
 
 
@@ -58,11 +163,13 @@ def _is_heading(passage: PassageToExtract) -> bool:
 
 
 def skipped(passage: PassageToExtract) -> str | None:
-    """Says why a passage is not worth a model call, or None if it is.
+    """Says why a passage is not worth a model call.
 
-    A passage whose sentences carry no finite verb asserts nothing - a
-    heading, a caption, a navigation line, a bare list fragment. Asking a
-    model to find a claim in one costs a full call and returns the text back.
+    Args:
+        passage: The passage about to be read.
+
+    Returns:
+        The reason it was skipped, or None when it is worth reading.
     """
     # Ahead of the table exemption: nothing can be cited from a passage with
     # nothing numbered, whatever kind it is. A table read without them
@@ -79,12 +186,10 @@ def skipped(passage: PassageToExtract) -> str | None:
 
 
 class ExtractionService(StageService):
-    """Draws atomic facts out of passages, one passage at a time.
+    """Draws facts out of passages, one passage at a time.
 
-    The unit of work is a passage rather than a document, so the queue
-    divides evenly between workers and one unreadable passage fails only
-    itself. A passage that yields no facts is not a failure, and neither is a
-    fact that fails a check: that one is stored with the reason.
+    A passage that yields no facts is not a failure, and neither is a fact
+    that fails a check: that one is stored with the reason.
     """
 
     name: ClassVar[str] = "extraction"
@@ -96,15 +201,29 @@ class ExtractionService(StageService):
         repository: PassageQueue,
         extractors: ExtractorRegistry,
         checker: FactChecker,
+        digest: DigestExtractor | None = None,
     ) -> None:
-        """Initialises the service with its collaborators."""
+        """Initialises the service with its collaborators.
+
+        Args:
+            repository: The queue it claims passages from.
+            extractors: One reader per block type, with a default.
+            checker: What judges everything they propose.
+            digest: The reader of a passage's summary and outline, or None
+                when this deployment writes neither.
+        """
         super().__init__(repository)
         self._repository: PassageQueue = repository
         self._extractors = extractors
         self._checker = checker
+        self._digest = digest
 
     def process_next(self) -> int | None:
-        """Reads one queued passage and stores what it yielded."""
+        """Reads one queued passage and stores what it yielded.
+
+        Returns:
+            The passage's id, or None when the queue is empty.
+        """
         passage = self._repository.claim()
         if passage is None:
             return None
@@ -143,9 +262,21 @@ class ExtractionService(StageService):
             return []
 
         extractor = self._extractors.for_block_type(passage.block_type)
-        return [
+        facts = [
             self._checker.check(
                 passage, candidate, extractor.method, extractor.provenance
             )
             for candidate in extractor.extract(passage)
+        ]
+        return facts + self._digested(passage)
+
+    def _digested(self, passage: PassageToExtract) -> list[CheckedFact]:
+        """Reads what the passage is about, when there is enough to condense."""
+        if self._digest is None or passage.claims < _DIGESTIBLE:
+            return []
+        return [
+            self._checker.check(
+                passage, candidate, self._digest.method, self._digest.provenance
+            )
+            for candidate in self._digest.extract(passage)
         ]

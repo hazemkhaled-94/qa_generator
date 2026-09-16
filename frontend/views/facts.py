@@ -16,13 +16,47 @@ _FIELDS = {
     "Evidence": "evidence",
 }
 
-#: Every check a fact is put through, by the code it is rejected under: what
-#: the check tests, and what a count above zero means. Listed whether or not
-#: anything failed it, because a check missing from a list cannot be told
-#: apart from a check nobody wrote.
+#: The four readings a passage gets, by the value stored on the fact: what
+#: the reader is looking at, and what it is for.
+_KINDS = {
+    "atomic": (
+        "Atomic",
+        (
+            "One claim drawn from one sentence, citing it by number. The unit "
+            "a question is generated from and scored against."
+        ),
+    ),
+    "summary": (
+        "Summary",
+        (
+            "Two or three sentences standing in for a whole passage. Read "
+            "this instead of the passage to know what it covers."
+        ),
+    ),
+    "outline": (
+        "Outline",
+        (
+            "The points one passage makes, one bullet each. The same reading "
+            "as the summary, as a list rather than as prose."
+        ),
+    ),
+    "bridge": (
+        "Bridge",
+        (
+            "One claim no single passage states, drawn from a group of "
+            "passages the topic model put together."
+        ),
+    ),
+}
+
+#: Every check a fact is put through, by the code it is rejected under: which
+#: kinds face it, what it tests, and what a count above zero means. Listed
+#: whether or not anything failed it, because a check missing from a list
+#: cannot be told apart from a check nobody wrote.
 _CHECKS = {
     "evidence_absent": (
         "Citation resolves",
+        "every kind",
         ("Every sentence number a fact cites exists in the passage it was drawn from."),
         (
             "The model cited a sentence that is not there, so the claim rests on "
@@ -31,25 +65,43 @@ _CHECKS = {
     ),
     "copied": (
         "Not copied",
+        "atomic",
         ("The statement differs from the evidence it cites, rather than repeating it."),
         (
             "The model returned the sentence it was given instead of drawing a "
             "claim out of it. These add no information over the passage itself."
         ),
     ),
+    "asserts_nothing": (
+        "Asserts something",
+        "atomic, summary, bridge",
+        (
+            "The statement carries a finite verb, so it says something rather "
+            "than naming something."
+        ),
+        (
+            "The model returned a heading, a label or a noun phrase. It cannot be "
+            "true or false, so nothing can be asked about it. An outline is "
+            "exempt: a bullet is written as a fragment, and a parser reads a "
+            "fragment as having no verb at all."
+        ),
+    ),
     "not_atomic": (
         "Exactly one claim",
+        "atomic, bridge",
         (
             "The statement carries a single predicate, so it can be answered by "
             "a single question."
         ),
         (
-            "Statements carrying several claims, or none. A multi-claim statement "
-            "cannot be scored right or wrong as one answer."
+            "Statements carrying several claims. A multi-claim statement cannot "
+            "be scored right or wrong as one answer. A summary and an outline "
+            "are exempt: carrying several claims is what they are for."
         ),
     ),
     "unsupported_addition": (
         "Nothing invented",
+        "every kind",
         (
             "Every number, name and date in the statement appears in the "
             "sentence it cites."
@@ -62,6 +114,7 @@ _CHECKS = {
     ),
     "unresolved_reference": (
         "No dangling pronouns",
+        "atomic, bridge",
         (
             "The statement stands alone, without a pronoun whose referent is "
             "only in the surrounding text."
@@ -69,6 +122,37 @@ _CHECKS = {
         (
             "The statement cannot be read on its own, so a question built from "
             "it would be unanswerable out of context."
+        ),
+    ),
+    "not_condensed": (
+        "Shorter than its passage",
+        "summary, outline",
+        (
+            "The digest is well under the length of the passage it stands in "
+            "for, so reading it saves the reader something."
+        ),
+        (
+            "The model returned something about as long as the passage. A "
+            "summary the length of its source is of no use to anybody."
+        ),
+    ),
+    "not_listed": (
+        "Two points or more",
+        "outline",
+        "The outline holds at least two bullet points.",
+        (
+            "The model returned one line, which is a label rather than a list. "
+            "This is the only shape check an outline gets: its points are "
+            "fragments, so nothing can be read off their grammar."
+        ),
+    ),
+    "not_bridging": (
+        "Rests on two passages",
+        "bridge",
+        "The claim names at least two of the passages it was shown.",
+        (
+            "The model wrote a claim one passage states on its own. That is an "
+            "ordinary fact, and the atomic pass has it already."
         ),
     ),
 }
@@ -84,9 +168,11 @@ def view() -> None:
     page.header(
         "Facts",
         "What extraction drew out of each passage, with the sentences it "
-        "cites. Rejected facts are listed too: the share that failed a check "
-        "is how extraction is judged. Pick a fact from the table to see it in "
-        "full and to read its passage again.",
+        "cites. Four readings of the same corpus: atomic claims, a summary "
+        "and an outline of each passage, and bridges across passages about "
+        "one subject. Rejected facts are listed too: the share that failed a "
+        "check is how extraction is judged. Pick a fact from the table to see "
+        "it in full and to read its passage again.",
     )
 
     client = backend.catalog_api()
@@ -107,11 +193,13 @@ def view() -> None:
         fields=_FIELDS,
     )
 
+    kind = _kind_picker()
     where = {
         "document": bar.document,
         "q": bar.search,
         "field": bar.field,
         "method": bar.block_type,
+        "kind": kind,
     }
     total, rows = catalog.paged(
         "facts",
@@ -138,14 +226,16 @@ def view() -> None:
         "is the point: the share that failed is how extraction is judged.",
     )
     page.metrics(_quality_figures(quality))
+    page.metrics(_kind_figures(quality))
     page.metrics(_shape_figures(quality))
     page.findings(
         "Every check, and what it found",
         "A fact is stored whether or not it passed. Each row is one check, "
-        "the number of facts in this filtered set that failed it, and what a "
-        "count above zero means for the corpus. A row reading OK failed "
-        "nothing.",
-        _checks(quality),
+        "which kinds of fact face it, the number in this filtered set that "
+        "failed it, and what a count above zero means for the corpus. A check "
+        "no kind in view faces reads 0 because nothing was asked of it, not "
+        "because everything passed.",
+        _checks(quality, kind),
     )
 
     st.dataframe(
@@ -153,6 +243,7 @@ def view() -> None:
             {
                 "Passage": row["ordinal"],
                 "Page": row["page_from"] if row["page_from"] is not None else "—",
+                "Kind": _KINDS.get(row["kind"], (row["kind"],))[0],
                 "Method": row["extraction_method"],
                 "Passed": "yes" if row["validated"] else "no",
                 "Failed check": _CHECKS.get(row["rejection_code"], ("—",))[0]
@@ -181,6 +272,31 @@ def view() -> None:
     )
     if chosen is not None:
         _detail(client, chosen)
+
+
+def _kind_picker() -> str | None:
+    """Draws the kind filter and returns what the API takes, or None for all."""
+    headings = {label: code for code, (label, _) in _KINDS.items()}
+    chosen = st.radio(
+        "Reading",
+        ["All kinds", *headings],
+        horizontal=True,
+        key="facts-kind",
+        help="Which reading of the corpus to look at. Each narrows every "
+        "figure and row below to one kind:\n\n"
+        + "\n\n".join(f"- **{label}** — {what}" for label, what in _KINDS.values()),
+    )
+    return headings.get(chosen)
+
+
+def _kind_figures(quality: dict) -> dict[str, tuple]:
+    """Counts each reading of the corpus in the filtered set."""
+    held = quality.get("kinds", {})
+    total = quality["total"]
+    return {
+        label: (*page.portion(held.get(code, 0), total), what)
+        for code, (label, what) in _KINDS.items()
+    }
 
 
 def _corpus_figures(
@@ -237,10 +353,10 @@ def _quality_figures(quality: dict) -> dict[str, tuple]:
         "Passed every check": (
             *page.portion(quality["validated"], total),
             (
-                "Facts that cited a sentence that exists, carried exactly one "
-                "claim, added nothing their source does not say, did not copy "
-                "their evidence and left no dangling pronoun. Only these are "
-                "usable for question generation."
+                "Facts that cleared every check their kind faces: the citation "
+                "resolved, nothing was asserted the source does not say, and "
+                "whatever else that kind is held to. Only these are usable for "
+                "question generation."
             ),
         ),
         "Rejected": (
@@ -254,8 +370,9 @@ def _quality_figures(quality: dict) -> dict[str, tuple]:
         "Facts per passage": (
             f"{quality['facts_per_passage']:.1f}",
             (
-                "Facts drawn from each passage that yielded any. A passage "
-                "usually carries several claims, so a figure near 1 means most "
+                "Facts drawn from each passage that yielded any, counted over "
+                "the kinds in view. With Atomic picked above, a passage "
+                "usually carries several claims and a figure near 1 means most "
                 "of each passage went unread."
             ),
         ),
@@ -317,43 +434,28 @@ def _shape_figures(quality: dict) -> dict[str, tuple]:
     }
 
 
-def _checks(quality: dict) -> list[dict[str, str]]:
+def _checks(quality: dict, kind: str | None) -> list[dict[str, str]]:
     """Builds one row per check, whether or not anything failed it."""
     total = quality["total"]
     rejected = quality["rejected"]
     rows = [
         {
             "Check": name,
+            "Applies to": applies,
             "Failed": page.share(rejected.get(code, 0), total),
             "Should be": "0",
             "State": "OK" if not rejected.get(code) else "Attention",
             "What it means": tests if not rejected.get(code) else consequence,
         }
-        for code, (name, tests, consequence) in _CHECKS.items()
+        for code, (name, applies, tests, consequence) in _CHECKS.items()
     ]
-
-    # Not a rejection code: no single fact fails decomposition, the set does.
-    statement = quality["mean_statement_predicates"]
-    ratio = quality["mean_evidence_predicates"] / statement if statement else 0
-    rows.append(
-        {
-            "Check": "Decomposition",
-            "Failed": _decomposition(quality),
-            "Should be": f"above {_DECOMPOSITION_FLOOR}×",
-            "State": "OK" if ratio >= _DECOMPOSITION_FLOOR else "Attention",
-            "What it means": "Each statement takes one claim out of a "
-            "sentence carrying several."
-            if ratio >= _DECOMPOSITION_FLOOR
-            else "Statements keep almost every claim their sentence carried, "
-            "so the model restated rather than decomposed. Check "
-            "EXTRACTION_MODEL and the prompt version.",
-        }
-    )
+    rows.append(_decomposition_row(quality, kind))
 
     unknown = set(rejected) - set(_CHECKS)
     rows += [
         {
             "Check": code,
+            "Applies to": "unknown",
             "Failed": page.share(rejected[code], total),
             "Should be": "0",
             "State": "Attention",
@@ -364,6 +466,41 @@ def _checks(quality: dict) -> list[dict[str, str]]:
         for code in sorted(unknown)
     ]
     return rows
+
+
+def _decomposition_row(quality: dict, kind: str | None) -> dict[str, str]:
+    """Builds the decomposition row, which no single fact can fail.
+
+    Only atomic facts are decomposed: a summary keeps every claim its passage
+    carried on purpose, so measuring it over a mixed set says nothing.
+    """
+    if kind != "atomic":
+        return {
+            "Check": "Decomposition",
+            "Applies to": "atomic",
+            "Failed": "—",
+            "Should be": f"above {_DECOMPOSITION_FLOOR}×",
+            "State": "—",
+            "What it means": "Only atomic facts are decomposed; a summary "
+            "keeps the claims its passage carried on purpose. Pick Atomic "
+            "above to measure it.",
+        }
+
+    statement = quality["mean_statement_predicates"]
+    ratio = quality["mean_evidence_predicates"] / statement if statement else 0
+    return {
+        "Check": "Decomposition",
+        "Applies to": "atomic",
+        "Failed": _decomposition(quality),
+        "Should be": f"above {_DECOMPOSITION_FLOOR}×",
+        "State": "OK" if ratio >= _DECOMPOSITION_FLOOR else "Attention",
+        "What it means": "Each statement takes one claim out of a sentence "
+        "carrying several."
+        if ratio >= _DECOMPOSITION_FLOOR
+        else "Statements keep almost every claim their sentence carried, so "
+        "the model restated rather than decomposed. Check EXTRACTION_MODEL "
+        "and the prompt version.",
+    }
 
 
 def _decomposition(quality: dict) -> str:
@@ -378,36 +515,40 @@ def _detail(client, fact: dict) -> None:
     """Shows one fact in full and offers to read its passage again."""
     scope = ("passage", str(fact["passage_id"]))
     check = _CHECKS.get(fact["rejection_code"])
+    label, what = _KINDS.get(fact["kind"], (fact["kind"], "An unrecognised kind."))
 
     page.section(
-        f"Fact from passage {fact['ordinal']}",
+        f"{label} fact from passage {fact['ordinal']}",
         "This fact as it is stored, and the passage it came from.",
     )
     page.metrics(
         {
+            "Reading": (label, what),
             "Passed every check": (
                 "yes" if fact["validated"] else "no",
                 (
-                    "Whether this fact cleared all five checks. Only facts "
-                    "reading yes are usable for question generation."
+                    "Whether this fact cleared every check its kind faces. "
+                    "Only facts reading yes are usable for question "
+                    "generation."
                 ),
             ),
             "Failed check": (
                 check[0] if check else "—",
-                check[1] if check else "This fact failed no check.",
+                check[2] if check else "This fact failed no check.",
             ),
             "Claims in statement": (
                 f"{fact['statement_predicates']:,}",
                 (
-                    "Predicates spaCy found in the statement. A fact should "
-                    "carry exactly one."
+                    "Predicates spaCy found in the statement. An atomic fact "
+                    "and a bridge carry exactly one; a summary and an outline "
+                    "carry as many as they need."
                 ),
             ),
             "Claims in evidence": (
                 f"{fact['evidence_predicates']:,}",
                 (
-                    "Predicates in the sentence this fact cites. More than the "
-                    "statement is what decomposition looks like."
+                    "Predicates in the passage text this fact cites. More than "
+                    "the statement is what decomposition looks like."
                 ),
             ),
             "Method": (
@@ -422,16 +563,20 @@ def _detail(client, fact: dict) -> None:
 
     st.markdown(
         "**Statement**",
-        help="The claim extraction wrote. This is what a question would be "
-        "generated from.",
+        help="What extraction wrote. This is what a question would be generated from.",
     )
     st.text(fact["statement"])
     st.markdown(
         "**Evidence cited**",
         help="The passage text this claim says it rests on. A claim asserting "
-        "anything not present here failed the `Nothing invented` check.",
+        "anything not present here failed the `Nothing invented` check. A "
+        "summary and an outline cite their whole passage; a bridge cites the "
+        "whole of the first of the passages below.",
     )
     st.text(fact["evidence_text"])
+
+    if fact["kind"] == "bridge":
+        _bridged(client, fact)
 
     if fact["validation_error"]:
         st.error(f"Rejection reason: {fact['validation_error']}")
@@ -461,9 +606,21 @@ def _detail(client, fact: dict) -> None:
         "Queues extraction over the one passage this fact came from, "
         "replacing every fact drawn from it - this one included. A single "
         "fact cannot be re-read on its own: extraction reads a passage and "
-        "writes all of its facts together. " + stage.COLOUR_KEY,
+        "writes all of its facts together. Bridge facts are not replaced by "
+        "this; they are written by their own pass over the topics. " + stage.COLOUR_KEY,
     )
     stage.controls(client, _EXTRACTION, scope)
+
+
+def _bridged(client, fact: dict) -> None:
+    """Names the passages a bridge fact rests on, anchor first."""
+    held = client.fact_passages(fact["id"])["passages"]
+    st.caption(
+        "Rests on passage(s): " + ", ".join(str(one) for one in held),
+        help="Every passage this claim was drawn from, in the order the model "
+        "was shown them. The first is the anchor, and is the one the evidence "
+        "above and the controls below apply to.",
+    )
 
 
 page.render(view)

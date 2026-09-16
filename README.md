@@ -133,6 +133,7 @@ make extract-start   # the same five, over passages
 make extract         #   ... and `extract-status`, `extract-stop`,
                      #       `extract-retry`, `extract-rerun`
 make extract-revalidate  # judge stored facts again; the model is not called
+make extract-bridge  # read each topic's passage groups for shared claims
 make chunk-revocabulary  # read stored passages' language and vocabulary again
 make topics-discover # ask for a fit over the whole corpus, and run it
 make topics          # run any queued fit here, in the foreground

@@ -22,9 +22,10 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
-from database.qa_generator.outcomes import Rejection, one_of
+from database.qa_generator.outcomes import FactKind, Rejection, one_of
 
 if TYPE_CHECKING:
+    from database.qa_generator.fact_passages import FactPassage
     from database.qa_generator.passages import Passage
     from database.qa_generator.question_facts import QuestionFact
 
@@ -48,10 +49,13 @@ class Fact(Base):
         ),
         # Groups the quality report; without it every scan reads the table.
         Index("ix_facts_rejection_code", "rejection_code"),
+        # Filters the listing and groups the quality report by kind.
+        Index("ix_facts_kind", "kind"),
         CheckConstraint(
             "extraction_method IN ('llm', 'deterministic')",
             name="facts_extraction_method_valid",
         ),
+        CheckConstraint(one_of("kind", FactKind), name="facts_kind_valid"),
         CheckConstraint(
             "evidence_end >= evidence_start", name="facts_evidence_span_ordered"
         ),
@@ -75,10 +79,22 @@ class Fact(Base):
         ForeignKey("passages.id", ondelete="CASCADE"),
         index=True,
         comment="The passage this fact was drawn from, and the route to both its "
-        "document and its topics.",
+        "document and its topics. On a bridge fact this is the anchor, the first "
+        "of the passages listed in fact_passages.",
+    )
+    kind: Mapped[str] = mapped_column(
+        Text,
+        server_default=FactKind.ATOMIC,
+        comment="atomic | summary | outline | bridge. Decides which checks the "
+        "statement is held to and what its evidence is: an atomic fact cites "
+        "sentences, a summary and an outline stand in for the whole passage, and a "
+        "bridge rests on the passages in fact_passages.",
     )
     statement: Mapped[str] = mapped_column(
-        Text, comment="The fact as a single self-contained sentence."
+        Text,
+        comment="The fact as written. One self-contained sentence for an atomic "
+        "fact or a bridge, a short paragraph for a summary, and newline-separated "
+        "`- ` bullets for an outline.",
     )
     evidence_text: Mapped[str] = mapped_column(
         Text,
@@ -89,7 +105,8 @@ class Fact(Base):
         ARRAY(Integer),
         comment="Which of passages.sentences the claim was drawn from. What the "
         "extractor chooses; the span below is resolved from it, so a citation is "
-        "exact by construction rather than by searching for a quote.",
+        "exact by construction rather than by searching for a quote. Every "
+        "sentence of the passage on a summary, an outline or a bridge.",
     )
     evidence_start: Mapped[int] = mapped_column(
         Integer,
@@ -163,6 +180,9 @@ class Fact(Base):
     )
 
     passage: Mapped[Passage] = relationship(back_populates="facts")
+    passage_links: Mapped[list[FactPassage]] = relationship(
+        back_populates="fact", cascade="all, delete-orphan", passive_deletes=True
+    )
     question_links: Mapped[list[QuestionFact]] = relationship(
         back_populates="fact", cascade="all, delete-orphan", passive_deletes=True
     )

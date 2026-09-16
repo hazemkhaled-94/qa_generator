@@ -25,7 +25,14 @@ class TableExtractor(Extractor):
     method: ClassVar[str] = "deterministic"
 
     def extract(self, passage: PassageToExtract) -> list[CandidateFact]:
-        """Reads every data cell of every table in the passage."""
+        """Reads every data cell of every table in the passage.
+
+        Args:
+            passage: The table passage to read.
+
+        Returns:
+            One candidate per labelled value cell the passage renders.
+        """
         facts: list[CandidateFact] = []
         for grid in passage.table_cells:
             # The caption in preference to the heading trail: it is the one

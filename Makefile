@@ -45,7 +45,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
         chunk-revocabulary \
         extract extract-status extract-start extract-stop extract-retry \
-        extract-rerun extract-revalidate \
+        extract-rerun extract-revalidate extract-bridge \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         questions questions-status questions-start questions-stop \
@@ -297,6 +297,14 @@ extract-rerun:
 # applies a change to the checks without re-extracting the corpus.
 extract-revalidate:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --revalidate $(ONLY)
+
+# Read every topic's passage groups for the claims that need more than one of
+# them. A pass of its own rather than part of the queue: the unit is a group
+# of passages the topic model put together, so topics must be fitted first.
+# Re-running replaces the bridges it wrote last time instead of adding to
+# them.
+extract-bridge:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --bridge $(ONLY)
 
 # ── Topic modelling ────────────────────────────────────────────────────────
 #

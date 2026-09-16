@@ -169,6 +169,7 @@
       "parameters": [
         "document",
         "field",
+        "kind",
         "limit",
         "method",
         "offset",
@@ -185,8 +186,20 @@
       "parameters": [
         "document",
         "field",
+        "kind",
         "method",
         "q"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/facts/{fact_id}/passages": {
+    "get": {
+      "parameters": [
+        "fact_id"
       ],
       "responses": [
         "200",

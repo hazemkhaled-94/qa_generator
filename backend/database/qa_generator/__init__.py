@@ -7,12 +7,14 @@ what Alembic compares the live schema against.
 from database.qa_generator.base import Base
 from database.qa_generator.documents import Document
 from database.qa_generator.engine import engine, sessions
+from database.qa_generator.fact_passages import FactPassage
 from database.qa_generator.facts import Fact
 from database.qa_generator.ingest_events import IngestEvent
 from database.qa_generator.outcomes import (
     AnswerForm,
     Difficulty,
     DocumentScope,
+    FactKind,
     Outcome,
     PassageScope,
     QuestionRejection,
@@ -36,6 +38,8 @@ __all__ = [
     "Document",
     "DocumentScope",
     "Fact",
+    "FactKind",
+    "FactPassage",
     "IngestEvent",
     "Outcome",
     "Passage",

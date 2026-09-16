@@ -1,4 +1,4 @@
-"""The model-backed extractor for prose passages."""
+"""The model-backed extractor for the claims a passage carries."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from extraction.models import CandidateFact, PassageToExtract, Provenance
 from llm.client import Client, ModelUnavailable
 
 #: Recorded on every fact drawn with the prompt below. Bumped whenever that
-#: prompt changes what counts as a fact: two prompts are two datasets.
+#: prompt changes what counts as a fact.
 PROMPT_VERSION = "5"
 
 _SYSTEM = """You break a numbered excerpt down into the separate claims it
@@ -96,7 +96,7 @@ class _Facts(BaseModel):
 
 
 class LlmExtractor(Extractor):
-    """Reads facts out of prose with a local model.
+    """Reads a passage's claims one at a time with a local model.
 
     The fallback for every passage the deterministic readers do not claim.
     The model sees one passage's numbered sentences and its heading trail,
@@ -121,7 +121,18 @@ class LlmExtractor(Extractor):
         )
 
     def extract(self, passage: PassageToExtract) -> list[CandidateFact]:
-        """Asks the model for the facts in one passage."""
+        """Asks the model for the claims in one passage.
+
+        Args:
+            passage: The passage to read.
+
+        Returns:
+            One atomic candidate per claim, each citing the sentences it was
+            drawn from. Empty when the passage carries none.
+
+        Raises:
+            ExtractionFailed: If the model could not be reached.
+        """
         try:
             answer = self._client.answer(
                 system=_SYSTEM, user=self._prompt(passage), shape=_Facts

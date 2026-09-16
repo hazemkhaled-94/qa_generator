@@ -123,6 +123,20 @@ class QuestionRejection(StrEnum):
     SOURCE_CHANGED = "source_changed"
 
 
+class FactKind(StrEnum):
+    """What a fact is, and so which checks it is held to.
+
+    ATOMIC carries one claim from one sentence. SUMMARY and OUTLINE stand in
+    for a whole passage, as prose and as bullet points. BRIDGE carries one
+    claim that no single passage states.
+    """
+
+    ATOMIC = "atomic"
+    SUMMARY = "summary"
+    OUTLINE = "outline"
+    BRIDGE = "bridge"
+
+
 class Rejection(StrEnum):
     """Why a candidate fact was not accepted.
 
@@ -132,9 +146,13 @@ class Rejection(StrEnum):
 
     EVIDENCE_ABSENT = "evidence_absent"
     COPIED = "copied"
+    ASSERTS_NOTHING = "asserts_nothing"
     NOT_ATOMIC = "not_atomic"
     UNSUPPORTED_ADDITION = "unsupported_addition"
     UNRESOLVED_REFERENCE = "unresolved_reference"
+    NOT_CONDENSED = "not_condensed"
+    NOT_LISTED = "not_listed"
+    NOT_BRIDGING = "not_bridging"
 
 
 def one_of(column: str, values: type[StrEnum]) -> str:
