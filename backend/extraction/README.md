@@ -391,7 +391,7 @@ Twenty-two files, 349 tests, over seven layers. Coverage of
 | Integration | `tests/integration/api/test_facts.py` | `integration` | The HTTP surface against the real wiring. |
 | Property | `tests/property/test_fact_invariants.py` | `nlp` | Over inputs nobody wrote down: a verdict and its code always agree, a span always resolves in its passage, a group never repeats a passage, a bridge never records one it was not offered. |
 | Regression | `tests/regression/test_fact_verdicts.py` | `nlp` | A golden table of every candidate anybody has actually seen, in both languages, with the verdict it is meant to get. A change to one check that quietly moves another shows up here as a diff. Asserts that every kind and every rejection code appears in the table. |
-| Static | `tests/static/test_facts_frozen.py` | — | The frozen surface: settings, routes, dataclass fields, modules, kinds, rejection codes, the check matrix, the three prompt versions, and that this README documents all of it. |
+| Static | `tests/static/test_facts_pinned.py` | — | The pinned surface: settings, routes, dataclass fields, modules, kinds, rejection codes, the check matrix, the three prompt versions, and that this README documents all of it. |
 | Frontend | `tests/frontend/test_facts_page.py` | `frontend` | The Facts page against a scripted backend: every reading offered and explained, the kind filter reaching the request, every check listed, decomposition withheld on a mixed set, a bridge naming its passages. |
 | Eval | `tests/eval/test_extraction_quality.py` | `eval` | A real served model against golden passages. Prints; never gates. |
 

@@ -1,15 +1,13 @@
-"""The facts service is frozen: its surface is pinned here.
+"""The facts service's surface, pinned.
 
-Frozen means the service is finished. Its behaviour is settled, its
-documentation is written, and every layer of its test suite passes. Nothing
-here stops the code being changed - it makes a change to the surface fail a
-test, so that it is a decision somebody took rather than a drift nobody
-noticed.
+Nothing here stops the code being changed - it makes a change to the surface
+fail a test, so that it is a decision somebody took rather than a drift
+nobody noticed.
 
 Six things are pinned: the settings it reads, the routes it serves, the
 fields it answers with, the modules it is made of, the vocabularies it
 writes to the database, and which checks each kind of fact faces. A change to
-any of them is a change every reader of this service sees, so unfreezing
+any of them is a change every reader of this service sees, so making one
 means editing this file in the same commit and saying why in the message.
 """
 
@@ -194,7 +192,7 @@ def test_the_service_reads_exactly_the_settings_named_here() -> None:
 
 
 def test_every_setting_is_declared_where_a_deployment_reads_it() -> None:
-    """Frozen or not, a setting with nowhere to be set is unreachable."""
+    """A setting with nowhere to be set is unreachable."""
     declared = (ROOT / "configs/env/backend.env").read_text()
 
     missing = [name for name in SETTINGS if f"{name}=" not in declared]
@@ -303,7 +301,7 @@ def test_each_prompt_version_is_the_one_recorded_on_its_facts(reader, version) -
 
 
 def test_the_service_documents_itself() -> None:
-    """Frozen means the README is the description, so it has to be there."""
+    """The README is the service's description, so it has to be there."""
     readme = SERVICE / "README.md"
 
     assert readme.exists(), f"{readme} is missing"

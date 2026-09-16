@@ -1,7 +1,7 @@
 # Topic modelling
 
-> **Frozen.** This service is finished. Its behaviour is settled, this README
-> is its description, and `tests/static/test_topics_frozen.py` pins its
+> This README is the service's description, and
+> `tests/static/test_topics_pinned.py` pins its
 > surface — the settings it reads, the routes it serves, the fields it answers
 > with, and the modules it is made of. Changing any of those fails that test
 > on purpose. Unfreezing means editing that file in the same commit and saying
@@ -585,7 +585,7 @@ screen, top to bottom:
 | Integration | `tests/integration/database/test_topic_store.py` | 50 | Both repositories against a migrated Postgres: which rows a fit replaces, which it leaves, and what every reporting query answers. |
 | Integration | `tests/integration/api/test_topics.py` | 34 | All nine routes, with the object store behind them. |
 | Frontend | `tests/frontend/test_topics_page.py` | 36 | The page against a scripted backend, including every refusal and every nullable column. |
-| Static | `tests/static/test_topics_frozen.py` | 9 | The frozen surface: settings, routes, answer shapes, modules, and that this README exists. |
+| Static | `tests/static/test_topics_pinned.py` | 9 | The pinned surface: settings, routes, answer shapes, modules, and that this README exists. |
 
 Coverage of `backend/topic_modelling` is **99% of statements** — 538 of 539.
 The one uncovered line is `run.py`'s `if __name__ == "__main__"`.

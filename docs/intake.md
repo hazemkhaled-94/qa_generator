@@ -1,8 +1,9 @@
 # Intake: ingestion, parsing and chunking
 
-**Status: frozen.** The three stages documented here are complete and are
-not being developed further. Changes should be confined to defect fixes,
-with a test added beside the fix. Everything downstream — extraction, topic
+This document is the description of the three stages, and
+`tests/static/test_intake_pinned.py` pins their surface: a change to the
+settings, the routes, the answer shapes or the modules fails a test until
+this document is edited with it. Everything downstream — extraction, topic
 modelling, question generation — reads what this produces and is documented
 in the root `README.md`.
 
