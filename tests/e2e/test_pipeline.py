@@ -116,6 +116,7 @@ class StubModel:
 QUESTIONS = QuestionSettings(
     per_topic=4,
     sample_size=4,
+    fact_kinds=("atomic",),
     type_mix={"factoid": 3, "reason": 1},
     difficulty_mix={"easy": 1, "medium": 1},
     followup_types=("condition",),
@@ -170,7 +171,6 @@ class StubVerifier:
             in_passage=found,
             answer="4 kg" if found else "",
             subject="the device",
-            matches_intent=True,
         )
 
 

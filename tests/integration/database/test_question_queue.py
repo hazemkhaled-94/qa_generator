@@ -560,6 +560,7 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
     settings = Settings(
         per_topic=4,
         sample_size=4,
+        fact_kinds=("atomic",),
         type_mix={"factoid": 1},
         difficulty_mix={"easy": 1},
         followup_types=("condition",),
@@ -679,3 +680,30 @@ def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
     assert quality.answer_form == {"value": 2}
     assert quality.planned_difficulty == {"easy": 1, "hard": 1}
     assert quality.planned_met == 1
+
+
+# ── Which kinds of fact a question may be written from ────────────────────
+
+
+def test_only_the_kinds_this_stage_can_use_are_offered(corpus, engine) -> None:
+    """Extraction reads a passage four ways and one of them is a question seed.
+
+    An outline is newline-separated `- ` bullets. Interpolated into the
+    writer's numbered `[1] {fact}` list it spans several lines and breaks the
+    numbering the writer is told to cite by; a summary is a paraphrase of the
+    passage rather than a checked claim; a bridge rests on passages the
+    verifier is never shown. Without this filter the first re-extraction that
+    writes any of them silently changes what a question rests on.
+    """
+    written = corpus(topics=1, facts_per_topic=2)
+    topic_id = written["topics"][0]
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE facts SET kind = 'outline' WHERE id = :id"),
+            {"id": written["facts"][topic_id][0]},
+        )
+
+    offered = QuestionQueue().facts(topic_id)
+
+    assert len(offered) == 1
+    assert written["facts"][topic_id][0] not in {one.id for one in offered}

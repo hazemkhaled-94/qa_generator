@@ -51,7 +51,9 @@ def build_service(
 
     catalog = QuestionCatalog()
     return QuestionGenerationService(
-        repository=QuestionQueue(lease=lease(settings, model)),
+        repository=QuestionQueue(
+            lease=lease(settings, model), kinds=settings.fact_kinds
+        ),
         writer=QuestionWriter(Client(model)),
         checker=QuestionChecker(
             embedder=Embedder(settings.embedding_model, settings.max_tokens),

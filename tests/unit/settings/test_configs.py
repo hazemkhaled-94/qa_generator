@@ -157,3 +157,27 @@ def test_a_setting_of_the_wrong_shape_names_itself(
 
     with pytest.raises(ValueError, match=name):
         settings.load()
+
+
+def test_a_fact_kind_this_stage_cannot_use_is_refused_at_start_up() -> None:
+    """Rather than silently mangled on the first re-extraction.
+
+    An outline interpolated into the writer's numbered fact list spans
+    several lines and breaks the numbering it is told to cite by; a bridge
+    rests on passages the verifier is never shown. Both are things
+    EXTRACTION_KINDS produces, and neither is a question seed.
+    """
+    import os
+
+    from question_generation.config import Settings
+
+    previous = os.environ.get("QUESTIONS_FACT_KINDS")
+    os.environ["QUESTIONS_FACT_KINDS"] = "atomic,outline"
+    try:
+        with pytest.raises(ValueError, match="QUESTIONS_FACT_KINDS"):
+            Settings.load()
+    finally:
+        if previous is None:
+            os.environ.pop("QUESTIONS_FACT_KINDS", None)
+        else:
+            os.environ["QUESTIONS_FACT_KINDS"] = previous

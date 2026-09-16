@@ -12,6 +12,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from database.qa_generator import (
     Document,
     Fact,
+    FactKind,
     Passage,
     PassageTopic,
     Question,
@@ -207,6 +208,24 @@ def _present(values: Sequence[Any] | None) -> list[str]:
     return sorted({str(value) for value in values or () if value is not None})
 
 
+#: The kinds of fact a question may be written from, by the name the setting
+#: takes. Only what this stage can honestly use:
+#:
+#:   atomic   one claim in one sentence, which is the shape every prompt here
+#:            assumes and the shape the citation gates read
+#:   summary  a paragraph standing in for a whole passage. A question "answered
+#:            by" one rests on a paraphrase rather than on a checked claim
+#:   outline  newline-separated `- ` bullets. Interpolated into a numbered
+#:            prompt it breaks the numbering the writer cites facts by
+#:   bridge   one claim resting on the passages in fact_passages. The right
+#:            seed for a cross-passage question and the one that needs work:
+#:            SourceFact carries a single passage, so the verifier would be
+#:            shown the anchor alone and could never recover the answer
+#:
+#: QUESTIONS_FACT_KINDS is what decides; this is what it is checked against.
+ASKABLE = (FactKind.ATOMIC,)
+
+
 #: One validated fact with everything selection and the writer read off it.
 #: Written once because two queries select it: a topic's own facts and the
 #: facts of the passages that bridge it to another topic.
@@ -296,6 +315,15 @@ class QuestionQueue(RowQueue):
     done = Status.GENERATED
     next_pending = _NEXT_PENDING
 
+    def __init__(self, lease=None, kinds: tuple[str, ...] = ASKABLE) -> None:
+        """Binds to the session factory, with the kinds of fact it may offer.
+
+        `kinds` is QUESTIONS_FACT_KINDS. `atomic` alone by default, which is
+        the only shape every prompt and gate here was written for.
+        """
+        super().__init__(lease)
+        self._kinds = kinds
+
     def claim(self) -> TopicToCover | None:
         """Takes the next topic off the queue."""
         claimed = self._claim(
@@ -326,6 +354,10 @@ class QuestionQueue(RowQueue):
                 _SOURCE.where(
                     DOMINANT.c.topic_id == topic_id,
                     Fact.validated,
+                    # A fact of a kind this stage can use. Without it, the
+                    # first re-extraction that writes outlines hands the
+                    # writer a bulleted blob as though it were one claim.
+                    Fact.kind.in_(self._kinds),
                     # A question is written in a language, and the column
                     # holding it is NOT NULL: a passage too short for the
                     # detector has no language to write one in.
@@ -356,6 +388,7 @@ class QuestionQueue(RowQueue):
                     PassageTopic.topic_id == topic_id,
                     DOMINANT.c.topic_id != topic_id,
                     Fact.validated,
+                    Fact.kind.in_(self._kinds),
                     Passage.language.is_not(None),
                     ~_ALREADY_ASKED,
                 )

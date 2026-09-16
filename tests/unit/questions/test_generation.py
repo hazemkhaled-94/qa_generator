@@ -281,3 +281,16 @@ def test_a_follow_up_takes_its_own_kind() -> None:
     assert written.spec.name == "reason"
     assert "why" in model.system
     assert "CONVERSATION so far" in model.user
+
+
+def test_the_writer_is_told_not_to_pad_a_question_with_hedges() -> None:
+    """Nobody types `specific` into a search box.
+
+    Measured over 24 real questions: six used `spezifisch` and two `konkret`.
+    A third of the set read like a form rather than like somebody asking.
+    """
+    model = StubModel(question="Q?", answer="A")
+
+    QuestionWriter(model).write(group(), plan())
+
+    assert "PADDING" in model.system

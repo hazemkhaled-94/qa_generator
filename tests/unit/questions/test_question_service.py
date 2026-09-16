@@ -23,6 +23,7 @@ from question_generation.service import QuestionGenerationService
 SETTINGS = Settings(
     per_topic=4,
     sample_size=4,
+    fact_kinds=("atomic",),
     type_mix={QuestionType.FACTOID: 3, QuestionType.REASON: 1},
     difficulty_mix={Difficulty.EASY: 1, Difficulty.MEDIUM: 1},
     followup_types=(QuestionType.CONDITION, QuestionType.REASON),

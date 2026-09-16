@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from database.qa_generator import AnswerForm, Difficulty
+from question_generation.repository import ASKABLE
 from question_generation.types import SPECS
 from settings import csv, decimal, integer, mapping, optional, required
 
@@ -80,6 +81,12 @@ class Settings:
 
     per_topic: int
     sample_size: int
+    #: Which kinds of fact a question may be written from. Extraction reads a
+    #: passage four ways and only one of those shapes is a question seed: a
+    #: summary is a paraphrase rather than a checked claim, an outline is a
+    #: bulleted blob that breaks the numbering the writer cites by, and a
+    #: bridge rests on passages the verifier would never be shown.
+    fact_kinds: tuple[str, ...]
     #: Which question types are written, and in what proportion. A type with a
     #: weight of 0, or absent, is never written.
     type_mix: dict[str, int]
@@ -141,9 +148,19 @@ class Settings:
                 f"QUESTIONS_FOLLOWUP_TYPES names {', '.join(unknown)}, which is "
                 f"not among {', '.join(sorted(SPECS))}"
             )
+        kinds = csv("QUESTIONS_FACT_KINDS")
+        unusable = [kind for kind in kinds if kind not in ASKABLE]
+        if unusable:
+            raise ValueError(
+                f"QUESTIONS_FACT_KINDS names {', '.join(unusable)}, which this "
+                f"stage cannot write a question from. It takes "
+                f"{', '.join(ASKABLE)}; see the note beside ASKABLE for what "
+                f"each other kind would need first."
+            )
         return cls(
             per_topic=integer("QUESTIONS_PER_TOPIC"),
             sample_size=integer("QUESTIONS_FACT_SAMPLE"),
+            fact_kinds=kinds,
             type_mix=_weights("QUESTIONS_TYPE_MIX", SPECS),
             difficulty_mix=_weights("QUESTIONS_DIFFICULTY_MIX", tuple(Difficulty)),
             followup_types=followups,

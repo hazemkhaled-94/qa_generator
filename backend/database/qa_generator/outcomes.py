@@ -111,10 +111,10 @@ class QuestionRejection(StrEnum):
     """
 
     MALFORMED = "malformed"
+    COMPOUND = "compound"
     ANSWER_TOO_SHORT = "answer_too_short"
     ANSWER_TOO_LONG = "answer_too_long"
     WRONG_FORM = "wrong_form"
-    WRONG_TYPE = "wrong_type"
     LEAKS_SOURCE = "leaks_source"
     UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"

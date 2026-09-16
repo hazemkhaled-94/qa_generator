@@ -25,7 +25,7 @@ from database.qa_generator import AnswerForm, QuestionType
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "5"
+PROMPT_VERSION = "6"
 
 _RULES = """You write ONE test question for measuring a document-search chatbot.
 
@@ -54,6 +54,11 @@ Rules, all of them mandatory:
 - DO NOT HAND THE FACT BACK. Taking the sentence and replacing one part with a
   question word is the failure this task is about. Ask what a person would ask.
 
+- NO PADDING WORDS. Nobody typing a question into a search box writes
+  "specific", "concrete", "particular", "spezifisch" or "konkret" - they are
+  filler that makes a question read like a form. Ask "Which criteria ...",
+  never "Which specific criteria ...". Say the thing plainly.
+
 - NEVER PUT THE ANSWER IN THE QUESTION, or the word the answer is a kind of.
 
 - ONE question, ending in a question mark. One thing asked.
@@ -68,11 +73,26 @@ Rules, all of them mandatory:
 #: passage. Without it the writer answers the first passage and ignores the
 #: rest, and the row carries a spread the question never used.
 _SPAN = """
-- THIS QUESTION MUST NEED MORE THAN ONE OF THE FACTS, and they must come from
-  different passages. That is what it is for: a chatbot has to find and
-  combine two places in the material rather than one. If the facts you were
-  given cannot be combined into one honest question, write the closest one you
-  can and name every fact it needs.
+- THIS QUESTION SHOULD NEED FACTS FROM MORE THAN ONE PASSAGE, so that a
+  chatbot has to find and combine two places in the material rather than one.
+
+- BUT IT IS STILL ONE QUESTION ABOUT ONE THING, and that comes first. One
+  question word, one thing asked. Do NOT weld two questions together with
+  "and":
+
+    WRONG  "Which rules govern lending AND how high is the fee for funds?"
+    WRONG  "Why did the position ease in 2025 AND how is lending assessed?"
+           (two questions in a trenchcoat; a chatbot answering one of them is
+            neither right nor wrong, and nobody types this)
+
+    RIGHT  "How many inspections were carried out across the northern and
+            southern sites in total?"
+    RIGHT  "How do the reply times for standard and urgent requests differ?"
+           (one thing asked, which happens to need both facts)
+
+- IF THE FACTS HAVE NO SINGLE HONEST QUESTION BETWEEN THEM, ask about one of
+  them alone and name only the facts you used. A narrower question that
+  somebody would actually type beats a wide one nobody would.
 """
 
 _FORMS: dict[str, str] = {

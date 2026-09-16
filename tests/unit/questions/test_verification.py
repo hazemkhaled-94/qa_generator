@@ -13,6 +13,7 @@ from factories import candidate, group, source
 from database.qa_generator import AnswerForm, QuestionRejection, QuestionStatus
 from question_generation.models import Neighbour
 from question_generation.verification import (
+    OVERLAP,
     QuestionChecker,
     Reading,
     agrees,
@@ -288,14 +289,12 @@ class Recording:
         recovers: str | None = "4 kg",
         stands_alone: bool = True,
         names_its_source: bool = False,
-        matches_intent: bool = True,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
         self.names_its_source = names_its_source
-        self.matches_intent = matches_intent
         self.threaded: tuple = ()
         self.asked: str = ""
         self.embedded = 0
@@ -306,16 +305,14 @@ class Recording:
         self.embedded += 1
         return self.vector
 
-    def read(self, question: str, passages, thread=(), asks="") -> Reading:
+    def read(self, question: str, passages, thread=()) -> Reading:
         """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
         self.threaded = tuple(thread)
-        self.asked = asks
         return Reading(
             recovered=self.recovers,
             stands_alone=self.stands_alone,
             names_its_source=self.names_its_source,
-            matches_intent=self.matches_intent,
         )
 
 
@@ -434,10 +431,10 @@ def test_the_verifier_is_shown_the_cited_passages_and_nothing_else() -> None:
     class Watching(Recording):
         """Records what the verifier was shown."""
 
-        def read(self, question: str, passages, thread=(), asks="") -> Reading:
+        def read(self, question: str, passages, thread=()) -> Reading:
             """Keeps the passages and answers as scripted."""
             seen.append(list(passages))
-            return super().read(question, passages, thread, asks)
+            return super().read(question, passages, thread)
 
     pair = group(
         source(1, document="a", passage_id=1, statement="The device weighs 4 kg."),
@@ -589,8 +586,8 @@ def test_an_answer_that_names_a_thing_is_kept(answer) -> None:
     assert failed is None
 
 
-def test_a_question_asking_two_things_is_refused() -> None:
-    """A chatbot answering one of them is neither right nor wrong."""
+def test_two_sentences_each_ending_in_a_question_mark_are_malformed() -> None:
+    """The shape a question mark counts. `compound` catches the other one."""
     failed = checked(
         question_text="Wie hoch ist die Gebühr? Und wer erhebt sie?",
         target_answer="1.033 Euro",
@@ -1145,22 +1142,14 @@ def test_a_value_is_still_compared_whole() -> None:
 # ── The kind of question it was asked to be ───────────────────────────────
 
 
-def test_a_question_that_is_not_the_kind_it_was_asked_for_is_refused() -> None:
-    """A `reason` slot answered with a value is not a reason question.
+def test_no_gate_asks_the_verifier_what_kind_of_question_it_is_reading() -> None:
+    """It was asked, and answered `true` for a question of the wrong kind.
 
-    Counting it as one would report a mix nobody got, which is what the
-    planned and realised columns exist to make visible.
+    Measured over 71 questions the judgement fired zero times while the kind
+    was plainly wrong on six of the 27 accepted - the same failure the
+    phrasing judgement had while it was a yes or no. `wrong_form` carries the
+    structural half, and `question_type` records what was asked for.
     """
-    recording = Recording(recovers="4 kg", matches_intent=False)
-
-    result = build(recording).check(candidate())
-
-    assert result.rejected_reason == QuestionRejection.WRONG_TYPE
-    assert recording.verified == 1, "it must not cost a second call"
-
-
-def test_the_verifier_is_told_what_kind_of_question_it_is_reading() -> None:
-    """It cannot judge the kind without being told which kind was asked."""
     recording = Recording(recovers="because the plant was rebuilt in March")
 
     build(recording).check(
@@ -1171,21 +1160,7 @@ def test_the_verifier_is_told_what_kind_of_question_it_is_reading() -> None:
         )
     )
 
-    assert "why" in recording.asked
-
-
-def test_a_writer_marking_its_own_work_cannot_reject_on_the_kind() -> None:
-    """An opinion needs an independent holder, as with the phrasing gates."""
-    recording = Recording(recovers="4 kg", matches_intent=False)
-    checker = QuestionChecker(
-        embedder=recording,
-        verifier=recording,
-        nearest=lambda embedding: None,
-        threshold=0.93,
-        judge_phrasing=False,
-    )
-
-    assert checker.check(candidate()).accepted
+    assert recording.asked == ""
 
 
 def test_the_type_and_the_form_are_stored_on_the_question() -> None:
@@ -1219,3 +1194,101 @@ def test_the_verifier_is_told_to_answer_in_the_language_of_the_passages() -> Non
     from question_generation.verification import _VERIFY
 
     assert "language" in _VERIFY
+
+
+# ── Two questions welded with a conjunction ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        (
+            "Welche Vorschriften gelten für das Kreditgeschäft und wie hoch ist "
+            "die Gebühr für das inländische Investmentwesen?"
+        ),
+        (
+            "Warum hat sich die Lage der Pensionskassen entspannt und wie wird "
+            "die Kreditentwicklung eingeschätzt?"
+        ),
+        "What fee applies to a licence and who approves the shift plan?",
+    ],
+)
+def test_a_question_asking_two_things_is_refused(question) -> None:
+    """Real rows, all of them written into a wide sample.
+
+    Told to use both passages of a pair with no single question between them,
+    the writer welds two together. A chatbot answering one of them is neither
+    right nor wrong, and nobody types this. 17 of the first 19 multi-passage
+    questions had this shape.
+    """
+    failed = checked(
+        question_text=question,
+        target_answer=(
+            "etwas und etwas anderes"
+            if question.startswith(("Welche", "Warum"))
+            else "a fee and a manager"
+        ),
+        language="de" if question.startswith(("Welche", "Warum")) else "en",
+        form=AnswerForm.LIST,
+    )
+
+    assert code(failed) == QuestionRejection.COMPOUND
+
+
+@pytest.mark.parametrize(
+    ("question", "language"),
+    [
+        ("Welche Arten von Kryptowerten gelten als reguliert?", "de"),
+        (
+            (
+                "Wie viele Meldungen gab es insgesamt in den Jahren 2025 und "
+                "2024 zusammen?"
+            ),
+            "de",
+        ),
+        ("How do the reply times for standard and urgent requests differ?", "en"),
+        ("How is a support request raised and confirmed?", "en"),
+    ],
+)
+def test_one_question_about_two_things_is_kept(question, language) -> None:
+    """A conjunction is not two questions.
+
+    A finite-verb count does not separate these: `Welche Arten von Kryptowerten
+    gelten als reguliert?` carries two verbs and is one question, and a
+    comparison names both sides by construction.
+    """
+    assert (
+        checked(
+            question_text=question,
+            target_answer="two things, and another",
+            language=language,
+            form=AnswerForm.LIST,
+        )
+        is None
+    )
+
+
+def test_the_target_answer_may_restate_the_question_without_disagreeing() -> None:
+    """A real rejection, and a false one.
+
+    The writer answered `Die Regionen, in die chinesische Produkte exportiert
+    werden, umfassen Südostasien und Afrika`; the verifier answered
+    `Südostasien, Afrika und Europa`. They agree about everything the answer
+    carries and share two lemmas of seven, so counting the question's own
+    words threw a good question away.
+    """
+    question = "In welche Regionen werden chinesische Produkte exportiert?"
+    target = (
+        "Die Regionen, in die chinesische Produkte exportiert werden, "
+        "umfassen Südostasien und Afrika."
+    )
+
+    assert not agrees("Südostasien, Afrika und Europa", target, "de", AnswerForm.LIST)
+    assert agrees(
+        "Südostasien, Afrika und Europa",
+        target,
+        "de",
+        AnswerForm.LIST,
+        OVERLAP,
+        question,
+    )

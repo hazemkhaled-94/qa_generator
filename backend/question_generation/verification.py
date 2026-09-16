@@ -11,11 +11,21 @@ behind it:
   duplicate       one index probe against the questions already accepted
   answerable      the same probe, when an unanswerable question has a twin
                   the corpus does answer
+  compound        it asks two things, so half an answer is neither right
+                  nor wrong
   unanchored      a question nobody could have asked without the passage
-  wrong_type      it is not the kind of question it was asked to be
   recoverable     the answer is not in the evidence the question cites
 
-The last four come out of one model call. Recoverability is the one no
+The last three come out of one model call.
+
+There is no gate here for "it is not the kind of question it was asked to be",
+and that is a finding rather than an omission. The verifier was asked it, as
+`matches_intent`, and answered `true` for a bare `Wie viele Anlassprüfungen
+wurden 2025 durchgeführt?` written into a `reason` slot - the same failure the
+phrasing judgement had when it was a yes or no. What survives is structural:
+a kind declares an answer form, and `wrong_form` reads the answer against it,
+so a reason answered with a value is still refused. `question_type` records
+what was ASKED for, as `planned_difficulty` does. Recoverability is the one no
 similarity measure makes: it asks whether the answer can be got back out of
 the passages, which is what a question is for, and a paraphrase, a
 decomposition and a resolved pronoun all survive it where a threshold would
@@ -42,7 +52,7 @@ from pydantic import BaseModel, Field
 
 from database.qa_generator import AnswerForm, QuestionRejection, QuestionStatus
 from llm.client import Client
-from nlp.analysis import claim, content, normalised, vocabulary
+from nlp.analysis import claim, content, interrogatives, normalised, vocabulary
 from nlp.language import detect
 from question_generation.embedding import Embedder, cosine
 from question_generation.models import (
@@ -86,8 +96,8 @@ work out counts either: if the passages do not state it, it is not there.
 Saying it is not in the passages is a correct answer and is the one we are
 looking for whenever it is true. Guessing is the failure.
 
-SECOND, three narrow readings of the question itself. They are about
-different things and are easy to confuse, so read all three.
+SECOND, two narrow readings of the question itself. They are about different
+things and are easy to confuse, so read both.
 
 - `names_its_source`: does the question say WHERE the answer is - naming or
   quoting a document, a report, a circular, a regulation by name, a section or
@@ -124,16 +134,6 @@ different things and are easy to confuse, so read all three.
   in the passages says nothing about this, and the two are constantly
   confused: answer this one by reading the QUESTION, not the passages.
 
-- `matches_intent`: the question was written to ask for one particular kind of
-  thing, named under WAS ASKED TO ASK FOR below. Does it ask for that kind of
-  thing?
-
-  Judge the KIND, not the quality. A question asking why something is required
-  matches "why something is required", whether or not it is a good question.
-  One asking how much something costs does not.
-
-  If nothing is named below, answer true.
-
 All the judgements are independent. A question can be answerable by the
 passages, name no source, and still name no subject either.
 """
@@ -164,12 +164,6 @@ class _Recovered(BaseModel):
         "out of the question. Empty only when it names nothing at all. Read "
         "the question, not the passages: a question you could not answer "
         "still has a subject.",
-    )
-    matches_intent: bool = Field(
-        default=True,
-        description="True if the question asks for the kind of thing it was "
-        "asked to ask for. Judge the kind, not the quality. True when no kind "
-        "was named.",
     )
 
 
@@ -255,6 +249,23 @@ def structural(
             (
                 "it is one of its own facts handed back rather than a question "
                 "written from one"
+            ),
+        )
+
+    # Two question words is two questions welded with a conjunction:
+    # `Welche Vorschriften gelten für X und wie hoch ist die Gebühr für Y?`.
+    # A chatbot answering half of it is neither right nor wrong, and nobody
+    # types it. This is what a writer told to use both passages of a wide
+    # sample does when the two have no single question between them - 17 of
+    # the first 19 multi-passage questions were this shape, and every one was
+    # rejected downstream for an answer the verifier could only half recover.
+    asked_about = interrogatives(asked, language)
+    if len(asked_about) > 1:
+        return (
+            QuestionRejection.COMPOUND,
+            (
+                f"it asks {len(asked_about)} things ({', '.join(asked_about)}); "
+                f"a chatbot answering one of them is neither right nor wrong"
             ),
         )
 
@@ -408,8 +419,6 @@ class Reading:
     recovered: str | None
     stands_alone: bool
     names_its_source: bool = False
-    #: Whether it asks for the kind of thing its type asked for.
-    matches_intent: bool = True
 
 
 class Verifier:
@@ -429,7 +438,6 @@ class Verifier:
         question: str,
         passages: Sequence[str],
         thread: Sequence[tuple[str, str | None]] = (),
-        asks: str = "",
     ) -> Reading:
         """Answers one question from these passages, and judges the question.
 
@@ -453,10 +461,9 @@ class Verifier:
             if thread
             else f"Question: {question}"
         )
-        intent = f"\n\nWAS ASKED TO ASK FOR: {asks}" if asks else ""
         got = self._client.answer(
             system=_VERIFY,
-            user=f"Passages:\n{numbered}\n\n{asked}{intent}",
+            user=f"Passages:\n{numbered}\n\n{asked}",
             shape=_Recovered,
         )
         return Reading(
@@ -472,7 +479,6 @@ class Verifier:
             # confuse with reading the passages.
             stands_alone=bool(got.subject.strip()),
             names_its_source=got.names_its_source,
-            matches_intent=got.matches_intent,
         )
 
 
@@ -482,6 +488,7 @@ def agrees(
     language: str | None,
     form: str = AnswerForm.VALUE,
     overlap: float = OVERLAP,
+    question: str = "",
 ) -> bool:
     """Whether what the verifier got back says what the target answer says.
 
@@ -545,7 +552,16 @@ def agrees(
         got = content(recovered, language)
         if form == AnswerForm.VALUE:
             return wanted <= got
-        return len(wanted & got) / len(wanted) >= overlap
+        # Measured over what the ANSWER adds, not over the question restated
+        # inside it. A model asked for prose writes `Die Regionen, in die
+        # chinesische Produkte exportiert werden, umfassen Südostasien und
+        # Afrika`; the verifier answers `Südostasien, Afrika und Europa`. The
+        # two agree about everything the answer carries and share two lemmas
+        # of seven, so counting the question's own words rejected it.
+        answered = wanted - content(question, language) if question else wanted
+        if not answered:
+            return bool(wanted & got)
+        return len(answered & got) / len(answered) >= overlap
 
     left, right = normalised(recovered), normalised(target)
     return bool(left) and (left in right or right in left)
@@ -638,7 +654,6 @@ class QuestionChecker:
             candidate.question_text,
             candidate.group.passages,
             candidate.thread,
-            asks=candidate.spec.asks,
         )
 
         # Judged before the answer is, and for both kinds of question: an
@@ -684,27 +699,6 @@ class QuestionChecker:
                 reason,
             )
 
-        # The kind of question it was asked to be. A `reason` slot answered
-        # with a value is not a reason question, and counting it as one is how
-        # a mix nobody got is reported as a mix everybody got. An opinion, so
-        # it needs the same independent holder as the two above.
-        if not read.matches_intent:
-            wrong = (
-                QuestionRejection.WRONG_TYPE,
-                (
-                    f"the verifier says it does not ask for "
-                    f"{candidate.spec.asks}, which is what a "
-                    f"{candidate.spec.name} question asks for"
-                ),
-            )
-            if self._judge_phrasing:
-                return wrong
-            log.info(
-                "keeping %r: %s, but the writer judged itself",
-                candidate.question_text,
-                wrong[1],
-            )
-
         if candidate.answerable:
             target = candidate.target_answer or ""
             if read.recovered is None:
@@ -718,6 +712,7 @@ class QuestionChecker:
                 candidate.group.language,
                 candidate.spec.form,
                 self._overlap,
+                candidate.question_text,
             ):
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
