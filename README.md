@@ -206,10 +206,24 @@ Documents are ingestion's, not a stage's:
 make documents                    # list every document with its parse state
 make delete SHA=<sha256>          # delete a document and everything from it
 make delete-derived SHA=<sha256>  # delete only its passages and facts
+make wipe                         # empty the corpus: every document, then the topics
 ```
 
-Both deletions are irreversible, and both have a route: `DELETE /documents/{sha}`
-and `DELETE /documents/{sha}/derived`.
+All of these are irreversible, and the first two have a route:
+`DELETE /documents/{sha}` and `DELETE /documents/{sha}/derived`.
+
+Deleting a document takes **everything derived from it**: its passages, their
+topic memberships, the facts on them, and — through the orphan trigger on
+`question_facts` — the questions resting on those facts.
+
+What it does **not** take is `topics`. A topic has no foreign key to a
+document because a fit is over the corpus rather than over a file, so deleting
+every document leaves the topics standing: their labels, their coverage flags
+and their question-generation queue state, all describing passages that are
+gone. Nothing is broken by that — the next fit replaces every row — but
+somebody who has deleted every document has not emptied the corpus, which is
+why `make wipe` is one command that runs both in order. It also drops the
+upload history, which a single deletion deliberately keeps.
 
 ## Pipeline stages
 

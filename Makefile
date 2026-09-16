@@ -48,7 +48,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         extract-rerun extract-revalidate extract-bridge \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
-        questions questions-status questions-start questions-stop \
+        questions questions-status questions-start questions-stop wipe \
         questions-retry questions-rerun questions-reverify \
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
@@ -424,6 +424,25 @@ documents:
 delete:
 	@[ -n "$(SHA)" ] || { echo "usage: make delete SHA=<sha256>"; exit 2; }
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --delete $(SHA)
+
+# Empty the corpus: every document, every file, every converted form, and
+# with them by cascade every passage, membership, fact and question. Then the
+# topics, which are none of those. Irreversible.
+#
+# Two commands and not one because `topics` has no foreign key to a document:
+# a fit is over the corpus rather than over a file, so deleting every document
+# leaves the topics behind, holding their labels, their coverage flags and
+# their question-generation queue state, all describing passages that are
+# gone. Deleting the topics takes their figures out of the export bucket too.
+#
+# The upload history goes with the documents here, though a single deletion
+# keeps it: an empty corpus reporting nine upload attempts is a status panel
+# describing documents nothing has.
+wipe:
+	@echo "WARNING: this deletes every document, topic, fact and question. Ctrl-C within 5s to abort."
+	@sleep 5
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --delete-all
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --delete
 
 # Delete only what the pipeline built: passages and facts. The document and
 # its file stay, and chunking goes back to `new`, so the next run rebuilds

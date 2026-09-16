@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -192,7 +193,13 @@ def s3(runtime) -> Iterator[dict[str, str]]:
     start = (
         "mkdir -p /etc/seaweedfs && "
         f"printf '%s' '{S3_IDENTITY}' > /etc/seaweedfs/s3.json && "
-        "exec weed server -dir=/data -s3 -ip=0.0.0.0 "
+        # -volume.max: a bucket is a SeaweedFS collection and a collection
+        # claims a volume on its first write. The default is small enough
+        # that the third bucket never got one: `export` answered head_bucket
+        # and refused every PutObject with an InternalError, which took the
+        # three tests that store a topic figure whenever the other two
+        # buckets were written to first.
+        "exec weed server -dir=/data -s3 -ip=0.0.0.0 -volume.max=20 "
         "-s3.config=/etc/seaweedfs/s3.json"
     )
     # The image's entrypoint is `weed`, so the shell that writes the config
@@ -245,9 +252,7 @@ def buckets(s3: dict[str, str], monkeypatch) -> Iterator[None]:
     _COUNTS.clear()
 
     made = client.s3_client()
-    for name in BUCKETS:
-        with contextlib.suppress(Exception):
-            made.create_bucket(Bucket=name)
+    _ensure(made)
     _empty(made)
     try:
         yield
@@ -255,6 +260,33 @@ def buckets(s3: dict[str, str], monkeypatch) -> Iterator[None]:
         _empty(made)
         _COUNTS.clear()
         client.s3_client.cache_clear()
+
+
+def _ensure(client, attempts: int = 10) -> None:
+    """Makes sure every bucket is there before a test writes to one.
+
+    Creating one used to be wrapped in a bare suppress, which is fine for the
+    usual case - the bucket exists and creation is refused - and wrong for the
+    one that matters. `test_a_missing_bucket_is_named` deletes `export` to see
+    what the health check says, and SeaweedFS does not free the name at once:
+    the next test's creation was refused, suppressed, and every later write to
+    that bucket failed with an InternalError after three retries. In a full
+    run that took the three tests that put a topic figure.
+
+    Raises:
+        AssertionError: If a bucket cannot be created, which is the object
+            store being broken rather than a test having deleted one.
+    """
+    for name in BUCKETS:
+        for attempt in range(attempts):
+            with contextlib.suppress(Exception):
+                client.create_bucket(Bucket=name)
+            with contextlib.suppress(Exception):
+                client.head_bucket(Bucket=name)
+                break
+            time.sleep(0.2 * (attempt + 1))
+        else:
+            raise AssertionError(f"the {name} bucket could not be created")
 
 
 def _empty(client) -> None:
@@ -284,9 +316,23 @@ def application(postgres: str, s3: dict[str, str]):
     The routes hold those services as module-level names rather than through
     `Depends`, so there is nothing to override: what these tests exercise is
     the real wiring.
+
+    The caches are cleared BEFORE that import, and that is the whole fixture.
+    Each repository captures `sessions()` as it is constructed, so a cache
+    populated by anything that ran earlier binds every route for the rest of
+    the process - and the `database` fixture clearing it afterwards cannot
+    reach the factories already captured. A unit test that runs a stage's
+    command line populates it against the ambient DATABASE_URL, which is the
+    developer's own database: the API tests then read and write there while
+    the fixtures set up a container nothing touches.
     """
+    from database.qa_generator.engine import engine as connect
+    from database.qa_generator.engine import sessions
+
     os.environ["DATABASE_URL"] = postgres
     os.environ.update(s3)
+    connect.cache_clear()
+    sessions.cache_clear()
 
     from api.main import app
 

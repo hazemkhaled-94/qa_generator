@@ -68,6 +68,39 @@ class RemovalService:
             parsed=parsed_gone,
         )
 
+    def delete_every(self) -> list[Removal]:
+        """Removes every document, its file, its converted form and its rows.
+
+        What a document's deletion cascades to is everything drawn from it:
+        its passages, their topic memberships, the facts on them, and by the
+        orphan trigger the questions resting on those facts. What it does not
+        reach is `topics`, which has no foreign key to a document because a
+        fit is over the corpus rather than over a file. Emptying the corpus
+        is therefore two commands, and `make wipe` is the one that runs both
+        in the order that leaves nothing: documents, then topics.
+
+        The upload history goes too. It survives a single deletion on purpose
+        - it records what was attempted rather than what is held - but an
+        empty corpus reporting nine upload attempts is a status panel
+        describing documents nothing has.
+
+        Returns:
+            What was removed, one entry per document.
+        """
+        removed = [
+            gone
+            for digest in self._repository.digests()
+            if (gone := self.delete(digest)) is not None
+        ]
+        events = self._repository.forget_uploads()
+        log.info(
+            "deleted %d document(s) and %d upload record(s); topics are not a "
+            "document's and are deleted separately",
+            len(removed),
+            events,
+        )
+        return removed
+
     def delete_derived(self, sha256: str) -> Removal | None:
         """Drops what the pipeline built from a document, keeping the document.
 

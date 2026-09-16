@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Builds the argument parser. The three flags are mutually exclusive."""
+    """Builds the argument parser. The flags are mutually exclusive."""
     built = argparse.ArgumentParser(prog="python -m ingestion.run")
     group = built.add_mutually_exclusive_group(required=True)
     group.add_argument("--list", action="store_true", help="list every document")
@@ -32,6 +32,12 @@ def _parser() -> argparse.ArgumentParser:
         "--delete-derived",
         metavar="SHA256",
         help="drop only the passages and facts, keeping the document",
+    )
+    group.add_argument(
+        "--delete-all",
+        action="store_true",
+        help="remove every document, its files and the upload history. Topics "
+        "are not a document's and go separately; `make wipe` runs both",
     )
     return built
 
@@ -65,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     removal = build_removal()
+    if args.delete_all:
+        for gone in removal.delete_every():
+            log.info("%s: %d passage(s) removed", gone.sha256, gone.passages)
+        return 0
+
     digest, remove = (
         (args.delete, removal.delete)
         if args.delete

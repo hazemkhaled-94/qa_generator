@@ -67,6 +67,24 @@ class DocumentRepository(Repository):
                 select(Document.mime_type).where(Document.sha256 == sha256)
             )
 
+    def digests(self) -> list[str]:
+        """Every stored document's digest, oldest first."""
+        with self._session() as session:
+            return list(
+                session.scalars(select(Document.sha256).order_by(Document.sha256))
+            )
+
+    def forget_uploads(self) -> int:
+        """Drops the upload history, which a document's deletion keeps.
+
+        `ingest_events` survives a deletion on ON DELETE SET NULL, because it
+        records what was attempted rather than what is held. Emptying the
+        corpus is the one time that is wrong: the status panel would report
+        upload attempts for documents nothing has.
+        """
+        with self._session.begin() as session:
+            return session.execute(delete(IngestEvent)).rowcount
+
     def delete(self, sha256: str) -> int:
         """Removes a document row and everything derived from it.
 

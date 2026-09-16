@@ -64,10 +64,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.delete:
         removed = TopicCatalog().delete_all()
+        # The figures go with the topics, as they do on the route. `delete_all`
+        # reports the languages whose figure is now orphaned and this read that
+        # list and dropped it, so the command left two pyLDAvis pages in the
+        # export bucket describing topics that no longer existed.
+        bucket = ExportBucket()
+        figures = sum(
+            bucket.remove(bucket.topic_visualisation_key(language))
+            for language in removed.languages
+        )
         log.info(
-            "deleted %d topic(s) and %d membership(s); %d label(s) lost",
+            "deleted %d topic(s), %d membership(s) and %d figure(s); %d label(s) lost",
             removed.topics,
             removed.memberships,
+            figures,
             removed.labels,
         )
         return 0
