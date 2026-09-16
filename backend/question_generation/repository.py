@@ -87,11 +87,9 @@ def _joined(query: Select) -> Select:
     trigger is about to delete: it should not disappear from a count before
     it disappears from the table.
 
-    A fact reaches its passages through `fact_passages` where it has rows and
-    through its anchor where it has none, which is what the coalesce below
-    says. A bridge therefore reaches both of its passages here: the documents
-    a question is filtered by, listed under and scored against are the ones
-    its answer actually needs.
+    A fact reaches its passages through `fact_passages`, so a bridge reaches
+    both of its passages here: the documents a question is filtered by,
+    listed under and scored against are the ones its answer actually needs.
 
     Every join here multiplies a question by its facts, and a bridge by its
     passages on top, so anything counted over this has to be counted
@@ -103,11 +101,7 @@ def _joined(query: Select) -> Select:
         .join(QuestionFact, QuestionFact.question_id == Question.id, isouter=True)
         .join(Fact, Fact.id == QuestionFact.fact_id, isouter=True)
         .join(FactPassage, FactPassage.fact_id == Fact.id, isouter=True)
-        .join(
-            Passage,
-            Passage.id == func.coalesce(FactPassage.passage_id, Fact.passage_id),
-            isouter=True,
-        )
+        .join(Passage, Passage.id == FactPassage.passage_id, isouter=True)
         .join(DOMINANT, DOMINANT.c.passage_id == Passage.id, isouter=True)
         .join(Topic, Topic.id == DOMINANT.c.topic_id, isouter=True)
     )
@@ -241,38 +235,36 @@ def _present(values: Sequence[Any] | None) -> list[str]:
 ASKABLE = (FactKind.ATOMIC, FactKind.BRIDGE)
 
 
-#: One validated fact with everything selection and the writer read off it.
-#: Written once because two queries select it: a topic's own facts and the
-#: facts of the passages that bridge it to another topic.
+#: One validated fact, selected through the passage it opens on. Written
+#: once because two queries select it: a topic's own facts and the facts of
+#: the passages that bridge it to another topic.
+#:
+#: The opening passage and no other, so a fact comes back once. It is what
+#: the topic, the document and the language are asked of; the passages the
+#: fact actually rests on are _RESTING below. A bridge is read from one
+#: topic's group, so every passage of one carries the same dominant topic
+#: and which of them is asked makes no difference to what is selected.
 _SOURCE = (
     select(
         Fact.id,
         Fact.statement,
         Fact.kind,
         Fact.units_statement,
-        Passage.id.label("passage_id"),
-        Passage.text,
-        Passage.doc_sha256,
-        Passage.language,
-        Passage.section_path,
-        Passage.ordinal,
-        Passage.lemmas,
-        DOMINANT.c.topic_id,
-        Document.title,
     )
     .select_from(Fact)
-    .join(Passage, Passage.id == Fact.passage_id)
+    .join(FactPassage, (FactPassage.fact_id == Fact.id) & (FactPassage.position == 0))
+    .join(Passage, Passage.id == FactPassage.passage_id)
     .join(Document, Document.sha256 == Passage.doc_sha256)
     .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
 )
 
-#: The passages a bridge rests on besides its anchor, with everything the
-#: writer and the gates read off one. Ordered by position, so the anchor
-#: comes first and the rest follow as the model was shown them.
+#: The passages a fact rests on, with everything the writer and the gates
+#: read off one. Ordered by position, so they come as the model was shown
+#: them.
 #:
 #: A separate query rather than an aggregate on _SOURCE: two call sites share
-#: that select, and joining a second passage onto it would multiply every row
-#: and change what its callers count.
+#: that select, and joining the passages onto it would multiply every row and
+#: change what its callers count.
 _RESTING = (
     select(
         FactPassage.fact_id,
@@ -311,13 +303,12 @@ def _passage(row: Any) -> SourcePassage:
     )
 
 
-def _fact(row: Any, resting: tuple[SourcePassage, ...] = ()) -> SourceFact:
-    """Reads one row of the query above back as a fact to write from.
+def _fact(row: Any, resting: tuple[SourcePassage, ...]) -> SourceFact:
+    """Reads one row of _SOURCE back as a fact to write from.
 
     Args:
         row: The selected row.
-        resting: Every passage a bridge rests on, anchor first. Empty for
-            every other kind, which rests on the row's own passage.
+        resting: Every passage it rests on, in the order the model saw them.
 
     Returns:
         The fact.
@@ -326,7 +317,7 @@ def _fact(row: Any, resting: tuple[SourcePassage, ...] = ()) -> SourceFact:
         id=row.id,
         statement=row.statement,
         kind=row.kind,
-        passages=resting or (_passage(row),),
+        passages=resting,
         units=tuple(row.units_statement or ()),
     )
 
@@ -430,11 +421,12 @@ class QuestionQueue(RowQueue):
         return self._read(rows)
 
     def _read(self, rows: list[Any]) -> list[SourceFact]:
-        """Turns selected rows into facts, giving a bridge all its passages.
+        """Turns selected rows into facts, each with the passages it rests on.
 
-        A bridge whose citations were never recorded is dropped: it was drawn
-        before the prompt said where in each passage it rests, so the verifier
-        could not be shown what it was answered from.
+        A fact one of whose passages carries no citation is dropped: a bridge
+        drawn before the prompt said where in each passage it rests, and a
+        refused fact that resolved nowhere. Neither can be shown to the
+        verifier as what a question was answered from.
 
         Args:
             rows: What one of the selects above returned.
@@ -442,27 +434,19 @@ class QuestionQueue(RowQueue):
         Returns:
             The facts, in the order the rows came.
         """
-        bridges = [row for row in rows if row.kind == FactKind.BRIDGE]
-        if not bridges:
-            return [_fact(row) for row in rows]
-
-        resting = self._resting([row.id for row in bridges])
-        return [
-            _fact(row, resting.get(row.id, ()))
-            for row in rows
-            if row.kind != FactKind.BRIDGE or resting.get(row.id)
-        ]
+        resting = self._resting([row.id for row in rows])
+        return [_fact(row, resting[row.id]) for row in rows if row.id in resting]
 
     def _resting(self, fact_ids: list[int]) -> dict[int, tuple[SourcePassage, ...]]:
-        """Reads the passages those bridges rest on, anchors first.
+        """Reads the passages those facts rest on, in the order shown.
 
         Args:
-            fact_ids: The bridge facts to read.
+            fact_ids: The facts to read.
 
         Returns:
-            Per fact, its passages. A fact whose citations were never
-            recorded, or one of whose passages has no language, is absent:
-            neither can be written from.
+            Per fact, its passages. A fact any of whose passages carries no
+            citation, or has no language, is absent: neither can be written
+            from.
         """
         found: dict[int, list[SourcePassage]] = {}
         refused: set[int] = set()
@@ -477,7 +461,7 @@ class QuestionQueue(RowQueue):
         return {
             fact_id: tuple(passages)
             for fact_id, passages in found.items()
-            if fact_id not in refused and len(passages) > 1
+            if fact_id not in refused
         }
 
     def bridging(self, topic_id: int) -> list[SourceFact]:
@@ -798,21 +782,17 @@ class QuestionCatalog(Repository):
                     Fact.statement,
                     Fact.evidence_text,
                     Fact.validated,
-                    # The passage this row reached, not the fact's anchor: a
-                    # bridge comes back once per passage it rests on, and the
-                    # document and the ordinal beside it are that passage's.
+                    # A bridge comes back once per passage it rests on, and
+                    # the document and the ordinal beside it are that
+                    # passage's.
                     Passage.id.label("passage_id"),
                     Passage.doc_sha256,
                     Passage.ordinal,
                 )
                 .select_from(QuestionFact)
                 .join(Fact, Fact.id == QuestionFact.fact_id)
-                .join(FactPassage, FactPassage.fact_id == Fact.id, isouter=True)
-                .join(
-                    Passage,
-                    Passage.id
-                    == func.coalesce(FactPassage.passage_id, Fact.passage_id),
-                )
+                .join(FactPassage, FactPassage.fact_id == Fact.id)
+                .join(Passage, Passage.id == FactPassage.passage_id)
                 .where(QuestionFact.question_id == question_id)
                 .order_by(Passage.doc_sha256, Passage.ordinal, Fact.id)
             ).all()

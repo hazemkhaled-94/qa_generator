@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 import requests
 from conftest import Answers
-from facts_page import FactsPage, fact, page_of, quality
+from facts_page import FACT, FactsPage, fact, page_of, quality, resting
 
 pytestmark = pytest.mark.frontend
 
@@ -172,19 +172,25 @@ def test_a_refused_fact_names_the_check_it_failed(page) -> None:
     assert "Two points or more" in drawn.tables()
 
 
-def test_a_bridge_names_the_passages_it_rests_on(page) -> None:
-    """The anchor's evidence alone would not say what it was drawn from."""
+def test_a_fact_resting_on_several_passages_names_them_all(page) -> None:
+    """One passage's evidence would not say what the claim was drawn from."""
     drawn = page(
-        facts=page_of(fact(id=7, kind="bridge", statement="A bridge.")),
+        facts=page_of(
+            fact(
+                id=7,
+                kind="bridge",
+                statement="A bridge.",
+                passages=[FACT["passages"][0], resting(22, ordinal=9, position=1)],
+            )
+        ),
         fact_quality=quality(kinds={"bridge": 1}),
-        fact_passages={"fact": 7, "passages": [11, 22]},
     )
 
-    assert "Rests on passage(s): 11, 22" in drawn.text(), drawn.text()
+    assert "Rests on passages: 3 (id 11), 9 (id 22)" in drawn.text(), drawn.text()
 
 
-def test_another_kind_asks_for_no_group(run_view) -> None:
-    """Every other kind rests on the passage the listing already names."""
+def test_the_listing_carries_the_passages_so_none_are_asked_for(run_view) -> None:
+    """Every kind names its passages on the row; no second call is made."""
     client = Answers(**FactsPage.answers())
     run_view("facts", catalog_api=client)
 

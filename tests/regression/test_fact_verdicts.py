@@ -301,18 +301,18 @@ def test_every_refusal_appears_in_this_table() -> None:
 def test_an_accepted_fact_carries_a_span_that_resolves_in_its_passage(
     english, offered
 ) -> None:
-    """The invariant every reader of the facts table relies on."""
+    """The invariant every reader of fact_passages relies on."""
     under = english.passage
     for statement, cited, expected in [row[1:] for row in ATOMIC]:
         checked = english.atomic(statement, cited)
         if expected == Rejection.EVIDENCE_ABSENT:
             continue
-        assert under.text[checked.evidence_start : checked.evidence_end] == (
-            checked.evidence_text
-        ), statement
+        ((one,),) = [checked.citations]
+        assert one.passage_id == under.id, statement
+        assert under.text[one.start : one.end] == checked.evidence_text, statement
 
     bridged = english.bridge("An urgent request waits 4 hours.", offered)
-    anchor = next(one for one in offered if one.id == bridged.passage_id)
-    assert anchor.text[bridged.evidence_start : bridged.evidence_end] == (
-        bridged.evidence_text
+    by_id = {one.id: one for one in offered}
+    assert bridged.evidence_text == "\n".join(
+        by_id[one.passage_id].text[one.start : one.end] for one in bridged.citations
     )

@@ -32,38 +32,44 @@ def checked(
     """One fact as the checker would hand it to the repository.
 
     Args:
-        passage_id: The passage it is anchored to.
+        passage_id: The passage it rests on, cited at position 0.
         statement: What it says.
         kind: Which reading it is.
         validated: Whether it passed.
         rejection_code: Why it did not, when it did not.
-        passage_ids: The passages a bridge rests on, each cited at its
-            sentence 0 over an empty span. For a test that reads the links
-            rather than the spans.
+        passage_ids: Every passage a bridge rests on, in position order,
+            each cited at its sentence 0 over an empty span, replacing the
+            one citation `passage_id` would have given.
         citations: The citations themselves, for a test that reads a span.
         **columns: Anything else `CheckedFact` takes.
 
     Returns:
         The fact.
     """
-    return CheckedFact(
+    first = Citation(
         passage_id=passage_id,
+        sentence_ids=columns.pop("evidence_sentence_ids", [0]),
+        start=columns.pop("evidence_start", 0),
+        end=columns.pop("evidence_end", len(statement)),
+    )
+    if citations is None:
+        citations = (
+            [
+                Citation(passage_id=one, sentence_ids=[0], start=0, end=0)
+                for one in passage_ids
+            ]
+            if passage_ids
+            else [first]
+        )
+    return CheckedFact(
         statement=statement,
         evidence_text=columns.pop("evidence_text", statement),
-        evidence_sentence_ids=columns.pop("evidence_sentence_ids", [0]),
-        evidence_start=columns.pop("evidence_start", 0),
-        evidence_end=columns.pop("evidence_end", len(statement)),
         extraction_method=columns.pop("extraction_method", "llm"),
         validated=validated,
         rejection_code=rejection_code,
         validation_error=columns.pop("validation_error", None),
         kind=kind,
-        citations=citations
-        if citations is not None
-        else [
-            Citation(passage_id=one, sentence_ids=[0], start=0, end=0)
-            for one in (passage_ids or [])
-        ],
+        citations=citations,
         **columns,
     )
 

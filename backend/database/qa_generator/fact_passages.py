@@ -22,20 +22,19 @@ if TYPE_CHECKING:
 
 
 class FactPassage(Base):
-    """Which passages a bridge fact rests on.
+    """Which passages a fact rests on, and where in each.
 
-    Written for `kind = 'bridge'` only, one row per passage including the
-    anchor in facts.passage_id. Every other kind rests on that anchor alone
-    and has no row here.
+    One row per passage for every kind: one for an atomic fact, a summary and
+    an outline, two or more for a bridge. The only route from a fact to a
+    passage, and so to a document and to a topic.
     """
 
     __tablename__ = "fact_passages"
     __table_args__ = (
         CheckConstraint(CITATION_COMPLETE, name="fact_passages_citation_complete"),
         {
-            "comment": "Which passages a bridge fact rests on, one row per passage "
-            "including the anchor in facts.passage_id, and where in each it rests. "
-            "Empty for every other kind, which rests on that anchor alone."
+            "comment": "Which passages a fact rests on and where in each, one row "
+            "per passage for every kind. The only route from a fact to a passage."
         },
     )
 
@@ -43,7 +42,7 @@ class FactPassage(Base):
         BigInteger,
         ForeignKey("facts.id", ondelete="CASCADE"),
         primary_key=True,
-        comment="The bridge fact.",
+        comment="The fact.",
     )
     passage_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -53,18 +52,19 @@ class FactPassage(Base):
         # the lookup by passage_id alone that re-extraction runs.
         index=True,
         comment="A passage the claim rests on. Deleting the passage deletes this "
-        "row, and the fact with it when the passage is the anchor.",
+        "row and the fact with it.",
     )
     position: Mapped[int] = mapped_column(
         Integer,
-        comment="Where this passage sat in the excerpt the model was shown, from "
-        "0. Position 0 is the anchor.",
+        comment="Where this passage sat in what the model was shown, from 0. "
+        "0 for the one passage of an atomic fact, a summary or an outline.",
     )
     sentence_ids: Mapped[list[int] | None] = mapped_column(
         ARRAY(Integer),
-        comment="Which of this passage's sentences the claim rests on. NULL on a "
-        "bridge drawn before prompt version 2, which cited a passage without "
-        "saying where in it; such a bridge is not offered to question generation.",
+        comment="Which of this passage's sentences the claim rests on. NULL when "
+        "the claim named no sentence this passage has: a refused fact, or a "
+        "bridge drawn before prompt version 2. Neither is offered to question "
+        "generation.",
     )
     evidence_start: Mapped[int | None] = mapped_column(
         Integer,
@@ -79,33 +79,35 @@ class FactPassage(Base):
     passage: Mapped[Passage] = relationship(back_populates="fact_links")
 
 
-#: Deletes a bridge fact once it rests on fewer than two passages. Re-chunking
-#: one of them cascades to this table and not to the fact, which would
-#: otherwise leave a claim that bridges nothing. A foreign key cascades parent
-#: to child, never the reverse.
+#: Deletes a fact once any passage it rests on is gone. Re-chunking cascades
+#: to this table and not to the fact, and a foreign key cascades parent to
+#: child and never the reverse, so without this a claim outlives its evidence.
+#:
+#: Unconditional, for every kind: the spans here are the whole of what a fact
+#: rests on, so losing one is losing part of the claim. Re-entrant by
+#: construction - the cascade from facts back into this table fires it again,
+#: and the second firing finds no fact to delete.
 #:
 #: Declared here, beside the table it belongs to, and executed by the
 #: migration that creates that table: autogenerate sees tables and columns,
 #: never a trigger.
 DELETE_ORPHAN_FUNCTION = """
-CREATE OR REPLACE FUNCTION delete_bridge_without_passages() RETURNS trigger
+CREATE OR REPLACE FUNCTION delete_fact_without_passage() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-    DELETE FROM facts f
-     WHERE f.id = OLD.fact_id
-       AND (SELECT count(*) FROM fact_passages fp WHERE fp.fact_id = f.id) < 2;
+    DELETE FROM facts WHERE id = OLD.fact_id;
     RETURN NULL;
 END;
 $$;
 """
 
 DELETE_ORPHAN_TRIGGER = """
-CREATE TRIGGER fact_passages_delete_orphan_bridge
+CREATE TRIGGER fact_passages_delete_orphan_fact
 AFTER DELETE ON fact_passages
-FOR EACH ROW EXECUTE FUNCTION delete_bridge_without_passages();
+FOR EACH ROW EXECUTE FUNCTION delete_fact_without_passage();
 """
 
 DROP_DELETE_ORPHAN = """
-DROP TRIGGER IF EXISTS fact_passages_delete_orphan_bridge ON fact_passages;
-DROP FUNCTION IF EXISTS delete_bridge_without_passages();
+DROP TRIGGER IF EXISTS fact_passages_delete_orphan_fact ON fact_passages;
+DROP FUNCTION IF EXISTS delete_fact_without_passage();
 """

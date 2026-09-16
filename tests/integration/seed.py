@@ -12,6 +12,7 @@ from typing import Any
 from database.qa_generator import (
     Document,
     Fact,
+    FactPassage,
     IngestEvent,
     Passage,
     PassageTopic,
@@ -51,16 +52,43 @@ def passage(doc_sha256: str, ordinal: int = 1, **columns: Any) -> Passage:
     )
 
 
-def fact(passage_id: int, **columns: Any) -> Fact:
-    """One checked fact, validated unless a test says otherwise."""
+def fact(passage_id: int, *rests_on: int, **columns: Any) -> Fact:
+    """One checked fact, validated unless a test says otherwise.
+
+    Args:
+        passage_id: The passage it rests on, written at position 0.
+        *rests_on: Further passages, for a bridge, at the positions they are
+            given in. Each cites sentence 0 over an empty span.
+        **columns: Anything else the row takes. `evidence_sentence_ids`,
+            `evidence_start` and `evidence_end` name the first passage's
+            citation, which is where they used to live.
+
+    Returns:
+        The fact, with its link rows attached.
+    """
     statement = columns.pop("statement", "The device weighs 4 kg.")
     return Fact(
-        passage_id=passage_id,
+        passage_links=[
+            FactPassage(
+                passage_id=passage_id,
+                position=0,
+                sentence_ids=columns.pop("evidence_sentence_ids", [0]),
+                evidence_start=columns.pop("evidence_start", 0),
+                evidence_end=columns.pop("evidence_end", len(statement)),
+            ),
+            *(
+                FactPassage(
+                    passage_id=one,
+                    position=position,
+                    sentence_ids=[0],
+                    evidence_start=0,
+                    evidence_end=0,
+                )
+                for position, one in enumerate(rests_on, start=1)
+            ),
+        ],
         statement=statement,
         evidence_text=columns.pop("evidence_text", statement),
-        evidence_sentence_ids=columns.pop("evidence_sentence_ids", [0]),
-        evidence_start=columns.pop("evidence_start", 0),
-        evidence_end=columns.pop("evidence_end", len(statement)),
         extraction_method=columns.pop("extraction_method", "llm"),
         # Stated rather than defaulted: the verdict and the code have to
         # agree, and the column defaults to false while the code defaults

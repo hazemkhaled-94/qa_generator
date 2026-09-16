@@ -19,7 +19,7 @@ class QuestionFact(Base):
 
     One row for an ordinary question, two or more for a cross-document one.
     The passages a question needs retrieved are reached from here through
-    facts.passage_id rather than stored.
+    fact_passages rather than stored.
     """
 
     __tablename__ = "question_facts"
@@ -28,7 +28,7 @@ class QuestionFact(Base):
             "comment": "Which facts a question was generated from. One row for an "
             "ordinary question, two or more for a cross-document question. The "
             "passages a question needs retrieved are derived from here through "
-            "facts.passage_id rather than stored separately."
+            "fact_passages rather than stored separately."
         },
     )
 

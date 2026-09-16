@@ -730,17 +730,24 @@ def _bridge(engine, *passage_ids: int, cited: bool = True) -> int:
     with engine.begin() as connection:
         fact_id = connection.execute(
             text(
-                "UPDATE facts SET kind = 'bridge' WHERE passage_id = :anchor "
-                "RETURNING id"
+                "UPDATE facts SET kind = 'bridge' WHERE id = (SELECT fact_id "
+                "FROM fact_passages WHERE passage_id = :anchor ORDER BY fact_id "
+                "LIMIT 1) RETURNING id"
             ),
             {"anchor": anchor},
         ).scalar_one()
+        # The anchor's own row is already there, from the fact it was.
         for position, passage_id in enumerate(passage_ids):
             connection.execute(
                 text(
                     "INSERT INTO fact_passages (fact_id, passage_id, position, "
                     "sentence_ids, evidence_start, evidence_end) VALUES "
-                    "(:fact, :passage, :position, :ids, :start, :end)"
+                    "(:fact, :passage, :position, :ids, :start, :end) "
+                    "ON CONFLICT (fact_id, passage_id) DO UPDATE SET "
+                    "position = excluded.position, "
+                    "sentence_ids = excluded.sentence_ids, "
+                    "evidence_start = excluded.evidence_start, "
+                    "evidence_end = excluded.evidence_end"
                 ),
                 {
                     "fact": fact_id,
@@ -793,12 +800,15 @@ def test_a_bridge_that_recorded_no_citation_is_never_offered(corpus, engine) -> 
     assert fact_id not in _passages_of(engine, topic_id)
 
 
-def test_a_bridge_left_resting_on_one_passage_is_never_offered(corpus, engine) -> None:
-    """A claim no single passage states cannot rest on a single passage."""
+def test_a_bridge_cannot_outlive_a_passage_it_rested_on(corpus, engine) -> None:
+    """Which is why nothing here has to guard against one resting on one."""
     written = corpus(topics=1, facts_per_topic=2, documents=2)
     topic_id = written["topics"][0]
-    anchor, _other = (one.passage_id for one in QuestionQueue().facts(topic_id))
-    fact_id = _bridge(engine, anchor)
+    anchor, other = (one.passage_id for one in QuestionQueue().facts(topic_id))
+    fact_id = _bridge(engine, anchor, other)
+
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM passages WHERE id = :id"), {"id": other})
 
     assert fact_id not in _passages_of(engine, topic_id)
 

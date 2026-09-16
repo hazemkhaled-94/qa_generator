@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from itertools import groupby
 from typing import ClassVar, cast
 
 from sqlalchemy import (
+    ColumnElement,
     Select,
     Table,
     bindparam,
@@ -15,7 +17,7 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, aliased
 
 from database.qa_generator import (
     Document,
@@ -32,6 +34,7 @@ from extraction.models import (
     CheckedFact,
     Cited,
     FactQuality,
+    FactSource,
     PassageToExtract,
     StoredFact,
 )
@@ -64,6 +67,9 @@ _BATCH = 500
 
 #: The facts table itself, for the bulk update a re-judgement writes.
 _FACTS = cast("Table", Fact.__table__)
+
+#: The link table itself, for the same reason.
+_LINKS = cast("Table", FactPassage.__table__)
 
 #: What one passage of a bridge group is read as. The same columns `claim`
 #: reads, so a group and a queued passage are the same object.
@@ -106,14 +112,36 @@ def _passage(row, language: str | None) -> PassageToExtract:
     )
 
 
+#: The link a listing is placed and ordered by: the passage the fact opens
+#: on. Aliased, because the document filter reaches the table again to ask
+#: about every other passage the fact rests on.
+_OPENS = aliased(FactPassage)
+
+
+def _resting(condition) -> ColumnElement[bool]:
+    """Matches a fact resting on any passage the condition selects.
+
+    Any rather than the one it opens on: a bridge across two documents
+    belongs to both, and narrowing to the second is asking for the facts its
+    passages support. Written as a subquery on the fact rather than as a join
+    so the narrowing selects facts whole - joining it would drop the half of
+    a bridge that sits outside the narrowing.
+    """
+    return Fact.id.in_(
+        select(FactPassage.fact_id)
+        .join(Passage, Passage.id == FactPassage.passage_id)
+        .where(condition)
+    )
+
+
 def _filtered(query, document, search, method, field, kind=None):
     """Applies the document, text, method and kind filters to a fact query.
 
     One place, so a listing and its count cannot disagree about what they are
-    looking at. The query must already join Passage.
+    looking at. The query must already be joined by :func:`_joined`.
     """
     if document:
-        query = query.where(Passage.doc_sha256 == document)
+        query = query.where(_resting(Passage.doc_sha256 == document))
     if search:
         query = query.where(
             matching(
@@ -128,8 +156,34 @@ def _filtered(query, document, search, method, field, kind=None):
 
 
 def _joined(query: Select) -> Select:
-    """Joins the passage every fact filter and ordering needs."""
-    return query.select_from(Fact).join(Passage, Fact.passage_id == Passage.id)
+    """Joins the passage a fact is ordered by: the one it opens on.
+
+    One row per fact, not one per passage it rests on: a listing that
+    multiplied a bridge by its passages would page through it twice.
+    """
+    return (
+        query.select_from(Fact)
+        .join(_OPENS, (_OPENS.fact_id == Fact.id) & (_OPENS.position == 0))
+        .join(Passage, Passage.id == _OPENS.passage_id)
+    )
+
+
+#: One fact's passages, in the order the model was shown them. Read for the
+#: page of facts a listing returned rather than joined into it, which would
+#: give a bridge one row per passage.
+_SOURCES = (
+    select(
+        FactPassage.fact_id,
+        FactPassage.passage_id,
+        FactPassage.position,
+        Passage.doc_sha256,
+        Passage.ordinal,
+        Passage.page_from,
+    )
+    .select_from(FactPassage)
+    .join(Passage, Passage.id == FactPassage.passage_id)
+    .order_by(FactPassage.fact_id, FactPassage.position)
+)
 
 
 class PassageQueue(RowQueue):
@@ -170,7 +224,7 @@ class PassageQueue(RowQueue):
         """Replaces one passage's facts, in one transaction, and finishes it.
 
         Scoped to the passage, so two workers on two passages of the same
-        document do not delete each other's results. Bridge facts anchored
+        document do not delete each other's results. Bridge facts resting
         here are left alone: they are the bridge pass's to write and to
         replace.
 
@@ -184,11 +238,15 @@ class PassageQueue(RowQueue):
         with self._session.begin() as session:
             session.execute(
                 delete(Fact).where(
-                    Fact.passage_id == passage_id, Fact.kind != FactKind.BRIDGE
+                    Fact.kind != FactKind.BRIDGE,
+                    Fact.id.in_(
+                        select(FactPassage.fact_id).where(
+                            FactPassage.passage_id == passage_id
+                        )
+                    ),
                 )
             )
-            if facts:
-                session.execute(insert(Fact), [_row(fact) for fact in facts])
+            _write(session, facts)
             self._finish(passage_id, session=session)
         return len(facts)
 
@@ -202,16 +260,48 @@ class PassageQueue(RowQueue):
         return {**self.counts_by_status(), "facts": total, "validated": valid}
 
 
+def _write(session, facts: list[CheckedFact]) -> int:
+    """Writes facts and the passages each rests on, in the caller's transaction.
+
+    Args:
+        session: The open transaction.
+        facts: Checked facts of any kind, refused ones included.
+
+    Returns:
+        How many facts were written.
+    """
+    if not facts:
+        return 0
+    # sort_by_parameter_order: the links below are matched to the facts by
+    # position, so the ids have to come back in the order they went in rather
+    # than in whatever order the insert chose.
+    ids = session.scalars(
+        insert(Fact).returning(Fact.id, sort_by_parameter_order=True),
+        [_row(fact) for fact in facts],
+    ).all()
+    links = [
+        {
+            "fact_id": fact_id,
+            "passage_id": cited.passage_id,
+            "position": position,
+            "sentence_ids": cited.sentence_ids,
+            "evidence_start": cited.start,
+            "evidence_end": cited.end,
+        }
+        for fact_id, fact in zip(ids, facts, strict=True)
+        for position, cited in enumerate(fact.citations)
+    ]
+    if links:
+        session.execute(insert(FactPassage), links)
+    return len(facts)
+
+
 def _row(fact: CheckedFact) -> dict:
     """Turns one checked fact into the columns the facts table holds."""
     return {
-        "passage_id": fact.passage_id,
         "kind": fact.kind,
         "statement": fact.statement,
         "evidence_text": fact.evidence_text,
-        "evidence_sentence_ids": fact.evidence_sentence_ids,
-        "evidence_start": fact.evidence_start,
-        "evidence_end": fact.evidence_end,
         "extraction_method": fact.extraction_method,
         "validated": fact.validated,
         "rejection_code": fact.rejection_code,
@@ -280,16 +370,11 @@ class FactCatalog(Repository):
         Returns:
             How many were deleted.
         """
-        anchored = (
-            select(Fact.id)
-            .select_from(Fact)
-            .join(Passage, Passage.id == Fact.passage_id)
-            .where(Fact.kind == FactKind.BRIDGE)
-        )
+        chosen = select(Fact.id).where(Fact.kind == FactKind.BRIDGE)
         if within is not None:
-            anchored = anchored.where(within)
+            chosen = chosen.where(_resting(within))
         with self._session.begin() as session:
-            return session.execute(delete(Fact).where(Fact.id.in_(anchored))).rowcount
+            return session.execute(delete(Fact).where(Fact.id.in_(chosen))).rowcount
 
     def add_bridges(self, facts: list[CheckedFact]) -> int:
         """Writes bridge facts and the passages each rests on.
@@ -300,31 +385,8 @@ class FactCatalog(Repository):
         Returns:
             How many were written.
         """
-        if not facts:
-            return 0
         with self._session.begin() as session:
-            # sort_by_parameter_order: the links below are matched to the
-            # facts by position, so the ids have to come back in the order
-            # they went in rather than in whatever order the insert chose.
-            ids = session.scalars(
-                insert(Fact).returning(Fact.id, sort_by_parameter_order=True),
-                [_row(fact) for fact in facts],
-            ).all()
-            links = [
-                {
-                    "fact_id": fact_id,
-                    "passage_id": cited.passage_id,
-                    "position": position,
-                    "sentence_ids": cited.sentence_ids,
-                    "evidence_start": cited.start,
-                    "evidence_end": cited.end,
-                }
-                for fact_id, fact in zip(ids, facts, strict=True)
-                for position, cited in enumerate(fact.citations)
-            ]
-            if links:
-                session.execute(insert(FactPassage), links)
-        return len(facts)
+            return _write(session, facts)
 
     def judged(
         self, within=None
@@ -346,82 +408,54 @@ class FactCatalog(Repository):
                 Fact.id.label("fact_id"),
                 Fact.kind,
                 Fact.statement,
-                Fact.evidence_sentence_ids,
                 Fact.extraction_method,
-                *_PASSAGE_COLUMNS,
-                Document.language,
-            )
-            .select_from(Fact)
-            .join(Passage, Fact.passage_id == Passage.id)
-            .join(Document, Document.sha256 == Passage.doc_sha256)
-            .order_by(Fact.id)
-            .execution_options(yield_per=_BATCH)
-        )
-        if within is not None:
-            query = query.where(within)
-
-        bridges = self._bridge_groups()
-        with self._session() as session:
-            for row in session.execute(query):
-                group = bridges.get(row.fact_id)
-                yield (
-                    row.fact_id,
-                    [passage for passage, _ in group]
-                    if group
-                    else [_passage(row, row.language)],
-                    CandidateFact(
-                        statement=row.statement,
-                        sentences=tuple(row.evidence_sentence_ids or ()),
-                        kind=row.kind,
-                        passages=tuple(
-                            Cited(position=position, sentences=cited)
-                            for position, (_, cited) in enumerate(group or ())
-                        ),
-                    ),
-                    row.extraction_method,
-                )
-
-    def _bridge_groups(
-        self,
-    ) -> dict[int, list[tuple[PassageToExtract, tuple[int, ...]]]]:
-        """Reads every bridge's passages and citations, in the order shown.
-
-        Held whole rather than streamed, and never narrowed: a bridge is one
-        call per topic group, so there are orders of magnitude fewer of these
-        than of facts, and a narrowing on the fact would drop the half of a
-        group that sits in another document.
-
-        Returns:
-            Per fact id, one (passage, cited sentence indices) per passage.
-            The indices are empty on a bridge drawn before prompt version 2,
-            which recorded none.
-        """
-        query = (
-            select(
-                FactPassage.fact_id,
                 FactPassage.sentence_ids,
                 *_PASSAGE_COLUMNS,
                 Document.language,
             )
-            .select_from(FactPassage)
+            .select_from(Fact)
+            .join(FactPassage, FactPassage.fact_id == Fact.id)
             .join(Passage, Passage.id == FactPassage.passage_id)
             .join(Document, Document.sha256 == Passage.doc_sha256)
-            .order_by(FactPassage.fact_id, FactPassage.position)
+            # One row per passage, consecutive per fact, so a fact is read off
+            # the run of rows carrying its id.
+            .order_by(Fact.id, FactPassage.position)
+            .execution_options(yield_per=_BATCH)
         )
+        if within is not None:
+            query = query.where(_resting(within))
 
-        groups: dict[int, list[tuple[PassageToExtract, tuple[int, ...]]]] = {}
         with self._session() as session:
-            for row in session.execute(query):
-                groups.setdefault(row.fact_id, []).append(
-                    (_passage(row, row.language), tuple(row.sentence_ids or ()))
+            for fact_id, found in groupby(
+                session.execute(query), key=lambda row: row.fact_id
+            ):
+                rows = list(found)
+                yield (
+                    fact_id,
+                    [_passage(row, row.language) for row in rows],
+                    CandidateFact(
+                        statement=rows[0].statement,
+                        sentences=tuple(rows[0].sentence_ids or ()),
+                        kind=rows[0].kind,
+                        passages=tuple(
+                            Cited(
+                                position=position,
+                                sentences=tuple(row.sentence_ids or ()),
+                            )
+                            for position, row in enumerate(rows)
+                        ),
+                    ),
+                    rows[0].extraction_method,
                 )
-        return groups
 
     def rejudge(self, verdicts: list[tuple[int, CheckedFact]]) -> int:
         """Writes back what the checks read, leaving what the model wrote.
 
         The statement, the kind, the method and the model's own provenance
-        are the record of one extraction and are never rewritten here.
+        are the record of one extraction and are never rewritten here. The
+        spans in fact_passages are: they are what the checks resolved, and a
+        fact keeping yesterday's offsets beside today's verdict cites text it
+        was not judged on.
 
         Args:
             verdicts: Each fact's id beside its new verdict.
@@ -441,9 +475,6 @@ class FactCatalog(Repository):
                     {
                         "row": fact_id,
                         "evidence_text": checked.evidence_text,
-                        "evidence_sentence_ids": checked.evidence_sentence_ids,
-                        "evidence_start": checked.evidence_start,
-                        "evidence_end": checked.evidence_end,
                         "validated": checked.validated,
                         "rejection_code": checked.rejection_code,
                         "validation_error": checked.validation_error,
@@ -458,17 +489,44 @@ class FactCatalog(Repository):
                     for fact_id, checked in verdicts
                 ],
             )
+            # Cleared first: a passage the checks no longer resolve against
+            # keeps no span, and its row is left saying so rather than saying
+            # what last year's parse found.
+            session.execute(
+                update(_LINKS)
+                .where(_LINKS.c.fact_id.in_([fact_id for fact_id, _ in verdicts]))
+                .values(sentence_ids=None, evidence_start=None, evidence_end=None)
+            )
+            spans = [
+                {
+                    "row": fact_id,
+                    "passage": cited.passage_id,
+                    "sentence_ids": cited.sentence_ids,
+                    "evidence_start": cited.start,
+                    "evidence_end": cited.end,
+                }
+                for fact_id, checked in verdicts
+                for cited in checked.citations
+            ]
+            if spans:
+                session.execute(
+                    update(_LINKS).where(
+                        _LINKS.c.fact_id == bindparam("row"),
+                        _LINKS.c.passage_id == bindparam("passage"),
+                    ),
+                    spans,
+                )
         return len(verdicts)
 
     def passages_of(self, fact_id: int) -> list[int]:
-        """The passages one bridge fact rests on, anchor first.
+        """The passages one fact rests on, in the order the model saw them.
 
         Args:
             fact_id: The fact to read.
 
         Returns:
-            Their ids in the order the model was shown them; empty for a
-            fact resting on its anchor alone.
+            Their ids; one for an atomic fact, a summary and an outline, two
+            or more for a bridge.
         """
         with self._session() as session:
             return list(
@@ -492,7 +550,7 @@ class FactCatalog(Repository):
         """Reads one page of facts and the total behind it.
 
         Args:
-            document: Only facts of this document's passages.
+            document: Only facts resting on a passage of this document.
             limit: How many rows to return.
             offset: How many to skip.
             search: Text to match, in the columns `field` names.
@@ -518,10 +576,6 @@ class FactCatalog(Repository):
                     Fact.evidence_predicates,
                     Fact.units_added,
                     Fact.unresolved_references,
-                    Fact.passage_id,
-                    Passage.doc_sha256,
-                    Passage.ordinal,
-                    Passage.page_from,
                 )
             ).order_by(Passage.doc_sha256, Passage.ordinal, Fact.id),
             document,
@@ -536,7 +590,29 @@ class FactCatalog(Repository):
         with self._session() as session:
             total = session.scalar(counting) or 0
             rows = session.execute(listing.limit(limit).offset(offset)).all()
-        return total, [StoredFact(**row._asdict()) for row in rows]
+            sources = self._sources(session, [row.id for row in rows])
+        return total, [
+            StoredFact(**row._asdict(), passages=sources.get(row.id, []))
+            for row in rows
+        ]
+
+    @staticmethod
+    def _sources(session, fact_ids: list[int]) -> dict[int, list[FactSource]]:
+        """Reads the passages one page of facts rests on, by fact id."""
+        if not fact_ids:
+            return {}
+        found: dict[int, list[FactSource]] = {}
+        for row in session.execute(_SOURCES.where(FactPassage.fact_id.in_(fact_ids))):
+            found.setdefault(row.fact_id, []).append(
+                FactSource(
+                    passage_id=row.passage_id,
+                    doc_sha256=row.doc_sha256,
+                    ordinal=row.ordinal,
+                    page_from=row.page_from,
+                    position=row.position,
+                )
+            )
+        return found
 
     def quality(
         self,
@@ -552,7 +628,7 @@ class FactCatalog(Repository):
         carrying a measurement gives one bucket per measurement.
 
         Args:
-            document: Only facts of this document's passages.
+            document: Only facts resting on a passage of this document.
             search: Text to match, in the columns `field` names.
             method: Only facts drawn this way.
             field: Which columns `search` looks in.
@@ -566,7 +642,7 @@ class FactCatalog(Repository):
                 select(
                     func.count().label("total"),
                     func.count().filter(Fact.validated).label("validated"),
-                    func.count(func.distinct(Fact.passage_id)).label("passages"),
+                    func.count(func.distinct(_OPENS.passage_id)).label("passages"),
                     func.coalesce(func.avg(func.length(Fact.statement)), 0.0).label(
                         "statement_chars"
                     ),

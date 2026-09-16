@@ -78,15 +78,17 @@ class Citation:
 
     Attributes:
         passage_id: The passage.
-        sentence_ids: Which of its sentences, in order.
-        start: Offset of the span in that passage's text.
-        end: Offset one past its last character.
+        sentence_ids: Which of its sentences, in order, or None when the
+            claim named no sentence this passage has.
+        start: Offset of the span in that passage's text, or None with the
+            sentences.
+        end: Offset one past its last character, or None with the sentences.
     """
 
     passage_id: int
-    sentence_ids: list[int]
-    start: int
-    end: int
+    sentence_ids: list[int] | None = None
+    start: int | None = None
+    end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -113,20 +115,17 @@ class CheckedFact:
     """A checked fact, ready for the facts table.
 
     Attributes:
-        passage_id: The passage it is anchored to.
         statement: What the extractor wrote.
-        evidence_text: The cited passage text, resolved from the citation.
-        evidence_sentence_ids: Which sentences of the anchor that was.
-        evidence_start: Offset of the evidence in the anchor's text.
-        evidence_end: Offset one past its last character.
+        evidence_text: Every cited span, joined in the order below.
         extraction_method: llm or deterministic.
         validated: Whether every check its kind faces passed.
         rejection_code: Which one did not, or None.
         validation_error: That failure in words, or None.
         kind: atomic, summary, outline or bridge.
-        citations: What a bridge rests on, one entry per passage it cites,
-            anchor first. Empty on every other kind, which rests on the
-            anchor alone and carries its span in the columns above.
+        citations: Every passage it rests on and where in each, in the order
+            the model was shown them. One entry for an atomic fact, a summary
+            and an outline, two or more for a bridge. A refused fact carries
+            the passages it was read from with no span.
         statement_predicates: Finite verbs in the statement.
         evidence_predicates: Finite verbs across the cited sentences.
         units_statement: The numbers and proper nouns the statement asserts.
@@ -139,12 +138,8 @@ class CheckedFact:
         spacy_version: That pipeline's version.
     """
 
-    passage_id: int
     statement: str
     evidence_text: str
-    evidence_sentence_ids: list[int]
-    evidence_start: int
-    evidence_end: int
     extraction_method: str
     validated: bool
     rejection_code: str | None
@@ -164,6 +159,25 @@ class CheckedFact:
 
 
 @dataclass(frozen=True)
+class FactSource:
+    """One passage a stored fact rests on, and where that passage sits.
+
+    Attributes:
+        passage_id: The passage.
+        doc_sha256: Its document.
+        ordinal: Its position in that document, in reading order.
+        page_from: The page it starts on, or None.
+        position: Where it sat in what the model was shown, from 0.
+    """
+
+    passage_id: int
+    doc_sha256: str
+    ordinal: int
+    page_from: int | None
+    position: int
+
+
+@dataclass(frozen=True)
 class StoredFact:
     """One fact as it is read back out, with where it came from.
 
@@ -180,10 +194,7 @@ class StoredFact:
         evidence_predicates: Finite verbs across the cited sentences.
         units_added: Units the evidence does not carry.
         unresolved_references: Pronouns pointing outside the statement.
-        passage_id: The passage it is anchored to.
-        doc_sha256: That passage's document.
-        ordinal: That passage's position in it.
-        page_from: The page it starts on, or None.
+        passages: Every passage it rests on, in position order.
     """
 
     id: int
@@ -198,10 +209,7 @@ class StoredFact:
     evidence_predicates: int
     units_added: list[str]
     unresolved_references: list[str]
-    passage_id: int
-    doc_sha256: str
-    ordinal: int
-    page_from: int | None
+    passages: list[FactSource] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

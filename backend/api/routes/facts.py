@@ -31,7 +31,7 @@ class FactPage:
 
 @dataclass(frozen=True)
 class FactSources:
-    """The passages one fact rests on."""
+    """The passages one fact rests on, as their ids alone."""
 
     fact: int
     passages: list[int]
@@ -71,9 +71,8 @@ def quality(
 
 @router.get("/facts/{fact_id}/passages")
 def passages(fact_id: int) -> FactSources:
-    """Lists the passages a bridge fact rests on, anchor first.
+    """Lists the passages one fact rests on, in the order the model saw them.
 
-    Empty for every other kind, which rests on the one passage the listing
-    already names.
+    The same passages /facts carries on every row, addressable on their own.
     """
     return FactSources(fact=fact_id, passages=fact_catalog.passages_of(fact_id))

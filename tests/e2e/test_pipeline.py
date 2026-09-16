@@ -342,20 +342,36 @@ def test_a_document_becomes_facts(pipeline, engine) -> None:
 
 
 def test_every_stored_fact_cites_a_sentence_of_its_passage(pipeline, engine) -> None:
-    """The citation is an index, so it has to index something."""
+    """The citation is an index, so it has to index something.
+
+    One assertion per link row rather than one per fact: a claim resting on
+    two passages has to resolve in both, and the joined spans have to be the
+    evidence the search index holds.
+    """
     _run(pipeline)
 
     with engine.connect() as connection:
         rows = connection.execute(
             text(
-                "SELECT f.evidence_text, p.text, f.evidence_start, f.evidence_end "
-                "FROM facts f JOIN passages p ON p.id = f.passage_id"
+                "SELECT fp.fact_id, f.evidence_text, "
+                "substring(p.text FROM fp.evidence_start + 1 "
+                "          FOR fp.evidence_end - fp.evidence_start) AS cited "
+                "FROM fact_passages fp "
+                "JOIN facts f ON f.id = fp.fact_id "
+                "JOIN passages p ON p.id = fp.passage_id "
+                "WHERE fp.sentence_ids IS NOT NULL "
+                "ORDER BY fp.fact_id, fp.position"
             )
         ).all()
 
     assert rows
-    for evidence, passage, start, end in rows:
-        assert passage[start:end] == evidence
+    joined: dict[int, list[str]] = {}
+    evidence: dict[int, str] = {}
+    for fact_id, stored, cited in rows:
+        joined.setdefault(fact_id, []).append(cited)
+        evidence[fact_id] = stored
+    for fact_id, spans in joined.items():
+        assert "\n".join(spans) == evidence[fact_id]
 
 
 def test_the_model_is_asked_once_per_passage_that_carries_a_claim(
@@ -457,7 +473,7 @@ def test_the_digest_survives_every_stage(pipeline, engine) -> None:
             connection.execute(
                 text(
                     "SELECT DISTINCT p.doc_sha256 FROM passages p "
-                    "JOIN facts f ON f.passage_id = p.id"
+                    "JOIN fact_passages fp ON fp.passage_id = p.id"
                 )
             )
             .scalars()
@@ -510,8 +526,10 @@ def test_every_question_can_be_traced_back_to_a_passage(pipeline, engine) -> Non
         orphans = connection.execute(
             text(
                 "SELECT count(*) FROM questions q WHERE NOT EXISTS ("
-                "  SELECT 1 FROM question_facts qf JOIN facts f ON f.id = qf.fact_id "
-                "  JOIN passages p ON p.id = f.passage_id WHERE qf.question_id = q.id)"
+                "  SELECT 1 FROM question_facts qf "
+                "  JOIN fact_passages fp ON fp.fact_id = qf.fact_id "
+                "  JOIN passages p ON p.id = fp.passage_id "
+                "  WHERE qf.question_id = q.id)"
             )
         ).scalar_one()
 

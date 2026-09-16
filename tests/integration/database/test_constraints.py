@@ -128,13 +128,13 @@ def test_the_same_ordinal_in_another_document_is_fine(session) -> None:
 
 
 def test_a_fact_whose_evidence_ends_before_it_starts_is_refused(session) -> None:
-    """The span is a slice of the passage text."""
+    """The span is a slice of the passage text, and lives on the link row."""
     stored(session, document())
     row = stored(session, passage(digest()))
     refuses(
         session,
         fact(row.id, evidence_start=50, evidence_end=10),
-        "facts_evidence_span_ordered",
+        "fact_passages_citation_complete",
     )
 
 

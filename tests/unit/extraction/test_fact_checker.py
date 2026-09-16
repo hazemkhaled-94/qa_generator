@@ -10,9 +10,15 @@ import pytest
 from drivers import Checker, group, passage
 
 from database.qa_generator import FactKind, Rejection
-from extraction.models import CandidateFact, Cited
+from extraction.models import CandidateFact, Citation, Cited
 
 pytestmark = pytest.mark.nlp
+
+
+def only(fact) -> Citation:
+    """The one citation a fact resting on a single passage carries."""
+    (one,) = fact.citations
+    return one
 
 
 @pytest.fixture(scope="module")
@@ -27,13 +33,13 @@ def test_one_claim_drawn_from_its_sentence_is_accepted(checker) -> None:
 
     assert good.validated, (good.rejection_code, good.validation_error)
     assert good.evidence_text == "The device weighs 4 kg and runs for 12 hours."
-    assert good.evidence_sentence_ids == [0]
+    assert only(good).sentence_ids == [0]
     assert good.statement_predicates == 1
     assert good.evidence_predicates == 2, "the cited sentence carries two claims"
     assert not good.units_added, good.units_added
     assert good.rejection_code is None and good.validation_error is None
     assert good.kind == FactKind.ATOMIC
-    assert good.citations == [], "a single-passage fact records no group"
+    assert only(good).passage_id == checker.passage.id
 
 
 def test_the_source_own_words_are_accepted_when_they_narrow_the_claim(checker) -> None:
@@ -178,15 +184,15 @@ def test_two_cited_sentences_span_from_the_first_to_the_last(checker) -> None:
     """The evidence runs from the start of the first to the end of the last."""
     joined = checker.atomic("The device arrives in March 2026.", (0, 1))
 
-    assert joined.evidence_sentence_ids == [0, 1]
-    assert joined.evidence_start == 0
-    assert joined.evidence_end == len(checker.passage.text)
+    assert only(joined).sentence_ids == [0, 1]
+    assert only(joined).start == 0
+    assert only(joined).end == len(checker.passage.text)
 
 
 def test_a_citation_naming_one_sentence_twice_resolves_once(checker) -> None:
     """A repeated index is one sentence, not a span of two."""
     repeated = checker.atomic("The device weighs 4 kg.", (0, 0))
-    assert repeated.evidence_sentence_ids == [0]
+    assert only(repeated).sentence_ids == [0]
 
 
 def test_a_deterministic_statement_is_judged_on_its_citation_alone(checker) -> None:
@@ -218,7 +224,7 @@ class TestDigest:
         assert made.validated, (made.rejection_code, made.validation_error)
         assert made.kind == FactKind.SUMMARY
         assert made.evidence_text == checker.passage.text
-        assert made.evidence_sentence_ids == [0, 1], "a digest cites the whole passage"
+        assert only(made).sentence_ids == [0, 1], "a digest cites its whole passage"
 
     def test_a_condensed_outline_of_the_passage_is_accepted(self, checker) -> None:
         """Two points, shorter than the passage, inventing nothing."""
@@ -314,7 +320,7 @@ class TestBridge:
     def test_a_claim_resting_on_both_passages_is_accepted(
         self, checker, offered
     ) -> None:
-        """It records every passage it rests on, anchored to the first."""
+        """It records every passage it rests on, in the order shown."""
         bridged = checker.bridge(
             "Support response times are stated separately for standard and "
             "urgent requests.",
@@ -324,17 +330,14 @@ class TestBridge:
         assert bridged.validated, (bridged.rejection_code, bridged.validation_error)
         assert bridged.kind == FactKind.BRIDGE
         assert [one.passage_id for one in bridged.citations] == [11, 22]
-        assert bridged.passage_id == 11, "the anchor is the first passage offered"
 
-    def test_the_anchor_evidence_is_the_span_it_cited(self, checker, offered) -> None:
-        """So the span resolves in the passage the fact points at."""
+    def test_the_evidence_is_every_span_it_cited(self, checker, offered) -> None:
+        """One line per passage, in the order the model was shown them."""
         bridged = checker.bridge("Two request kinds are named.", offered)
 
-        cited = offered[0].sentences[0]
-        assert bridged.evidence_start == cited.start
-        assert bridged.evidence_end == cited.end
-        assert offered[0].text[bridged.evidence_start : bridged.evidence_end] == (
-            bridged.evidence_text
+        by_id = {one.id: one for one in offered}
+        assert bridged.evidence_text == "\n".join(
+            by_id[one.passage_id].text[one.start : one.end] for one in bridged.citations
         )
 
     def test_every_citation_resolves_in_the_passage_it_names(
@@ -368,7 +371,9 @@ class TestBridge:
         )
 
         assert [one.sentence_ids for one in bridged.citations] == [[0], [0]]
-        assert bridged.evidence_text == two[0].sentences[0].text
+        assert bridged.evidence_text == (
+            f"{two[0].sentences[0].text}\n{two[1].sentences[0].text}"
+        )
 
     def test_a_claim_citing_a_sentence_one_passage_lacks_rests_on_the_other(
         self, checker, offered
@@ -397,7 +402,10 @@ class TestBridge:
         """Nothing resolves, so nothing supports it."""
         nowhere = checker.bridge("Anything at all happens.", offered, rests_on=named)
         assert nowhere.rejection_code == Rejection.EVIDENCE_ABSENT
-        assert nowhere.citations == []
+        assert [one.passage_id for one in nowhere.citations] == [11, 22], (
+            "the group it was read from, with no span in any of it"
+        )
+        assert not any(one.sentence_ids for one in nowhere.citations)
 
     def test_a_unit_from_the_second_passage_is_supported(
         self, checker, offered
