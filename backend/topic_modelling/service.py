@@ -108,20 +108,25 @@ class TopicModellingService(StageService):
 
         fittings: list[Fitting] = []
         for language in languages:
-            try:
-                fitting = self._fitter.fit(
-                    lambda language=language: self._repository.passages(language),
-                    language,
+            # A span per language, not one for the lot: each is a separate
+            # factorisation over its own vocabulary and then one model call
+            # per topic to name it, which is minutes. Under one span a fit
+            # that was slow in German reads as a fit that was slow.
+            with working(span, "fit_language", {"topic_fit.language": language}):
+                try:
+                    fitting = self._fitter.fit(
+                        lambda language=language: self._repository.passages(language),
+                        language,
+                    )
+                except NoVocabulary as exc:
+                    log.warning("no %s model: %s", language, exc)
+                    continue
+                carried = carry_labels(
+                    fitting.topics, self._repository.labelled_topics(language)
                 )
-            except NoVocabulary as exc:
-                log.warning("no %s model: %s", language, exc)
-                continue
-            carried = carry_labels(
-                fitting.topics, self._repository.labelled_topics(language)
-            )
-            fittings.append(
-                replace(fitting, topics=self._named(carried, fitting, language))
-            )
+                fittings.append(
+                    replace(fitting, topics=self._named(carried, fitting, language))
+                )
 
         if not fittings:
             raise NoVocabulary(

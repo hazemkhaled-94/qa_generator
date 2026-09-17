@@ -21,10 +21,16 @@ log = logging.getLogger(__name__)
 
 #: Applied only for libraries the process has, so one call serves every
 #: process. SQLAlchemy and FastAPI are separate: both attach to an instance.
+#:
+#: litellm is deliberately not here; see :func:`instrument_llm`.
 _INSTRUMENTORS = (
     ("opentelemetry.instrumentation.requests", "RequestsInstrumentor"),
     ("opentelemetry.instrumentation.botocore", "BotocoreInstrumentor"),
 )
+
+#: Whether the model client has been instrumented in this process. The
+#: instrumentor warns when applied twice, and two stages build two clients.
+_llm_instrumented = False
 
 
 def configure(service_name: str) -> None:
@@ -64,6 +70,45 @@ def _instrument() -> None:
             getattr(module, class_name)().instrument()
         except Exception as exc:  # noqa: BLE001
             log.warning("could not instrument %s: %s", class_name, exc)
+
+
+def instrument_llm() -> None:
+    """Records every model call as a span carrying its prompt and its cost.
+
+    Called by the module that builds the client rather than by
+    :func:`configure`, and that is the whole reason this is a function of
+    its own. Importing the instrumentor imports litellm, `configure` runs
+    in every process, and the api is sized to serve JSON and deliberately
+    loads neither it nor anything else that holds a model. Putting it in
+    `_INSTRUMENTORS` would have loaded litellm into the api at start-up,
+    and `tests/static/test_api_stays_light.py` would not have caught it:
+    that reads imports as syntax, and the one there is a dynamic string.
+
+    Does nothing the second time. Applies once per process; question
+    generation builds two clients, a writer and a verifier, and the
+    instrumentor warns when applied to a library already instrumented.
+    """
+    global _llm_instrumented
+    if _llm_instrumented:
+        return
+    try:
+        from openinference.instrumentation.litellm import LiteLLMInstrumentor
+    except ImportError:
+        # Warned rather than passed over in silence, unlike the optional
+        # instrumentors above: a worker missing this still calls the model
+        # and still works, and the only symptom is that the spans it was
+        # meant to produce are the ones nobody notices are absent.
+        log.warning(
+            "openinference-instrumentation-litellm is not installed, so model "
+            "calls are timed in the logs but carry no prompt or token counts"
+        )
+        return
+    try:
+        LiteLLMInstrumentor().instrument()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not instrument the model client: %s", exc)
+        return
+    _llm_instrumented = True
 
 
 def tracer(name: str) -> trace.Tracer:

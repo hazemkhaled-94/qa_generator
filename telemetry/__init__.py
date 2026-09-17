@@ -25,9 +25,17 @@ from opentelemetry import trace
 
 from telemetry import logs, traces
 from telemetry.logs import bind
-from telemetry.traces import trace_app, trace_engine, tracer
+from telemetry.traces import instrument_llm, trace_app, trace_engine, tracer
 
-__all__ = ["bind", "configure", "trace_app", "trace_engine", "tracer", "working"]
+__all__ = [
+    "bind",
+    "configure",
+    "instrument_llm",
+    "trace_app",
+    "trace_engine",
+    "tracer",
+    "working",
+]
 
 
 @contextmanager

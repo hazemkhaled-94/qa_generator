@@ -20,6 +20,7 @@ from tenacity import (
     wait_exponential,
 )
 
+import telemetry
 from llm.config import Settings
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ class Client:
 
     def __init__(self, settings: Settings) -> None:
         """Builds the client and the retry policy around one call."""
+        # Here rather than in telemetry.configure, which the api runs too:
+        # the instrumentor imports litellm, and this module is the one that
+        # already has. Idempotent, and two stages build two clients.
+        telemetry.instrument_llm()
         self._settings = settings
         # Any: instructor replaces create() at run time, so a checker would
         # match these keywords against the unpatched signature.

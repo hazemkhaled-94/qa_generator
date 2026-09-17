@@ -22,14 +22,14 @@
 #
 # torch and torchvision are +cpu builds; they resolve only from
 # https://download.pytorch.org/whl/cpu.
-Faker==40.38.0
+Faker==40.39.0
 Jinja2==3.1.6
 Mako==1.4.1
 MarkupSafe==3.0.3
 PyYAML==6.0.3
 Pygments==2.21.0
 RapidFuzz==3.14.6
-SQLAlchemy==2.0.52
+SQLAlchemy==2.0.54
 accelerate==1.15.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
@@ -43,8 +43,8 @@ asgiref==3.12.1
 attrs==26.1.0
 beautifulsoup4==4.15.0
 blis==1.3.3
-boto3==1.43.93
-botocore==1.43.93
+boto3==1.43.96
+botocore==1.43.96
 catalogue==2.0.10
 certifi==2026.7.22
 charset-normalizer==3.5.1
@@ -58,11 +58,11 @@ defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
 doclang==0.7.3
-docling-core==2.96.0
+docling-core==2.97.0
 docling-ibm-models==4.0.2
-docling-parse==7.19.1
-docling-slim==2.126.0
-docling==2.126.0
+docling-parse==7.20.0
+docling-slim==2.128.0
+docling==2.128.0
 docstring_parser==0.18.0
 et_xmlfile==2.0.0
 fastapi==0.141.1
@@ -74,14 +74,14 @@ fsspec==2026.7.0
 funcy==2.1
 gensim==4.4.0
 googleapis-common-protos==1.75.3
-greenlet==3.5.5
-grpcio==1.83.1
+greenlet==3.5.6
+grpcio==1.84.0
 h11==0.16.0
 hf-xet==1.6.0
 httpcore==1.0.9
 httptools==0.8.0
 httpx==0.28.1
-huggingface_hub==1.31.0
+huggingface_hub==1.32.0
 idna==3.19
 importlib_metadata==8.9.0
 instructor==1.17.0
@@ -91,9 +91,10 @@ joblib==1.6.0
 jsonref==1.1.0
 jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
+langcodes==3.5.1
 latex2mathml==3.81.1
 lingua-language-detector==2.2.0
-litellm==1.100.1
+litellm==1.101.0
 lxml==6.1.3
 mail-parser==4.6.5
 markdown-it-py==4.2.0
@@ -112,6 +113,9 @@ olefile==0.47
 omegaconf==2.3.1
 openai==2.54.0
 opencv-python==5.0.0.93
+openinference-instrumentation-litellm==0.1.45
+openinference-instrumentation==0.1.65
+openinference-semantic-conventions==0.1.38
 openpyxl==3.1.5
 opentelemetry-api==1.44.0
 opentelemetry-exporter-otlp-proto-common==1.44.0
@@ -134,7 +138,7 @@ pillow==12.3.0
 pluggy==1.6.0
 polyfactory==3.3.0
 preshed==3.0.13
-propcache==0.5.2
+propcache==0.5.4
 protobuf==7.36.1
 psutil==7.2.2
 psycopg-binary==3.3.5
@@ -181,7 +185,7 @@ sympy==1.14.0
 tabulate==0.10.0
 tenacity==9.1.4
 thinc==8.3.13
-threadpoolctl==3.6.0
+threadpoolctl==3.7.0
 tiktoken==0.14.0
 tokenizers==0.23.2
 torch==2.14.0+cpu
@@ -196,8 +200,8 @@ tree-sitter==0.26.0
 typer==0.26.8
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-urllib3==2.7.0
-uvicorn==0.52.4
+urllib3==2.8.0
+uvicorn==0.53.0
 uvloop==0.22.1
 wasabi==1.1.3
 watchfiles==1.2.0
@@ -205,5 +209,5 @@ weasel==1.0.0
 websockets==16.1.1
 wrapt==2.4.1
 xlsxwriter==3.2.9
-yarl==1.24.5
+yarl==1.25.1
 zipp==4.1.0

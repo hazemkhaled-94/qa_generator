@@ -36,3 +36,7 @@ opentelemetry-instrumentation-fastapi>=0.65b0
 opentelemetry-instrumentation-sqlalchemy>=0.65b0
 opentelemetry-instrumentation-requests>=0.65b0
 opentelemetry-instrumentation-botocore>=0.65b0
+# Every model call as a span carrying its prompt, completion and tokens.
+# Imported by llm/client.py, which already imports litellm, and not by
+# telemetry: the api runs telemetry too and must load neither.
+openinference-instrumentation-litellm>=0.1.45,<0.2.0
