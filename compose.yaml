@@ -122,11 +122,16 @@ x-worker: &worker
 # URL and no object store credentials - a process that cannot reach the app
 # tables cannot quietly grow a second way of moving a row.
 x-dagster: &dagster
-  image: qa-generator:latest
+  # Its own image, not the backend one. That image carries torch, spaCy,
+  # Docling and litellm because some process in it needs each; this one
+  # makes HTTP calls and needs none of them.
+  image: qa_generator-orchestration:latest
+  build:
+    context: .
+    dockerfile: orchestration/Dockerfile
   profiles: ["orchestration"]
   restart: unless-stopped
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
+  env_file: [configs/env/orchestration.env]
   environment:
     TZ: UTC
     DAGSTER_HOME: /opt/dagster/dagster_home
@@ -137,6 +142,8 @@ x-dagster: &dagster
     # reads both through `env:`, so one file serves this and `dagster dev`.
     DAGSTER_DB_HOST: postgres
     DAGSTER_DB_PORT: 5432
+    # The only thing it talks to. The compose service name, not localhost.
+    BACKEND_URL: ${BACKEND_URL}
     LOG_LEVEL: ${LOG_LEVEL}
     LOG_DIR: /var/log/qa
     OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
@@ -145,10 +152,15 @@ x-dagster: &dagster
     - dagster_home:/opt/dagster/dagster_home
     - ./configs/dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
     - ./configs/dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
+    - ./orchestration:/opt/dagster/app/orchestration:ro
     - ./telemetry:/shared/telemetry:ro
     - logs:/var/log/qa
   depends_on:
     postgres: { condition: service_healthy }
+    # Healthy, not started: the code location calls the stage routes as
+    # soon as a sensor ticks, and a sensor that starts before the api can
+    # answer reports a connection refused as if the pipeline were broken.
+    api:      { condition: service_healthy }
   networks: [global]
   logging: *logging
 
@@ -543,16 +555,26 @@ services:
       resources:
         limits: { cpus: "0.5", memory: 1G }
 
+  # The asset graph and the run history. Reading it changes nothing: the
+  # schedule and the sensor are both stopped until somebody switches them on.
   dagster-webserver:
     <<: *dagster
-    command: dagster-webserver -h 0.0.0.0 -p 3000
+    command: dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/dagster_home/workspace.yaml
     ports:
       - "${DAGSTER_WEBSERVER_PORT}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request as u; u.urlopen(\"http://localhost:3000/server_info\", timeout=3)' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks: [global]
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 512M }
 
+  # What actually ticks the schedule and the sensor. Without it the UI
+  # shows both and neither ever fires.
   dagster-daemon:
     <<: *dagster
     command: dagster-daemon run

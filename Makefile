@@ -53,7 +53,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
-        certs dagster-dev
+        certs dagster-dev orchestration orchestration-down orchestration-logs
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -638,14 +638,35 @@ certs:
 
 # ── Pipeline ───────────────────────────────────────────────────────────────
 
-# Runs the Dagster UI and daemon on the host against the containerised
-# PostgreSQL. Requires a code location in configs/dagster/workspace.yaml.
+# The orchestrator decides when a stage should run; it never runs one. It
+# posts to the stage routes and polls /status, which is the same surface
+# the Start button and the targets above use, so nothing here can move a
+# row in a way they could not.
 #
-# The database address is given here rather than in .env because it is the
-# only thing about this that is not what the containers use: they reach
-# postgres over the compose network, and this reaches the published port.
-# configs/dagster/dagster.yaml reads both from the environment.
+# Both services are behind the `orchestration` profile, so `make up` does
+# not start them: a pipeline driven by hand should not pay for two more
+# containers, and the schedule and the sensor ship stopped regardless.
+
+# Start the Dagster webserver and daemon.
+orchestration:
+	$(COMPOSE) --profile orchestration up -d --build
+	@$(LOADENV) && echo "Dagster UI: http://localhost:$$DAGSTER_WEBSERVER_PORT"
+
+orchestration-down:
+	$(COMPOSE) --profile orchestration down
+
+orchestration-logs:
+	$(COMPOSE) --profile orchestration logs -f dagster-webserver dagster-daemon
+
+# Runs the UI and the daemon on the host instead, against the
+# containerised PostgreSQL and the containerised api.
+#
+# Two things differ from the containers and are given here rather than in
+# .env, because .env holds what both use. The database is reached on its
+# published port rather than over the compose network, and the api is too.
 dagster-dev:
-	$(LOADENV) && DAGSTER_HOME=$$PWD/configs/dagster \
+	$(LOADENV) && . ./configs/env/orchestration.env && \
+	  DAGSTER_HOME=$$PWD/configs/dagster \
 	  DAGSTER_DB_HOST=localhost DAGSTER_DB_PORT=$$POSTGRES_PORT \
-	  dagster dev
+	  BACKEND_URL=http://localhost:$$BACKEND_PORT \
+	  poetry run dagster dev

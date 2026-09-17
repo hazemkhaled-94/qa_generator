@@ -1,11 +1,16 @@
-# Dagster workspace — defines code locations (Python packages with assets/jobs).
+# Dagster workspace — the code locations, which are the Python packages
+# holding the assets, jobs, schedules and sensors.
 # Mounted read-only into DAGSTER_HOME in compose.yaml.
 #
-# Add entries here once the pipeline package exists. Example:
+# One location. `orchestration` is a top-level package beside `telemetry`,
+# on PYTHONPATH in the image and at the repository root for
+# `make dagster-dev`, so the same line serves both.
 #
-#   load_from:
-#     - python_package:
-#         package_name: qa_generator.pipeline
-#         location_name: qa_generator
+# python_module rather than python_package: the project is not installed
+# (package-mode = false in pyproject.toml), so there is no distribution for
+# Dagster to look up by name.
 
-load_from: []
+load_from:
+  - python_module:
+      module_name: orchestration
+      location_name: qa_generator

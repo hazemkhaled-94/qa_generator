@@ -1,0 +1,18 @@
+# The orchestrator's image. Deliberately short: this process decides when a
+# stage should run and never runs one, so it holds no model, no converter
+# and no database driver beyond the one Dagster keeps its own runs in.
+#
+# Kept in step with the `pipeline` and `observability` groups in
+# pyproject.toml, which is what `make dagster-dev` installs to run the same
+# code location on the host.
+dagster>=1.13.19,<2.0.0
+dagster-webserver>=1.13.19,<2.0.0
+dagster-postgres>=0.29.19,<1.0.0
+# The stage routes, which are the only thing this talks to.
+requests>=2.32.5,<3.0.0
+# The shared telemetry package, mounted at /shared, imports these. Logging
+# and tracing configured the same way as every other process, so the
+# orchestrator's lines land in the same index under the same field names.
+opentelemetry-sdk>=1.44.0,<2.0.0
+opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0
+opentelemetry-instrumentation-requests>=0.65b0

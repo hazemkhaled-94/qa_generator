@@ -22,12 +22,16 @@ ROOT = Path(__file__).resolve().parents[2]
 #: The readers in backend/settings/env.py, by name.
 READERS = frozenset({"required", "optional", "integer", "decimal", "boolean", "csv"})
 
-#: Where a setting may be declared. Tuning in the first, credentials, ports
-#: and addresses in the second.
-DECLARING = ("configs/env/backend.env", ".env.example")
+#: Where a setting may be declared. Tuning in the first two, credentials,
+#: ports and addresses in the last.
+DECLARING = (
+    "configs/env/backend.env",
+    "configs/env/orchestration.env",
+    ".env.example",
+)
 
 #: Directories holding the code that runs in a container.
-SOURCES = ("backend", "frontend", "telemetry")
+SOURCES = ("backend", "frontend", "telemetry", "orchestration")
 
 #: A declaration, commented out or not: an optional setting is documented by
 #: a commented line rather than by a value.
