@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settings import boolean, decimal, integer, optional, required
+from settings import Source, boolean, decimal, integer, optional, required
 
 
 @dataclass(frozen=True)
@@ -31,8 +31,11 @@ class Settings:
     artifacts_path: str | None
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads the settings from the environment.
+    def load(cls, source: Source = None) -> Settings:
+        """Reads the settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
 
         Returns:
             The loaded settings.
@@ -42,10 +45,10 @@ class Settings:
             ValueError: If a numeric setting is not a number.
         """
         return cls(
-            ocr_char_threshold=integer("PARSING_OCR_CHAR_THRESHOLD"),
-            min_confidence=decimal("PARSING_MIN_CONFIDENCE"),
-            table_mode=required("PARSING_TABLE_MODE"),
-            heading_hierarchy=boolean("PARSING_HEADING_HIERARCHY"),
-            document_timeout_seconds=decimal("PARSING_TIMEOUT_SECONDS"),
-            artifacts_path=optional("DOCLING_ARTIFACTS_PATH"),
+            ocr_char_threshold=integer("PARSING_OCR_CHAR_THRESHOLD", source),
+            min_confidence=decimal("PARSING_MIN_CONFIDENCE", source),
+            table_mode=required("PARSING_TABLE_MODE", source),
+            heading_hierarchy=boolean("PARSING_HEADING_HIERARCHY", source),
+            document_timeout_seconds=decimal("PARSING_TIMEOUT_SECONDS", source),
+            artifacts_path=optional("DOCLING_ARTIFACTS_PATH", source),
         )

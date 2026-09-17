@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settings import csv, integer, required
+from settings import Source, csv, integer, required
 
 
 @dataclass(frozen=True)
@@ -27,8 +27,11 @@ class Settings:
         return self.max_file_size_mb * 1024 * 1024
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads the settings from the environment.
+    def load(cls, source: Source = None) -> Settings:
+        """Reads the settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
 
         Returns:
             The loaded settings.
@@ -38,7 +41,7 @@ class Settings:
             ValueError: If MAX_FILE_SIZE_MB is not an integer.
         """
         return cls(
-            pipeline_version=required("PIPELINE_VERSION"),
-            max_file_size_mb=integer("MAX_FILE_SIZE_MB"),
-            allowed_mime_types=csv("ALLOWED_MIME_TYPES"),
+            pipeline_version=required("PIPELINE_VERSION", source),
+            max_file_size_mb=integer("MAX_FILE_SIZE_MB", source),
+            allowed_mime_types=csv("ALLOWED_MIME_TYPES", source),
         )

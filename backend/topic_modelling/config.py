@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import llm.config
-from settings import csv, decimal, integer, optional
+from settings import Source, csv, decimal, integer, optional
 
 
 @dataclass(frozen=True)
@@ -29,17 +29,25 @@ class Settings:
     no_above: float
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads settings from the environment."""
+    def load(cls, source: Source = None) -> Settings:
+        """Reads settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
+        """
         return cls(
-            model=llm.config.Settings.load() if optional("LLM_MODEL") else None,
-            languages=dict(pair.split(":", 1) for pair in csv("TOPIC_LANGUAGE_NAMES")),
-            num_topics=integer("TOPIC_NUM_TOPICS"),
-            passages_per_topic=integer("TOPIC_PASSAGES_PER_TOPIC"),
-            passes=integer("TOPIC_PASSES"),
-            random_state=integer("TOPIC_RANDOM_STATE"),
-            top_terms=integer("TOPIC_TOP_TERMS"),
-            min_weight=decimal("TOPIC_MIN_WEIGHT"),
-            no_below=integer("TOPIC_NO_BELOW"),
-            no_above=decimal("TOPIC_NO_ABOVE"),
+            model=llm.config.Settings.load(source)
+            if optional("LLM_MODEL", source)
+            else None,
+            languages=dict(
+                pair.split(":", 1) for pair in csv("TOPIC_LANGUAGE_NAMES", source)
+            ),
+            num_topics=integer("TOPIC_NUM_TOPICS", source),
+            passages_per_topic=integer("TOPIC_PASSAGES_PER_TOPIC", source),
+            passes=integer("TOPIC_PASSES", source),
+            random_state=integer("TOPIC_RANDOM_STATE", source),
+            top_terms=integer("TOPIC_TOP_TERMS", source),
+            min_weight=decimal("TOPIC_MIN_WEIGHT", source),
+            no_below=integer("TOPIC_NO_BELOW", source),
+            no_above=decimal("TOPIC_NO_ABOVE", source),
         )

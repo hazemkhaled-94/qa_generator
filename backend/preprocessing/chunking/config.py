@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settings import boolean, integer, required
+from settings import Source, boolean, integer, required
 
 
 @dataclass(frozen=True)
@@ -23,8 +23,11 @@ class Settings:
     merge_peers: bool
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads the settings from the environment.
+    def load(cls, source: Source = None) -> Settings:
+        """Reads the settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
 
         Returns:
             The loaded settings.
@@ -34,7 +37,7 @@ class Settings:
             ValueError: If a numeric setting is not a number.
         """
         return cls(
-            embedding_model=required("EMBEDDING_MODEL"),
-            max_tokens=integer("EMBEDDING_MAX_TOKENS"),
-            merge_peers=boolean("CHUNKING_MERGE_PEERS"),
+            embedding_model=required("EMBEDDING_MODEL", source),
+            max_tokens=integer("EMBEDDING_MAX_TOKENS", source),
+            merge_peers=boolean("CHUNKING_MERGE_PEERS", source),
         )

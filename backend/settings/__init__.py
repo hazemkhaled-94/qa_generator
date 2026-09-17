@@ -1,6 +1,7 @@
-"""Configuration, read from the environment and nowhere else."""
+"""Configuration, read from the environment and from an override over it."""
 
 from settings.env import (
+    Source,
     boolean,
     csv,
     decimal,
@@ -11,6 +12,7 @@ from settings.env import (
 )
 
 __all__ = [
+    "Source",
     "boolean",
     "csv",
     "decimal",

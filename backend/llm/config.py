@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 
-from settings import decimal, integer, optional, required
+from settings import Source, decimal, integer, optional, required
 
 
 @dataclass(frozen=True)
@@ -44,15 +44,21 @@ class Settings:
         return timedelta(seconds=self.timeout_seconds * self.max_attempts * 2)
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads settings from the environment."""
+    def load(cls, source: Source = None) -> Settings:
+        """Reads settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
+        """
         return cls(
-            model=required("LLM_MODEL"),
-            base_url=optional("LLM_BASE_URL"),
-            structured_mode=required("LLM_STRUCTURED_MODE"),
-            temperature=decimal("LLM_TEMPERATURE"),
-            timeout_seconds=decimal("LLM_TIMEOUT_SECONDS"),
-            max_attempts=integer("LLM_MAX_ATTEMPTS"),
-            num_ctx=int(window) if (window := optional("LLM_NUM_CTX")) else None,
-            reasoning_effort=optional("LLM_REASONING_EFFORT"),
+            model=required("LLM_MODEL", source),
+            base_url=optional("LLM_BASE_URL", source),
+            structured_mode=required("LLM_STRUCTURED_MODE", source),
+            temperature=decimal("LLM_TEMPERATURE", source),
+            timeout_seconds=decimal("LLM_TIMEOUT_SECONDS", source),
+            max_attempts=integer("LLM_MAX_ATTEMPTS", source),
+            num_ctx=int(window)
+            if (window := optional("LLM_NUM_CTX", source))
+            else None,
+            reasoning_effort=optional("LLM_REASONING_EFFORT", source),
         )

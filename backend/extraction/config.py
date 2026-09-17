@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from database.qa_generator import FactKind
-from settings import csv, decimal, integer
+from settings import Source, csv, decimal, integer
 
 #: The kind the routed extractor always produces. It is not optional: a
 #: passage read for nothing else is still read for its claims.
 _ALWAYS = FactKind.ATOMIC
 
 
-def _kinds(name: str) -> frozenset[str]:
+def _kinds(name: str, source: Source = None) -> frozenset[str]:
     """Reads which fact kinds this deployment writes.
 
     Raises:
@@ -20,7 +20,7 @@ def _kinds(name: str) -> frozenset[str]:
         ValueError: If it names something that is not a fact kind, or leaves
             out the atomic kind.
     """
-    read = frozenset(kind.lower() for kind in csv(name))
+    read = frozenset(kind.lower() for kind in csv(name, source))
     unknown = read - set(FactKind)
     if unknown:
         raise ValueError(
@@ -88,12 +88,16 @@ class Settings:
         return FactKind.BRIDGE in self.kinds
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads settings from the environment."""
+    def load(cls, source: Source = None) -> Settings:
+        """Reads settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
+        """
         return cls(
-            kinds=_kinds("EXTRACTION_KINDS"),
-            digest_share=decimal("EXTRACTION_DIGEST_MAX_SHARE"),
-            min_other_share=decimal("EXTRACTION_MIN_OTHER_SHARE"),
-            bridges_per_topic=integer("EXTRACTION_BRIDGES_PER_TOPIC"),
-            bridge_passages=integer("EXTRACTION_BRIDGE_PASSAGES"),
+            kinds=_kinds("EXTRACTION_KINDS", source),
+            digest_share=decimal("EXTRACTION_DIGEST_MAX_SHARE", source),
+            min_other_share=decimal("EXTRACTION_MIN_OTHER_SHARE", source),
+            bridges_per_topic=integer("EXTRACTION_BRIDGES_PER_TOPIC", source),
+            bridge_passages=integer("EXTRACTION_BRIDGE_PASSAGES", source),
         )

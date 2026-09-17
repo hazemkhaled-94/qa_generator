@@ -1,4 +1,4 @@
-"""Reading configuration out of the environment, and nowhere else.
+"""Reading configuration out of the environment, and out of an override.
 
 There are no defaults in code: a missing variable stops the service at
 start-up, naming itself. Two files list what must be set:
@@ -7,26 +7,46 @@ start-up, naming itself. Two files list what must be set:
 setting whose absence is itself meaningful uses `optional`, and `telemetry`
 falls back to INFO because it is configured before a service has read its
 settings.
+
+Every reader takes an optional `source`. Absent, it is the process
+environment, which is how a container starts. Given, it is whatever the
+caller resolved - the environment overlaid with the rows a service's stored
+settings hold - so one value set through the API, the CLI or a page reaches a
+stage without a restart. The environment stays required either way: a source
+overrides a setting, it never supplies one.
+
+Passing a source rather than reading an ambient one, so a candidate value can
+be parsed without touching the environment the process is running under. That
+is what lets the API validate a proposed setting with the same parser the
+stage itself uses.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 #: Accepted spellings of true. Anything else is false, including nonsense: a
 #: boolean that guesses is worse than one that is simply off.
 _TRUE = frozenset({"1", "true", "yes", "on"})
 
+#: Where a reader looks. None is the process environment.
+Source = Mapping[str, str] | None
 
-def required(name: str) -> str:
+
+def required(name: str, source: Mapping[str, str] | None = None) -> str:
     """Reads a setting that must be present.
+
+    Args:
+        name: The variable to read.
+        source: Where to read it, or None for the process environment.
 
     Raises:
         KeyError: If it is unset or empty. Empty counts as missing, because
             compose turns an unset variable into an empty string rather than
             leaving it out.
     """
-    value = os.environ.get(name, "").strip()
+    value = (os.environ if source is None else source).get(name, "").strip()
     if not value:
         raise KeyError(
             f"{name} must be set in the environment. How the pipeline behaves "
@@ -36,58 +56,60 @@ def required(name: str) -> str:
     return value
 
 
-def optional(name: str) -> str | None:
+def optional(name: str, source: Mapping[str, str] | None = None) -> str | None:
     """Reads a setting whose absence means something."""
-    return os.environ.get(name, "").strip() or None
+    return (os.environ if source is None else source).get(name, "").strip() or None
 
 
-def integer(name: str) -> int:
+def integer(name: str, source: Mapping[str, str] | None = None) -> int:
     """Reads a required whole number.
 
     Raises:
         KeyError: If it is unset or empty.
         ValueError: If it is not a whole number, naming the variable.
     """
-    value = required(name)
+    value = required(name, source)
     try:
         return int(value)
     except ValueError:
         raise ValueError(f"{name}={value!r} is not a whole number") from None
 
 
-def decimal(name: str) -> float:
+def decimal(name: str, source: Mapping[str, str] | None = None) -> float:
     """Reads a required number.
 
     Raises:
         KeyError: If it is unset or empty.
         ValueError: If it is not a number, naming the variable.
     """
-    value = required(name)
+    value = required(name, source)
     try:
         return float(value)
     except ValueError:
         raise ValueError(f"{name}={value!r} is not a number") from None
 
 
-def boolean(name: str) -> bool:
+def boolean(name: str, source: Mapping[str, str] | None = None) -> bool:
     """Reads a required flag.
 
     Raises:
         KeyError: If it is unset or empty.
     """
-    return required(name).lower() in _TRUE
+    return required(name, source).lower() in _TRUE
 
 
-def csv(name: str) -> tuple[str, ...]:
+def csv(name: str, source: Mapping[str, str] | None = None) -> tuple[str, ...]:
     """Reads a required comma-separated list.
 
     Raises:
         KeyError: If it is unset or empty.
     """
-    return tuple(part.strip() for part in required(name).split(",") if part.strip())
+    return tuple(
+        part.strip() for part in required(name, source).split(",") if part.strip()
+    )
 
 
-def mapping(name: str) -> dict[str, str]:
+def mapping(name: str, source: Mapping[str, str] | None = None) -> dict[str, str]:
     """Reads a required comma-separated list of `key:value` pairs.
 
     Raises:
@@ -95,7 +117,7 @@ def mapping(name: str) -> dict[str, str]:
         ValueError: If an entry carries no colon, naming the variable.
     """
     found = {}
-    for entry in csv(name):
+    for entry in csv(name, source):
         key, colon, value = entry.partition(":")
         if not colon or not key.strip():
             raise ValueError(

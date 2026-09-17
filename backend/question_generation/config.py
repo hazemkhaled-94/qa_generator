@@ -9,11 +9,13 @@ from datetime import timedelta
 from database.qa_generator import AnswerForm, Difficulty
 from question_generation.repository import ASKABLE
 from question_generation.types import SPECS
-from settings import csv, decimal, integer, mapping, optional, required
+from settings import Source, csv, decimal, integer, mapping, optional, required
 
 
 def _weights(
-    name: str, allowed: Mapping[str, object] | tuple[str, ...]
+    name: str,
+    allowed: Mapping[str, object] | tuple[str, ...],
+    source: Source = None,
 ) -> dict[str, int]:
     """Reads a `name:weight` mix, refusing a name nothing answers to.
 
@@ -23,7 +25,7 @@ def _weights(
             whole number, or every weight is zero.
     """
     read = {}
-    for key, value in mapping(name).items():
+    for key, value in mapping(name, source).items():
         if key not in allowed:
             raise ValueError(
                 f"{name} names {key!r}, which is not one of "
@@ -41,7 +43,7 @@ def _weights(
     return read
 
 
-def _bounds(name: str) -> dict[str, tuple[int, int]]:
+def _bounds(name: str, source: Source = None) -> dict[str, tuple[int, int]]:
     """Reads the `form:min:max` length bounds of each answer form.
 
     Raises:
@@ -50,7 +52,7 @@ def _bounds(name: str) -> dict[str, tuple[int, int]]:
             form is missing.
     """
     read = {}
-    for form, value in mapping(name).items():
+    for form, value in mapping(name, source).items():
         if form not in tuple(AnswerForm):
             raise ValueError(
                 f"{name} names the answer form {form!r}, which is not one of "
@@ -172,22 +174,25 @@ class Settings:
         )
 
     @classmethod
-    def load(cls) -> Settings:
-        """Reads settings from the environment.
+    def load(cls, source: Source = None) -> Settings:
+        """Reads settings from the environment, or from an override.
+
+        Args:
+            source: Where to read them, or None for the process environment.
 
         Raises:
             KeyError: If any required setting is missing.
             ValueError: If a numeric setting is not a number, or a mix names
                 a type, a band or an answer form that does not exist.
         """
-        followups = csv("QUESTIONS_FOLLOWUP_TYPES")
+        followups = csv("QUESTIONS_FOLLOWUP_TYPES", source)
         unknown = [name for name in followups if name not in SPECS]
         if unknown:
             raise ValueError(
                 f"QUESTIONS_FOLLOWUP_TYPES names {', '.join(unknown)}, which is "
                 f"not among {', '.join(sorted(SPECS))}"
             )
-        kinds = csv("QUESTIONS_FACT_KINDS")
+        kinds = csv("QUESTIONS_FACT_KINDS", source)
         unusable = [kind for kind in kinds if kind not in ASKABLE]
         if unusable:
             raise ValueError(
@@ -197,35 +202,37 @@ class Settings:
                 f"each other kind would need first."
             )
         return cls(
-            per_topic=integer("QUESTIONS_PER_TOPIC"),
-            sample_size=integer("QUESTIONS_FACT_SAMPLE"),
-            samples_per_passage=integer("QUESTIONS_SAMPLES_PER_PASSAGE"),
+            per_topic=integer("QUESTIONS_PER_TOPIC", source),
+            sample_size=integer("QUESTIONS_FACT_SAMPLE", source),
+            samples_per_passage=integer("QUESTIONS_SAMPLES_PER_PASSAGE", source),
             fact_kinds=kinds,
-            type_mix=_weights("QUESTIONS_TYPE_MIX", SPECS),
-            difficulty_mix=_weights("QUESTIONS_DIFFICULTY_MIX", tuple(Difficulty)),
+            type_mix=_weights("QUESTIONS_TYPE_MIX", SPECS, source),
+            difficulty_mix=_weights(
+                "QUESTIONS_DIFFICULTY_MIX", tuple(Difficulty), source
+            ),
             followup_types=followups,
-            unanswerable_share=decimal("QUESTIONS_UNANSWERABLE_SHARE"),
-            followup_share=decimal("QUESTIONS_FOLLOWUP_SHARE"),
-            max_followups=integer("QUESTIONS_MAX_FOLLOWUPS"),
-            retries=integer("QUESTIONS_RETRIES"),
-            answer_chars=_bounds("QUESTIONS_ANSWER_CHARS"),
-            answer_overlap=decimal("QUESTIONS_ANSWER_OVERLAP"),
-            off_topic_overlap=decimal("QUESTIONS_OFF_TOPIC_OVERLAP"),
-            elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES"),
-            long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS"),
-            duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE"),
-            release_size=integer("QUESTIONS_RELEASE_SIZE"),
-            release_unanswerable=decimal("QUESTIONS_RELEASE_UNANSWERABLE"),
+            unanswerable_share=decimal("QUESTIONS_UNANSWERABLE_SHARE", source),
+            followup_share=decimal("QUESTIONS_FOLLOWUP_SHARE", source),
+            max_followups=integer("QUESTIONS_MAX_FOLLOWUPS", source),
+            retries=integer("QUESTIONS_RETRIES", source),
+            answer_chars=_bounds("QUESTIONS_ANSWER_CHARS", source),
+            answer_overlap=decimal("QUESTIONS_ANSWER_OVERLAP", source),
+            off_topic_overlap=decimal("QUESTIONS_OFF_TOPIC_OVERLAP", source),
+            elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES", source),
+            long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS", source),
+            duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE", source),
+            release_size=integer("QUESTIONS_RELEASE_SIZE", source),
+            release_unanswerable=decimal("QUESTIONS_RELEASE_UNANSWERABLE", source),
             release_difficulty=_weights(
-                "QUESTIONS_RELEASE_DIFFICULTY", tuple(Difficulty)
+                "QUESTIONS_RELEASE_DIFFICULTY", tuple(Difficulty), source
             ),
             # The one embedding model, as chunking reads it: a question
             # embedded by a model other than the one a passage was sized by
             # measures distance in a space the corpus was never put in.
-            embedding_model=required("EMBEDDING_MODEL"),
-            max_tokens=integer("EMBEDDING_MAX_TOKENS"),
+            embedding_model=required("EMBEDDING_MODEL", source),
+            max_tokens=integer("EMBEDDING_MAX_TOKENS", source),
             # Absent means the writer verifies its own questions, which is
             # worth knowing about rather than guessing at, so the service
             # warns rather than failing.
-            verifier_model=optional("QUESTIONS_VERIFIER_MODEL"),
+            verifier_model=optional("QUESTIONS_VERIFIER_MODEL", source),
         )
