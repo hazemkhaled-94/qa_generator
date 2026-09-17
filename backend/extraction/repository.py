@@ -25,6 +25,7 @@ from database.qa_generator import (
     FactKind,
     FactPassage,
     Passage,
+    Rejection,
     Status,
 )
 from database.qa_generator.passage_topics import DOMINANT
@@ -359,6 +360,61 @@ class FactCatalog(Repository):
                 held.append(_passage(row, row.language))
             if held:
                 yield cast("int", current), held
+
+    def recap(self, cap: int, reason: str, within=None) -> int:
+        """Refuses the atomic facts already stored above the cap.
+
+        The counterpart of `extract-revalidate` and the same bargain: what
+        the model wrote is the record of one extraction and is kept, only
+        the verdict moves. No model is called, so a corpus extracted before
+        EXTRACTION_MIN_OTHER_SHARE existed is re-balanced in seconds rather
+        than re-read over hours.
+
+        Ranked exactly as `over_cap` ranks a passage in flight - the facts
+        asserting a number, a date or a name first, ties by id - so a
+        passage re-extracted later keeps the same facts this leaves.
+
+        Args:
+            cap: The most validated atomic facts one passage may keep.
+            reason: What to record on the ones refused.
+            within: A condition on Passage narrowing which are read, or None.
+
+        Returns:
+            How many facts were refused.
+        """
+        ranked = (
+            select(
+                Fact.id,
+                func.row_number()
+                .over(
+                    partition_by=FactPassage.passage_id,
+                    order_by=(
+                        func.coalesce(func.cardinality(Fact.units_statement), 0) == 0,
+                        Fact.id,
+                    ),
+                )
+                .label("rank"),
+            )
+            .select_from(Fact)
+            .join(
+                FactPassage,
+                (FactPassage.fact_id == Fact.id) & (FactPassage.position == 0),
+            )
+            .where(Fact.kind == FactKind.ATOMIC, Fact.validated)
+        )
+        if within is not None:
+            ranked = ranked.where(_resting(within))
+        over = ranked.subquery()
+        with self._session.begin() as session:
+            return session.execute(
+                update(Fact)
+                .where(Fact.id.in_(select(over.c.id).where(over.c.rank > cap)))
+                .values(
+                    validated=False,
+                    rejection_code=Rejection.OVER_CAP,
+                    validation_error=reason,
+                )
+            ).rowcount
 
     def clear_bridges(self, within=None) -> int:
         """Deletes the bridge facts a fresh pass is about to replace.

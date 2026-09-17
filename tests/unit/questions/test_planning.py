@@ -154,3 +154,64 @@ def test_the_same_settings_plan_the_same_topic_twice() -> None:
     second = [(one.spec.name, one.band, one.shape) for one in planned()]
 
     assert first == second
+
+
+# ── The unanswerable slots ─────────────────────────────────────────────────
+
+
+def test_an_unanswerable_slot_never_takes_a_spanning_type() -> None:
+    """The writer is handed one fact to perturb.
+
+    An unanswerable comparison has one side and an unanswerable aggregation
+    has one number, and neither is the kind of question it was planned to
+    be.
+    """
+    planned = plans(
+        wanted=40,
+        types={
+            QuestionType.COMPARISON: 1,
+            QuestionType.AGGREGATION: 1,
+            QuestionType.TEMPORAL: 1,
+            QuestionType.FACTOID: 1,
+        },
+        bands={Difficulty.EASY: 1, Difficulty.MEDIUM: 1, Difficulty.HARD: 1},
+        unanswerable_share=0.25,
+    )
+
+    spanning = [one for one in planned if not one.answerable and one.spec.spans]
+
+    assert [one.spec.name for one in planned if not one.answerable]
+    assert spanning == []
+
+
+def test_the_swap_is_spread_over_the_types_that_do_not_span() -> None:
+    """Rather than landing every perturbation on one kind."""
+    planned = plans(
+        wanted=40,
+        types={
+            QuestionType.COMPARISON: 4,
+            QuestionType.FACTOID: 1,
+            QuestionType.ENTITY: 1,
+        },
+        bands={Difficulty.EASY: 1},
+        unanswerable_share=0.25,
+    )
+
+    swapped = {one.spec.name for one in planned if not one.answerable}
+
+    assert swapped == {QuestionType.FACTOID, QuestionType.ENTITY}
+
+
+def test_a_mix_of_only_spanning_types_keeps_the_type_it_was_given() -> None:
+    """There is nothing to swap to, and writing nothing is the worse answer."""
+    planned = plans(
+        wanted=8,
+        types={QuestionType.COMPARISON: 1},
+        bands={Difficulty.MEDIUM: 1},
+        unanswerable_share=0.25,
+    )
+
+    unanswerable = [one for one in planned if not one.answerable]
+
+    assert unanswerable
+    assert all(one.spec.name == QuestionType.COMPARISON for one in unanswerable)

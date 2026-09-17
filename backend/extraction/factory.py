@@ -33,13 +33,18 @@ def build_service(
     settings = settings or Settings.load()
     client = Client(model)
     digests = settings.digests
+    cap = settings.atomic_cap
     return ExtractionService(
         repository=PassageQueue(lease=model.lease),
         extractors=ExtractorRegistry(
-            extractors=(TableExtractor(),), default=LlmExtractor(client)
+            extractors=(TableExtractor(),), default=LlmExtractor(client, cap)
         ),
         checker=FactChecker(settings.digest_share),
         digest=DigestExtractor(client, digests) if digests else None,
+        # Asked for in the prompt and enforced again on what comes back: a
+        # model told to write four still writes nine, and a cap nothing
+        # checks is a suggestion.
+        atomic_cap=cap,
     )
 
 

@@ -12,7 +12,7 @@ from llm.client import Client, ModelUnavailable
 
 #: Recorded on every fact drawn with the prompt below. Bumped whenever that
 #: prompt changes what counts as a fact.
-PROMPT_VERSION = "5"
+PROMPT_VERSION = "6"
 
 _SYSTEM = """You break a numbered excerpt down into the separate claims it
 makes. Each claim becomes one fact.
@@ -72,6 +72,23 @@ Worked example. Excerpt, under the context "Support > Response times":
        statement: "An urgent support request may be raised by phone."
 """
 
+#: Appended when EXTRACTION_MIN_OTHER_SHARE caps how many atomic facts a
+#: passage keeps. Asked for here as well as enforced on what comes back,
+#: because the facts over the cap are thrown away and a model told to write
+#: four instead of nineteen spends a fifth of the tokens reaching the same
+#: set. Left off entirely when there is no cap, rather than written as a
+#: large number: a ceiling nothing is near still changes what a model writes.
+_CAP = """
+MOST IMPORTANT RULE, ABOVE ALL THE OTHERS:
+
+- AT MOST {cap} FACTS from this excerpt, however long it is. Returning fewer
+  is correct; returning more is not.
+- CHOOSE THE {cap} SOMEBODY WOULD LOOK UP. A claim carrying a number, a date,
+  a name, a limit, a duty or a definition comes first. Boilerplate - who holds
+  a copyright, who reviewed the document, which edition a thing belongs to -
+  is left out even when it is the only thing the excerpt says.
+"""
+
 
 class _Fact(BaseModel):
     """One fact as the model is asked to return it."""
@@ -107,9 +124,16 @@ class LlmExtractor(Extractor):
     block_types: ClassVar[tuple[str, ...]] = ()
     method: ClassVar[str] = "llm"
 
-    def __init__(self, client: Client) -> None:
-        """Initialises the extractor with the model it asks."""
+    def __init__(self, client: Client, cap: int | None = None) -> None:
+        """Initialises the extractor with the model it asks.
+
+        Args:
+            client: The model that reads a passage.
+            cap: The most facts one passage may yield, or None for no
+                ceiling. What EXTRACTION_MIN_OTHER_SHARE works out to.
+        """
         self._client = client
+        self._system = _SYSTEM + _CAP.format(cap=cap) if cap else _SYSTEM
 
     @property
     def provenance(self) -> Provenance:
@@ -135,7 +159,7 @@ class LlmExtractor(Extractor):
         """
         try:
             answer = self._client.answer(
-                system=_SYSTEM, user=self._prompt(passage), shape=_Facts
+                system=self._system, user=self._prompt(passage), shape=_Facts
             )
         except ModelUnavailable as exc:
             raise ExtractionFailed(str(exc)) from exc

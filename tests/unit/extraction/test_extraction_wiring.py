@@ -44,11 +44,16 @@ def _no_engine_left_behind():
     sessions.cache_clear()
 
 
-def settings(*kinds: str, share: float = 0.6) -> Settings:
-    """The extraction settings, built rather than read."""
+def settings(*kinds: str, share: float = 0.6, other: float = 0.0) -> Settings:
+    """The extraction settings, built rather than read.
+
+    `other` is off by default, so a test about the wiring is not also a
+    test of what the atomic cap works out to.
+    """
     return Settings(
         kinds=frozenset(kinds),
         digest_share=share,
+        min_other_share=other,
         bridges_per_topic=5,
         bridge_passages=2,
     )

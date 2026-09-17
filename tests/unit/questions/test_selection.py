@@ -14,7 +14,12 @@ from __future__ import annotations
 
 from factories import bridge, resting, source
 
-from database.qa_generator import DocumentScope, PassageScope, TopicScope
+from database.qa_generator import (
+    DocumentScope,
+    FactKind,
+    PassageScope,
+    TopicScope,
+)
 from question_generation.models import FactGroup
 from question_generation.selection import (
     Deal,
@@ -354,3 +359,112 @@ def test_a_passage_a_bridge_rests_on_is_never_dealt_again() -> None:
 
     assert first is not None and [fact.id for fact in first.facts] == [1]
     assert second is None, "passage 2 was already offered inside the bridge"
+
+
+# ── More than one sample from one passage ──────────────────────────────────
+
+
+def test_a_passage_is_offered_as_many_times_as_rounds_allow() -> None:
+    """A passage carrying a dozen facts holds a dozen questions.
+
+    Offering it once was the ceiling on the whole stage: 18.9% of one
+    corpus's passages were ever read and 1.8% of its facts, because each
+    topic stopped after its passages rather than after its material.
+    """
+    deal = Deal(facts_of(1, "a", count=6), wanted=10, size=2, rounds=3)
+
+    dealt = [deal.sample() for _ in range(4)]
+
+    assert [one is not None for one in dealt] == [True, True, True, False]
+
+
+def test_no_fact_is_offered_twice_across_rounds() -> None:
+    """What must not repeat is the material, not the passage it sits in."""
+    deal = Deal(facts_of(1, "a", count=6), wanted=10, size=2, rounds=3)
+
+    seen = []
+    while (sample := deal.sample()) is not None:
+        seen.extend(fact.id for fact in sample.facts)
+
+    assert len(seen) == 6
+    assert len(seen) == len(set(seen))
+
+
+def test_a_passage_runs_out_of_facts_before_it_runs_out_of_rounds() -> None:
+    """Rounds are a ceiling; the facts are the real limit.
+
+    So a thin passage yields one sample and a dense one yields several,
+    without either being configured.
+    """
+    deal = Deal(facts_of(1, "a", count=2), wanted=10, size=2, rounds=5)
+
+    dealt = [deal.sample() for _ in range(3)]
+
+    assert [one is not None for one in dealt] == [True, False, False]
+
+
+def test_rounds_of_one_is_what_it_always_was() -> None:
+    """The default, so nothing changes for a deployment that does not ask."""
+    facts = [f for p in range(3) for f in facts_of(p, "a", count=4)]
+
+    once = Deal(facts, wanted=10, size=2)
+    dealt = [once.sample() for _ in range(4)]
+
+    assert [one is not None for one in dealt] == [True, True, True, False]
+
+
+def test_a_bridges_second_passage_is_used_up_whole() -> None:
+    """It has been asked about once the bridge has, however many rounds remain."""
+    spanning = bridge(resting(2, "b"), fact_id=99, passage_id=1, document="a")
+    deal = Deal([spanning, *facts_of(2, "b", count=4)], wanted=10, size=2, rounds=3)
+
+    first = deal.sample()
+
+    assert first is not None
+    assert [fact.id for fact in first.facts] == [spanning.id]
+    assert deal.sample() is None
+
+
+# ── Which kinds a sample offers ────────────────────────────────────────────
+
+
+def test_the_kinds_of_a_passage_are_interleaved() -> None:
+    """A sample capped at four spent all four on atomic claims.
+
+    Which left the summary and the outline unoffered, and those two are what
+    the types a single claim cannot answer are written from: a definition
+    asks what something IS, an enumeration wants a real set.
+    """
+    facts = [
+        source(1, passage_id=1, kind=FactKind.ATOMIC),
+        source(2, passage_id=1, kind=FactKind.ATOMIC),
+        source(3, passage_id=1, kind=FactKind.ATOMIC),
+        source(4, passage_id=1, kind=FactKind.SUMMARY),
+        source(5, passage_id=1, kind=FactKind.OUTLINE),
+    ]
+
+    assert [fact.kind for fact in ranked(facts)] == [
+        FactKind.ATOMIC,
+        FactKind.SUMMARY,
+        FactKind.OUTLINE,
+        FactKind.ATOMIC,
+        FactKind.ATOMIC,
+    ]
+
+
+def test_a_value_still_comes_first_within_a_kind() -> None:
+    """The two orderings are both applied, not one instead of the other."""
+    facts = [
+        source(1, passage_id=1, statement="It is reviewed regularly."),
+        source(2, passage_id=1, statement="Reviewed every 4 years.", units=("4",)),
+        source(3, passage_id=1, kind=FactKind.SUMMARY),
+    ]
+
+    assert [fact.id for fact in ranked(facts)] == [2, 3, 1]
+
+
+def test_one_kind_is_left_in_its_own_order() -> None:
+    """A corpus extracted with EXTRACTION_KINDS=atomic deals as it always did."""
+    facts = facts_of(1, "a", count=4)
+
+    assert [fact.id for fact in ranked(facts)] == [one.id for one in facts]

@@ -46,6 +46,11 @@ class Passage(Base):
             postgresql_using="gin",
             postgresql_ops={"text": "gin_trgm_ops"},
         ),
+        # GIN over the array, which is what the `&&` in question generation's
+        # corpus-wide probe needs: an unanswerable question claims the whole
+        # corpus is silent about something, so that gate reads every passage
+        # rather than the two the question cites.
+        Index("ix_passages_lemmas_gin", "lemmas", postgresql_using="gin"),
         # Partial: the queue is a shrinking fraction of the table, and this is
         # the only predicate a worker selects on.
         Index(

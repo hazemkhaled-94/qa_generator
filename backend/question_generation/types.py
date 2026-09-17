@@ -135,11 +135,31 @@ class TypeSpec:
     asks: str
     #: What to ask, and one worked example, appended to the shared rules.
     directive: str
+    #: The other forms this type's answer is allowed to come back as. The
+    #: prompt still asks for `form`; these are what the gates will also take.
+    #:
+    #: One form per type was refusing good answers. The material decides what
+    #: shape an answer has, not the question: `Welche Werkzeuge werden
+    #: empfohlen?` is a factoid whose answer is three tools, and a `condition`
+    #: is answered `immer` when that is the condition. Both were thrown out
+    #: for the form they arrived in rather than for being wrong, and the
+    #: stricter comparison a `value` is held to then refused them twice.
+    also: tuple[str, ...] = ()
+    #: Whether the answer is worked out from the facts rather than stated by
+    #: them. True only for aggregation, and it changes which gate applies:
+    #: recoverability asks whether the passages STATE the answer, which this
+    #: type's own directive forbids them from doing.
+    derived: bool = False
 
     @property
     def spans(self) -> bool:
         """Whether this type needs facts from more than one passage."""
         return self.passages > 1
+
+    @property
+    def forms(self) -> tuple[str, ...]:
+        """Every form this type's answer may take, the asked-for one first."""
+        return (self.form, *self.also)
 
     @property
     def answer_rule(self) -> str:
@@ -166,6 +186,7 @@ _SPECS = (
         name=QuestionType.FACTOID,
         form=AnswerForm.VALUE,
         passages=1,
+        also=(AnswerForm.LIST,),
         asks="one checkable value - how many, how much, by when, what limit",
         directive="""Worked example. Facts:
 
@@ -187,6 +208,7 @@ _SPECS = (
         name=QuestionType.ENTITY,
         form=AnswerForm.VALUE,
         passages=1,
+        also=(AnswerForm.LIST,),
         asks="who or which party does, decides, owns or must be told something",
         directive="""Worked example. Facts:
 
@@ -203,6 +225,7 @@ _SPECS = (
         name=QuestionType.DEFINITION,
         form=AnswerForm.EXPLANATION,
         passages=1,
+        also=(AnswerForm.VALUE,),
         asks="what a named thing, term or status IS, as the material defines it",
         directive="""Ask about a term the material itself defines or describes. Do
 not ask for a dictionary definition of an ordinary word.
@@ -243,6 +266,7 @@ Worked example. Facts:
         name=QuestionType.CONDITION,
         form=AnswerForm.LIST,
         passages=1,
+        also=(AnswerForm.VALUE,),
         asks="when, or under what circumstances, something applies or is required",
         directive="""Ask for the circumstances, not for the thing itself.
 
@@ -282,6 +306,7 @@ Worked example. Facts:
         name=QuestionType.PROCEDURE,
         form=AnswerForm.EXPLANATION,
         passages=1,
+        also=(AnswerForm.LIST,),
         asks="how something is done, or in what order the steps go",
         directive="""Ask for the method. The answer names the steps, in order, in
 the words of the material.
@@ -319,6 +344,7 @@ Worked example. Facts:
         name=QuestionType.COMPARISON,
         form=AnswerForm.LIST,
         passages=2,
+        also=(AnswerForm.EXPLANATION,),
         asks="how two named things differ, as the material states each of them",
         directive="""Both sides must come from the facts. Name both in the question.
 
@@ -338,6 +364,7 @@ Worked example. Facts:
         name=QuestionType.AGGREGATION,
         form=AnswerForm.VALUE,
         passages=2,
+        derived=True,
         asks="a total, a count or a sum that no single fact states on its own",
         directive="""The answer must be something the material does not write down
 anywhere - it has to be worked out from two or more facts. If one fact already
@@ -358,6 +385,7 @@ Worked example. Facts:
         name=QuestionType.TEMPORAL,
         form=AnswerForm.LIST,
         passages=2,
+        also=(AnswerForm.EXPLANATION,),
         asks="what changed between two periods, or what the order of events was",
         directive="""Both periods, or both events, must be in the facts.
 

@@ -13,7 +13,7 @@ import sys
 from extraction.config import Settings
 from extraction.factory import build_bridge, build_service
 from extraction.repository import FactCatalog, PassageQueue
-from extraction.service import bridge, revalidate
+from extraction.service import bridge, recap, revalidate
 from extraction.validation import FactChecker
 from llm.config import Settings as ModelSettings
 from stages.cli import queue_main
@@ -62,6 +62,11 @@ def main(argv: list[str] | None = None) -> int:
             "read every topic's passage groups for the claims they share",
             "bridged",
             run_bridge,
+        ),
+        "recap": (
+            "refuse the atomic facts over the cap, without calling the model",
+            "refused",
+            lambda within: recap(FactCatalog(), settings.atomic_cap, within),
         ),
     }
 

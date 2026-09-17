@@ -529,7 +529,6 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
     survives with a difficulty that stopped being true - which is quieter
     than a deletion and worse.
     """
-    from question_generation.config import Settings
     from question_generation.service import reverify
 
     with Session(engine) as session:
@@ -557,24 +556,7 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
         session.commit()
         asked_id, lost = asked.id, facts[1].id
 
-    settings = Settings(
-        per_topic=4,
-        sample_size=4,
-        fact_kinds=("atomic",),
-        type_mix={"factoid": 1},
-        difficulty_mix={"easy": 1},
-        followup_types=("condition",),
-        unanswerable_share=0.25,
-        followup_share=0.5,
-        max_followups=2,
-        answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
-        answer_overlap=0.6,
-        long_answer_chars=60,
-        duplicate_cosine=0.93,
-        embedding_model="stub",
-        max_tokens=512,
-        verifier_model="ollama/verifier",
-    )
+    settings = _settings(fact_kinds=("atomic",))
     # Re-extracting one document deletes its facts; the other citation stays.
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM facts WHERE id = :id"), {"id": lost})
@@ -685,17 +667,34 @@ def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
 # ── Which kinds of fact a question may be written from ────────────────────
 
 
-def test_only_the_kinds_this_stage_can_use_are_offered(corpus, engine) -> None:
-    """Extraction reads a passage four ways and one of them is a question seed.
+def test_a_kind_this_deployment_did_not_ask_for_is_not_offered(corpus, engine) -> None:
+    """QUESTIONS_FACT_KINDS is a filter, and it has to be applied in the query.
 
-    An outline is newline-separated `- ` bullets. Interpolated into the
-    writer's numbered `[1] {fact}` list it spans several lines and breaks the
-    numbering the writer is told to cite by; a summary is a paraphrase of the
-    passage rather than a checked claim; a bridge rests on passages the
-    verifier is never shown. Without this filter the first re-extraction that
-    writes any of them silently changes what a question rests on.
+    All four kinds are askable now, so this is about the setting rather than
+    about the kinds: a deployment that narrows it to `atomic` must not be
+    handed an outline by the first re-extraction that writes one.
+    """
+    written = corpus(topics=1, facts_per_topic=2)
+    topic_id = written["topics"][0]
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE facts SET kind = 'outline' WHERE id = :id"),
+            {"id": written["facts"][topic_id][0]},
+        )
 
-    A bridge is askable and is covered separately below.
+    offered = QuestionQueue(kinds=("atomic",)).facts(topic_id)
+
+    assert len(offered) == 1
+    assert written["facts"][topic_id][0] not in {one.id for one in offered}
+
+
+def test_an_outline_is_offered_when_it_was_asked_for(corpus, engine) -> None:
+    """An enumeration written from one has a real set behind it.
+
+    Which is what that type needs and what no single atomic claim can give
+    it. The blob that kept outlines out is fixed where it was: a sample
+    indents the later lines under their own number, so they no longer break
+    the numbering the writer cites by.
     """
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -707,8 +706,7 @@ def test_only_the_kinds_this_stage_can_use_are_offered(corpus, engine) -> None:
 
     offered = QuestionQueue().facts(topic_id)
 
-    assert len(offered) == 1
-    assert written["facts"][topic_id][0] not in {one.id for one in offered}
+    assert {one.id for one in offered} == set(written["facts"][topic_id])
 
 
 # ── Bridges, which rest on more than one passage ──────────────────────────
@@ -814,27 +812,44 @@ def test_a_bridge_cannot_outlive_a_passage_it_rested_on(corpus, engine) -> None:
 
 
 def _settings(**overrides):
-    """The question settings a re-check reads, with nothing served."""
+    """The question settings a re-check reads, with nothing served.
+
+    Anything named twice is the caller's, so a test can narrow one value
+    without restating the other twenty.
+    """
     from question_generation.config import Settings
 
     return Settings(
-        per_topic=4,
-        sample_size=4,
-        fact_kinds=("atomic", "bridge"),
-        type_mix={"factoid": 1},
-        difficulty_mix={"easy": 1},
-        followup_types=("condition",),
-        unanswerable_share=0.25,
-        followup_share=0.5,
-        max_followups=2,
-        answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
-        answer_overlap=0.6,
-        long_answer_chars=60,
-        duplicate_cosine=0.93,
-        embedding_model="stub",
-        max_tokens=512,
-        verifier_model="ollama/verifier",
-        **overrides,
+        **{
+            "per_topic": 4,
+            "sample_size": 4,
+            "samples_per_passage": 1,
+            "fact_kinds": ("atomic", "bridge"),
+            "type_mix": {"factoid": 1},
+            "difficulty_mix": {"easy": 1},
+            "followup_types": ("condition",),
+            "unanswerable_share": 0.25,
+            "followup_share": 0.5,
+            "max_followups": 2,
+            "retries": 0,
+            "answer_chars": {
+                "value": (1, 80),
+                "list": (3, 300),
+                "explanation": (20, 600),
+            },
+            "answer_overlap": 0.6,
+            "off_topic_overlap": 0.3,
+            "elsewhere_passages": 0,
+            "long_answer_chars": 60,
+            "duplicate_cosine": 0.93,
+            "release_size": 0,
+            "release_unanswerable": 0.1,
+            "release_difficulty": {"easy": 1, "medium": 1, "hard": 1},
+            "embedding_model": "stub",
+            "max_tokens": 512,
+            "verifier_model": "ollama/verifier",
+            **overrides,
+        }
     )
 
 

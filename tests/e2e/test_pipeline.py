@@ -116,6 +116,7 @@ class StubModel:
 QUESTIONS = QuestionSettings(
     per_topic=4,
     sample_size=4,
+    samples_per_passage=1,
     fact_kinds=("atomic",),
     type_mix={"factoid": 3, "reason": 1},
     difficulty_mix={"easy": 1, "medium": 1},
@@ -123,10 +124,18 @@ QUESTIONS = QuestionSettings(
     unanswerable_share=0.25,
     followup_share=0.5,
     max_followups=2,
+    # Nothing is asked twice: this drives the whole pipeline with stub
+    # models, and a retry would double the calls the run is counted by.
+    retries=0,
     answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
     answer_overlap=0.6,
+    off_topic_overlap=0.3,
+    elsewhere_passages=0,
     long_answer_chars=60,
     duplicate_cosine=0.93,
+    release_size=0,
+    release_unanswerable=0.1,
+    release_difficulty={"easy": 1, "medium": 1, "hard": 1},
     embedding_model="stub",
     max_tokens=512,
     verifier_model="ollama/verifier",

@@ -29,6 +29,7 @@ SETTINGS = frozenset(
     {
         "TOPIC_LANGUAGE_NAMES",
         "TOPIC_NUM_TOPICS",
+        "TOPIC_PASSAGES_PER_TOPIC",
         "TOPIC_PASSES",
         "TOPIC_RANDOM_STATE",
         "TOPIC_TOP_TERMS",

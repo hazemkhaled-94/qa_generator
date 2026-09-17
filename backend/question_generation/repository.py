@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator, Sequence
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Select, func, insert, select, update
+from sqlalchemy import ARRAY, Select, Text, cast, func, insert, select, update
 from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import (
@@ -24,6 +25,7 @@ from database.qa_generator import (
 )
 from database.qa_generator.passage_topics import DOMINANT
 from database.qa_generator.repository import Repository, matching
+from question_generation.balance import Row
 from question_generation.models import (
     CheckedQuestion,
     JudgedQuestion,
@@ -217,14 +219,22 @@ def _present(values: Sequence[Any] | None) -> list[str]:
 
 
 #: The kinds of fact a question may be written from, by the name the setting
-#: takes. Only what this stage can honestly use:
+#: takes. All four, and what each is good for:
 #:
 #:   atomic   one claim in one sentence, which is the shape every prompt here
 #:            assumes and the shape the citation gates read
-#:   summary  a paragraph standing in for a whole passage. A question "answered
-#:            by" one rests on a paraphrase rather than on a checked claim
-#:   outline  newline-separated `- ` bullets. Interpolated into a numbered
-#:            prompt it breaks the numbering the writer cites facts by
+#:   summary  a paragraph standing in for a whole passage. What a definition
+#:            or a procedure is written from: those ask what something IS or
+#:            HOW it is done, which is a reading of the passage rather than
+#:            one sentence of it. Still a checked fact - the same
+#:            unsupported_addition and unresolved_reference gates judge it -
+#:            and the verifier is shown the passage it condenses, so a
+#:            question resting on one is recoverable like any other
+#:   outline  newline-separated `- ` bullets. An enumeration written from one
+#:            has a real set behind it, which is what that type needs and
+#:            what a single atomic claim cannot give it. The bullets are
+#:            indented under their own number when the sample is rendered,
+#:            so they no longer break the numbering the writer cites by
 #:   bridge   one claim resting on the passages in fact_passages. Asked
 #:            about alone: it already spans the passages a wide question
 #:            needs, and the verifier is shown all of them. A bridge drawn
@@ -232,7 +242,7 @@ def _present(values: Sequence[Any] | None) -> list[str]:
 #:            because there is nothing to show the verifier
 #:
 #: QUESTIONS_FACT_KINDS is what decides; this is what it is checked against.
-ASKABLE = (FactKind.ATOMIC, FactKind.BRIDGE)
+ASKABLE = (FactKind.ATOMIC, FactKind.SUMMARY, FactKind.OUTLINE, FactKind.BRIDGE)
 
 
 #: One validated fact, selected through the passage it opens on. Written
@@ -568,6 +578,129 @@ class QuestionCatalog(Repository):
 
     Separate from the queue: the API serves these and never claims a row.
     """
+
+    def releasable(self, within=None) -> list[Row]:
+        """Every accepted question a release may be chosen from.
+
+        Only the three columns the choosing reads. A question with no
+        difficulty or no type is left out rather than given a bucket: it
+        would be chosen into a quota it cannot be counted against, and the
+        report would then disagree with the set it describes.
+        """
+        query = select(
+            Question.id,
+            Question.answerable,
+            Question.difficulty,
+            Question.question_type,
+        ).where(
+            Question.status == QuestionStatus.ACCEPTED,
+            Question.difficulty.is_not(None),
+            Question.question_type.is_not(None),
+        )
+        if within is not None:
+            query = query.where(within)
+        with self._session() as session:
+            return [
+                Row(
+                    id=row.id,
+                    answerable=row.answerable,
+                    difficulty=row.difficulty,
+                    question_type=row.question_type,
+                )
+                for row in session.execute(query.order_by(Question.id))
+            ]
+
+    def release(self, ids: Sequence[int]) -> tuple[uuid.UUID, int]:
+        """Marks these questions as the release, and clears the last one.
+
+        One release at a time, because the column holds one id and the
+        question a report is about is "what would ship today". A previous
+        release is not history worth keeping here: every question it held
+        is still in the table, and the draw is reproducible from the
+        settings that made it.
+        """
+        drawn = uuid.uuid4()
+        with self._session.begin() as session:
+            session.execute(
+                update(Question)
+                .where(Question.release_id.is_not(None))
+                .values(release_id=None)
+            )
+            if not ids:
+                return drawn, 0
+            return drawn, session.execute(
+                update(Question)
+                .where(Question.id.in_(list(ids)))
+                .values(release_id=drawn)
+            ).rowcount
+
+    def elsewhere(
+        self, lemmas: Sequence[str], language: str, skip: Sequence[int], limit: int
+    ) -> list[str]:
+        """The passages outside this question's own that talk about it most.
+
+        What the `answerable_elsewhere` gate reads. The verifier is shown
+        only the passages a question cites, which is right for measuring the
+        dataset and wrong for one claim: an unanswerable question is a claim
+        about the WHOLE corpus, and a passage nobody cited may answer it. A
+        question labelled unanswerable that the material does answer marks a
+        correct chatbot wrong, which is the failure the gates exist for.
+
+        Ranked by how many content lemmas a passage shares with the
+        question, over the array chunking already wrote - the same
+        vocabulary the topics were fitted over. It is a retrieval and not a
+        proof: it finds where to look, and the model still reads the
+        passages and decides.
+
+        Args:
+            lemmas: The question's content lemmas.
+            language: Only passages written in this one.
+            skip: Passages the question already cites, which the first
+                verifier pass has read.
+            limit: The most passages to hand back.
+
+        Returns:
+            Their text, most-shared first. Empty when the question names
+            nothing the corpus does.
+        """
+        if not lemmas:
+            return []
+        wanted = cast(list(lemmas), ARRAY(Text))
+        # The overlap counted by intersecting the two arrays. The `&&`
+        # filter beside it is what the GIN index on lemmas serves, so this
+        # only ever orders the rows that filter already kept.
+        overlap = func.cardinality(
+            func.array(
+                select(func.unnest(Passage.lemmas))
+                .intersect(select(func.unnest(wanted)))
+                .scalar_subquery()
+            )
+        )
+        # Only passages the corpus makes a checkable claim from. Without it
+        # the probe comes back with tables of contents and indexes, which
+        # carry every term in the material and answer nothing: they are the
+        # same passages extraction skips as navigation.
+        asserts = (
+            select(FactPassage.passage_id)
+            .join(Fact, Fact.id == FactPassage.fact_id)
+            .where(Fact.validated)
+            .where(FactPassage.passage_id == Passage.id)
+            .exists()
+        )
+        query = (
+            select(Passage.text)
+            .where(
+                Passage.language == language,
+                Passage.lemmas.op("&&")(wanted),
+                asserts,
+            )
+            .order_by(overlap.desc(), Passage.id)
+            .limit(limit)
+        )
+        if skip:
+            query = query.where(Passage.id.notin_(skip))
+        with self._session() as session:
+            return [row.text for row in session.execute(query)]
 
     def nearest(
         self, embedding: list[float], before: int | None = None

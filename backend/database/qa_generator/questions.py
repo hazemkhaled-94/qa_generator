@@ -254,6 +254,16 @@ class Question(Base):
         "encrypted, so there is a test the development team has not tuned against. "
         "NULL means it is in the open set.",
     )
+    release_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        index=True,
+        comment="The balanced release this question was chosen into; one UUID "
+        "per draw. Accepting a question says it is sound, which is a different "
+        "question from what the SET should look like: `make questions-balance` "
+        "fills an even quota of kinds and difficulty bands out of everything "
+        "accepted, and writes this. NULL means accepted but not drawn - kept, "
+        "queryable, and available to the next draw.",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

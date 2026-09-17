@@ -81,11 +81,14 @@ class Settings:
 
     per_topic: int
     sample_size: int
+    #: How many times one passage may be offered, each time with facts no
+    #: earlier sample took. The ceiling on it; what really stops a passage
+    #: is running out of facts nothing has been written from.
+    samples_per_passage: int
     #: Which kinds of fact a question may be written from. Extraction reads a
-    #: passage four ways and only one of those shapes is a question seed: a
-    #: summary is a paraphrase rather than a checked claim, an outline is a
-    #: bulleted blob that breaks the numbering the writer cites by, and a
-    #: bridge rests on passages the verifier would never be shown.
+    #: passage four ways and each shape seeds a different question: an atomic
+    #: claim a factoid, a summary a definition, an outline an enumeration,
+    #: and a bridge a cross-document one.
     fact_kinds: tuple[str, ...]
     #: Which question types are written, and in what proportion. A type with a
     #: weight of 0, or absent, is never written.
@@ -99,13 +102,37 @@ class Settings:
     unanswerable_share: float
     followup_share: float
     max_followups: int
+    #: How many more times a question may be written when a gate refused the
+    #: draft, or when it came out below the band its slot asked for. 0 keeps
+    #: the first draft whatever it is.
+    retries: int
     #: Shortest and longest target answer per form.
     answer_chars: dict[str, tuple[int, int]]
     #: How much of a list or an explanation has to come back for the verifier
     #: to be agreeing with it.
     answer_overlap: float
+    #: How much of what an unanswerable question is about has to occur in the
+    #: material it was drawn from. Below it the question is off topic: any
+    #: chatbot declines one about something the corpus never mentions.
+    off_topic_overlap: float
+    #: How many passages the corpus-wide probe shows the verifier before an
+    #: unanswerable question is accepted. 0 judges one against its own
+    #: passages alone, as every other gate does.
+    elsewhere_passages: int
     long_answer_chars: int
     duplicate_cosine: float
+    #: How many questions a balanced release holds. 0 draws the largest one
+    #: the accepted pool can fill without missing a quota.
+    release_size: int
+    #: The most of a release that may be questions with no answer. A ceiling
+    #: and not a target, unlike the two mixes: too few tests a little less
+    #: than it could, too many tests mostly whether a chatbot can say no.
+    release_unanswerable: float
+    #: How a release spreads over the difficulty bands. The whole set, so
+    #: the unanswerable questions are counted in it - they are always easy.
+    #: Not the same thing as difficulty_mix, which is what the planner aims
+    #: the answerable ones at.
+    release_difficulty: dict[str, int]
     embedding_model: str
     max_tokens: int
     verifier_model: str | None
@@ -122,14 +149,26 @@ class Settings:
         every root may be followed twice, and each follow-up is another pair
         of calls.
 
-        Two calls per candidate and not a round number above it. This is
-        already the worst case - every call taking its full timeout on every
-        attempt - and padding a worst case is what makes a lease long enough
-        to matter: a worker killed mid-topic leaves that row unclaimable
-        until the lease runs out, and nothing but time moves it.
+        Three calls per candidate, not two: the writer's, the verifier's,
+        and the one a candidate may cost on top - the entailment pass when
+        recall came back empty, or the corpus probe on an unanswerable
+        question. And every candidate may be written `retries` times more.
+
+        This is a worst case on a worst case - every call taking its full
+        timeout on every attempt, on every question of the topic - so the
+        figure is days rather than hours and it grows with
+        QUESTIONS_PER_TOPIC. That is the wrong direction for the one thing
+        the lease is for: a worker killed mid-topic leaves that row
+        unclaimable until it runs out, and nothing but time moves it. The
+        remedy meanwhile is `make questions-retry`, which returns a stuck
+        topic to the queue without waiting.
         """
         return timedelta(
-            seconds=call_seconds * self.per_topic * (1 + self.max_followups) * 2
+            seconds=call_seconds
+            * self.per_topic
+            * (1 + self.max_followups)
+            * (1 + self.retries)
+            * 3
         )
 
     @classmethod
@@ -160,6 +199,7 @@ class Settings:
         return cls(
             per_topic=integer("QUESTIONS_PER_TOPIC"),
             sample_size=integer("QUESTIONS_FACT_SAMPLE"),
+            samples_per_passage=integer("QUESTIONS_SAMPLES_PER_PASSAGE"),
             fact_kinds=kinds,
             type_mix=_weights("QUESTIONS_TYPE_MIX", SPECS),
             difficulty_mix=_weights("QUESTIONS_DIFFICULTY_MIX", tuple(Difficulty)),
@@ -167,10 +207,18 @@ class Settings:
             unanswerable_share=decimal("QUESTIONS_UNANSWERABLE_SHARE"),
             followup_share=decimal("QUESTIONS_FOLLOWUP_SHARE"),
             max_followups=integer("QUESTIONS_MAX_FOLLOWUPS"),
+            retries=integer("QUESTIONS_RETRIES"),
             answer_chars=_bounds("QUESTIONS_ANSWER_CHARS"),
             answer_overlap=decimal("QUESTIONS_ANSWER_OVERLAP"),
+            off_topic_overlap=decimal("QUESTIONS_OFF_TOPIC_OVERLAP"),
+            elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES"),
             long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS"),
             duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE"),
+            release_size=integer("QUESTIONS_RELEASE_SIZE"),
+            release_unanswerable=decimal("QUESTIONS_RELEASE_UNANSWERABLE"),
+            release_difficulty=_weights(
+                "QUESTIONS_RELEASE_DIFFICULTY", tuple(Difficulty)
+            ),
             # The one embedding model, as chunking reads it: a question
             # embedded by a model other than the one a passage was sized by
             # measures distance in a space the corpus was never put in.

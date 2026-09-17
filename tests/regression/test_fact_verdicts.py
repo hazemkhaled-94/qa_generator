@@ -295,7 +295,15 @@ def test_every_refusal_appears_in_this_table() -> None:
     pinned |= {expected for *_, expected in OUTLINES if expected}
     pinned |= {expected for *_, expected in BRIDGES if expected}
 
-    assert pinned == set(Rejection), sorted(set(Rejection) - pinned)
+    # `over_cap` is not a verdict any check reaches, so no statement here
+    # could pin it: it is the service refusing facts the checks passed,
+    # because the passage yielded more atomic ones than
+    # EXTRACTION_MIN_OTHER_SHARE leaves room for. Pinned in
+    # tests/unit/extraction/test_atomic_cap.py instead.
+    service_only = {Rejection.OVER_CAP}
+    assert pinned == set(Rejection) - service_only, sorted(
+        set(Rejection) - service_only - pinned
+    )
 
 
 def test_an_accepted_fact_carries_a_span_that_resolves_in_its_passage(

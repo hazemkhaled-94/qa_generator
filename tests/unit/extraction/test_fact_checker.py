@@ -459,7 +459,13 @@ def test_each_failure_reaches_its_own_code(checker, offered) -> None:
         ).rejection_code,
     }
 
-    assert codes == set(Rejection), sorted(set(Rejection) - codes)
+    # Every code a CHECK emits. `over_cap` is not one of them: it is the
+    # service refusing what the checks already passed, because the passage
+    # yielded more atomic facts than EXTRACTION_MIN_OTHER_SHARE leaves room
+    # for. Nothing about the fact itself decides it, so nothing here can.
+    assert codes == set(Rejection) - {Rejection.OVER_CAP}, sorted(
+        set(Rejection) - {Rejection.OVER_CAP} - codes
+    )
 
 
 def test_one_passage_cited_twice_is_one_citation() -> None:

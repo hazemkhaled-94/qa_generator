@@ -10,7 +10,12 @@ from __future__ import annotations
 import pytest
 from factories import candidate, group, source
 
-from database.qa_generator import AnswerForm, QuestionRejection, QuestionStatus
+from database.qa_generator import (
+    AnswerForm,
+    QuestionRejection,
+    QuestionStatus,
+    QuestionType,
+)
 from question_generation.models import Neighbour
 from question_generation.verification import (
     OVERLAP,
@@ -18,7 +23,9 @@ from question_generation.verification import (
     Reading,
     agrees,
     anchored,
+    fitting,
     near_verdict,
+    on_topic,
     structural,
 )
 
@@ -37,20 +44,27 @@ BOUNDS = {"value": (1, 80), "list": (3, 300), "explanation": (20, 600)}
 
 
 def checked(**kwargs):
-    """Runs the free gates over one candidate's fields."""
-    return structural(
-        **{
-            "question_text": "What does the device weigh?",
-            "target_answer": "4 kg",
-            "answerable": True,
-            "language": "en",
-            "statements": (),
-            "form": AnswerForm.VALUE,
-            "bounds": BOUNDS,
-            "titles": (),
-            **kwargs,
-        }
-    )
+    """Runs the free gates over one candidate's fields.
+
+    Takes `form` singular and hands back the verdict alone. `structural`
+    takes every form a type will accept and reports which one the answer
+    turned out to fit; these tests are about the gates rather than about
+    that choice, so they pin one form and read the verdict. What happens
+    when a type allows several is covered in `test_fitting` below.
+    """
+    fields = {
+        "question_text": "What does the device weigh?",
+        "target_answer": "4 kg",
+        "answerable": True,
+        "language": "en",
+        "statements": (),
+        "form": AnswerForm.VALUE,
+        "bounds": BOUNDS,
+        "titles": (),
+        **kwargs,
+    }
+    failed, _ = structural(forms=(fields.pop("form"),), **fields)
+    return failed
 
 
 # ── The free gates ─────────────────────────────────────────────────────────
@@ -290,16 +304,22 @@ class Recording:
         recovers: str | None = "4 kg",
         stands_alone: bool = True,
         names_its_source: bool = False,
+        backs: bool = False,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
         self.names_its_source = names_its_source
+        #: What the entailment pass answers. False by default, so a test
+        #: about recall measures recall: the pass can only ever rescue, and
+        #: one that always said yes would hide every rejection below it.
+        self.backs = backs
         self.threaded: tuple = ()
         self.asked: str = ""
         self.embedded = 0
         self.verified = 0
+        self.supported = 0
 
     def embed(self, text: str) -> list[float]:
         """Answers with the one vector, and counts the ask."""
@@ -315,6 +335,16 @@ class Recording:
             stands_alone=self.stands_alone,
             names_its_source=self.names_its_source,
         )
+
+    def supports(self, question: str, answer: str, passages, thread=()) -> bool:
+        """Answers the entailment pass, and counts the ask."""
+        self.supported += 1
+        return self.backs
+
+    def computes(self, question: str, answer: str, passages, thread=()) -> bool:
+        """Answers the derived-answer pass, and counts the ask."""
+        self.supported += 1
+        return self.backs
 
 
 def build(recording: Recording, near: Neighbour | None = None) -> QuestionChecker:
@@ -1366,3 +1396,202 @@ def test_the_verifier_still_rejects_a_question_that_names_nothing() -> None:
     )
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
+
+
+# ── The forms a type will take ─────────────────────────────────────────────
+
+
+def test_a_type_takes_the_form_its_answer_actually_has() -> None:
+    """A factoid answered with three tools is not a malformed factoid.
+
+    The material decides what shape an answer has, not the question. Held to
+    the one form its type asked for, `Welche Werkzeuge werden empfohlen?` ->
+    `statische Analysatoren, Linter und Formatierer` was refused for the form
+    it arrived in, and then held to a value's stricter comparison on the way
+    out.
+    """
+    form, failed = fitting(
+        "unterschiedliche Fähigkeiten, Kompetenzen, Rollen und Verantwortung",
+        (AnswerForm.VALUE, AnswerForm.LIST),
+        BOUNDS,
+        "de",
+    )
+
+    assert failed is None
+    assert form == AnswerForm.LIST
+
+
+def test_a_condition_answered_with_a_value_is_kept() -> None:
+    """`immer` is the condition, and it is one word."""
+    form, failed = fitting("immer", (AnswerForm.LIST, AnswerForm.VALUE), BOUNDS, "de")
+
+    assert failed is None
+    assert form == AnswerForm.VALUE
+
+
+def test_a_form_the_type_does_not_allow_is_still_refused() -> None:
+    """The point is a wider set of forms, not no check at all."""
+    _, failed = fitting(
+        "die Testbarkeit des Systems", (AnswerForm.EXPLANATION,), BOUNDS, "de"
+    )
+
+    assert code(failed) == QuestionRejection.WRONG_FORM
+
+
+def test_two_items_are_not_a_list() -> None:
+    """`Berlin, 2025` is a value with a comma in it, not a set of two."""
+    form, failed = fitting(
+        "Berlin, 2025", (AnswerForm.VALUE, AnswerForm.LIST), BOUNDS, "en"
+    )
+
+    assert failed is None
+    assert form == AnswerForm.VALUE
+
+
+def test_the_complaint_reported_is_the_asked_for_forms() -> None:
+    """That is the form the writer was told to produce, so it is the one to show."""
+    form, failed = fitting("x" * 700, (AnswerForm.VALUE, AnswerForm.LIST), BOUNDS, "en")
+
+    assert form == AnswerForm.VALUE
+    assert code(failed) == QuestionRejection.ANSWER_TOO_LONG
+
+
+# ── The gates an unanswerable question faces ───────────────────────────────
+
+
+def test_a_question_about_the_material_is_on_topic() -> None:
+    """A perturbation keeps the subject and moves one detail out of reach."""
+    assert on_topic(
+        "How long is allowed for a standard request on a public holiday?",
+        "en",
+        frozenset({"standard", "request", "holiday", "hour"}),
+        0.3,
+    )
+
+
+def test_a_question_about_nothing_the_material_mentions_is_off_topic() -> None:
+    """Any chatbot declines it, so declining it proves nothing."""
+    assert not on_topic(
+        "What is the top speed of a swallow?",
+        "en",
+        frozenset({"standard", "request", "holiday", "hour"}),
+        0.3,
+    )
+
+
+def test_a_passage_with_no_lemmas_refuses_nothing() -> None:
+    """A measurement with nothing to measure against is not evidence."""
+    assert on_topic("What is the top speed of a swallow?", "en", frozenset(), 0.3)
+
+
+def test_a_floor_of_zero_turns_the_gate_off() -> None:
+    """One setting, and 0 is how a deployment declines to hold the opinion."""
+    assert on_topic("What is the top speed of a swallow?", "en", frozenset({"a"}), 0.0)
+
+
+def test_an_unanswerable_question_another_passage_answers_is_refused() -> None:
+    """The one claim here that is about the corpus and not about two passages.
+
+    A question wrongly carrying "nothing here answers this" marks a correct
+    chatbot wrong, which is the failure every gate exists to stop.
+    """
+    recording = Recording(recovers=None)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        bounds=BOUNDS,
+        elsewhere=lambda lemmas, language, skip, limit: ["It is 48 hours."],
+        elsewhere_passages=4,
+    )
+
+    # The corpus probe re-reads with the same stub, which recovers nothing on
+    # the first pass; scripting it to recover is what the second pass reads.
+    recording.recovers = None
+    result = checker.check(
+        candidate(
+            question_text="How long is allowed for a request on a holiday?",
+            target_answer=None,
+            answerable=False,
+        )
+    )
+
+    # Nothing was found anywhere, so it stands.
+    assert result.status == "accepted"
+
+
+# ── The entailment pass ────────────────────────────────────────────────────
+
+
+def test_recall_missing_an_answer_the_passages_support_is_rescued() -> None:
+    """Recalling an answer cold is a harder task than checking one.
+
+    Over one corpus the verifier failed to recall an answer 76 times against
+    19 real disagreements about what the answer was, so four in five of the
+    biggest rejection class were the task and not the question.
+    """
+    recording = Recording(recovers=None, backs=True)
+
+    result = build(recording).check(candidate(target_answer="4 kg"))
+
+    assert result.status == "accepted"
+    assert recording.supported == 1
+
+
+def test_the_entailment_pass_can_only_accept() -> None:
+    """A question reaching it was already being refused."""
+    recording = Recording(recovers=None, backs=False)
+
+    result = build(recording).check(candidate(target_answer="4 kg"))
+
+    assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+    assert recording.supported == 1
+
+
+def test_a_number_the_passages_never_gave_is_not_rescued() -> None:
+    """The one error that must not get through, whatever the model says.
+
+    `4 hours` confirmed against a passage that says 48 puts a question in
+    the benchmark whose answer the material does not give, which marks a
+    correct chatbot wrong.
+    """
+    recording = Recording(recovers=None, backs=True)
+
+    result = build(recording).check(
+        candidate(
+            question_text="How long is allowed for a standard request?",
+            target_answer="48 hours",
+            facts=group(
+                source(passage_text="A standard request is answered within 4 hours.")
+            ),
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+    # Refused before the model was asked, because the guard is free.
+    assert recording.supported == 0
+
+
+def test_a_target_asserting_nothing_numeric_reaches_the_pass() -> None:
+    """The guard is about numbers and names; prose has none to check."""
+    recording = Recording(recovers=None, backs=True)
+
+    result = build(recording).check(
+        candidate(
+            question_text="Why must a request be confirmed in writing?",
+            target_answer="so that the agreed time can be evidenced later",
+            question_type=QuestionType.REASON,
+            facts=group(
+                source(
+                    passage_text=(
+                        "Requests are confirmed in writing so the agreed time "
+                        "can be evidenced later."
+                    )
+                )
+            ),
+        )
+    )
+
+    assert result.status == "accepted"
+    assert recording.supported == 1

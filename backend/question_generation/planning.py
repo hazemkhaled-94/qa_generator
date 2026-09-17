@@ -94,17 +94,30 @@ def plans(
     said. It is written by moving one fact out of reach, so a second passage
     has nothing to do, and a chatbot declining it is not made cleverer by the
     question having spanned two documents.
+
+    And its TYPE is swapped for one that does not span, because the writer is
+    handed one fact to perturb: an unanswerable `comparison` has one side and
+    an unanswerable `aggregation` has one number, and neither is the kind of
+    question it was planned to be. The non-spanning types are cycled in mix
+    order, so the swap is spread over them rather than landing on one.
     """
     typed = allocate(types, wanted)
     banded = allocate(bands, wanted)
     if not typed or not banded:
         return []
 
+    alone = [
+        name for name, weight in types.items() if weight > 0 and not SPECS[name].spans
+    ]
     planned = []
+    perturbed = 0
     for index, name in enumerate(typed):
-        spec = SPECS[name]
         answerable = not spread(index, unanswerable_share)
         band = banded[index % len(banded)]
+        if not answerable and alone:
+            name = alone[perturbed % len(alone)]
+            perturbed += 1
+        spec = SPECS[name]
         if spec.spans and band == Difficulty.EASY:
             band = Difficulty.MEDIUM
         if not answerable:

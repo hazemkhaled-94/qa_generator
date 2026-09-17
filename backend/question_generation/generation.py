@@ -91,6 +91,20 @@ Rules, all of them mandatory:
 """
 
 
+def _under(position: int, statement: str) -> str:
+    """One fact under its number, every later line indented beneath it.
+
+    An outline is one fact carrying several `- ` lines. Interpolated flat
+    into a numbered list it reads as several facts, and the writer cites a
+    number the sample does not have; indenting the rest under the label
+    keeps the numbering the writer answers with intact. Every other kind is
+    one line and comes back unchanged.
+    """
+    label = f"[{position}] "
+    first, *rest = statement.splitlines() or [""]
+    return "\n".join([label + first, *(" " * len(label) + one for one in rest)])
+
+
 class _Answered(BaseModel):
     """A question the facts answer, as the model is asked to return it."""
 
@@ -126,7 +140,7 @@ class QuestionWriter:
         """The model writing the questions."""
         return self._client.model
 
-    def write(self, sample: FactGroup, plan: Plan) -> Candidate:
+    def write(self, sample: FactGroup, plan: Plan, note: str = "") -> Candidate:
         """Asks the model for one question of the kind the plan wants.
 
         Returns whatever came back, unjudged. An empty question is a
@@ -138,16 +152,20 @@ class QuestionWriter:
         fact of three is a single-passage question, and recording it as
         anything else is a difficulty nobody can reproduce.
 
+        `note` is what a gate said about the last draft, on a second
+        attempt. The same sample and the same plan: what is being asked for
+        has not changed, only what to avoid this time.
+
         Raises:
             ModelUnavailable: If the model could not be reached or would not
                 answer in the shape.
         """
         if not plan.answerable:
-            return self._unanswerable(sample, plan)
+            return self._unanswerable(sample, plan, note)
 
         written = self._client.answer(
             system=plan.spec.system(spans=plan.spans),
-            user=self._prompt(sample),
+            user=self._prompt(sample, note),
             shape=_Answered,
         )
         return self._candidate(
@@ -190,7 +208,7 @@ class QuestionWriter:
             thread=thread,
         )
 
-    def _unanswerable(self, sample: FactGroup, plan: Plan) -> Candidate:
+    def _unanswerable(self, sample: FactGroup, plan: Plan, note: str = "") -> Candidate:
         """Moves one fact out of reach and asks about where it went.
 
         From one fact and not from the sample: moving a claim just out of
@@ -200,7 +218,7 @@ class QuestionWriter:
         first = FactGroup(sample.facts[:1])
         written = self._client.answer(
             system=f"{_PERTURB}\nTHE KIND OF QUESTION TO ASK: {plan.spec.asks}",
-            user=self._prompt(first),
+            user=self._prompt(first, note),
             shape=_Unanswered,
         )
         return Candidate(
@@ -260,25 +278,36 @@ class QuestionWriter:
         return FactGroup(chosen or sample.facts[:1])
 
     @staticmethod
-    def _prompt(sample: FactGroup) -> str:
+    def _prompt(sample: FactGroup, note: str = "") -> str:
         """Renders one sample: the facts numbered, then their passages.
 
         The passages are fenced and labelled, as extraction fences a heading
         trail, because a model shown them unlabelled asks about them instead
         of about the facts.
+
+        `note` goes last, where a model weighs it most: it is what went
+        wrong with the draft before this one, and it is the only thing that
+        differs between the two attempts.
         """
         numbered = "\n".join(
-            f"[{position}] {fact.statement}"
+            _under(position, fact.statement)
             for position, fact in enumerate(sample.facts, 1)
         )
         context = "\n\n".join(
             f"[{position}] {heading}{text}"
             for position, (heading, text) in enumerate(sample.context, 1)
         )
+        again = (
+            f"\n\nYOUR LAST ATTEMPT WAS THROWN OUT: {note}\nWrite a different "
+            f"question from the same facts. Everything else asked of you still "
+            f"applies."
+            if note
+            else ""
+        )
         return (
             f"FACTS - your question must be answered by these:\n{numbered}\n\n"
             f"PASSAGE(S) - context only, so you know what the material is "
             f"about. Phrase the question from these; never quote or name a "
             f"heading or a title out of them, and never ask about anything "
-            f"here that the facts above do not state:\n{context}"
+            f"here that the facts above do not state:\n{context}{again}"
         )

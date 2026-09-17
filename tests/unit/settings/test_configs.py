@@ -88,7 +88,8 @@ def test_topic_modelling_reads_the_fitter_and_the_language_names() -> None:
     loaded = Settings.load()
 
     assert loaded.languages == {"de": "German", "en": "English"}
-    assert loaded.num_topics == 12
+    assert loaded.num_topics == 40
+    assert loaded.passages_per_topic == 40
     assert loaded.passes == 10
     assert loaded.random_state == 42
     assert loaded.top_terms == 12
@@ -160,19 +161,21 @@ def test_a_setting_of_the_wrong_shape_names_itself(
 
 
 def test_a_fact_kind_this_stage_cannot_use_is_refused_at_start_up() -> None:
-    """Rather than silently mangled on the first re-extraction.
+    """Rather than selecting nothing and writing no questions at all.
 
-    An outline interpolated into the writer's numbered fact list spans
-    several lines and breaks the numbering it is told to cite by; a bridge
-    rests on passages the verifier is never shown. Both are things
-    EXTRACTION_KINDS produces, and neither is a question seed.
+    All four of the kinds EXTRACTION_KINDS produces are askable now - an
+    outline's lines are indented under their own number, so it no longer
+    breaks the numbering the writer cites by - so what is left to refuse is
+    a name that is not a fact kind. Read as a filter it would match no row,
+    and a topic with no facts is not a failure: the stage would report a
+    clean run over an empty corpus.
     """
     import os
 
     from question_generation.config import Settings
 
     previous = os.environ.get("QUESTIONS_FACT_KINDS")
-    os.environ["QUESTIONS_FACT_KINDS"] = "atomic,outline"
+    os.environ["QUESTIONS_FACT_KINDS"] = "atomic,paraphrase"
     try:
         with pytest.raises(ValueError, match="QUESTIONS_FACT_KINDS"):
             Settings.load()

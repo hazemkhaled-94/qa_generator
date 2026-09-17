@@ -284,6 +284,15 @@ class FactGroup:
         )
 
     @property
+    def lemmas(self) -> frozenset[str]:
+        """The content lemmas of every passage this group rests on.
+
+        What says whether a question is about this material at all. Read off
+        the column chunking already wrote, so nothing here parses any text.
+        """
+        return frozenset(lemma for passage in self.resting for lemma in passage.lemmas)
+
+    @property
     def language(self) -> str:
         """The language the question is written in.
 

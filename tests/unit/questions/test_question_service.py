@@ -14,7 +14,12 @@ from dataclasses import replace
 import pytest
 from factories import source
 
-from database.qa_generator import Difficulty, QuestionType, Status
+from database.qa_generator import (
+    Difficulty,
+    QuestionRejection,
+    QuestionType,
+    Status,
+)
 from llm.client import ModelUnavailable
 from question_generation.config import Settings
 from question_generation.models import CheckedQuestion, TopicToCover
@@ -23,6 +28,7 @@ from question_generation.service import QuestionGenerationService
 SETTINGS = Settings(
     per_topic=4,
     sample_size=4,
+    samples_per_passage=1,
     fact_kinds=("atomic",),
     type_mix={QuestionType.FACTOID: 3, QuestionType.REASON: 1},
     difficulty_mix={Difficulty.EASY: 1, Difficulty.MEDIUM: 1},
@@ -30,10 +36,18 @@ SETTINGS = Settings(
     unanswerable_share=0.25,
     followup_share=0.5,
     max_followups=2,
+    # Nothing is asked twice here. A retry is another model call, and these
+    # tests count the calls a topic costs.
+    retries=0,
     answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
     answer_overlap=0.6,
+    off_topic_overlap=0.3,
+    elsewhere_passages=0,
     long_answer_chars=60,
     duplicate_cosine=0.93,
+    release_size=0,
+    release_unanswerable=0.1,
+    release_difficulty={Difficulty.EASY: 1, Difficulty.MEDIUM: 1, Difficulty.HARD: 1},
     embedding_model="stub",
     max_tokens=512,
     verifier_model="ollama/verifier",
@@ -340,12 +354,23 @@ def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
     Nothing but the lease running out returns an `in_progress` row to the
     queue: stop moves `pending` and retry moves `failed`. So every hour
     added here is an hour a killed worker's topic cannot be picked up.
+
+    Three calls a candidate, not two: the writer's, the verifier's, and the
+    one a candidate may cost on top - the entailment pass when recall came
+    back empty, or the corpus probe on an unanswerable question. Times
+    `1 + retries`, because every candidate may be written again.
     """
     call = 900.0 * 3
 
     held = SETTINGS.lease(call).total_seconds()
 
-    assert held == call * SETTINGS.per_topic * (1 + SETTINGS.max_followups) * 2
+    assert held == (
+        call
+        * SETTINGS.per_topic
+        * (1 + SETTINGS.max_followups)
+        * (1 + SETTINGS.retries)
+        * 3
+    )
 
 
 def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
@@ -552,3 +577,123 @@ def test_a_topic_that_runs_out_of_passages_stops_rather_than_repeating() -> None
 
     assert len(queue.stored[0]) == 1
     assert queue.finished == [7]
+
+
+# ── Asking again ───────────────────────────────────────────────────────────
+
+
+def test_a_gate_the_writer_could_have_satisfied_is_worth_asking_again() -> None:
+    """43 of 155 rejections over one corpus were of that kind.
+
+    A question thrown away for how it was written rather than for what it
+    was about, where saying what went wrong costs one call.
+    """
+    from question_generation.service import again
+
+    refused = replace(
+        accepted_question(),
+        status="rejected",
+        rejected_reason=QuestionRejection.COMPOUND,
+    )
+
+    assert again(refused, easy_plan()) is not None
+
+
+def test_a_duplicate_is_not_worth_asking_again() -> None:
+    """The same sample asked twice gives another twin of the same question."""
+    from question_generation.service import again
+
+    refused = replace(
+        accepted_question(),
+        status="rejected",
+        rejected_reason=QuestionRejection.DUPLICATE,
+    )
+
+    assert again(refused, easy_plan()) is None
+
+
+def test_a_question_that_stood_is_left_alone() -> None:
+    """Nothing to fix, and a second call would only risk the first draft."""
+    from question_generation.service import again
+
+    assert again(accepted_question(), easy_plan()) is None
+
+
+def test_a_question_narrower_than_its_slot_is_asked_to_widen() -> None:
+    """The other half of the difficulty problem.
+
+    The writer is offered two passages, takes the escape hatch its own rules
+    give it, cites one fact, and the question bands easy. Planned medium
+    collapsed to easy 83 times over one corpus.
+    """
+    from question_generation.service import again
+
+    assert again(accepted_question(), wide_plan()) is not None
+
+
+def test_a_question_that_met_its_band_is_not_asked_to_widen() -> None:
+    """The band is a request, and this one was granted."""
+    from question_generation.service import again
+
+    assert again(accepted_question(band=Difficulty.MEDIUM), wide_plan()) is None
+
+
+def test_a_single_passage_slot_is_never_asked_to_widen() -> None:
+    """It was never offered a second passage to use."""
+    from question_generation.service import again
+
+    assert again(accepted_question(), easy_plan()) is None
+
+
+def accepted_question(band: str = Difficulty.EASY) -> CheckedQuestion:
+    """One accepted question, banded as a test asks."""
+    from question_generation.models import Criteria
+
+    return CheckedQuestion(
+        question_text="How heavy is the device?",
+        target_answer="4 kg",
+        answerable=True,
+        criteria=Criteria(
+            passage_scope="single_passage",
+            document_scope="single_document",
+            topic_scope="single_topic",
+            answer_chars=4,
+            difficulty=band,
+        ),
+        language="en",
+        status="accepted",
+        rejected_reason=None,
+        fact_ids=(1,),
+        thread_position=1,
+        question_type=QuestionType.FACTOID,
+        answer_form="value",
+        planned_difficulty=band,
+    )
+
+
+def easy_plan():
+    """A slot asking for one passage, which cannot come out narrower."""
+    from question_generation.planning import Plan
+    from question_generation.selection import Shape
+    from question_generation.types import SPECS
+
+    return Plan(
+        spec=SPECS[QuestionType.FACTOID],
+        band=Difficulty.EASY,
+        shape=Shape.SINGLE,
+        answerable=True,
+    )
+
+
+def wide_plan():
+    """A slot asking for two passages and the medium band."""
+    from question_generation.planning import Plan
+    from question_generation.selection import Shape
+    from question_generation.types import SPECS
+
+    return Plan(
+        spec=SPECS[QuestionType.FACTOID],
+        band=Difficulty.MEDIUM,
+        shape=Shape.CROSS,
+        answerable=True,
+    )

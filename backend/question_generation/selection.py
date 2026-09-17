@@ -23,6 +23,7 @@ from collections.abc import Iterable, Sequence
 from enum import StrEnum
 from itertools import zip_longest
 
+from database.qa_generator import FactKind
 from question_generation.models import FactGroup, SourceFact
 
 
@@ -74,13 +75,32 @@ def overlap(left: Sequence[SourceFact], right: Sequence[SourceFact]) -> float:
     return len(first & second) / len(first | second)
 
 
-def ranked(facts: Iterable[SourceFact]) -> list[SourceFact]:
-    """One passage's facts, the ones asserting a value first.
+#: The order the kinds are interleaved in. Atomic first because it is the
+#: shape every prompt here assumes; the rest as EXTRACTION_KINDS writes them.
+_KINDS = (FactKind.ATOMIC, FactKind.SUMMARY, FactKind.OUTLINE, FactKind.BRIDGE)
 
-    A fact carrying a number, a date or an amount is what a checkable question
-    is written from, so it is offered before one that carries none.
+
+def ranked(facts: Iterable[SourceFact]) -> list[SourceFact]:
+    """One passage's facts, its kinds interleaved and each kind's best first.
+
+    Two orderings in one.
+
+    Within a kind, the facts asserting a value come first: a fact carrying a
+    number, a date or an amount is what a checkable question is written
+    from, so it is offered before one that carries none.
+
+    Across kinds, one of each in turn. A passage yields far more atomic
+    facts than anything else, so a sample capped at four spent all four on
+    atomic claims and left the summary and the outline unoffered - and those
+    two are what the types a single claim cannot answer are written from: a
+    definition asks what something IS, an enumeration wants a real set, and
+    neither is in one sentence of a passage.
     """
-    return sorted(facts, key=lambda one: (not one.units, one.id))
+    held: dict[str, list[SourceFact]] = {}
+    for fact in sorted(facts, key=lambda one: (not one.units, one.id)):
+        held.setdefault(fact.kind, []).append(fact)
+    ordered = [held[kind] for kind in _KINDS if kind in held]
+    return [fact for row in zip_longest(*ordered) for fact in row if fact is not None]
 
 
 def by_passage(facts: Iterable[SourceFact]) -> list[list[SourceFact]]:
@@ -126,11 +146,18 @@ def strided(items: list, wanted: int) -> list:
 
 
 class Deal:
-    """One topic's passages, handed out as samples without repeating one.
+    """One topic's passages, handed out as samples of facts not yet used.
 
-    A passage is offered once per run. Two questions written from one passage
-    are two questions about the same few sentences, and the dedup gate pays
-    for both before throwing one away.
+    A passage may be offered `rounds` times, and never twice with the same
+    fact: what must not repeat is the material a question is written from,
+    not the passage it sits in. A passage carrying a dozen facts holds a
+    dozen questions, and offering it once was the ceiling on the whole
+    stage - 18.9% of one corpus's passages were ever read, and 1.8% of its
+    facts, because each of 12 topics stopped after 20 passages.
+
+    Rounds are a ceiling and the facts are the real limit: a passage runs
+    out when nothing unspent is left in it, so a thin passage yields one
+    sample and a dense one yields several, without either being configured.
     """
 
     def __init__(
@@ -140,12 +167,15 @@ class Deal:
         *,
         wanted: int,
         size: int,
+        rounds: int = 1,
     ) -> None:
         """Deals one topic's facts, strided over the whole of it."""
         self._order = strided(interleaved(by_passage(facts)), wanted)
         self._bridges = interleaved(by_passage(bridges))
         self._size = max(size, 1)
-        self._used: set[int] = set()
+        self._rounds = max(rounds, 1)
+        self._offered: dict[int, int] = {}
+        self._spent: set[int] = set()
 
     @property
     def passages(self) -> int:
@@ -173,12 +203,24 @@ class Deal:
         partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
         return self._group([head, partner] if partner else [head])
 
+    def _left(self, passage: list[SourceFact]) -> list[SourceFact]:
+        """The facts of this passage no sample has taken yet, in rank order."""
+        return [fact for fact in passage if fact.id not in self._spent]
+
     def _taken(self, passage: list[SourceFact]) -> bool:
-        """Whether this passage has already been offered."""
-        return passage[0].passage_id in self._used
+        """Whether this passage has nothing left to offer.
+
+        Either it has been offered its share of times, or every fact in it
+        has already been written from. The second is the one that binds on
+        a thin passage, and it is why `rounds` can be raised without any
+        risk of dealing the same material twice.
+        """
+        return self._offered.get(passage[0].passage_id, 0) >= self._rounds or not (
+            self._left(passage)
+        )
 
     def _next(self) -> list[SourceFact] | None:
-        """The next passage nothing has been written from."""
+        """The next passage with something still to be written from."""
         for passage in self._order:
             if not self._taken(passage):
                 return passage
@@ -263,21 +305,32 @@ class Deal:
         )
 
     def _group(self, passages: list[list[SourceFact]]) -> FactGroup:
-        """Marks these passages used and offers a capped share of each.
+        """Counts a round against these passages and offers unspent facts.
 
         The cap is divided between the passages rather than applied to the
         sample, so a wide sample offers both sides of what it is asking about
         instead of filling itself from the first passage.
 
-        Every passage a chosen fact rests on is marked, not only the one it
-        is filed under: a bridge's second passage has been asked about once
-        the bridge has, and offering it again would ask the same thing twice.
+        Only facts nothing has been written from, so the second round over a
+        passage asks about the rest of it rather than about the same few
+        sentences again. The facts taken are spent whatever the writer does
+        with them: a sample is an offer, but offering it twice would put the
+        dedup gate in the way of the same question twice.
+
+        A passage a chosen fact rests on but which was not itself offered is
+        used up whole - that is a bridge's second passage, which has been
+        asked about once the bridge has.
         """
         each = max(1, self._size // len(passages))
+        offered = {passage[0].passage_id for passage in passages}
         facts: list[SourceFact] = []
         for passage in passages:
-            self._used.add(passage[0].passage_id)
-            facts.extend(passage[:each])
+            pid = passage[0].passage_id
+            self._offered[pid] = self._offered.get(pid, 0) + 1
+            facts.extend(self._left(passage)[:each])
         for fact in facts:
-            self._used.update(one.id for one in fact.passages)
+            self._spent.add(fact.id)
+            for one in fact.passages:
+                if one.id not in offered:
+                    self._offered[one.id] = self._rounds
         return FactGroup(tuple(facts))

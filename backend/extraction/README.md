@@ -162,6 +162,17 @@ winning:
 | two points or more | `not_listed` | | | ● | |
 | rests on two passages | `not_bridging` | | | | ● |
 
+One refusal is not in that table because no check makes it. `over_cap` is the
+service refusing what the checks already passed: `EXTRACTION_MIN_OTHER_SHARE`
+is a floor on the share of a passage's facts that are *not* atomic, a passage
+yields a fixed two digests however much it says, and so the floor works out
+to a cap on the atomic ones — at a third, four of them. Read without a cap
+this corpus gave 18.4 atomic facts a passage and an author list became fifty
+facts of the form *X wrote the original edition*. The ones asserting a
+number, a date or a name are kept first, and the rest are refused rather than
+dropped, like every other refusal here. `make extract-recap` applies the cap
+to facts already stored without calling the model.
+
 The gaps are the design, not oversights:
 
 - **A summary and an outline are exempt from `not_atomic`.** Carrying several

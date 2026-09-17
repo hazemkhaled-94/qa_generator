@@ -31,6 +31,7 @@ SETTINGS = frozenset(
     {
         "EXTRACTION_KINDS",
         "EXTRACTION_DIGEST_MAX_SHARE",
+        "EXTRACTION_MIN_OTHER_SHARE",
         "EXTRACTION_BRIDGES_PER_TOPIC",
         "EXTRACTION_BRIDGE_PASSAGES",
     }
@@ -161,6 +162,10 @@ REJECTIONS = frozenset(
         "not_condensed",
         "not_listed",
         "not_bridging",
+        # Not a check's: the service refuses what the checks passed, because
+        # the passage yielded more atomic facts than
+        # EXTRACTION_MIN_OTHER_SHARE leaves room for.
+        "over_cap",
     }
 )
 
@@ -176,7 +181,7 @@ CHECKS = {
 #: The prompt version recorded on every fact each model-backed reader draws.
 #: Bumped whenever the prompt changes what counts as a fact: two prompts are
 #: two datasets, and a corpus read under both is neither.
-PROMPTS = {"llm": "5", "digest": "1", "bridge": "2"}
+PROMPTS = {"llm": "6", "digest": "1", "bridge": "2"}
 
 
 def test_the_service_reads_exactly_the_settings_named_here() -> None:

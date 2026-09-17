@@ -66,9 +66,16 @@ def build_service(
             # naming nothing, which is the kind of loss a gate must not
             # cause. Recoverability is unaffected: that one is checkable.
             judge_phrasing=bool(settings.verifier_model),
+            # For the same reason, and it matters more here: the entailment
+            # pass can only accept, so a writer running it over its own
+            # answer would wave through everything its own recall missed.
+            entail=bool(settings.verifier_model),
             bounds=settings.answer_chars,
             overlap=settings.answer_overlap,
             long_answer_chars=settings.long_answer_chars,
+            elsewhere=catalog.elsewhere,
+            elsewhere_passages=settings.elsewhere_passages,
+            off_topic_overlap=settings.off_topic_overlap,
         ),
         settings=settings,
     )

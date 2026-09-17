@@ -24,7 +24,8 @@ def unserved(monkeypatch):
 
 def test_the_fitter_settings_are_read_from_the_environment(unserved) -> None:
     """The values in configs/env/backend.env, which the tests load."""
-    assert unserved.num_topics == 12
+    assert unserved.num_topics == 40
+    assert unserved.passages_per_topic == 40
     assert unserved.passes == 10
     assert unserved.random_state == 42
     assert unserved.top_terms == 12

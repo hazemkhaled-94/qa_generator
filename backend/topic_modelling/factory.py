@@ -43,6 +43,7 @@ def build_service(settings: Settings) -> TopicModellingService:
             min_weight=settings.min_weight,
             no_below=settings.no_below,
             no_above=settings.no_above,
+            passages_per_topic=settings.passages_per_topic,
         ),
         labeller=labeller,
     )

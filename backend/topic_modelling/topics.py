@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 #: How many passages to hold at once while building the vocabulary.
 _BATCH = 500
 
+#: The fewest topics a fit is worth. Below two nothing is partitioned.
+_FEWEST = 2
+
 #: The corpus, as the fitter takes it: a callable handing back a fresh walk
 #: over every passage.
 Corpus = Callable[[], Iterable[PassageVocabulary]]
@@ -70,11 +73,13 @@ class TopicFitter:
         min_weight: float,
         no_below: int,
         no_above: float,
+        passages_per_topic: int = 0,
     ) -> None:
         """Initialises the fitter.
 
         Args:
-            num_topics: Topics to fit, at least 2.
+            num_topics: Topics to fit, at least 2. The ceiling when
+                `passages_per_topic` is set.
             passes: Times the factorisation walks the corpus.
             random_state: Seed for the factorisation.
             top_terms: Terms kept as a topic's signature, at least 1.
@@ -82,14 +87,17 @@ class TopicFitter:
             no_below: Fewest passages a term must appear in.
             no_above: Largest share of passages a term may appear in, in
                 (0, 1].
+            passages_per_topic: How many passages one topic is worth, which
+                scales the count to each language's share of the corpus. 0
+                fits `num_topics` whatever the corpus is.
 
         Raises:
             ValueError: If a setting is outside the range named above.
         """
-        if num_topics < 2:
+        if num_topics < _FEWEST:
             raise ValueError(
                 f"TOPIC_NUM_TOPICS={num_topics} is not a partition of anything; "
-                "it must be at least 2"
+                f"it must be at least {_FEWEST}"
             )
         if top_terms < 1:
             raise ValueError(
@@ -113,6 +121,7 @@ class TopicFitter:
         self._min_weight = min_weight
         self._no_below = no_below
         self._no_above = no_above
+        self._passages_per_topic = passages_per_topic
 
     def fit(self, corpus: Corpus, language: str) -> Fitting:
         """Fits one language's model and scores its passages against it.
@@ -180,10 +189,11 @@ class TopicFitter:
                 f"TOPIC_NO_ABOVE, which is {self._no_above:.0%}, to drop them."
             )
 
+        wanted = self._count(counted)
         log.info(
             "%s: fitting %d topics over %d passage(s), %d term(s) of %d kept",
             language,
-            self._num_topics,
+            wanted,
             counted,
             len(dictionary),
             before,
@@ -191,7 +201,7 @@ class TopicFitter:
         model = Nmf(
             corpus=weighting[bows],
             id2word=dictionary,
-            num_topics=self._num_topics,
+            num_topics=wanted,
             passes=self._passes,
             random_state=self._random_state,
         )
@@ -206,6 +216,23 @@ class TopicFitter:
             vocabulary=len(dictionary),
             space=space,
         )
+
+    def _count(self, passages: int) -> int:
+        """How many topics to fit over this many passages.
+
+        TOPIC_NUM_TOPICS is the ceiling and TOPIC_PASSAGES_PER_TOPIC turns
+        it into a count that follows the corpus. One fit runs per language
+        and two languages are rarely the same size: this corpus carries 1434
+        passages in one and 51 in the other, and fitting twelve topics over
+        each gave twelve subjects on one side and twelve slivers of four
+        passages on the other. The slivers are what a question is written
+        about, so they are worth not making.
+
+        0 turns it off and the ceiling is taken as written.
+        """
+        if self._passages_per_topic <= 0:
+            return self._num_topics
+        return max(_FEWEST, min(self._num_topics, passages // self._passages_per_topic))
 
     def _topics(self, model: Nmf) -> list[FittedTopic]:
         """Reads each topic's signature out of the fitted model."""

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from dataclasses import replace
 from itertools import zip_longest
 from typing import ClassVar
 
-from database.qa_generator import FactKind
+from database.qa_generator import FactKind, Rejection
 from extraction.extractors import (
     BridgeExtractor,
     DigestExtractor,
@@ -18,7 +20,7 @@ from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import FactChecker
 from nlp.analysis import normalised
 from stages import StageService
-from telemetry import tracer
+from telemetry import tracer, working
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -68,6 +70,32 @@ def revalidate(catalog: FactCatalog, within=None) -> int:
             "against. Run --bridge to replace them.",
             skipped,
         )
+    return written
+
+
+def recap(catalog: FactCatalog, cap: int | None, within=None) -> int:
+    """Applies the atomic cap to facts already stored.
+
+    Args:
+        catalog: Where the facts are read from and written back to.
+        cap: The most validated atomic facts one passage may keep, or None
+            when EXTRACTION_MIN_OTHER_SHARE sets no cap.
+        within: A condition narrowing which passages are read, or None.
+
+    Returns:
+        How many facts were refused.
+    """
+    if cap is None:
+        log.info("EXTRACTION_MIN_OTHER_SHARE caps nothing; no fact was touched")
+        return 0
+    written = catalog.recap(
+        cap,
+        f"the passage yielded more than the {cap} atomic fact(s) "
+        f"EXTRACTION_MIN_OTHER_SHARE leaves room for, and the ones asserting "
+        f"a number, a date or a name were kept ahead of it",
+        within,
+    )
+    log.info("refused %d atomic fact(s) over the cap of %d a passage", written, cap)
     return written
 
 
@@ -219,6 +247,46 @@ def skipped(passage: PassageToExtract) -> str | None:
     return None
 
 
+def over_cap(facts: Sequence[CheckedFact], cap: int | None) -> set[int]:
+    """Which of one passage's facts the atomic cap refuses, by position.
+
+    Only the validated atomic ones compete for the budget and only they are
+    refused. A fact a check already threw out is not taking a place from
+    anything, and overwriting its code would lose why it really went.
+
+    The ones asserting a value are kept, which is the rule question
+    generation already offers facts by: a fact carrying a number, a date or
+    a name is what a checkable question is written from. Ties go to the
+    order the model wrote them in, so one passage read twice keeps the same
+    facts.
+    """
+    if cap is None:
+        return set()
+    competing = [
+        (position, fact)
+        for position, fact in enumerate(facts)
+        if fact.kind == FactKind.ATOMIC and fact.validated
+    ]
+    if len(competing) <= cap:
+        return set()
+    ranked = sorted(competing, key=lambda one: (not one[1].units_statement, one[0]))
+    return {position for position, _ in ranked[cap:]}
+
+
+def _refuse(fact: CheckedFact, cap: int) -> CheckedFact:
+    """Marks one atomic fact as over the cap, leaving the rest of it alone."""
+    return replace(
+        fact,
+        validated=False,
+        rejection_code=Rejection.OVER_CAP,
+        validation_error=(
+            f"the passage yielded more than the {cap} atomic fact(s) "
+            f"EXTRACTION_MIN_OTHER_SHARE leaves room for, and the ones "
+            f"asserting a number, a date or a name were kept ahead of it"
+        ),
+    )
+
+
 class ExtractionService(StageService):
     """Draws facts out of passages, one passage at a time.
 
@@ -236,6 +304,7 @@ class ExtractionService(StageService):
         extractors: ExtractorRegistry,
         checker: FactChecker,
         digest: DigestExtractor | None = None,
+        atomic_cap: int | None = None,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -245,12 +314,15 @@ class ExtractionService(StageService):
             checker: What judges everything they propose.
             digest: The reader of a passage's summary and outline, or None
                 when this deployment writes neither.
+            atomic_cap: The most atomic facts one passage keeps, or None for
+                no cap. EXTRACTION_MIN_OTHER_SHARE is where it comes from.
         """
         super().__init__(repository)
         self._repository: PassageQueue = repository
         self._extractors = extractors
         self._checker = checker
         self._digest = digest
+        self._atomic_cap = atomic_cap
 
     def process_next(self) -> int | None:
         """Reads one queued passage and stores what it yielded.
@@ -262,9 +334,15 @@ class ExtractionService(StageService):
         if passage is None:
             return None
 
-        with span.start_as_current_span("extract") as current:
-            current.set_attribute("passage.id", passage.id)
-            current.set_attribute("passage.block_type", passage.block_type or "")
+        with working(
+            span,
+            "extract",
+            {
+                "stage": self.name,
+                "passage.id": passage.id,
+                "passage.block_type": passage.block_type or "",
+            },
+        ) as current:
             try:
                 facts = self._passage(passage, current)
                 stored = self._repository.store(passage.id, facts)
@@ -278,6 +356,11 @@ class ExtractionService(StageService):
                     stored,
                     validated,
                     stored - validated,
+                    extra={
+                        "facts.stored": stored,
+                        "facts.validated": validated,
+                        "facts.rejected": stored - validated,
+                    },
                 )
             except ExtractionFailed as exc:
                 self._fail(passage.id, str(exc), current)
@@ -302,6 +385,14 @@ class ExtractionService(StageService):
             )
             for candidate in extractor.extract(passage)
         ]
+        cap = self._atomic_cap
+        refused = over_cap(facts, cap)
+        if cap is not None and refused:
+            current.set_attribute("extract.over_cap", len(refused))
+            facts = [
+                _refuse(fact, cap) if position in refused else fact
+                for position, fact in enumerate(facts)
+            ]
         return facts + self._digested(passage)
 
     def _digested(self, passage: PassageToExtract) -> list[CheckedFact]:

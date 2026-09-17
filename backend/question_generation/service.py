@@ -7,7 +7,8 @@ from typing import ClassVar
 
 from opentelemetry.trace import Span
 
-from database.qa_generator import QuestionRejection, QuestionStatus
+from database.qa_generator import Difficulty, QuestionRejection, QuestionStatus
+from question_generation.balance import choose, composition, largest, quota_of
 from question_generation.config import Settings
 from question_generation.generation import QuestionWriter
 from question_generation.models import (
@@ -27,13 +28,92 @@ from question_generation.verification import (
     structural,
 )
 from stages import StageService
-from telemetry import tracer
+from telemetry import tracer, working
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
 
 #: How many re-checked questions to write at once.
 _RECHECK_BATCH = 500
+
+#: The bands in order, for asking whether a question came out below the one
+#: its plan wanted.
+_RANK: dict[str, int] = {
+    Difficulty.EASY: 0,
+    Difficulty.MEDIUM: 1,
+    Difficulty.HARD: 2,
+}
+
+#: What to tell the writer about a draft a gate refused, by the gate that
+#: refused it. Only the gates a second attempt can do anything about are
+#: here: each of these is the writer having written the question badly
+#: rather than the material not supporting one, and saying what went wrong
+#: is worth one more call. `duplicate` is deliberately absent - the same
+#: sample asked again produces another near-twin of the same question.
+_NOTES: dict[str, str] = {
+    QuestionRejection.MALFORMED: (
+        "it was not one well-formed question. Write exactly one, ending in a "
+        "single question mark, with the answer in the field for it."
+    ),
+    QuestionRejection.COMPOUND: (
+        "it asked two things joined by 'and', so a chatbot answering half of "
+        "it would be neither right nor wrong. Ask ONE thing. If the facts "
+        "have no single question between them, ask about one fact alone and "
+        "cite only that one."
+    ),
+    QuestionRejection.WRONG_FORM: (
+        "the answer was not the shape this kind of question asks for. Read "
+        "the answer rule again and write an answer of that shape."
+    ),
+    QuestionRejection.ANSWER_TOO_SHORT: (
+        "the answer was too short to score anything against. Ask a question "
+        "whose answer the material states in full."
+    ),
+    QuestionRejection.ANSWER_TOO_LONG: (
+        "the answer ran far past the length this kind of question allows. "
+        "Ask something narrower, with a shorter answer."
+    ),
+    QuestionRejection.LEAKS_SOURCE: (
+        "it said WHERE the answer is - it named or quoted a document, a "
+        "section or a heading. Name the subject instead: the thing, the "
+        "party, the duty, the period."
+    ),
+    QuestionRejection.UNANCHORED: (
+        "it named nothing a person searching would know to type. Name the "
+        "subject in the question itself, so somebody who has not read the "
+        "passage could have asked it."
+    ),
+    QuestionRejection.NOT_RECOVERABLE: (
+        "a second reader could not get your answer back out of the passages. "
+        "Ask about something the facts state plainly, and write the answer "
+        "in the words of the material."
+    ),
+    QuestionRejection.OFF_TOPIC: (
+        "it was about something this material never mentions, so any chatbot "
+        "declines it and declining it proves nothing. Stay on the subject of "
+        "the fact and move one detail of it out of reach."
+    ),
+    QuestionRejection.ANSWERABLE_AFTER_ALL: (
+        "the passages answered it, and this question is supposed to have no "
+        "answer. Move further out of reach: change the party, the period or "
+        "the category to one the material does not cover."
+    ),
+    QuestionRejection.ANSWERABLE_ELSEWHERE: (
+        "another part of the corpus answers it, and this question is "
+        "supposed to have no answer anywhere. Ask for a detail of this "
+        "subject that no document would carry."
+    ),
+}
+
+#: Told to the writer when a question was accepted but came out narrower
+#: than the band its slot asked for. Not a rejection: the draft stands if
+#: the second attempt is worse.
+_WIDEN = (
+    "it was accepted, but it used facts from only one passage where this "
+    "slot needs a question that genuinely requires both. Ask ONE question "
+    "that cannot be answered without facts from each passage, and cite them "
+    "all. Still one question about one thing - do not weld two together."
+)
 
 
 def reverify(catalog: QuestionCatalog, settings: Settings, within=None) -> int:
@@ -108,16 +188,18 @@ def _recheck(
     if moved:
         return QuestionRejection.SOURCE_CHANGED, "; ".join(moved)
 
-    failed = structural(
+    failed, _ = structural(
         question_text=question.question_text,
         target_answer=question.target_answer,
         answerable=question.answerable,
         language=question.language,
         statements=question.statements,
-        # The form the row was written under, not the one its type asks for
-        # today: a type whose answer form was changed under a stored question
-        # would otherwise reject every question written before the change.
-        form=question.answer_form or spec(question.question_type).form,
+        # The form the row was written under, not the ones its type will
+        # take today: a type whose answer forms changed under a stored
+        # question would otherwise re-judge every question written before
+        # the change, and a re-check that moves a verdict for that reason
+        # is measuring the settings rather than the row.
+        forms=(question.answer_form or spec(question.question_type).form,),
         bounds=settings.answer_chars,
     )
     if failed:
@@ -130,6 +212,142 @@ def _recheck(
         answerable=question.answerable,
         threshold=settings.duplicate_cosine,
     )
+
+
+def balance(catalog: QuestionCatalog, settings: Settings, within=None) -> int:
+    """Draws a balanced release out of everything the run accepted.
+
+    Args:
+        catalog: Where the accepted questions are read and the draw written.
+        settings: The shares the release is held to.
+        within: A condition narrowing which questions may be drawn, or None.
+
+    Returns:
+        How many questions were drawn into the release.
+    """
+    pool = catalog.releasable(within)
+    if not pool:
+        log.warning("no accepted question carries both a difficulty and a type")
+        return 0
+
+    bands = _supplied(pool, settings.release_difficulty, "band", "difficulty")
+    types = _supplied(pool, settings.type_mix, "kind", "question_type")
+    if not bands or not types:
+        log.warning("nothing accepted can fill any quota; no release was drawn")
+        catalog.release([])
+        return 0
+
+    if settings.release_size:
+        release = choose(
+            pool,
+            quota_of(
+                settings.release_size,
+                bands,
+                types,
+                settings.release_unanswerable,
+            ),
+        )
+    else:
+        release = largest(pool, bands, types, settings.release_unanswerable)
+
+    drawn, written = catalog.release(release.ids)
+    _report(pool, release, drawn, written)
+    return written
+
+
+def _supplied(pool, weights, what: str, attribute: str) -> dict[str, int]:
+    """The weights narrowed to the buckets this pool can actually supply.
+
+    A quota nothing can fill makes the whole draw empty rather than smaller:
+    the choosing needs every bucket at zero together, so one bucket with no
+    questions in it refuses every size, down to one. Over 29 accepted
+    questions spread across eleven kinds that is exactly what happened -
+    most kinds had nothing, and the release came out empty.
+
+    Dropping the bucket is the lesser wrong, and it is said out loud. What
+    the release then holds is reported off the rows either way, so a missing
+    kind or a missing band shows up in the composition rather than being
+    promised and quietly not delivered.
+    """
+    present = {getattr(row, attribute) for row in pool}
+    kept = {
+        name: weight
+        for name, weight in weights.items()
+        if weight > 0 and name in present
+    }
+    dropped = [
+        name for name, weight in weights.items() if weight > 0 and name not in present
+    ]
+    if dropped:
+        log.warning(
+            "no accepted question is of %s %s, so the release has no quota for "
+            "%s. Generate more, or accept a set without %s.",
+            what,
+            ", ".join(sorted(dropped)),
+            "them" if len(dropped) > 1 else "it",
+            "them" if len(dropped) > 1 else "it",
+        )
+    return kept
+
+
+def _report(pool, release, drawn, written: int) -> None:
+    """Logs what the draw came out as, and what it could not fill."""
+    log.info(
+        "release %s: %d of %d accepted question(s), a yield of %.0f%%",
+        drawn,
+        written,
+        len(pool),
+        100.0 * written / len(pool),
+    )
+    for name, counted in composition(pool, release.ids).items():
+        log.info(
+            "  %-11s %s",
+            name,
+            ", ".join(
+                f"{key} {value} ({100.0 * value / max(written, 1):.0f}%)"
+                for key, value in sorted(counted.items())
+            ),
+        )
+    if release.short:
+        log.warning(
+            "the pool could not fill: %s. Generate more, or lower the share "
+            "that is short.",
+            ", ".join(
+                f"{name} short by {count}" for name, count in release.short.items()
+            ),
+        )
+
+
+def again(checked: CheckedQuestion, plan: Plan) -> str | None:
+    """What to tell the writer about this draft, or None to keep it as it is.
+
+    Two reasons to ask a second time, and they are not the same kind of
+    reason.
+
+    A gate refused it, and it is a gate the writer could have satisfied.
+    Those are most of the rejections that are not about the material: over
+    one corpus, 21 compound questions, 11 malformed ones and 43 in all were
+    thrown away for how the question was written rather than for what it
+    was about.
+
+    Or it was accepted and came out below the band its slot asked for. That
+    is the other half of the difficulty problem: the writer is offered two
+    passages, takes the escape hatch its own rules give it, cites one fact,
+    and the question bands easy. Planned-medium collapsed to easy 83 times
+    and planned-hard 30 times, which is why the accepted set came out 96.5%
+    easy however the mix was set. This one only ever asks - the accepted
+    draft stands if the second attempt turns out worse.
+    """
+    if checked.rejected_reason in _NOTES:
+        return _NOTES[checked.rejected_reason]
+    if (
+        checked.accepted
+        and plan.answerable
+        and plan.spans
+        and _RANK[checked.criteria.difficulty] < _RANK[plan.band]
+    ):
+        return _WIDEN
+    return None
 
 
 class QuestionGenerationService(StageService):
@@ -168,9 +386,15 @@ class QuestionGenerationService(StageService):
         if topic is None:
             return None
 
-        with span.start_as_current_span("generate_questions") as current:
-            current.set_attribute("topic.id", topic.id)
-            current.set_attribute("topic.label", topic.label or "")
+        with working(
+            span,
+            "generate_questions",
+            {
+                "stage": self.name,
+                "topic.id": topic.id,
+                "topic.label": topic.label or "",
+            },
+        ) as current:
             try:
                 threads = self._topic(topic, current)
                 stored = self._repository.store(topic.id, threads)
@@ -190,6 +414,13 @@ class QuestionGenerationService(StageService):
                     accepted,
                     stored - accepted,
                     followups,
+                    extra={
+                        "questions.written": stored,
+                        "questions.threads": len(threads),
+                        "questions.accepted": accepted,
+                        "questions.rejected": stored - accepted,
+                        "questions.followups": followups,
+                    },
                 )
             except Exception as exc:
                 self._fail(topic.id, f"{type(exc).__name__}: {exc}", current)
@@ -223,6 +454,7 @@ class QuestionGenerationService(StageService):
             self._repository.bridging(topic.id),
             wanted=self._settings.per_topic,
             size=self._settings.sample_size,
+            rounds=self._settings.samples_per_passage,
         )
         planned = plans(
             wanted=self._settings.per_topic,
@@ -241,11 +473,13 @@ class QuestionGenerationService(StageService):
                 # slots. Everything it had has been asked about once.
                 break
             written += 1
-            candidate = self._writer.write(sample, plan)
-            # Against what this run has accepted as well as what the database
-            # holds: nothing is stored until the topic is finished, so
-            # without it a topic would happily write the same question twice.
-            checked = self._checker.check(candidate, accepted)
+            drafts = self._attempt(sample, plan, accepted)
+            # Every draft but the kept one goes in on its own, not as a turn
+            # of the thread: a thread links each row to the one before it,
+            # and a discarded attempt is drop-rate evidence rather than a
+            # question somebody asked next.
+            threads.extend([one] for one in drafts[:-1])
+            checked = drafts[-1]
             thread = [checked]
             if checked.accepted:
                 accepted.append(checked)
@@ -254,6 +488,37 @@ class QuestionGenerationService(StageService):
             threads.append(thread)
         current.set_attribute("questions.samples", written)
         return threads
+
+    def _attempt(
+        self, sample: FactGroup, plan: Plan, accepted: list[CheckedQuestion]
+    ) -> list[CheckedQuestion]:
+        """Writes one question, and writes it again when a gate can be answered.
+
+        Returns every draft with the one to keep last. All of them are
+        stored: a draft a gate refused is the same drop-rate evidence as any
+        other refusal, and quietly dropping it would make the writer look
+        better than it is while hiding what the retry cost.
+
+        A retry can only improve the outcome. If the second draft is refused
+        where the first was not, the first is what is kept - which is what
+        makes it safe to ask again about a question that was merely narrower
+        than its slot wanted.
+        """
+        # Checked against what this run has accepted as well as what the
+        # database holds: nothing is stored until the topic is finished, so
+        # without it a topic would happily write the same question twice.
+        drafts = [self._checker.check(self._writer.write(sample, plan), accepted)]
+        for _ in range(self._settings.retries):
+            note = again(drafts[-1], plan)
+            if note is None:
+                break
+            log.info("asking again for %r: %s", drafts[-1].question_text, note)
+            drafts.append(
+                self._checker.check(self._writer.write(sample, plan, note), accepted)
+            )
+        best = max(range(len(drafts)), key=lambda one: (drafts[one].accepted, one))
+        drafts.append(drafts.pop(best))
+        return drafts
 
     def _followups(
         self,

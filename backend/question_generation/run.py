@@ -13,7 +13,7 @@ from llm.config import Settings as ModelSettings
 from question_generation.config import Settings
 from question_generation.factory import build_service, lease
 from question_generation.repository import QuestionCatalog, QuestionQueue
-from question_generation.service import reverify
+from question_generation.service import balance, reverify
 from stages.cli import queue_main
 
 log = logging.getLogger(__name__)
@@ -32,7 +32,15 @@ def main(argv: list[str] | None = None) -> int:
             "check every stored question again, without calling a model",
             "rejected",
             lambda within: reverify(QuestionCatalog(), settings, within),
-        )
+        ),
+        #: Which of the accepted questions make up the release. Accepting
+        #: one says it is sound; this says what the SET looks like, and the
+        #: two are different problems.
+        "balance": (
+            "draw a balanced release out of every accepted question",
+            "released",
+            lambda within: balance(QuestionCatalog(), settings, within),
+        ),
     }
 
     def build():
