@@ -87,7 +87,7 @@ Once it reports ready:
 | Grafana | http://localhost:3001 | Logs and pipeline dashboards — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
 | Argilla | http://localhost:6900 | Review what the models decided — sign in with `ARGILLA_USERNAME` and `ARGILLA_PASSWORD` |
 | Adminer | http://localhost:9001 | Database browser |
-| Dagster | http://localhost:3000 | The asset graph and run history. Not started by `make up`; see [Orchestration](#orchestration) |
+| Dagster | http://localhost:3000 | The asset graph and run history — see [Orchestration](#orchestration) |
 
 Upload a PDF on the Upload page, then go to Documents and press **Start
 all**: nothing runs until it is asked to. Each page runs exactly one stage —
@@ -109,7 +109,7 @@ make logs-api        # follow the API log
 make logs-frontend   # follow the frontend log
 make logs-shipper    # follow the log shipper, when Grafana shows nothing
 make logs-retention  # set how long a day's logs are kept; run once
-make orchestration   # start Dagster: the asset graph, the schedule, the sensor
+make logs-orchestration  # follow the Dagster webserver and daemon
 make review-push-facts   # send a sample of facts to Argilla for review
 make review-pull-facts   # bring the submitted verdicts back
 make eval-upload     # put the golden cases in Phoenix
@@ -307,15 +307,14 @@ a stage should run and never runs one: it posts to the stage routes and polls
 `/status` until nothing claimable is left, which is the same surface the Start
 button and the `make` targets use.
 
-```bash
-make orchestration        # start the webserver and the daemon
-make orchestration-logs   # follow both
-make orchestration-down   # stop them
-```
+`make up` starts the webserver and the daemon with everything else, and the
+UI is at http://localhost:3000. Starting them costs nothing on its own: both
+triggers below ship stopped, so the webserver serves an asset graph and the
+daemon ticks nothing until one is switched on.
 
-Both are behind the `orchestration` compose profile, so `make up` does not
-start them: a pipeline driven by hand should not pay for two more containers.
-The UI is at http://localhost:3000.
+```bash
+make logs-orchestration   # follow both
+```
 
 One asset per stage, chained in the order a document moves:
 
@@ -1012,7 +1011,7 @@ gates a merge; the two that do not are excluded from it.
 | `tests/integration/` | The database, the object store and the HTTP surface, against the images compose runs | a container |
 | `tests/e2e/` | One document through every stage in this process, with the converter and the model stood in for | a container |
 | `tests/frontend/` | Each Streamlit page against a scripted backend | nothing |
-| `tests/smoke/` | Both images built and looked inside, and the compose file resolved — with the `orchestration` profile too, which is how the orchestrator is held to holding no database credential | a container engine |
+| `tests/smoke/` | Both images built and looked inside, and the compose file resolved: no service behind a profile, and the orchestrator holding no database credential | a container engine |
 | `tests/eval/` | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions. The cases are in `evaluation/cases.py`, read by this and by `make eval-score` | a served model |
 
 The integration layers start a PostgreSQL and a SeaweedFS of their own through
@@ -1175,11 +1174,25 @@ make logs-retention                        # 30 days
 make logs-retention LOGS_RETENTION_DAYS=90
 ```
 
-Run once against a running stack; Elasticsearch remembers the policy. A
-shipper cannot create one, and `filebeat.yml` names it on every index it
-writes — so until this has run, each daily index carries the name of a policy
-that is not there. It is indexed and searched normally and simply never
-deleted, which is the state the stack ships in.
+Run once against a running stack, after the shipper has written something.
+Elasticsearch remembers it, and every backing index the stream rolls over to
+afterwards inherits it. Until it has run nothing is deleted, which is the
+state the stack ships in.
+
+The retention belongs to the data stream, not to an ILM policy. This version
+of Filebeat writes to a data stream, which rolls its own backing indices over
+by age and size — so the index is named `qa-logs` and not `qa-logs-<date>`: a
+date in the name creates a second data stream every midnight, each of which
+then has to be found and aged separately. Naming an ILM policy in
+`filebeat.yml` does not work either, because Filebeat strips
+`index.lifecycle` out of the template it installs when `setup.ilm.enabled` is
+false.
+
+`setup.template.overwrite: true` is what makes an edit to `filebeat.yml`
+take effect at all. Without it Filebeat sees a template of that name already
+there and leaves it alone, and a changed pattern silently stops matching the
+index being written — which drops the whole thing to dynamic mapping, where
+`stage` arrives as `text` and the panels grouping on it go quiet.
 
 Only this project's processes are shipped. Postgres, SeaweedFS, Redis and
 Elasticsearch itself keep the `json-file` driver and are read with `make logs`.

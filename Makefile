@@ -50,7 +50,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
        $(if $(TOPIC),--only topic=$(TOPIC))))
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
-        logs-shipper logs-retention \
+        logs-shipper logs-retention logs-orchestration \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
@@ -64,7 +64,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
-        certs dagster-dev orchestration orchestration-down orchestration-logs \
+        certs dagster-dev \
         review-status review-push-facts review-pull-facts \
         review-push-topics review-pull-topics \
         review-push-questions review-pull-questions \
@@ -136,28 +136,49 @@ logs-api:
 logs-shipper:
 	$(COMPOSE) logs -f filebeat
 
-# How long a day's logs are kept. Run once against a running stack; the
-# policy is remembered in Elasticsearch, so a later `make up` needs nothing.
+# The webserver and the daemon together. A code location that will not load
+# is reported by the webserver, and a schedule or sensor that fired and
+# failed by the daemon.
+logs-orchestration:
+	$(COMPOSE) logs -f dagster-webserver dagster-daemon
+
+# How long the logs are kept. Run once against a running stack, after the
+# shipper has written something: the retention belongs to the data stream,
+# Elasticsearch remembers it, and every backing index the stream rolls over
+# to afterwards inherits it. Nothing deletes anything until this has run,
+# which is the state the stack ships in.
 #
-# A shipper cannot create a lifecycle policy, and configs/filebeat/
-# filebeat.yml names this one on every index it writes. Until this has run,
-# each daily index carries the name of a policy that is not there: it is
-# indexed and searched normally and simply never deleted, which is the state
-# the stack ships in.
+# The data stream's own lifecycle, not an ILM policy. A shipper cannot
+# create an ILM policy, and naming one in filebeat.yml does not work either:
+# Filebeat strips `index.lifecycle` out of the template it installs when
+# `setup.ilm.enabled` is false, so the setting arrived nowhere and the
+# indices were aged by nothing.
+#
+# The wildcard covers the dated streams an earlier version of filebeat.yml
+# created alongside today's single one.
 #
 # Idempotent - PUT replaces. LOGS_RETENTION_DAYS overrides the default:
 #
 #     make logs-retention LOGS_RETENTION_DAYS=90
 LOGS_RETENTION_DAYS ?= 30
+# Run through `sh -c`, with the credential read from the container's own
+# environment rather than passed in, so it stays out of the process list
+# and out of make's echo of the command.
+#
+# No `--fail-with-body`, which is how this would normally report a refusal:
+# the curl in the Elasticsearch image predates it and exits with a usage
+# error instead. So the answer is read directly, which is also the only way
+# to see which streams it matched.
 logs-retention:
-	@$(LOADENV) && $(COMPOSE) exec -T elasticsearch curl -sS --fail-with-body \
+	@$(COMPOSE) exec -T elasticsearch sh -c 'answer=$$(curl -sS \
 	  --cacert /usr/share/elasticsearch/config/certs/ca.crt \
-	  -u "elastic:$$ELASTICSEARCH_PASSWORD" \
-	  -X PUT "https://localhost:9200/_ilm/policy/qa-logs" \
-	  -H 'Content-Type: application/json' \
-	  -d '{"policy":{"phases":{"hot":{"actions":{}},"delete":{"min_age":"$(LOGS_RETENTION_DAYS)d","actions":{"delete":{}}}}}}'
-	@echo
-	@echo "qa-logs indices are now deleted after $(LOGS_RETENTION_DAYS) days."
+	  -u "elastic:$$ELASTIC_PASSWORD" \
+	  -X PUT "https://localhost:9200/_data_stream/qa-logs*/_lifecycle" \
+	  -H "Content-Type: application/json" \
+	  -d "{\"data_retention\":\"$(LOGS_RETENTION_DAYS)d\"}"); \
+	  echo "$$answer"; \
+	  case "$$answer" in *\"acknowledged\":true*) ;; *) exit 1;; esac'
+	@echo "qa-logs is kept for $(LOGS_RETENTION_DAYS) days."
 
 # ── Database ───────────────────────────────────────────────────────────────
 #
@@ -724,20 +745,10 @@ review-pull-questions:
 # the Start button and the targets above use, so nothing here can move a
 # row in a way they could not.
 #
-# Both services are behind the `orchestration` profile, so `make up` does
-# not start them: a pipeline driven by hand should not pay for two more
-# containers, and the schedule and the sensor ship stopped regardless.
-
-# Start the Dagster webserver and daemon.
-orchestration:
-	$(COMPOSE) --profile orchestration up -d --build
-	@$(LOADENV) && echo "Dagster UI: http://localhost:$$DAGSTER_WEBSERVER_PORT"
-
-orchestration-down:
-	$(COMPOSE) --profile orchestration down
-
-orchestration-logs:
-	$(COMPOSE) --profile orchestration logs -f dagster-webserver dagster-daemon
+# `make up` starts both, like every other service. There is no target to
+# start them on their own and nothing to switch on here: the schedule and
+# the sensor both ship STOPPED, so the webserver serves an asset graph and
+# the daemon ticks nothing until somebody enables one in the UI.
 
 # Runs the UI and the daemon on the host instead, against the
 # containerised PostgreSQL and the containerised api.

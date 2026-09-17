@@ -20,11 +20,14 @@ datasources:
     basicAuth: true
     basicAuthUser: elastic
     jsonData:
-      # Every daily index at once. No `interval` here on purpose: with one,
-      # Grafana composes the index name from the time range and a query
-      # spanning a day the pipeline was idle asks for an index that does not
-      # exist.
-      index: "qa-logs-*"
+      # The `qa-logs` data stream, and the dated ones an earlier version of
+      # filebeat.yml created beside it - hence the star with no dash, which
+      # `qa-logs-*` would have missed the undated one with.
+      #
+      # No `interval` here on purpose: with one, Grafana composes the name
+      # from the time range, and a query spanning a day the pipeline was
+      # idle asks for an index that does not exist.
+      index: "qa-logs*"
       timeField: "@timestamp"
       # What the Logs panel reads as the line and as its severity. Without
       # these every line renders as raw JSON at one colour.

@@ -114,13 +114,18 @@ x-worker: &worker
   networks: [global]
   logging: *logging
 
-# Dagster. Profile: orchestration.
+# Dagster.
 #
 # The orchestrator decides when a stage should run and never runs one itself:
 # it posts to the stage routes and reads /status back, which is the same
 # surface the Start button and the make targets use. So it holds no database
 # URL and no object store credentials - a process that cannot reach the app
 # tables cannot quietly grow a second way of moving a row.
+#
+# No profile: `compose up` starts these two like everything else. Starting
+# them costs nothing on its own - the schedule and the sensor both ship
+# STOPPED, so the webserver serves an asset graph and the daemon ticks
+# nothing until somebody switches one on in the UI.
 x-dagster: &dagster
   # Its own image, not the backend one. That image carries torch, spaCy,
   # Docling and litellm because some process in it needs each; this one
@@ -129,7 +134,6 @@ x-dagster: &dagster
   build:
     context: .
     dockerfile: orchestration/Dockerfile
-  profiles: ["orchestration"]
   restart: unless-stopped
   env_file: [configs/env/orchestration.env]
   environment:

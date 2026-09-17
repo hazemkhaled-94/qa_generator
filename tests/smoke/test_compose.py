@@ -88,21 +88,6 @@ def resolved() -> dict:
     return json.loads(answered.stdout)
 
 
-@pytest.fixture(scope="module")
-def orchestrated() -> dict:
-    """The same, with the `orchestration` profile switched on.
-
-    A second resolution rather than a flag on the first: `compose config`
-    leaves a profile's services out entirely unless the profile is named,
-    so the fixture above cannot see the two Dagster services at all, and
-    the tests that read every service must not start seeing them either.
-    """
-    answered = compose("--profile", "orchestration", "config", "--format", "json")
-    if answered.returncode != 0:
-        pytest.skip(f"compose could not resolve the file: {answered.stderr[-600:]}")
-    return json.loads(answered.stdout)
-
-
 def test_the_compose_file_resolves(resolved) -> None:
     """Every variable it interpolates is supplied by .env."""
     assert resolved["services"]
@@ -113,6 +98,43 @@ def test_every_service_the_pipeline_needs_is_declared(resolved) -> None:
     declared = set(resolved["services"])
 
     assert EXPECTED <= declared, sorted(EXPECTED - declared)
+
+
+def test_no_service_is_behind_a_profile(resolved) -> None:
+    """`compose up` starts the whole stack, and that is the point.
+
+    A profile is invisible in exactly the wrong way. `compose config`
+    omits the service, `compose up` does not create it, and nothing
+    anywhere reports a service that was never asked for - which is how
+    the log shipper sat unstarted while Grafana showed an empty
+    dashboard, and how the orchestrator was unreachable at a port the
+    README advertised.
+
+    So if a service is not worth starting it should not be declared, and
+    if it is declared it comes up with the rest.
+    """
+    gated = {
+        name: service["profiles"]
+        for name, service in resolved["services"].items()
+        if service.get("profiles")
+    }
+
+    assert not gated, (
+        f"{', '.join(sorted(gated))} would not be started by `compose up`. "
+        f"Drop the profile, or drop the service."
+    )
+
+
+def test_the_log_shipper_and_the_orchestrator_are_part_of_the_stack(resolved) -> None:
+    """The three that were declared and never ran.
+
+    Named rather than left to the check above, because "no profiles" is
+    also true of a file they have been deleted from.
+    """
+    declared = set(resolved["services"])
+    missing = {"filebeat", "dagster-webserver", "dagster-daemon"} - declared
+
+    assert not missing, sorted(missing)
 
 
 def test_no_two_services_bind_the_same_host_port(resolved) -> None:
@@ -265,15 +287,13 @@ def test_the_scan_finds_the_packages_it_is_meant_to_guard(resolved) -> None:
     assert mounted_packages(resolved["services"]["api"]), "no bind mounts were read"
 
 
-#: The orchestrator's two processes. Behind the `orchestration` profile, so
-#: `compose up` does not start them; `compose config` lists them anyway,
-#: which is what lets them be read here.
+#: The orchestrator's two processes.
 DAGSTER_SERVICES = ("dagster-webserver", "dagster-daemon")
 
 
 @pytest.mark.parametrize("service", DAGSTER_SERVICES)
 def test_the_orchestrator_cannot_reach_the_application_tables(
-    orchestrated, service
+    resolved, service
 ) -> None:
     """It decides when a stage runs; it never runs one.
 
@@ -286,7 +306,7 @@ def test_the_orchestrator_cannot_reach_the_application_tables(
     Holding no credential is what makes that structural rather than a
     convention somebody remembers.
     """
-    environment = orchestrated["services"][service].get("environment", {})
+    environment = resolved["services"][service].get("environment", {})
     reachable = sorted(
         name
         for name in ("DATABASE_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY")
@@ -300,17 +320,17 @@ def test_the_orchestrator_cannot_reach_the_application_tables(
 
 
 @pytest.mark.parametrize("service", DAGSTER_SERVICES)
-def test_the_orchestrator_is_told_where_the_backend_is(orchestrated, service) -> None:
+def test_the_orchestrator_is_told_where_the_backend_is(resolved, service) -> None:
     """The orchestrator is told where the backend is.
 
     The one address it holds. Without it the code location loads and
     every asset fails on its first call.
     """
-    assert orchestrated["services"][service].get("environment", {}).get("BACKEND_URL")
+    assert resolved["services"][service].get("environment", {}).get("BACKEND_URL")
 
 
 @pytest.mark.parametrize("service", DAGSTER_SERVICES)
-def test_the_orchestrator_does_not_run_the_backend_image(orchestrated, service) -> None:
+def test_the_orchestrator_does_not_run_the_backend_image(resolved, service) -> None:
     """The orchestrator is not built from the backend image.
 
     That image serves the api and all five workers and carries torch,
@@ -318,6 +338,6 @@ def test_the_orchestrator_does_not_run_the_backend_image(orchestrated, service) 
     one makes HTTP calls: sharing it would put three gigabytes behind a
     process whose whole job is to POST and poll.
     """
-    service_image = orchestrated["services"][service].get("image", "")
+    service_image = resolved["services"][service].get("image", "")
 
-    assert service_image != orchestrated["services"]["api"].get("image"), service_image
+    assert service_image != resolved["services"]["api"].get("image"), service_image

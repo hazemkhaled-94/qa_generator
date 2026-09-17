@@ -46,23 +46,33 @@ output.elasticsearch:
   username: "elastic"
   password: "${ELASTICSEARCH_PASSWORD}"
   ssl.certificate_authorities: ["/usr/share/filebeat/certs/ca.crt"]
-  index: "qa-logs-%{+yyyy.MM.dd}"
+  # One name, not one per day. This version of Filebeat writes to a data
+  # stream, which rolls its own backing indices over by age and size - so a
+  # date in the name creates a second data stream every midnight, each of
+  # which then has to be found and aged separately. `make logs-retention`
+  # sets a retention on the stream once and it holds for every backing
+  # index the stream ever creates.
+  index: "qa-logs"
 
 # Required once `index` is set: without a template name and pattern Filebeat
 # refuses to start, and without ILM disabled it writes to its own managed
 # alias instead of the index above.
+#
+# The pattern has no dash before the star, deliberately: it has to match
+# `qa-logs` itself, and `qa-logs-*` does not. It still matches the dated
+# streams an earlier version of this file created.
 setup.template.name: "qa-logs"
-setup.template.pattern: "qa-logs-*"
+setup.template.pattern: "qa-logs*"
 setup.ilm.enabled: false
 
-# How long a day's index is kept. The policy itself is created by
-# `make logs-retention`, because a shipper cannot create one. Named here
-# regardless: an index carrying the name of a policy that does not exist yet
-# is indexed and searched normally, and starts being aged the moment the
-# policy arrives. Without daily indices being deleted by something, the disk
-# fills - `setup.ilm.enabled: false` above means nothing else is going to.
-setup.template.settings:
-  index.lifecycle.name: "qa-logs"
+# Reinstall the template on every start. Without this Filebeat sees a
+# template of that name already there and leaves it alone, so an edit to
+# this file does nothing at all: the pattern below was changed once and the
+# old one stayed, which stopped matching the index being written, which
+# left the whole thing to dynamic mapping - `stage` arrived as `text`, and
+# the panel grouping on it went quiet. Reinstalling is cheap and happens
+# before the first event.
+setup.template.overwrite: true
 
 # The fields the application adds beside ECS, so they arrive as something
 # aggregatable. Left to dynamic mapping a string becomes `text` with a
