@@ -21,6 +21,7 @@ from database.qa_generator.outcomes import (
     QuestionStatus,
     QuestionType,
     Rejection,
+    ReviewVerdict,
     TopicScope,
     one_of,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "QuestionStatus",
     "QuestionType",
     "Rejection",
+    "ReviewVerdict",
     "Status",
     "Topic",
     "TopicScope",

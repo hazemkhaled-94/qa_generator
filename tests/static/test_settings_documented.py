@@ -27,11 +27,12 @@ READERS = frozenset({"required", "optional", "integer", "decimal", "boolean", "c
 DECLARING = (
     "configs/env/backend.env",
     "configs/env/orchestration.env",
+    "configs/env/review.env",
     ".env.example",
 )
 
 #: Directories holding the code that runs in a container.
-SOURCES = ("backend", "frontend", "telemetry", "orchestration")
+SOURCES = ("backend", "frontend", "telemetry", "orchestration", "review")
 
 #: A declaration, commented out or not: an optional setting is documented by
 #: a commented line rather than by a value.

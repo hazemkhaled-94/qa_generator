@@ -1,0 +1,197 @@
+"""Reading the rows a person should look at, and writing back what they said.
+
+Three things in this pipeline are decided by a model and have somewhere for
+a person to disagree: a fact's verdict, a topic's name, and whether a
+question is any good. Those are the three datasets, and this is the half of
+them that touches the database.
+
+Stratified samples, not the first N. A review is a sample - nobody reads
+twenty thousand facts - and a sample taken in id order is a sample of
+whatever was extracted first, which for this corpus is one document. Drawn
+evenly across the verdicts instead, because the question a review answers
+is "is the checker right", and a sample of only what it accepted cannot
+answer it. That the bands and the rejection codes exist to be sampled on
+is what facts.rejection_code and questions.difficulty were for.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import func, select, update
+
+from database.qa_generator import Fact, Question, ReviewVerdict
+from database.qa_generator.repository import Repository
+
+
+@dataclass(frozen=True)
+class FactRow:
+    """One fact as a reviewer sees it."""
+
+    id: int
+    statement: str
+    evidence: str
+    kind: str
+    validated: bool
+    rejection_code: str | None
+    validation_error: str | None
+
+
+@dataclass(frozen=True)
+class QuestionRow:
+    """One question as a reviewer sees it."""
+
+    id: int
+    question_text: str
+    target_answer: str | None
+    answerable: bool
+    difficulty: str | None
+    question_type: str | None
+    language: str
+    status: str
+    rejected_reason: str | None
+    facts: list[str]
+
+
+def _even(total: int, groups: int) -> int:
+    """How many to take from each group so the whole sample is `total`.
+
+    At least one: a group with a share below one is a rejection code that
+    fired twice in a corpus, and those are the interesting ones.
+    """
+    return max(1, total // max(groups, 1))
+
+
+class ReviewRepository(Repository):
+    """The rows a review is drawn from, and the verdicts it produces."""
+
+    def facts(self, sample: int) -> list[FactRow]:
+        """Draws a sample of facts, spread over the verdicts.
+
+        Everything the checker rejected is grouped by its code, and what it
+        accepted is one more group beside them, so a reviewer sees both the
+        drops and the keeps in one sitting.
+        """
+        with self._session() as session:
+            groups = [
+                code
+                for (code,) in session.execute(
+                    select(Fact.rejection_code).group_by(Fact.rejection_code)
+                )
+            ]
+            each = _even(sample, len(groups))
+            rows: list[FactRow] = []
+            for code in groups:
+                found = session.execute(
+                    select(
+                        Fact.id,
+                        Fact.statement,
+                        Fact.evidence_text,
+                        Fact.kind,
+                        Fact.validated,
+                        Fact.rejection_code,
+                        Fact.validation_error,
+                    )
+                    .where(
+                        Fact.rejection_code.is_(code)
+                        if code is None
+                        else Fact.rejection_code == code,
+                        # Never the same row twice: a second push would
+                        # otherwise ask for a verdict already given.
+                        Fact.reviewed_verdict.is_(None),
+                    )
+                    # Randomly, so two pushes are two samples rather than
+                    # the same rows in the same order.
+                    .order_by(func.random())
+                    .limit(each)
+                ).all()
+                rows += [FactRow(*one) for one in found]
+        return rows
+
+    def questions(self, sample: int) -> list[QuestionRow]:
+        """Draws a sample of questions, spread over difficulty and verdict.
+
+        Both, because they are the two things a reviewer is judging at
+        once: whether the gate was right, and whether a question the band
+        calls hard is actually hard.
+        """
+        with self._session() as session:
+            groups = session.execute(
+                select(Question.difficulty, Question.rejected_reason).group_by(
+                    Question.difficulty, Question.rejected_reason
+                )
+            ).all()
+            each = _even(sample, len(groups))
+            rows: list[QuestionRow] = []
+            for difficulty, reason in groups:
+                found = session.execute(
+                    select(Question)
+                    .where(
+                        Question.difficulty.is_(difficulty)
+                        if difficulty is None
+                        else Question.difficulty == difficulty,
+                        Question.rejected_reason.is_(reason)
+                        if reason is None
+                        else Question.rejected_reason == reason,
+                    )
+                    .order_by(func.random())
+                    .limit(each)
+                ).scalars()
+                rows += [
+                    QuestionRow(
+                        id=one.id,
+                        question_text=one.question_text,
+                        target_answer=one.target_answer,
+                        answerable=one.answerable,
+                        difficulty=one.difficulty,
+                        question_type=one.question_type,
+                        language=one.language,
+                        status=one.status,
+                        rejected_reason=one.rejected_reason,
+                        facts=[link.fact.statement for link in one.fact_links],
+                    )
+                    for one in found
+                ]
+        return rows
+
+    def review_facts(self, verdicts: list[tuple[int, str]]) -> int:
+        """Records what a person decided about some facts.
+
+        Writes `reviewed_verdict` and never `validated`: that one is the
+        checker's and extract-revalidate rewrites it in full, so a verdict
+        written there would last until the next re-judgement.
+
+        Args:
+            verdicts: Each fact's id beside `accepted` or `rejected`.
+
+        Returns:
+            How many rows were written.
+        """
+        if not verdicts:
+            return 0
+        now = datetime.now(UTC)
+        written = 0
+        with self._session.begin() as session:
+            for fact_id, verdict in verdicts:
+                written += session.execute(
+                    update(Fact)
+                    .where(Fact.id == fact_id)
+                    .values(
+                        reviewed_verdict=ReviewVerdict(verdict),
+                        reviewed_at=now,
+                    )
+                ).rowcount
+        return written
+
+    def counts(self) -> dict[str, Any]:
+        """How much of the corpus has been looked at."""
+        with self._session() as session:
+            reviewed = session.execute(
+                select(Fact.reviewed_verdict, func.count())
+                .where(Fact.reviewed_verdict.is_not(None))
+                .group_by(Fact.reviewed_verdict)
+            ).all()
+            facts = session.execute(select(func.count()).select_from(Fact)).scalar_one()
+        return {"facts": facts, "reviewed": {code: n for code, n in reviewed}}

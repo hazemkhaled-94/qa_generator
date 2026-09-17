@@ -22,6 +22,17 @@ AUDIT_TMP := backend/api/requirements.lock.audit
 OVERRIDE = $(if $(MAKEOVERRIDES),&& export $(MAKEOVERRIDES),)
 LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE)
 
+# The same, for a tool with a tuning file of its own:
+#
+#     $(call WITH,review.env) && python -m review.run --status
+#
+# Sourced inside the `set -a` region, which is the whole point of having
+# this rather than appending `&& . ./configs/env/x.env` to LOADENV: after
+# `set +a` a sourced file's values are set in the shell and not exported,
+# so the process below saw none of them and stopped naming the first.
+WITH = set -a && . ./configs/env/backend.env && . ./configs/env/$(1) && \
+       . ./.env && set +a $(OVERRIDE)
+
 # Narrows a stage target to one item instead of the whole queue, mirroring
 # the route's /{scope}/{value} segment:
 #
@@ -53,7 +64,10 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
-        certs dagster-dev orchestration orchestration-down orchestration-logs
+        certs dagster-dev orchestration orchestration-down orchestration-logs \
+        review-status review-push-facts review-pull-facts \
+        review-push-topics review-pull-topics \
+        review-push-questions review-pull-questions
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -636,6 +650,46 @@ certs:
 	@chmod 600 certs/ca.key
 	@chmod 644 certs/elasticsearch.key
 
+# ── Review ─────────────────────────────────────────────────────────────────
+#
+# Human review of what the models decided, through Argilla. Three things
+# have somewhere for a person to disagree, and each already had a
+# human-owned column before this: a fact's verdict, a topic's name and
+# whether it is a subject, and whether a question is any good.
+#
+#   make review-push-facts      a sample, spread over the checker's verdicts
+#   make review-pull-facts      write the submitted verdicts back
+#
+# Push, review in the UI at ARGILLA_API_URL, then pull. A pull takes only
+# submitted answers: Argilla saves a draft the moment a record is touched,
+# and a draft is somebody part-way through thinking.
+#
+# Runs on the host against the same database the workers use. Nothing in
+# the pipeline calls it, and no container carries it.
+REVIEW = $(call WITH,review.env) && \
+         PYTHONPATH=backend poetry run python -m review.run
+
+review-status:
+	$(REVIEW) --status
+
+review-push-facts:
+	$(REVIEW) --push facts
+
+review-pull-facts:
+	$(REVIEW) --pull facts
+
+review-push-topics:
+	$(REVIEW) --push topic-labels
+
+review-pull-topics:
+	$(REVIEW) --pull topic-labels
+
+review-push-questions:
+	$(REVIEW) --push questions
+
+review-pull-questions:
+	$(REVIEW) --pull questions
+
 # ── Pipeline ───────────────────────────────────────────────────────────────
 
 # The orchestrator decides when a stage should run; it never runs one. It
@@ -665,7 +719,7 @@ orchestration-logs:
 # .env, because .env holds what both use. The database is reached on its
 # published port rather than over the compose network, and the api is too.
 dagster-dev:
-	$(LOADENV) && . ./configs/env/orchestration.env && \
+	$(call WITH,orchestration.env) && \
 	  DAGSTER_HOME=$$PWD/configs/dagster \
 	  DAGSTER_DB_HOST=localhost DAGSTER_DB_PORT=$$POSTGRES_PORT \
 	  BACKEND_URL=http://localhost:$$BACKEND_PORT \

@@ -16,12 +16,13 @@ from sqlalchemy import (
     Text,
     false,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
-from database.qa_generator.outcomes import FactKind, Rejection, one_of
+from database.qa_generator.outcomes import FactKind, Rejection, ReviewVerdict, one_of
 
 if TYPE_CHECKING:
     from database.qa_generator.fact_passages import FactPassage
@@ -60,6 +61,22 @@ class Fact(Base):
         ),
         CheckConstraint(
             "validated = (rejection_code IS NULL)", name="facts_verdict_agrees"
+        ),
+        CheckConstraint(
+            f"reviewed_verdict IS NULL OR {one_of('reviewed_verdict', ReviewVerdict)}",
+            name="facts_reviewed_verdict_valid",
+        ),
+        # One fact about a row, so half of it written is a write that failed.
+        CheckConstraint(
+            "(reviewed_verdict IS NULL) = (reviewed_at IS NULL)",
+            name="facts_reviewed_together",
+        ),
+        # Partial: NULL for almost every row, and what anyone asks for is
+        # the reviewed ones.
+        Index(
+            "ix_facts_reviewed_verdict",
+            "reviewed_verdict",
+            postgresql_where=text("reviewed_verdict IS NOT NULL"),
         ),
         {
             "comment": "One statement and the verdicts the checks reached on it. "
@@ -145,6 +162,18 @@ class Fact(Base):
     )
     validation_error: Mapped[str | None] = mapped_column(
         Text, comment="That failure in words."
+    )
+    reviewed_verdict: Mapped[str | None] = mapped_column(
+        Text,
+        comment="What a person decided about this fact: accepted or rejected. "
+        "NULL means nobody has looked, which is most facts - a review is a "
+        "sample. Separate from `validated`, which is the checker's and is "
+        "rewritten in full by extract-revalidate.",
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        comment="When the verdict above was recorded. NULL exactly when "
+        "reviewed_verdict is.",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

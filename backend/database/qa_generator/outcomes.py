@@ -120,6 +120,8 @@ class QuestionRejection(StrEnum):
     NOT_RECOVERABLE = "not_recoverable"
     DUPLICATE = "duplicate"
     ANSWERABLE_AFTER_ALL = "answerable_after_all"
+    ANSWERABLE_ELSEWHERE = "answerable_elsewhere"
+    OFF_TOPIC = "off_topic"
     SOURCE_CHANGED = "source_changed"
 
 
@@ -135,6 +137,21 @@ class FactKind(StrEnum):
     SUMMARY = "summary"
     OUTLINE = "outline"
     BRIDGE = "bridge"
+
+
+class ReviewVerdict(StrEnum):
+    """What a person decided about a fact they were shown.
+
+    Stored in facts.reviewed_verdict, which is NULL until somebody looks.
+    Separate from `validated` on purpose: that one is the checker's and
+    `extract-revalidate` rewrites it in full, so a human decision recorded
+    there would last until the next re-judgement and then be gone with
+    nothing saying it had been. The same split questions already have
+    between `status` and `rejected_reason`.
+    """
+
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
 
 
 class Rejection(StrEnum):
@@ -153,6 +170,7 @@ class Rejection(StrEnum):
     NOT_CONDENSED = "not_condensed"
     NOT_LISTED = "not_listed"
     NOT_BRIDGING = "not_bridging"
+    OVER_CAP = "over_cap"
 
 
 def one_of(column: str, values: type[StrEnum]) -> str:
