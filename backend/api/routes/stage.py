@@ -16,6 +16,7 @@ one does not.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Protocol
 
@@ -23,6 +24,8 @@ from fastapi import APIRouter
 
 from api.errors import ApiError, ErrorBody
 from stages import QueueState, Unnarrowable
+
+log = logging.getLogger(__name__)
 
 #: The verbs a narrowed action accepts. A Literal rather than a free string,
 #: so the OpenAPI document lists them and anything else is refused before it
@@ -177,8 +180,26 @@ def answered(
     Separate from :func:`acted` for topic modelling, which owns its routes
     because a fit is asked for rather than started, and so counts its own
     rows - but should still describe `stop` the way every other stage does.
+
+    This is where a queue verb asked for over HTTP is recorded. Every stage
+    reaches it, narrowed or not, and the command line logs its own: without
+    a line here, a corpus that started moving because somebody pressed a
+    button left nothing behind saying so.
     """
     done, nothing = _DONE[action]
+    log.info(
+        "%s: %s moved %d row(s)%s",
+        name,
+        action,
+        rows,
+        f" for {scope}={value}" if scope else "",
+        extra={
+            "stage": name,
+            "queue.action": action,
+            "queue.rows": rows,
+            **({"queue.scope": scope, "queue.value": value} if scope else {}),
+        },
+    )
     return StageAction(
         stage=name,
         action=action,

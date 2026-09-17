@@ -6,6 +6,7 @@ Importing this loads litellm. Nothing outside a worker should name it.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, TypeVar
 
 import instructor
@@ -85,19 +86,51 @@ class Client:
     def answer(self, *, system: str, user: str, shape: type[Shape]) -> Shape:
         """Asks the model one question and parses the answer into `shape`.
 
+        Timed and logged either way. The model is the pipeline's bottleneck -
+        a median passage measured at 473 s - so how long a call took is the
+        one number worth having per call, and having it in the logs as well
+        as in the traces is what makes it readable when the collector is
+        down or was never configured.
+
         Raises:
             ModelUnavailable: If it could not be reached, or did not return
                 the requested shape after every attempt.
         """
+        started = time.monotonic()
+        # Shared by both lines below, so a failed call is counted in the
+        # same fields a successful one is.
+        about = {
+            "llm.model": self._settings.model,
+            "llm.shape": shape.__name__,
+        }
         try:
-            return self._attempt(system, user, shape)
+            answered = self._attempt(system, user, shape)
         except Exception as exc:
             # Logged with the traceback before it is rewrapped: what the
             # caller records against the row is one line, and litellm's own
             # cause is the only thing that says which of the layers below
             # failed.
-            log.exception("%s did not answer", self._settings.model)
+            log.exception(
+                "%s did not answer",
+                self._settings.model,
+                extra=about | {"llm.duration_ms": self._since(started)},
+            )
             raise ModelUnavailable(f"{type(exc).__name__}: {exc}") from exc
+
+        elapsed = self._since(started)
+        log.info(
+            "%s answered %s in %.1fs",
+            self._settings.model,
+            shape.__name__,
+            elapsed / 1000,
+            extra=about | {"llm.duration_ms": elapsed},
+        )
+        return answered
+
+    @staticmethod
+    def _since(started: float) -> int:
+        """Milliseconds since a monotonic reading."""
+        return round((time.monotonic() - started) * 1000)
 
     def _ask(self, system: str, user: str, shape: type[Shape]) -> Shape:
         """Sends one request."""

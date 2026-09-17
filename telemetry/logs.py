@@ -20,8 +20,12 @@ import logging.handlers
 import os
 import socket
 import sys
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from opentelemetry import trace
@@ -60,6 +64,67 @@ _STANDARD = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) 
     "otelTraceID",
     "otelSpanID",
 }
+
+#: What `bind` has put on every record logged in this context. A ContextVar
+#: rather than a module global because a thread or a task gets its own, so
+#: two passages worked at once cannot label each other's lines. The default
+#: is a read-only view: nothing here mutates what it reads - `bind` builds a
+#: new mapping each time - and a plain {} shared by every context is one
+#: careless `.update()` away from leaking a document id into every process.
+_BOUND: ContextVar[Mapping[str, Any]] = ContextVar(
+    "bound", default=MappingProxyType({})
+)
+
+
+@contextmanager
+def bind(fields: Mapping[str, Any]) -> Iterator[None]:
+    """Puts fields on every record logged inside this block.
+
+    What the pipeline is working on, recorded once where it is claimed
+    rather than spelled into each message beneath it. A document crosses
+    five processes over hours, and without this there is nothing in
+    Elasticsearch that says two lines are about the same one.
+
+    Nests: an inner call adds to what an outer one bound rather than
+    replacing it, and both are taken back on the way out.
+
+        with bind({"stage": "parsing", "document.sha256": sha}):
+            log.info("parsed")     # carries both
+
+    A mapping rather than keyword arguments because the names are ECS and
+    so mostly dotted, which no keyword can be. filebeat's `expand_keys`
+    turns `document.sha256` into the nested field Elasticsearch maps rather
+    than a string with a full stop in it, and the same spelling is what the
+    span beside it is given, so one value reads the same in Grafana and in
+    Phoenix.
+    """
+    token = _BOUND.set({**_BOUND.get(), **fields})
+    try:
+        yield
+    finally:
+        _BOUND.reset(token)
+
+
+class _Bound(logging.Filter):
+    """Copies what `bind` holds onto each record on its way to a handler.
+
+    A filter on the handler rather than work in the record factory, for two
+    reasons. `Logger.makeRecord` raises KeyError if a caller's `extra`
+    names a field the factory already set, so binding there turns an
+    overlap into a lost log line and a traceback. And a filter on a logger
+    is not consulted for records a child logger propagated, while one on a
+    handler sees everything that reaches it - including the lines a library
+    logs, which is the point.
+
+    `setdefault`: a caller's `extra` is the more specific of the two, being
+    passed at the line rather than around the block, so it wins.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Adds the bound fields and keeps the record."""
+        for name, value in _BOUND.get().items():
+            record.__dict__.setdefault(name, value)
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -134,6 +199,9 @@ def configure(service_name: str, level: str | None = None) -> None:
     if shipped is not None:
         handlers.append(shipped)
 
+    for handler in handlers:
+        handler.addFilter(_Bound())
+
     # force: replaces the root logger's handlers rather than adding to them.
     logging.basicConfig(
         handlers=handlers,
@@ -198,6 +266,7 @@ def add_trace_fields() -> None:
     Both read as zeros outside a span. Reads the current span directly
     rather than through opentelemetry-instrumentation-logging, which does
     not populate these fields in the pinned version.
+
     """
     factory = logging.getLogRecordFactory()
     if getattr(factory, "_adds_trace_fields", False):

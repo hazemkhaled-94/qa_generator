@@ -16,7 +16,7 @@ from ingestion.models import (
 from ingestion.pdf import UnreadablePdf, read_pdf
 from ingestion.repository import DocumentRepository
 from ingestion.stores import DocumentStore
-from telemetry import tracer
+from telemetry import tracer, working
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -122,9 +122,15 @@ class IngestService:
         Returns:
             What became of the upload.
         """
-        with span.start_as_current_span("ingest") as current:
-            current.set_attribute("upload.filename", upload.filename)
-            current.set_attribute("upload.size_bytes", upload.size_bytes)
+        with working(
+            span,
+            "ingest",
+            {
+                "stage": "ingestion",
+                "upload.filename": upload.filename,
+                "upload.size_bytes": upload.size_bytes,
+            },
+        ) as current:
             result = self._ingest(upload)
             current.set_attribute("ingest.outcome", result.outcome)
             if result.sha256:

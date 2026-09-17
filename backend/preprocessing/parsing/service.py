@@ -26,7 +26,7 @@ from preprocessing.parsing.pipelines import (
 )
 from preprocessing.parsing.repository import ParseQueue
 from stages import StageService
-from telemetry import tracer
+from telemetry import tracer, working
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -120,9 +120,15 @@ class ParsingService(StageService):
         if document is None:
             return None
 
-        with span.start_as_current_span("parse") as current:
-            current.set_attribute("document.sha256", document.sha256)
-            current.set_attribute("document.media_type", document.media_type)
+        with working(
+            span,
+            "parse",
+            {
+                "stage": self.name,
+                "document.sha256": document.sha256,
+                "document.media_type": document.media_type,
+            },
+        ) as current:
             try:
                 self._parse(document, current)
             except (

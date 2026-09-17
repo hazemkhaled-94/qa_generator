@@ -55,6 +55,78 @@ setup.template.name: "qa-logs"
 setup.template.pattern: "qa-logs-*"
 setup.ilm.enabled: false
 
+# How long a day's index is kept. The policy itself is created by
+# `make logs-retention`, because a shipper cannot create one. Named here
+# regardless: an index carrying the name of a policy that does not exist yet
+# is indexed and searched normally, and starts being aged the moment the
+# policy arrives. Without daily indices being deleted by something, the disk
+# fills - `setup.ilm.enabled: false` above means nothing else is going to.
+setup.template.settings:
+  index.lifecycle.name: "qa-logs"
+
+# The fields the application adds beside ECS, so they arrive as something
+# aggregatable. Left to dynamic mapping a string becomes `text` with a
+# `.keyword` under it, and a Grafana panel grouping by `stage` then finds
+# nothing to group on: `text` is analysed and has no doc values.
+#
+# Only the names ECS does not already define. `error.code`, `url.path`,
+# `http.request.method` and `http.response.status_code` are ECS and are
+# mapped by the template Filebeat installs.
+setup.template.append_fields:
+  # Which stage wrote the line. The one field every dashboard groups on.
+  - name: stage
+    type: keyword
+  # What the pipeline was working on, bound where the row was claimed.
+  - name: document.sha256
+    type: keyword
+  - name: passage.id
+    type: long
+  - name: passage.block_type
+    type: keyword
+  - name: topic.id
+    type: long
+  - name: topic.label
+    type: keyword
+  - name: topic_fit.id
+    type: long
+  - name: upload.filename
+    type: keyword
+  - name: upload.size_bytes
+    type: long
+  # A queue verb asked for over HTTP.
+  - name: queue.action
+    type: keyword
+  - name: queue.rows
+    type: long
+  - name: queue.scope
+    type: keyword
+  - name: queue.value
+    type: keyword
+  # One model call. duration_ms is what the latency percentiles read.
+  - name: llm.model
+    type: keyword
+  - name: llm.shape
+    type: keyword
+  - name: llm.duration_ms
+    type: long
+  # What a stage produced, for the throughput panels.
+  - name: facts.stored
+    type: long
+  - name: facts.validated
+    type: long
+  - name: facts.rejected
+    type: long
+  - name: questions.written
+    type: long
+  - name: questions.threads
+    type: long
+  - name: questions.accepted
+    type: long
+  - name: questions.rejected
+    type: long
+  - name: questions.followups
+    type: long
+
 # There is no Kibana in this deployment; Grafana reads the indices directly.
 setup.kibana.enabled: false
 setup.dashboards.enabled: false

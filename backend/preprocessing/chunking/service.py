@@ -14,7 +14,7 @@ from nlp.language import detect
 from preprocessing.chunking.passages import NoPassages, PassageBuilder
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from stages import StageService
-from telemetry import tracer
+from telemetry import tracer, working
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -123,8 +123,9 @@ class ChunkingService(StageService):
         if claimed is None:
             return None
 
-        with span.start_as_current_span("chunk") as current:
-            current.set_attribute("document.sha256", claimed.sha256)
+        with working(
+            span, "chunk", {"stage": self.name, "document.sha256": claimed.sha256}
+        ) as current:
             try:
                 self._chunk(claimed.sha256, claimed.language, current)
             except NoPassages as exc:

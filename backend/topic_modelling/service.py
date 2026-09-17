@@ -10,7 +10,7 @@ from opentelemetry.trace import Span
 
 from blob_store.seaweedfs import ExportBucket
 from stages import StageService
-from telemetry import tracer
+from telemetry import tracer, working
 from topic_modelling.labels import TopicLabeller
 from topic_modelling.models import FittedTopic, Fitting
 from topic_modelling.repository import TopicQueue
@@ -78,8 +78,9 @@ class TopicModellingService(StageService):
         if fit_id is None:
             return None
 
-        with span.start_as_current_span("model_topics") as current:
-            current.set_attribute("topic_fit.id", fit_id)
+        with working(
+            span, "model_topics", {"stage": self.name, "topic_fit.id": fit_id}
+        ) as current:
             try:
                 self._fit(fit_id, current)
             except NoVocabulary as exc:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import requests
+
+log = logging.getLogger(__name__)
 
 #: How long each verb waits, by what it costs the backend. A read is a query;
 #: a delete walks three stores; a post carries a file.
@@ -29,15 +32,32 @@ class Endpoint:
     ) -> requests.Response:
         """Sends one request and raises on any error status.
 
+        A failure is logged before it is raised. The page above renders the
+        exception as a message in the browser and nothing else, so without
+        this the only record of a backend the frontend could not reach was
+        on somebody's screen.
+
         Raises:
             requests.exceptions.RequestException: On a network failure or an
                 error status, whose body carries the reason.
         """
-        response = self._session.request(
-            method,
-            f"{self._base_url}{path}",
-            timeout=_TIMEOUTS[method] if timeout is None else timeout,
-            **kwargs,
-        )
-        response.raise_for_status()
+        about = {"http.request.method": method, "url.path": path}
+        try:
+            response = self._session.request(
+                method,
+                f"{self._base_url}{path}",
+                timeout=_TIMEOUTS[method] if timeout is None else timeout,
+                **kwargs,
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            status = getattr(exc.response, "status_code", None)
+            log.warning(
+                "%s %s failed: %s",
+                method,
+                path,
+                exc,
+                extra=about | ({"http.response.status_code": status} if status else {}),
+            )
+            raise
         return response

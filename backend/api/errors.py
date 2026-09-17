@@ -11,10 +11,13 @@ read back through its status rather than answered here.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -43,5 +46,23 @@ def install(app: FastAPI) -> None:
 
     @app.exception_handler(ApiError)
     async def _handle(request: Request, exc: ApiError) -> JSONResponse:
-        """Renders one refusal."""
+        """Renders one refusal, and records it.
+
+        One line here rather than one at each `raise`: every deliberate
+        refusal passes through, so the code a caller branched on is also
+        the code a dashboard can count. At warning, not error - a 404 for
+        an unknown id is the API working.
+        """
+        log.warning(
+            "%s %s refused: %s",
+            request.method,
+            request.url.path,
+            exc.body.code,
+            extra={
+                "http.request.method": request.method,
+                "url.path": request.url.path,
+                "http.response.status_code": exc.status,
+                "error.code": exc.body.code,
+            },
+        )
         return JSONResponse(status_code=exc.status, content=asdict(exc.body))

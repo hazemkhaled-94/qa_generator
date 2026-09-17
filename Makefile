@@ -39,17 +39,17 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
        $(if $(TOPIC),--only topic=$(TOPIC))))
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
-        logs-shipper \
+        logs-shipper logs-retention \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
         chunk-revocabulary \
         extract extract-status extract-start extract-stop extract-retry \
-        extract-rerun extract-revalidate extract-bridge \
+        extract-rerun extract-revalidate extract-bridge extract-recap \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         questions questions-status questions-start questions-stop wipe \
-        questions-retry questions-rerun questions-reverify \
+        questions-retry questions-rerun questions-reverify questions-balance \
         documents delete delete-derived \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
@@ -120,6 +120,29 @@ logs-api:
 # is reported here and nowhere else.
 logs-shipper:
 	$(COMPOSE) logs -f filebeat
+
+# How long a day's logs are kept. Run once against a running stack; the
+# policy is remembered in Elasticsearch, so a later `make up` needs nothing.
+#
+# A shipper cannot create a lifecycle policy, and configs/filebeat/
+# filebeat.yml names this one on every index it writes. Until this has run,
+# each daily index carries the name of a policy that is not there: it is
+# indexed and searched normally and simply never deleted, which is the state
+# the stack ships in.
+#
+# Idempotent - PUT replaces. LOGS_RETENTION_DAYS overrides the default:
+#
+#     make logs-retention LOGS_RETENTION_DAYS=90
+LOGS_RETENTION_DAYS ?= 30
+logs-retention:
+	@$(LOADENV) && $(COMPOSE) exec -T elasticsearch curl -sS --fail-with-body \
+	  --cacert /usr/share/elasticsearch/config/certs/ca.crt \
+	  -u "elastic:$$ELASTICSEARCH_PASSWORD" \
+	  -X PUT "https://localhost:9200/_ilm/policy/qa-logs" \
+	  -H 'Content-Type: application/json' \
+	  -d '{"policy":{"phases":{"hot":{"actions":{}},"delete":{"min_age":"$(LOGS_RETENTION_DAYS)d","actions":{"delete":{}}}}}}'
+	@echo
+	@echo "qa-logs indices are now deleted after $(LOGS_RETENTION_DAYS) days."
 
 # ── Database ───────────────────────────────────────────────────────────────
 #
@@ -420,6 +443,21 @@ questions-rerun:
 # re-extraction of one document, through to the questions resting on it.
 questions-reverify:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --reverify $(ONLY)
+
+# Draw the balanced release out of every accepted question, and report what
+# it came out as. Accepting a question says it is sound; this says what the
+# SET looks like, and the two are different problems - every gate can do its
+# job and still leave a set that is 45% unanswerable and 96.5% easy, because
+# what survives a filter is whatever the material happened to offer.
+#
+# Holds three shares at once: how much of the release has no answer, how it
+# spreads over the difficulty bands, and how it spreads over the kinds. A
+# column on the rows already there, so nothing is deleted, the questions left
+# out stay queryable, and running it again replaces the draw. Reports the
+# yield - how much of the accepted pool made it in - and names any quota the
+# pool could not fill.
+questions-balance:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
 
 # ── Documents ──────────────────────────────────────────────────────────────
 

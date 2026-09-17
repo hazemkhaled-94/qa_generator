@@ -7,14 +7,16 @@ dashboard as a failure with no cause.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import sys
+import threading
 from datetime import datetime
 
 import pytest
 
-from telemetry.logs import JsonFormatter, _file
+from telemetry.logs import JsonFormatter, _Bound, _file, bind
 
 
 @pytest.fixture
@@ -117,3 +119,96 @@ def test_an_unwritable_log_dir_costs_the_shipped_copy_and_nothing_else(
     """Raising here would stop a worker over a mounted volume."""
     monkeypatch.setenv("LOG_DIR", "/proc/nowhere/qa")
     assert _file("extraction") is None
+
+
+@pytest.fixture
+def shipped():
+    """A logger writing JSON lines through the bound-field filter.
+
+    Built here rather than through `configure`, which would replace the
+    root handlers for the rest of the session.
+    """
+    written = io.StringIO()
+    handler = logging.StreamHandler(written)
+    handler.setFormatter(JsonFormatter("extraction"))
+    handler.addFilter(_Bound())
+
+    logger = logging.getLogger("test.bound")
+    logger.handlers = [handler]
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    def lines() -> list[dict]:
+        """Every record written so far, parsed."""
+        return [json.loads(one) for one in written.getvalue().strip().splitlines()]
+
+    yield logger, lines
+    logger.handlers = []
+
+
+def test_bound_fields_reach_the_line(shipped) -> None:
+    """What a stage bound where it claimed, on a line logged beneath it."""
+    logger, lines = shipped
+    with bind({"stage": "parsing", "document.sha256": "abc"}):
+        logger.info("parsed")
+
+    assert lines()[0]["document.sha256"] == "abc"
+    assert lines()[0]["stage"] == "parsing"
+
+
+def test_binding_nests_and_unwinds(shipped) -> None:
+    """An inner bind adds to the outer one, and only until it closes."""
+    logger, lines = shipped
+    with bind({"stage": "extraction"}):
+        with bind({"passage.id": 41}):
+            logger.info("inner")
+        logger.info("outer")
+    logger.info("unbound")
+
+    inner, outer, unbound = lines()
+    assert inner["passage.id"] == 41 and inner["stage"] == "extraction"
+    assert "passage.id" not in outer and outer["stage"] == "extraction"
+    assert "stage" not in unbound
+
+
+def test_a_library_line_carries_the_binding_too(shipped) -> None:
+    """The filter is on the handler, so a propagated record gets it.
+
+    This is the point of binding rather than passing extra= everywhere:
+    the line that says which connection failed is logged by botocore.
+    """
+    _, lines = shipped
+    library = logging.getLogger("test.bound.botocore")
+    with bind({"document.sha256": "abc"}):
+        library.warning("could not reach the bucket")
+
+    assert lines()[0]["document.sha256"] == "abc"
+
+
+def test_a_callers_extra_beats_the_binding(shipped) -> None:
+    """The more specific of the two wins, and neither raises.
+
+    Setting a bound field in the record factory instead would make this
+    a KeyError out of logging.makeRecord, losing the line and its event.
+    """
+    logger, lines = shipped
+    with bind({"passage.id": 41}):
+        logger.info("re-reading", extra={"passage.id": 99})
+
+    assert lines()[0]["passage.id"] == 99
+
+
+def test_a_binding_does_not_leak_between_threads(shipped) -> None:
+    """Two passages worked at once must not label each other's lines."""
+    logger, lines = shipped
+
+    def elsewhere() -> None:
+        """Logs from a thread that bound nothing."""
+        logger.info("elsewhere")
+
+    with bind({"passage.id": 41}):
+        thread = threading.Thread(target=elsewhere)
+        thread.start()
+        thread.join()
+
+    assert "passage.id" not in lines()[0]
