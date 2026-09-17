@@ -157,7 +157,8 @@ def database(postgres: str, engine, monkeypatch) -> Iterator[None]:
             connection.execute(
                 text(
                     "TRUNCATE documents, ingest_events, passages, facts, "
-                    "questions, question_facts, passage_topics, topics "
+                    "questions, question_facts, passage_topics, topics, "
+                    "service_settings "
                     "RESTART IDENTITY CASCADE"
                 )
             )

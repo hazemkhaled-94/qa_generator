@@ -29,6 +29,7 @@ from database.qa_generator.passage_topics import PassageTopic
 from database.qa_generator.passages import Passage
 from database.qa_generator.question_facts import QuestionFact
 from database.qa_generator.questions import Question
+from database.qa_generator.service_settings import ServiceSetting
 from database.qa_generator.status import Status, check, queued
 from database.qa_generator.topics import Topic
 
@@ -53,6 +54,7 @@ __all__ = [
     "QuestionType",
     "Rejection",
     "ReviewVerdict",
+    "ServiceSetting",
     "Status",
     "Topic",
     "TopicScope",
