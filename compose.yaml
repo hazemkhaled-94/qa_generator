@@ -115,6 +115,12 @@ x-worker: &worker
   logging: *logging
 
 # Dagster. Profile: orchestration.
+#
+# The orchestrator decides when a stage should run and never runs one itself:
+# it posts to the stage routes and reads /status back, which is the same
+# surface the Start button and the make targets use. So it holds no database
+# URL and no object store credentials - a process that cannot reach the app
+# tables cannot quietly grow a second way of moving a row.
 x-dagster: &dagster
   image: qa-generator:latest
   profiles: ["orchestration"]
@@ -124,22 +130,25 @@ x-dagster: &dagster
   environment:
     TZ: UTC
     DAGSTER_HOME: /opt/dagster/dagster_home
-    DATABASE_URL: postgresql+psycopg://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
     DAGSTER_DB_USER: ${DAGSTER_DB_USER}
     DAGSTER_DB_PASSWORD: ${DAGSTER_DB_PASSWORD}
     DAGSTER_DB_NAME: ${DAGSTER_DB_NAME}
-    S3_ENDPOINT: http://seaweedfs-s3:8333
-    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-    S3_SECRET_KEY: ${S3_SECRET_KEY}
-    OTEL_EXPORTER_OTLP_ENDPOINT: http://phoenix:4317
-    OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL}
+    # The container's view of the database, not the host's. dagster.yaml
+    # reads both through `env:`, so one file serves this and `dagster dev`.
+    DAGSTER_DB_HOST: postgres
+    DAGSTER_DB_PORT: 5432
+    LOG_LEVEL: ${LOG_LEVEL}
+    LOG_DIR: /var/log/qa
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+    OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
   volumes:
     - dagster_home:/opt/dagster/dagster_home
     - ./configs/dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
     - ./configs/dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
+    - ./telemetry:/shared/telemetry:ro
+    - logs:/var/log/qa
   depends_on:
-    postgres:      { condition: service_healthy }
-    seaweedfs-s3:  { condition: service_healthy }
+    postgres: { condition: service_healthy }
   networks: [global]
   logging: *logging
 

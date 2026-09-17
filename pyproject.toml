@@ -84,7 +84,9 @@ viz = [
 ]
 
 observability = [
-    "arize-phoenix>=20.3.0,<21.0.0",
+    # The client side only. Phoenix itself runs as a container, so the server
+    # package - with its own web app, database layer and sqlean build - was
+    # three hundred megabytes installed to reach a collector over gRPC.
     "opentelemetry-api>=1.44.0,<2.0.0",
     "opentelemetry-sdk>=1.44.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0",
@@ -92,7 +94,6 @@ observability = [
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
     "opentelemetry-instrumentation-requests>=0.65b0",
     "opentelemetry-instrumentation-botocore>=0.65b0",
-    "mlflow>=3.15.1,<4.0.0",
     "argilla>=2.8.0,<3.0.0",
 ]
 

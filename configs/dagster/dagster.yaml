@@ -1,6 +1,13 @@
 # Dagster instance configuration.
 # Mounted read-only into DAGSTER_HOME (/opt/dagster/dagster_home) in compose.yaml.
-# Connection values are injected from the container environment — no secrets in this file.
+# Connection values are injected from the environment — no secrets in this file.
+#
+# The host and port are read from the environment like the rest, because this
+# one file serves two callers that reach the same database at two addresses:
+# the containers over the compose network as `postgres:5432`, and
+# `make dagster-dev` on the host as `localhost:${POSTGRES_PORT}`. Hard-coded
+# to the first, `dagster dev` could not connect and said only that it had
+# timed out.
 
 storage:
   postgres:
@@ -9,10 +16,12 @@ storage:
         env: DAGSTER_DB_USER
       password:
         env: DAGSTER_DB_PASSWORD
-      hostname: postgres
+      hostname:
+        env: DAGSTER_DB_HOST
       db_name:
         env: DAGSTER_DB_NAME
-      port: 5432
+      port:
+        env: DAGSTER_DB_PORT
 
 run_launcher:
   module: dagster.core.launcher

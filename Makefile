@@ -306,6 +306,15 @@ extract-revalidate:
 extract-bridge:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --bridge $(ONLY)
 
+# Refuse the atomic facts a passage yielded above the cap
+# EXTRACTION_MIN_OTHER_SHARE works out to, keeping the ones that assert a
+# number, a date or a name. No model is called, so a corpus extracted before
+# the cap existed is re-balanced in seconds rather than re-read over hours.
+# Only the verdict moves: nothing is deleted, and the facts refused carry
+# `over_cap` like any other refusal.
+extract-recap:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --recap $(ONLY)
+
 # ── Topic modelling ────────────────────────────────────────────────────────
 #
 # The one stage nothing triggers on its own. Every topic is fitted jointly
@@ -592,7 +601,13 @@ certs:
 # ── Pipeline ───────────────────────────────────────────────────────────────
 
 # Runs the Dagster UI and daemon on the host against the containerised
-# PostgreSQL and object store. Requires a code location in
-# configs/dagster/workspace.yaml, which does not exist yet.
+# PostgreSQL. Requires a code location in configs/dagster/workspace.yaml.
+#
+# The database address is given here rather than in .env because it is the
+# only thing about this that is not what the containers use: they reach
+# postgres over the compose network, and this reaches the published port.
+# configs/dagster/dagster.yaml reads both from the environment.
 dagster-dev:
-	$(LOADENV) && DAGSTER_HOME=$$PWD/configs/dagster dagster dev
+	$(LOADENV) && DAGSTER_HOME=$$PWD/configs/dagster \
+	  DAGSTER_DB_HOST=localhost DAGSTER_DB_PORT=$$POSTGRES_PORT \
+	  dagster dev
