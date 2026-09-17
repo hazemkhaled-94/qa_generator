@@ -193,13 +193,23 @@ def s3(runtime) -> Iterator[dict[str, str]]:
     start = (
         "mkdir -p /etc/seaweedfs && "
         f"printf '%s' '{S3_IDENTITY}' > /etc/seaweedfs/s3.json && "
-        # -volume.max: a bucket is a SeaweedFS collection and a collection
-        # claims a volume on its first write. The default is small enough
-        # that the third bucket never got one: `export` answered head_bucket
-        # and refused every PutObject with an InternalError, which took the
+        # -volume.max: a bucket is a SeaweedFS collection, and a collection
+        # does not claim one volume on its first write - it claims seven, in
+        # one growth batch, and `weed server` exposes no flag to make that
+        # smaller. Three buckets is therefore 21 volumes, plus the six the
+        # default collection takes for the filer's own metadata: 27.
+        #
+        # At 20 the third bucket got none. `export` answered head_bucket and
+        # then refused every PutObject with an InternalError, which took the
         # three tests that store a topic figure whenever the other two
-        # buckets were written to first.
-        "exec weed server -dir=/data -s3 -ip=0.0.0.0 -volume.max=20 "
+        # buckets were written to first - so it passed alone and failed in a
+        # full run, which is the worst way for a gate to be wrong. Measured
+        # on the container this builds: documents 7, parsed 7, default 6,
+        # free 0.
+        #
+        # 60 is headroom rather than a second guess. A volume is created on
+        # demand, so a slot nothing uses costs nothing.
+        "exec weed server -dir=/data -s3 -ip=0.0.0.0 -volume.max=60 "
         "-s3.config=/etc/seaweedfs/s3.json"
     )
     # The image's entrypoint is `weed`, so the shell that writes the config
