@@ -27,6 +27,7 @@ create_role "${SEAWEEDFS_DB_USER}" "${SEAWEEDFS_DB_PASSWORD}"
 create_role "${PHOENIX_DB_USER}"   "${PHOENIX_DB_PASSWORD}"
 create_role "${DAGSTER_DB_USER}"   "${DAGSTER_DB_PASSWORD}"
 create_role "${ARGILLA_DB_USER}"   "${ARGILLA_DB_PASSWORD}"
+create_role "${GRAFANA_DB_USER}"   "${GRAFANA_DB_PASSWORD}"
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
     -c "ALTER DATABASE ${POSTGRES_DB} OWNER TO ${APP_DB_USER}"
@@ -64,6 +65,27 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-S
     GRANT ALL ON SCHEMA public TO ${APP_DB_USER};
 SQL
 
+# ── Grafana's read-only view of the application database ───────────────────
+# The "Pipeline state" dashboard counts queue depths and acceptance rates
+# straight off the tables, because that is where the truth about them is.
+# It reads as its own role: a dashboard is a place people paste SQL, and
+# the application role can DROP.
+#
+# ALTER DEFAULT PRIVILEGES is the load-bearing line. This runs on an empty
+# database - Alembic has not run yet - so GRANT SELECT ON ALL TABLES grants
+# select on nothing. The default privilege is what covers every table the
+# app role creates afterwards. Both are here: the ALTER for the tables to
+# come, the GRANT for a database that already has them, which is what a
+# re-run of this script is for.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-SQL
+    REVOKE ALL ON DATABASE ${POSTGRES_DB} FROM ${GRAFANA_DB_USER};
+    GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO ${GRAFANA_DB_USER};
+    GRANT USAGE ON SCHEMA public TO ${GRAFANA_DB_USER};
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${GRAFANA_DB_USER};
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${APP_DB_USER} IN SCHEMA public
+        GRANT SELECT ON TABLES TO ${GRAFANA_DB_USER};
+SQL
+
 # ── SeaweedFS database ─────────────────────────────────────────────────────
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$SEAWEEDFS_DB_NAME" <<-SQL
@@ -99,3 +121,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$ARGILLA_DB_NAME" 
 SQL
 
 echo "init: ${POSTGRES_DB}, ${SEAWEEDFS_DB_NAME}, ${PHOENIX_DB_NAME}, ${DAGSTER_DB_NAME}, ${ARGILLA_DB_NAME} ready"
+echo "init: ${GRAFANA_DB_USER} may read ${POSTGRES_DB} and write nothing"

@@ -1,0 +1,170 @@
+{
+  "uid": "qa-pipeline-state",
+  "title": "Pipeline state",
+  "description": "What the pipeline holds right now, counted off the tables that hold it. The logs say what happened once; these say what is true. A row a worker died holding logged nothing and is still counted here, which is the difference that matters when something has gone quiet.",
+  "tags": ["qa_generator"],
+  "editable": true,
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "bargauge",
+      "title": "Queue depth by stage",
+      "description": "Every stage's queue in one shape. `new` is a row nobody has asked for yet and is not waiting on a worker - it is waiting on a person. `pending` is claimable and is the only thing a worker takes. A pending column that does not fall is a stage with no worker behind it, which reads exactly like a broken one.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "failed" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "in_progress" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "new" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      },
+      "transformations": [
+        { "id": "rowsToFields", "options": {} }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT stage, status, rows FROM (\n  SELECT 1 AS ord, 'parsing'  AS stage, parse_status   AS status, count(*) AS rows FROM documents GROUP BY parse_status\n  UNION ALL\n  SELECT 2, 'chunking',   chunk_status,   count(*) FROM documents GROUP BY chunk_status\n  UNION ALL\n  SELECT 3, 'extraction', extract_status, count(*) FROM passages  GROUP BY extract_status\n  UNION ALL\n  SELECT 4, 'topics',     status,         count(*) FROM topics WHERE topic_index IS NULL GROUP BY status\n  UNION ALL\n  SELECT 5, 'questions',  question_status, count(*) FROM topics WHERE topic_index IS NOT NULL GROUP BY question_status\n) q ORDER BY ord, status"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Failed, by stage",
+      "description": "A failed row is recoverable and stays where it is until something returns it: `retry` on that stage, or the Retry button beside it. Nothing sweeps them up on its own, so a number here that never moves is a number nobody has looked at.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 6, "w": 10, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "transformations": [{ "id": "rowsToFields", "options": {} }],
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'parsing' AS stage, count(*) AS failed FROM documents WHERE parse_status = 'failed'\nUNION ALL SELECT 'chunking',   count(*) FROM documents WHERE chunk_status   = 'failed'\nUNION ALL SELECT 'extraction', count(*) FROM passages  WHERE extract_status = 'failed'\nUNION ALL SELECT 'topics',     count(*) FROM topics WHERE topic_index IS NULL     AND status          = 'failed'\nUNION ALL SELECT 'questions',  count(*) FROM topics WHERE topic_index IS NOT NULL AND question_status = 'failed'"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "piechart",
+      "title": "Why a fact was refused",
+      "description": "Grouped on the stored code rather than on the English beside it, because the message carries a measurement and would make one bucket per fact. A shift in the mix between runs is the checker or the model changing its mind, and is worth more than the overall rate.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 6, "w": 14, "x": 10, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "pieType": "donut"
+      },
+      "transformations": [{ "id": "rowsToFields", "options": {} }],
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT rejection_code AS reason, count(*) AS facts\nFROM facts WHERE rejection_code IS NOT NULL\nGROUP BY rejection_code ORDER BY count(*) DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Facts held, by kind",
+      "description": "Extraction reads a passage four ways. The share of each is what EXTRACTION_KINDS and the atomic cap were set to control, so this is the panel that says whether they did.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "accepted %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "min", "value": 0 }, { "id": "max", "value": 100 }
+            ] }
+        ]
+      },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT kind,\n       count(*)                                   AS facts,\n       count(*) FILTER (WHERE validated)          AS accepted,\n       round(100.0 * count(*) FILTER (WHERE validated) / nullif(count(*), 0), 1) AS \"accepted %\"\nFROM facts GROUP BY kind ORDER BY count(*) DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Questions, and the gate that refused them",
+      "description": "A rejected question keeps its row: the share thrown away is the evidence behind the coverage report, and a deleted row is a drop nobody can count. `draft` is written and not yet decided.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT status,\n       coalesce(rejected_reason, '-') AS gate,\n       count(*) AS questions\nFROM questions\nGROUP BY status, rejected_reason\nORDER BY count(*) DESC"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Topics, and how much of the corpus each holds",
+      "description": "One model per language over that language's passages only. A topic nobody put in coverage is written no questions at all, which is a decision and not a gap - `include_in_coverage` says which.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 23 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT t.language,\n       t.topic_index                  AS topic,\n       coalesce(t.label, '(unnamed)') AS label,\n       t.labelled_by,\n       t.include_in_coverage          AS in_coverage,\n       count(DISTINCT pt.passage_id)  AS passages,\n       t.question_status\nFROM topics t\nLEFT JOIN passage_topics pt ON pt.topic_id = t.id\nWHERE t.topic_index IS NOT NULL\nGROUP BY t.id, t.language, t.topic_index, t.label, t.labelled_by,\n         t.include_in_coverage, t.question_status\nORDER BY t.language, t.topic_index"
+        }
+      ]
+    }
+  ]
+}

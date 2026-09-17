@@ -1,0 +1,270 @@
+{
+  "uid": "qa-pipeline-throughput",
+  "title": "Pipeline throughput",
+  "description": "How fast the corpus is moving and what the model is costing, read off the fields the stages bind to their lines. The companion to \"Pipeline state\": that one says what is held, this one says at what rate it got there. Empty panels on a stack that has been idle are correct.",
+  "tags": ["qa_generator"],
+  "editable": true,
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "stage",
+        "label": "Stage",
+        "type": "query",
+        "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+        "query": "{\"find\": \"terms\", \"field\": \"stage\"}",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": "*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Units finished per interval, by stage",
+      "description": "One line is one unit of work a stage finished - a document parsed, a passage read, a topic written. Counted from the lines that carry a `stage`, so a stage nothing has run in the window is absent rather than flat at zero.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "stage:($stage) AND log.level:info",
+          "alias": "{{term stage}}",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            { "id": "3", "type": "terms", "field": "stage",
+              "settings": { "size": "10", "order": "desc", "orderBy": "_count", "min_doc_count": "1" } },
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Model call latency",
+      "description": "The pipeline's bottleneck, not the pipeline. A median passage was measured at 473 s on a 31B model. The 99th is what the extraction lease is derived from, so a p99 climbing towards LLM_TIMEOUT_SECONDS is the warning that healthy workers are about to start looking abandoned.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5 } },
+        "overrides": []
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.duration_ms",
+          "metrics": [
+            { "id": "1", "type": "percentiles", "field": "llm.duration_ms",
+              "settings": { "percents": ["50", "95", "99"] } }
+          ],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Model calls, and what they cost",
+      "description": "Every call the three model-calling stages made in the window, and the time spent waiting for them.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Total wait" },
+            "properties": [{ "id": "unit", "value": "ms" }] }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "value", "graphMode": "area", "textMode": "auto", "orientation": "vertical"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.duration_ms",
+          "alias": "Calls",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.duration_ms",
+          "alias": "Total wait",
+          "metrics": [{ "id": "1", "type": "sum", "field": "llm.duration_ms" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Facts extracted, accepted against refused",
+      "description": "Summed from the line each passage logs when it is stored. The gap between the two is the checker's drop rate over time, which is the number that moves when a prompt or a gate is changed.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
+          "unit": "short", "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Accepted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "Refused" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:facts.validated",
+          "alias": "Accepted",
+          "metrics": [{ "id": "1", "type": "sum", "field": "facts.validated" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:facts.rejected",
+          "alias": "Refused",
+          "metrics": [{ "id": "1", "type": "sum", "field": "facts.rejected" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Questions written, accepted against refused",
+      "description": "The same shape for the stage at the other end. A topic yielding nothing is not a failure and logs no counts, so a flat stretch here with the queue draining is topics that had nothing left to ask about.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
+          "unit": "short", "min": 0
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Accepted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "Refused" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:questions.accepted",
+          "alias": "Accepted",
+          "metrics": [{ "id": "1", "type": "sum", "field": "questions.accepted" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:questions.rejected",
+          "alias": "Refused",
+          "metrics": [{ "id": "1", "type": "sum", "field": "questions.rejected" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Who asked for what",
+      "description": "Every queue verb asked for over HTTP - the Start button, a route, the orchestrator - and how many rows each moved. The command line logs its own and is not here. This is the panel that answers \"why did the corpus start moving\".",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:queue.action AND stage:($stage)",
+          "metrics": [
+            { "id": "1", "type": "raw_data", "settings": { "size": "200" } }
+          ],
+          "bucketAggs": [],
+          "timeField": "@timestamp"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "_id": true, "_index": true, "_type": true, "highlight": true, "sort": true,
+              "host.name": true, "process.pid": true, "process.thread.name": true,
+              "log.origin.file.name": true, "log.origin.file.line": true,
+              "log.origin.function": true, "log.logger": true, "span.id": true,
+              "service.name": true, "log.level": true
+            },
+            "indexByName": {
+              "@timestamp": 0, "stage": 1, "queue.action": 2, "queue.rows": 3,
+              "queue.scope": 4, "queue.value": 5, "message": 6
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

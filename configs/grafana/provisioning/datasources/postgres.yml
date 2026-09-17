@@ -1,0 +1,35 @@
+# The application database, as Grafana reads it. Provisioned rather than
+# clicked together, so a fresh volume comes up with the datasource there.
+#
+# Read-only, by a role that holds SELECT and nothing else. The queue depths
+# and the acceptance rates are counted off the tables that hold them rather
+# than off the logs, because that is where the truth about them is: a log
+# line says what happened once, and a row says what is true now. A worker
+# that died holding a row logged nothing, and this still counts it.
+#
+# The credential is interpolated from the environment compose hands the
+# container; configs/postgres/init.sh is what creates the role.
+
+apiVersion: 1
+
+datasources:
+  - name: Pipeline
+    uid: qa-pipeline
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: ${GRAFANA_DB_USER}
+    database: ${APP_DB_NAME}
+    # Edits in the UI would be silently reverted on restart, which is worse
+    # than not offering them.
+    editable: false
+    jsonData:
+      # No TLS between two containers on one compose network. The database
+      # publishes a port for the host's own tooling, not for this.
+      sslmode: disable
+      postgresVersion: 1800
+      # The extension the schema needs for embeddings. Declared so Grafana
+      # does not warn about a type it cannot map; nothing here selects one.
+      timescaledb: false
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}
