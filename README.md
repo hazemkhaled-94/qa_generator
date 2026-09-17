@@ -13,8 +13,8 @@ The pipeline runs entirely on local infrastructure. No document content leaves
 the deployment.
 
 **Status:** ingestion, parsing, chunking, fact extraction, topic modelling and
-question generation are implemented. Quality assurance and the evaluation
-harness are not yet built.
+question generation are implemented, and a balanced release is drawn from what
+they produce. Quality assurance and the evaluation harness are not yet built.
 
 Nothing here is bound to a subject or an industry. The parser, the chunker and
 the topic model work over whatever the documents say; the extraction prompt's
@@ -83,9 +83,11 @@ Once it reports ready:
 |---|---|---|
 | Frontend | http://localhost:8501 | Run each stage, browse what it produced, view system status |
 | API | http://localhost:8000/docs | OpenAPI documentation |
-| Phoenix | http://localhost:6006 | Traces — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
-| Grafana | http://localhost:3001 | Logs — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
+| Phoenix | http://localhost:6006 | Traces, and the golden-set experiments — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
+| Grafana | http://localhost:3001 | Logs and pipeline dashboards — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
+| Argilla | http://localhost:6900 | Review what the models decided — sign in with `ARGILLA_USERNAME` and `ARGILLA_PASSWORD` |
 | Adminer | http://localhost:9001 | Database browser |
+| Dagster | http://localhost:3000 | The asset graph and run history. Not started by `make up`; see [Orchestration](#orchestration) |
 
 Upload a PDF on the Upload page, then go to Documents and press **Start
 all**: nothing runs until it is asked to. Each page runs exactly one stage —
@@ -106,6 +108,12 @@ make logs            # follow all logs
 make logs-api        # follow the API log
 make logs-frontend   # follow the frontend log
 make logs-shipper    # follow the log shipper, when Grafana shows nothing
+make logs-retention  # set how long a day's logs are kept; run once
+make orchestration   # start Dagster: the asset graph, the schedule, the sensor
+make review-push-facts   # send a sample of facts to Argilla for review
+make review-pull-facts   # bring the submitted verdicts back
+make eval-upload     # put the golden cases in Phoenix
+make eval-score      # score the served model against them, and record it
 make test            # everything that gates; starts containers of its own
 make test-fast       # only the fast layers: no spaCy, no pyright, no containers
 make test-smoke      # build both images and look inside them
@@ -149,6 +157,8 @@ make questions-start # the same five, over topics
 make questions       #   ... and `questions-status`, `questions-stop`,
                      #       `questions-retry`, `questions-rerun`
 make questions-reverify  # check stored questions again; no model is called
+make questions-balance   # draw the balanced release out of what was accepted
+make extract-recap       # apply the atomic cap to stored facts; no model call
 ```
 
 Any of those five verbs narrows to a single item with `SHA`, `PASSAGE` or
@@ -178,9 +188,10 @@ without the expensive part:
 | `make extract-revalidate` | Judges every stored fact again. The model is not called and no statement changes — only what the checks read off one. |
 | `make chunk-revocabulary` | Reads every stored passage's language and vocabulary again. Only `passages.language` and `passages.lemmas` change. |
 | `make questions-reverify` | Puts every stored question through the gates that need no model: its facts still pass their own checks, its evidence is still spread the way its difficulty says, it is still well formed, and no earlier question already asks it. |
+| `make extract-recap` | Refuses the atomic facts a passage yielded above the cap `EXTRACTION_MIN_OTHER_SHARE` works out to, keeping the ones that assert a number, a date or a name. A corpus extracted before the cap existed is re-balanced in seconds rather than re-read over hours. |
 
-The first two take `SHA`, `extract-revalidate` takes `PASSAGE`, and
-`questions-reverify` takes `TOPIC`, like the five queue verbs.
+The first two take `SHA`, `extract-revalidate` and `extract-recap` take
+`PASSAGE`, and `questions-reverify` takes `TOPIC`, like the five queue verbs.
 
 `questions-reverify` only ever rejects. Accepting is a person's decision, and
 a re-check that un-rejected would overturn one on its next run. It is what
@@ -263,7 +274,7 @@ narrowed verb and a whole-queue one cannot disagree about what they do.
 `start` moves it to `pending`, which is the only status a worker claims, and
 `stop` moves it back. A stage never sets another stage going: the previous
 stage finishing leaves a row `new`, and somebody — the Start button, the route,
-the `make` target, later the orchestrator — decides it should run.
+the `make` target, the [orchestrator](#orchestration) — decides it should run.
 
 The API only ever reads and writes the queue; the work happens in the stage's
 worker container. There is no `run` route, and that is not an omission — a
@@ -288,6 +299,63 @@ Every failure is recoverable. A row a worker died holding is failed by the next
 run of that stage, with the reason recorded, rather than being left claimed and
 invisible; `retry` then returns it to the queue. There is no state a row can
 reach that nothing can move it out of.
+
+## Orchestration
+
+Dagster is the somebody the section above reserved a slot for. It decides when
+a stage should run and never runs one: it posts to the stage routes and polls
+`/status` until nothing claimable is left, which is the same surface the Start
+button and the `make` targets use.
+
+```bash
+make orchestration        # start the webserver and the daemon
+make orchestration-logs   # follow both
+make orchestration-down   # stop them
+```
+
+Both are behind the `orchestration` compose profile, so `make up` does not
+start them: a pipeline driven by hand should not pay for two more containers.
+The UI is at http://localhost:3000.
+
+One asset per stage, chained in the order a document moves:
+
+```
+parsed_documents → passages → facts → topics → questions
+```
+
+Materialising one starts that stage and waits for the workers to drain it.
+Failed rows are an asset check rather than an exception, because a failed row
+is not a failed run — the rest of the corpus went through, the reason is
+recorded against the row, and `retry` is what moves it. Raising would stop
+every later stage because one document of four hundred was a scanned image.
+
+Three ways to set it going, and all three are off until asked:
+
+| | |
+|---|---|
+| The `corpus` job | Every stage, end to end. Run it by hand from the UI. |
+| The `nightly_corpus` schedule | 02:00 UTC. A refit is corpus-wide and goes stale on every new document, which is the one thing worth a clock. |
+| The `arrivals` sensor | Polls parsing every minute and requests a run when documents are sitting `new`. This is what makes the pipeline unattended. |
+
+The schedule and the sensor both ship **stopped**, and are switched on in the
+UI. A stack that starts running the pipeline the moment it comes up is one
+nobody chose.
+
+Dagster does not replace the workers, and that is deliberate. The watch loop,
+the lease sweep and `FOR UPDATE SKIP LOCKED` are the execution model and they
+work; moving the stages into Dagster ops would have thrown all three away in
+exchange for putting a 473-second model call inside an op. So `orchestration/`
+is additive: delete it and the pipeline runs exactly as before, with nobody
+deciding for it.
+
+It runs in an image of its own — 372 MB against the backend image's 3.02 GB,
+because it makes HTTP calls and needs neither torch nor spaCy nor a model. It
+is given no `DATABASE_URL` and no object store credentials, and a smoke test
+pins that: a process that cannot reach the application tables cannot grow a
+second way of moving a row that disagrees with the other three.
+
+`make dagster-dev` runs the same code location on the host instead, against
+the containerised PostgreSQL and API.
 
 ## Scaling
 
@@ -776,6 +844,48 @@ asked, because recoverability is not similarity — and a paraphrase, a
 decomposition and a resolved pronoun all survive it, which a similarity
 threshold does not let them do.
 
+### The balanced release
+
+Accepting a question says it is sound. It says nothing about what the SET
+looks like, and the two are different problems: every gate can do its job and
+still leave a set that is 45% unanswerable and 96.5% easy, because what
+survives a filter is whatever the material happened to offer. That is what
+one measured run came out as.
+
+So the run overgenerates and the composition is chosen afterwards.
+`make questions-balance` fills a quota out of everything accepted and writes
+`questions.release_id` on what it drew. Three shares are held at once:
+
+| | |
+|---|---|
+| `QUESTIONS_RELEASE_UNANSWERABLE` | The most of the release that may be questions with no answer. A ceiling, not a target. |
+| `QUESTIONS_RELEASE_DIFFICULTY` | How it spreads over the bands, over the whole set rather than over the answerable part of it. |
+| `QUESTIONS_TYPE_MIX` | Reused, so a type a deployment turned off gets no quota it cannot fill. |
+
+They are **marginals, not a joint distribution**, and that is deliberate. An
+even spread of kinds *within* each band is not reachable: a `factoid` answers
+with a value, a value is short, and a short answer cannot earn the length
+point a `hard` question generally needs. Asking for both marginals is
+achievable; asking for their product is asking the corpus to be something it
+is not.
+
+`QUESTIONS_RELEASE_SIZE=0` draws the largest release the pool can fill
+without missing a quota, which is usually what is wanted: the size a balanced
+set can reach is fixed by whichever bucket is furthest from supplying its
+share, and that is a property of the run rather than a number to pick. The
+command reports what it drew, the yield — how much of the accepted pool made
+it in — and names any quota the pool came up short on.
+
+Nothing is deleted and nothing is rewritten. A release is a column on the
+rows already there, so the questions left out stay queryable and available to
+the next draw, and running it again with different shares replaces the first.
+
+The number to read is that yield, not the share of rows that were accepted.
+Every draft the writer produced is stored, refused ones included — including
+the first attempt where `QUESTIONS_RETRIES` asked for a second — because they
+are the drop-rate evidence, and hiding them would make the writer look better
+than it is.
+
 ### What a refit and a re-extraction do to them
 
 Questions belong to their facts, not to a topic. A fit replaces every row in
@@ -895,15 +1005,15 @@ gates a merge; the two that do not are excluded from it.
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the pinned surface of three services, and pyright at zero | nothing |
-| `tests/unit/` | One module at a time, no I/O | spaCy, for some |
+| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, and pyright at zero | nothing |
+| `tests/unit/` | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
 | `tests/property/` | Invariants over generated input, with hypothesis | spaCy, for some |
 | `tests/contract/` | The OpenAPI surface, the paths the frontend builds, and the refusals each route declares | a container |
 | `tests/integration/` | The database, the object store and the HTTP surface, against the images compose runs | a container |
 | `tests/e2e/` | One document through every stage in this process, with the converter and the model stood in for | a container |
 | `tests/frontend/` | Each Streamlit page against a scripted backend | nothing |
-| `tests/smoke/` | Both images built and looked inside, and the compose file resolved | a container engine |
-| `tests/eval/` | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions | a served model |
+| `tests/smoke/` | Both images built and looked inside, and the compose file resolved — with the `orchestration` profile too, which is how the orchestrator is held to holding no database credential | a container engine |
+| `tests/eval/` | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions. The cases are in `evaluation/cases.py`, read by this and by `make eval-score` | a served model |
 
 The integration layers start a PostgreSQL and a SeaweedFS of their own through
 testcontainers and skip, with a reason, where no container engine answers.
@@ -968,8 +1078,12 @@ PyPI's build, which has no CUDA variant to avoid.
 | `tests/` | The test suite, one directory per layer; see Tests below |
 | `.github/workflows/` | What CI runs, and when |
 | `telemetry/` | Logging and OpenTelemetry configuration |
+| `orchestration/` | The Dagster code location: one asset per stage, a schedule and a sensor. Calls the API and nothing else |
+| `review/` | Pushing facts, topic labels and questions to Argilla, and bringing the verdicts back |
+| `evaluation/` | The golden cases, and scoring a served model against them in Phoenix |
 | `configs/filebeat/` | What the log shipper reads and where it puts it |
-| `configs/grafana/` | The log datasource and dashboard, provisioned |
+| `configs/grafana/` | The datasources and the three dashboards, provisioned |
+| `configs/dagster/` | The Dagster instance and its one code location |
 | `frontend/` | Streamlit application |
 | `configs/env/` | The settings that are decisions rather than credentials, and so live in git |
 | `configs/` | Service configuration and init scripts |
@@ -1019,11 +1133,53 @@ also logs it with its traceback — the row's error column is one line for a
 person reading the Documents page, not the whole story.
 
 The field names are [ECS](https://www.elastic.co/guide/en/ecs/current/index.html).
-That is the only reason none of this needs an index template of its own:
 `log.level`, `service.name`, `log.logger` and `error.type` are names
 Elasticsearch's own template already maps as keywords, so Grafana can group on
 them out of the box. `trace.id` is on every line too, which is what ties a log
 line to its span in Phoenix.
+
+### What a line says it was working on
+
+A line also carries what the pipeline was doing when it was written, not just
+what happened. Each stage binds its unit of work where it claims it, and every
+line beneath carries it — including the ones a library logs, which is the
+point:
+
+```python
+with working(span, "extract", {"stage": self.name, "passage.id": passage.id}):
+    log.info("passage %d: %d fact(s)", passage.id, stored,
+             extra={"facts.stored": stored})
+```
+
+One call, because the span and the log line are one fact said twice. A stage
+annotating its trace with `document.sha256` and its lines with something
+spelled differently is a trace that cannot be joined to the logs explaining
+it, and two calls drift into exactly that.
+
+So `stage`, `document.sha256`, `passage.id`, `topic.id`, `llm.duration_ms`,
+`facts.stored` and the rest are fields rather than prose inside `message`.
+That is what makes "how many passages failed extraction today" and "show me
+everything about this document" answerable at all — a document crosses five
+processes over hours, and without the binding nothing in Elasticsearch says
+two lines are about the same one.
+
+These are not ECS, so they are declared in `setup.template.append_fields` in
+`configs/filebeat/filebeat.yml`. Left to dynamic mapping a string arrives as
+`text`, which is analysed and has no doc values, and a panel grouping by
+`stage` finds nothing to group on.
+
+### Retention
+
+```bash
+make logs-retention                        # 30 days
+make logs-retention LOGS_RETENTION_DAYS=90
+```
+
+Run once against a running stack; Elasticsearch remembers the policy. A
+shipper cannot create one, and `filebeat.yml` names it on every index it
+writes — so until this has run, each daily index carries the name of a policy
+that is not there. It is indexed and searched normally and simply never
+deleted, which is the state the stack ships in.
 
 Only this project's processes are shipped. Postgres, SeaweedFS, Redis and
 Elasticsearch itself keep the `json-file` driver and are read with `make logs`.
@@ -1050,6 +1206,116 @@ slow.
 make logs-shipper    # why nothing is arriving, when nothing is arriving
 ```
 
+## Dashboards
+
+Three, provisioned into Grafana from `configs/grafana/`, over two datasources.
+
+| Dashboard | Reads | Shows |
+|---|---|---|
+| Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact acceptance by rejection code, question acceptance by gate, topics and their coverage |
+| Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused, and which queue verb was asked for over HTTP |
+| Pipeline logs | Elasticsearch | Lines per level, what failed and where, every line |
+
+The split is the point. Logs say what happened once; the tables say what is
+true now. A row a worker died holding logged nothing and is still counted in
+Pipeline state, which is the difference that matters when a stage has gone
+quiet.
+
+Grafana reads the application database as `grafana_reader`, which holds
+`SELECT` and nothing else — a dashboard is a place people paste SQL into, and
+the application role can `DROP`. The role is created by
+`configs/postgres/init.sh`, which only runs on the first boot of an empty
+volume; on a stack that already has one, re-run it by hand:
+
+```bash
+podman compose exec postgres bash /docker-entrypoint-initdb.d/init.sh
+```
+
+The panel worth watching during a long run is the model latency p99. The
+extraction lease is derived from `LLM_TIMEOUT_SECONDS` and
+`LLM_MAX_ATTEMPTS`, so a p99 climbing towards the timeout is healthy workers
+about to start looking abandoned.
+
+## Review
+
+Three things in this pipeline are a model's judgement, and each has somewhere
+for a person to disagree. Argilla is where a hundred of those decisions get
+made in a row instead of one at a time through a table.
+
+| Dataset | The decision | Lands in |
+|---|---|---|
+| `facts` | Does the statement follow from the evidence, and stand on its own? | `facts.reviewed_verdict` |
+| `topic-labels` | Is this a good name for these terms, and is it a subject worth asking about? | `topics.label`, `topics.include_in_coverage` |
+| `questions` | Would somebody ask this, and is the answer right? | `questions.status` |
+
+```bash
+make review-push-questions   # a sample, spread over the gates
+make review-pull-questions   # write the submitted verdicts back
+```
+
+`facts` and `topics` have the same pair. Push, review in the UI at
+`ARGILLA_API_URL`, then pull. `make review-status` says how much has been
+looked at.
+
+The database decides. Argilla holds a copy of the rows put in front of
+somebody and the answers they gave; a pull brings the answers home and the
+copy is disposable — delete the Argilla dataset and the pipeline has lost
+nothing.
+
+Two of the three write through routes that already existed: a verdict given
+here and one given on the Questions or Topics page are the same write, which
+is what keeps `labelled_by` honest about who named a topic. Facts had nowhere,
+because `validated` and `rejection_code` are the checker's and
+`extract-revalidate` rewrites both from scratch — so `reviewed_verdict` is its
+own column, the way `questions.status` is its own beside `rejected_reason`.
+
+The samples are stratified over the verdicts, not taken in id order. A review
+answers "is the checker right", and a sample of only what it accepted cannot
+answer that — nor can a sample in id order, which for a corpus is a sample of
+whichever document was extracted first. At least one from each group, because
+a rejection code that fired twice in a whole corpus is the interesting one.
+
+A pull takes only **submitted** answers. Argilla saves a draft the moment a
+record is touched, and writing one back records an opinion nobody has finished
+having.
+
+It runs on the host, like `make schema`. Nothing in the pipeline calls it, so
+no container carries the client.
+
+## Golden-set experiments
+
+`make test-eval` scores a served model against the cases in
+`evaluation/cases.py` and prints the numbers. Printing is the problem: a
+prompt change, a model change or a quantisation change moves precision and
+recall, and the question anybody has is whether it moved them up.
+
+```bash
+make eval-upload     # the cases become a Phoenix dataset
+make eval-score      # the model is scored against them, and it is recorded
+make eval-score EVAL_RUN_NAME=extraction-prompt-v7
+```
+
+Phoenix versions the dataset, so a case added today does not invalidate
+yesterday's experiments — they stay attached to the version they scored. Each
+run records the model, the temperature and the structured mode as metadata, so
+two runs are comparable by more than their timestamps.
+
+Scored by the pipeline's own checker rather than an LLM judge. The checker is
+what decides whether a fact is kept in production, so a golden set scored by
+anything else measures something this pipeline does not use.
+
+Only the extraction set is scored, and that is a decision rather than a gap.
+Its numbers are pure measurement, asserted against nothing, which is what is
+worth comparing between two prompts. The questions set already asserts — the
+recoverable cases must pass and the rest must be stopped — so it is a gate
+that fails a pull request rather than a trend that draws a line. It is
+uploaded anyway, so the cases are browsable and an experiment can be run
+against them from the Phoenix UI.
+
+Never a gate, for the same reason `test-eval` is not: a model's answers move
+between versions, between quantisations and between two runs at the same
+temperature.
+
 ## Configuration
 
 All configuration is environment variables, split by what the value is rather
@@ -1060,11 +1326,15 @@ than by which service reads it:
 | `configs/env/backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction, topic and question settings the api and the five workers read |
 | `configs/env/elasticsearch.env` | yes | The Elasticsearch node's certificate paths, security flags and heap. One node serves both Argilla and the logs |
 | `configs/env/seaweedfs-filer.env` | yes | Which metadata store the filer uses |
+| `configs/env/orchestration.env` | yes | How patiently Dagster watches a stage it started |
+| `configs/env/review.env` | yes | How a review sample is drawn |
+| `configs/env/evaluation.env` | yes | What a golden-set run is called in Phoenix |
 | `.env` | no | Credentials, ports, and the addresses a host reaches a service at. `.env.example` lists it |
 
 compose hands each file to the services that need it with `env_file`, and the
 Makefile sources `backend.env` and `.env` for the host commands, so one value
-reaches both. A variable given on the command line beats both:
+reaches both. A tool with a tuning file of its own gets that too, through
+`$(call WITH,...)`. A variable given on the command line beats all of them:
 
 ```bash
 make topics-discover TOPIC_PASSES=20
@@ -1095,7 +1365,16 @@ The values most likely to need changing:
 | `QUESTIONS_LONG_ANSWER_CHARS` | `backend.env` | 60 | Where an answer starts counting towards the difficulty band. Not a gate |
 | `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |
-| `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector |
+| `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
+| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets and experiments go. The same service the line above sends spans to, read the other way |
+| `GRAFANA_DB_USER` | `.env` | `grafana_reader` | The role Grafana reads the application database as. `SELECT` and nothing else |
+| `ARGILLA_API_URL` | `.env` | `http://localhost:6900` | Where the review tool reaches Argilla. The host's address: it is a `make` target, not a container |
+| `ARGILLA_API_KEY` | `.env` | — | Argilla shows it under "My settings". Not `ARGILLA_PASSWORD` |
+| `ARGILLA_WORKSPACE` | `.env` | `qa_generator` | One per deployment, so two people reviewing two corpora do not annotate each other's rows |
+| `REVIEW_SAMPLE_SIZE` | `review.env` | 200 | How many records a push puts in front of a reviewer, split across the verdicts |
+| `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | `orchestration.env` | 28800 | How long a Dagster asset waits for a stage to drain. Giving up is not failing the rows |
+| `ORCHESTRATION_POLL_SECONDS` | `orchestration.env` | 15 | How often it asks |
+| `LOGS_RETENTION_DAYS` | `make` | 30 | How long a day's log index is kept, applied by `make logs-retention` |
 
 `MAX_FILE_SIZE_MB` must be kept in step with `server.maxUploadSize` in
 `frontend/.streamlit/config.toml`, or Streamlit rejects the file before the API
