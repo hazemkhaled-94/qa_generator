@@ -67,7 +67,8 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         certs dagster-dev orchestration orchestration-down orchestration-logs \
         review-status review-push-facts review-pull-facts \
         review-push-topics review-pull-topics \
-        review-push-questions review-pull-questions
+        review-push-questions review-pull-questions \
+        eval-upload eval-score
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -649,6 +650,32 @@ certs:
 	echo "Certificates written to certs/"
 	@chmod 600 certs/ca.key
 	@chmod 644 certs/elasticsearch.key
+
+# ── Golden-set experiments ─────────────────────────────────────────────────
+#
+# `make test-eval` scores a served model against the cases in
+# evaluation/cases.py and prints the numbers. These record the same scores
+# in Phoenix instead, so two runs are comparable by more than scrollback:
+#
+#   make eval-upload    put the cases in Phoenix, as a new dataset version
+#   make eval-score     run the model against them and record the scores
+#
+# Never a gate, for the reason test-eval is not: a model's answers move
+# between versions, between quantisations and between two runs at the same
+# temperature.
+#
+# Name a run when the model is not what changed:
+#
+#     make eval-score EVAL_RUN_NAME=extraction-prompt-v7
+EVAL = $(call WITH,evaluation.env) && \
+       PYTHONPATH=backend poetry run python -m evaluation.run
+EVAL_DATASET ?= extraction-golden
+
+eval-upload:
+	$(EVAL) --upload $(EVAL_DATASET)
+
+eval-score:
+	$(EVAL) --score $(EVAL_DATASET)
 
 # ── Review ─────────────────────────────────────────────────────────────────
 #

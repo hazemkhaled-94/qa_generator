@@ -325,6 +325,32 @@ standardwebhooks = ">=1.0.0"
 tqdm = ">=4.60.0"
 
 [[package]]
+name = "arize-phoenix-client"
+version = "3.5.0"
+description = "LLM Observability"
+optional = false
+python-versions = "<3.15,>=3.10"
+groups = ["observability"]
+files = [
+    {file = "arize_phoenix_client-3.5.0-py3-none-any.whl", hash = "sha256:db7d05b692db0389d8d3306d59579793264f8ec3b2f7e9e5d724e9160ac78f72"},
+    {file = "arize_phoenix_client-3.5.0.tar.gz", hash = "sha256:6f9013457f6f56d56db65f61877369eae7bd23460212030b54da68cb0a4d8047"},
+]
+
+[package.dependencies]
+httpx = "*"
+openinference-instrumentation = ">=0.1.20"
+openinference-semantic-conventions = "*"
+opentelemetry-exporter-otlp = "*"
+opentelemetry-sdk = "*"
+tqdm = "*"
+typing-extensions = "*"
+
+[package.extras]
+evals = ["arize-phoenix-evals"]
+harbor = ["harbor (>=0.21.0) ; python_version >= \"3.12\""]
+pytest = ["pytest (>=7)"]
+
+[[package]]
 name = "asgiref"
 version = "3.12.1"
 description = "ASGI specs, helper code, and adapters"
@@ -5430,6 +5456,22 @@ files = [
 typing-extensions = ">=4.5.0"
 
 [[package]]
+name = "opentelemetry-exporter-otlp"
+version = "1.44.0"
+description = "OpenTelemetry Collector Exporters"
+optional = false
+python-versions = ">=3.10"
+groups = ["observability"]
+files = [
+    {file = "opentelemetry_exporter_otlp-1.44.0-py3-none-any.whl", hash = "sha256:4a498fa8d8fd8be9e8e2d175fe5524a3fe581ccffadd8509db86526a5fb97051"},
+    {file = "opentelemetry_exporter_otlp-1.44.0.tar.gz", hash = "sha256:af1cde7c33ea8ed624bf04ac49a885730fe44c1f1ad698656e592c38f70ce106"},
+]
+
+[package.dependencies]
+opentelemetry-exporter-otlp-proto-grpc = "1.44.0"
+opentelemetry-exporter-otlp-proto-http = "1.44.0"
+
+[[package]]
 name = "opentelemetry-exporter-otlp-proto-common"
 version = "1.44.0"
 description = "OpenTelemetry Protobuf encoding"
@@ -5467,6 +5509,30 @@ opentelemetry-exporter-otlp-proto-common = "1.44.0"
 opentelemetry-proto = "1.44.0"
 opentelemetry-sdk = ">=1.44.0,<1.45.0"
 typing-extensions = ">=4.6.0"
+
+[package.extras]
+gcp-auth = ["opentelemetry-exporter-credential-provider-gcp (>=0.59b0)"]
+
+[[package]]
+name = "opentelemetry-exporter-otlp-proto-http"
+version = "1.44.0"
+description = "OpenTelemetry Collector Protobuf over HTTP Exporter"
+optional = false
+python-versions = ">=3.10"
+groups = ["observability"]
+files = [
+    {file = "opentelemetry_exporter_otlp_proto_http-1.44.0-py3-none-any.whl", hash = "sha256:838592fce774c1c8bb7b9a0a7facbfa82e17be5a8a4e94cef10cb84ae026bae3"},
+    {file = "opentelemetry_exporter_otlp_proto_http-1.44.0.tar.gz", hash = "sha256:c633d7270ad6b57cd4cfbe8b0007a9e2e7c0cb50bd6c50fe2a7b245f721a09d8"},
+]
+
+[package.dependencies]
+googleapis-common-protos = ">=1.52,<2.0"
+opentelemetry-api = ">=1.15,<2.0"
+opentelemetry-exporter-otlp-proto-common = "1.44.0"
+opentelemetry-proto = "1.44.0"
+opentelemetry-sdk = ">=1.44.0,<1.45.0"
+requests = ">=2.7,<3.0"
+typing-extensions = ">=4.5.0"
 
 [package.extras]
 gcp-auth = ["opentelemetry-exporter-credential-provider-gcp (>=0.59b0)"]
@@ -10714,4 +10780,4 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "dfa78c355fbb886c5568602047e10b4a48ed22ec2d15626854e29b6ae0a48818"
+content-hash = "55d704ae517d2a7bf45842339d97eab096d38563fd6cf420f84a1ada83055a12"

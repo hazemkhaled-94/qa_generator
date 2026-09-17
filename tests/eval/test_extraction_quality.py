@@ -19,38 +19,14 @@ import os
 import pytest
 from factories import passage
 
+from evaluation.cases import EXTRACTION as GOLDEN
 from extraction.validation import FactChecker
 
 pytestmark = [pytest.mark.eval, pytest.mark.nlp]
 
-#: Passages and what a correct reading of each yields. `claims` is how many
-#: separate facts the text carries, which is what a reader should find.
-GOLDEN = (
-    {
-        "text": (
-            "The device weighs 4 kg and runs for 12 hours. "
-            "It arrives in March 2026 from the Hamburg plant."
-        ),
-        "language": "en",
-        "claims": 4,
-    },
-    {
-        "text": (
-            "Ein Risikobericht muss mindestens vierteljährlich erstellt werden. "
-            "Die Geschäftsleitung trägt dafür die Verantwortung."
-        ),
-        "language": "de",
-        "claims": 2,
-    },
-    {
-        "text": (
-            "Standard requests are answered within 48 hours on working days. "
-            "Urgent requests are answered within 4 hours."
-        ),
-        "language": "en",
-        "claims": 3,
-    },
-)
+#: The cases live in evaluation/cases.py: `make eval-experiment` reads
+#: the same ones, and one definition is what keeps the two measuring the
+#: same thing.
 
 
 @pytest.fixture(scope="module")

@@ -87,6 +87,9 @@ observability = [
     # The client side only. Phoenix itself runs as a container, so the server
     # package - with its own web app, database layer and sqlean build - was
     # three hundred megabytes installed to reach a collector over gRPC.
+    #
+    # The client is here for the golden-set experiments in evaluation/, which
+    # need the datasets and experiments API and nothing else.
     "opentelemetry-api>=1.44.0,<2.0.0",
     "opentelemetry-sdk>=1.44.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0",
@@ -100,6 +103,7 @@ observability = [
     # observability.
     "openinference-instrumentation-litellm (>=0.1.45,<0.2.0)",
     "argilla>=2.8.0,<3.0.0",
+    "arize-phoenix-client (>=3.5.0,<4.0.0)",
 ]
 
 dev = [

@@ -28,11 +28,19 @@ DECLARING = (
     "configs/env/backend.env",
     "configs/env/orchestration.env",
     "configs/env/review.env",
+    "configs/env/evaluation.env",
     ".env.example",
 )
 
 #: Directories holding the code that runs in a container.
-SOURCES = ("backend", "frontend", "telemetry", "orchestration", "review")
+SOURCES = (
+    "backend",
+    "frontend",
+    "telemetry",
+    "orchestration",
+    "review",
+    "evaluation",
+)
 
 #: A declaration, commented out or not: an optional setting is documented by
 #: a commented line rather than by a value.
