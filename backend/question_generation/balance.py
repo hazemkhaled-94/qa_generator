@@ -176,13 +176,39 @@ def choose(pool: Sequence[Row], quota: Quota) -> Release:
     return Release(ids=sorted(chosen), quota=quota, short=short)
 
 
-#: How far short of its quota a release may come and still be taken. The
-#: target is "about a third each", not exactly a third: three marginals over
-#: eleven kinds cannot all land on zero together out of a finite pool, and
-#: the last two percent of them is where it always fails. Held to exactness
-#: the draw collapsed - a pool that filled 98% of a release of 900 was
-#: refused, and the bisection backed off to 199.
+#: How far short of its own quota one bucket may come and still be taken,
+#: as a share of that quota. The target is "about a third each", not exactly
+#: a third: three marginals over eleven kinds cannot all land on zero
+#: together out of a finite pool, and the last few places are where it
+#: always fails.
 TOLERANCE = 0.03
+
+
+def close_enough(release: Release, tolerance: float = TOLERANCE) -> bool:
+    """Whether every bucket came within its slack of what was asked for.
+
+    Measured per bucket, not on the total, because the two say opposite
+    things about the same draw. Over 727 accepted questions a release of
+    143 was six aggregations short - that kind at 5.6% where the quota
+    wanted 9.1%, which is the one thing this whole stage exists to prevent -
+    and a release of 88 was short by exactly one in five buckets, which is
+    the balanced set the pool can supply. Judged on the total the first
+    looks like the better draw, and the bisection took neither: held to 3%
+    of the total it refused 85 out of 88 and collapsed to 4.
+
+    One place is always allowed. A quota of eight cannot absorb a
+    proportional tolerance, and being one short of eight is where the
+    rounding fell rather than a pool that cannot supply the kind.
+    """
+    wanted = {
+        **release.quota.difficulty,
+        **release.quota.types,
+        "answerable": release.quota.size - release.quota.unanswerable,
+    }
+    return all(
+        short <= max(1, tolerance * wanted.get(name, 0))
+        for name, short in release.short.items()
+    )
 
 
 def largest(
@@ -221,10 +247,10 @@ def largest(
         release = choose(pool, quota_of(size, bands, types, unanswerable))
         if release.size > most.size:
             most = release
-        if release.size < size * (1 - tolerance):
-            high = size - 1
-        else:
+        if close_enough(release, tolerance):
             best, low = release, size + 1
+        else:
+            high = size - 1
     return best if best.ids else most
 
 

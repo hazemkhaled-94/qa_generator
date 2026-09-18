@@ -20,6 +20,7 @@ from database.qa_generator import Difficulty, QuestionType
 from question_generation.balance import (
     Row,
     choose,
+    close_enough,
     composition,
     largest,
     quota_of,
@@ -173,8 +174,13 @@ def test_a_scarce_pair_gets_its_place_before_a_plentiful_one() -> None:
 # ── The largest release a pool can fill ────────────────────────────────────
 
 
-def test_the_largest_release_misses_no_quota() -> None:
-    """Which is what makes it the largest one worth shipping."""
+def test_the_largest_release_comes_within_a_place_of_every_quota() -> None:
+    """Which is what makes it the largest one worth shipping.
+
+    One place per bucket, not zero: a quota of eight cannot absorb a
+    proportional tolerance, and being one short of eight is where the
+    rounding fell rather than a pool that cannot supply the kind.
+    """
     counted = {
         (Difficulty.EASY, QuestionType.FACTOID, True): 30,
         (Difficulty.MEDIUM, QuestionType.FACTOID, True): 30,
@@ -188,10 +194,11 @@ def test_the_largest_release_misses_no_quota() -> None:
     release = largest(held, BANDS, TYPES, 0.0)
     got = composition(held, release.ids)
 
-    assert release.short == {}
-    # Ten hard questions is what caps it. At 31 the bands come out 11/10/10
-    # and the ten are exactly enough; at 32 hard wants 11 and there are not.
-    assert release.size == 31
+    assert close_enough(release)
+    assert all(short <= 1 for short in release.short.values())
+    # Ten hard questions is what caps it, give or take the one place each
+    # bucket may be short.
+    assert 30 <= release.size <= 34
     assert got["difficulty"][Difficulty.HARD] == 10
 
 
@@ -205,9 +212,9 @@ def test_the_scarcest_band_is_what_caps_the_size() -> None:
 
     release = largest(pool(counted), BANDS, {QuestionType.FACTOID: 1}, 0.0)
 
-    # Three hard questions. At 10 the bands come out 4/3/3 and the three fill
-    # it; at 11 they come out 4/3/4 and hard is one short.
-    assert release.size == 10
+    # Three hard questions, and one place of slack per bucket on top.
+    assert close_enough(release)
+    assert 9 <= release.size <= 13
 
 
 def test_an_empty_pool_releases_nothing() -> None:

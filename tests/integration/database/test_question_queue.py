@@ -846,6 +846,7 @@ def _settings(**overrides):
             "release_unanswerable": 0.1,
             "release_difficulty": {"easy": 1, "medium": 1, "hard": 1},
             "embedding_model": "stub",
+            "model": None,
             "max_tokens": 512,
             "verifier_model": "ollama/verifier",
             **overrides,
