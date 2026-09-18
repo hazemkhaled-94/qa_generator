@@ -26,10 +26,10 @@ import topic_modelling.config
 from settings import catalog
 from settings.store import Settings as Store
 
-#: What must still parse after a change. All of them on every write, because
-#: a platform setting is read by stages that were not named in the request.
-#: `platform` is llm.config; the spaCy pipelines and the tokenizer are
-#: checked by the stages that read them.
+#: What must still parse after a change. All of them on every write: a
+#: platform setting is read by stages a request never names. `platform` is
+#: llm.config; the spaCy pipelines and the tokenizer are checked by the
+#: stages that read them.
 PARSERS: dict[str, Any] = {
     "ingestion": ingestion.config.Settings.load,
     "parsing": preprocessing.parsing.config.Settings.load,
