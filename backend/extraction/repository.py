@@ -496,6 +496,14 @@ class FactCatalog(Repository):
             .join(FactPassage, FactPassage.fact_id == Fact.id)
             .join(Passage, Passage.id == FactPassage.passage_id)
             .join(Document, Document.sha256 == Passage.doc_sha256)
+            # Never a fact the cap refused. `over_cap` is the only verdict
+            # here that no check reaches: it says the passage had no room
+            # left, which is a fact about the passage's budget and not about
+            # this claim. A re-judgement asks the checks what they make of a
+            # statement, they make nothing of that, and the row would come
+            # back validated - quietly undoing EXTRACTION_MIN_OTHER_SHARE
+            # across the corpus. `make extract-recap` is what re-applies it.
+            .where(Fact.rejection_code.is_distinct_from(Rejection.OVER_CAP))
             # One row per passage, consecutive per fact, so a fact is read off
             # the run of rows carrying its id.
             .order_by(Fact.id, FactPassage.position)

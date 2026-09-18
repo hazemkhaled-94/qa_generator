@@ -49,6 +49,7 @@ def build_service(
         # model told to write four still writes nine, and a cap nothing
         # checks is a suggestion.
         atomic_cap=cap,
+        digest_min_chars=settings.digest_min_chars,
     )
 
 

@@ -51,6 +51,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
         logs-shipper logs-retention logs-orchestration \
+        prune spend \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
@@ -110,6 +111,19 @@ up: certs
 
 down:
 	$(COMPOSE) down
+	@$(MAKE) --no-print-directory prune
+
+# Reclaim the images a rebuild orphaned. Neither podman nor docker collects
+# them: an untagged layer may still be the cache the next build reuses, so
+# the engine keeps it until asked. A tag rebuilt six times leaves five
+# untagged copies of itself, and this project's backend image is 3 GB - one
+# run of this recovered 30 GB, after a build had already failed with `no
+# space left on device` inside the podman VM.
+#
+# Dangling only. `-a` would take images no container is running right now,
+# which on a stopped stack is all of them.
+prune:
+	-$(CONTAINER) image prune -f
 
 # Deletes every volume. Irreversible.
 down-volumes:
@@ -495,6 +509,23 @@ questions-reverify:
 # pool could not fill.
 questions-balance:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
+
+# What the models have cost, read off the logs the client already writes.
+# Every call logs its tokens and its price - litellm prices the response
+# rather than this counting it, because the provider is the only thing that
+# knows what it billed for. A self-hosted model has no published price and
+# logs no cost at all, which is the truth about it rather than a zero.
+#
+#   make spend                 everything the log holds
+#   make spend SINCE=2026-09-18  from a date
+spend:
+	@grep -hoE '^[0-9T:-]+ .*answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
+	   $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	 | $(if $(SINCE),grep "^$(SINCE)",cat) \
+	 | sed -E 's/.*\(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3/' \
+	 | tr -d ',' \
+	 | awk '{i+=$$1; o+=$$2; c+=$$3; n++} END {if (n==0) {print "no priced calls in the log"; exit} \
+	     printf "calls   %d\ntokens  %d in, %d out\ncost    $$%.2f  (mean $$%.5f a call)\n", n, i, o, c, c/n}'
 
 # ── Settings ───────────────────────────────────────────────────────────────
 #

@@ -305,6 +305,7 @@ class ExtractionService(StageService):
         checker: FactChecker,
         digest: DigestExtractor | None = None,
         atomic_cap: int | None = None,
+        digest_min_chars: int = 0,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -316,6 +317,8 @@ class ExtractionService(StageService):
                 when this deployment writes neither.
             atomic_cap: The most atomic facts one passage keeps, or None for
                 no cap. EXTRACTION_MIN_OTHER_SHARE is where it comes from.
+            digest_min_chars: The shortest passage worth digesting. 0
+                digests every passage carrying enough claims.
         """
         super().__init__(repository)
         self._repository: PassageQueue = repository
@@ -323,6 +326,7 @@ class ExtractionService(StageService):
         self._checker = checker
         self._digest = digest
         self._atomic_cap = atomic_cap
+        self._digest_min_chars = digest_min_chars
 
     def process_next(self) -> int | None:
         """Reads one queued passage and stores what it yielded.
@@ -396,8 +400,20 @@ class ExtractionService(StageService):
         return facts + self._digested(passage)
 
     def _digested(self, passage: PassageToExtract) -> list[CheckedFact]:
-        """Reads what the passage is about, when there is enough to condense."""
+        """Reads what the passage is about, when there is enough to condense.
+
+        Two floors, and the second is the one that costs money. A digest is
+        a FIXED size - the prompt asks for two or three sentences, or two to
+        six points - so how much it condenses is decided by the passage
+        rather than by the model. Measured over this corpus: against a
+        passage under 400 characters the median summary was 99% of it and
+        92% were refused as `not_condensed`; from 1,200 characters up, none
+        were. The check was measuring passage length and calling it digest
+        quality, and every one of those refusals had been paid for.
+        """
         if self._digest is None or passage.claims < _DIGESTIBLE:
+            return []
+        if len(normalised(passage.text)) < self._digest_min_chars:
             return []
         return [
             self._checker.check(

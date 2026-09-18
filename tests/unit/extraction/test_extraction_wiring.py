@@ -45,7 +45,11 @@ def _no_engine_left_behind():
 
 
 def settings(
-    *kinds: str, share: float = 0.6, other: float = 0.0, model: str | None = None
+    *kinds: str,
+    share: float = 0.6,
+    other: float = 0.0,
+    model: str | None = None,
+    min_chars: int = 0,
 ) -> Settings:
     """The extraction settings, built rather than read.
 
@@ -55,6 +59,7 @@ def settings(
     return Settings(
         kinds=frozenset(kinds),
         digest_share=share,
+        digest_min_chars=min_chars,
         min_other_share=other,
         bridges_per_topic=5,
         bridge_passages=2,

@@ -15,8 +15,9 @@ import pytest
 
 from database.qa_generator import FactKind, Rejection
 from extraction.config import atomic_cap
-from extraction.models import CheckedFact
+from extraction.models import CheckedFact, PassageToExtract
 from extraction.service import over_cap
+from nlp.models import Sentence
 
 
 def fact(
@@ -150,3 +151,76 @@ def test_a_fact_a_check_already_refused_is_not_refused_again() -> None:
 
     assert 0 not in refused
     assert refused == {3}
+
+
+# ── The floor under what is worth digesting ────────────────────────────────
+
+
+def test_a_passage_too_short_to_condense_is_not_digested() -> None:
+    """A digest is a fixed size, so how much it condenses is the passage's.
+
+    The prompt asks for two or three sentences whatever it is given. Against
+    a passage under 400 characters that came to 99% of it and 92% were
+    refused as `not_condensed` - refusals that had already been paid for.
+    """
+    from extraction.service import ExtractionService
+
+    service = ExtractionService(
+        repository=None,  # type: ignore[arg-type]
+        extractors=None,  # type: ignore[arg-type]
+        checker=None,  # type: ignore[arg-type]
+        digest=object(),  # type: ignore[arg-type]
+        digest_min_chars=800,
+    )
+    short = PassageToExtract(
+        id=1,
+        text="A short passage. It says two things.",
+        section_path=None,
+        block_type="text",
+        language="en",
+        sentences=[
+            Sentence(index=0, text="A short passage.", start=0, end=16, predicates=1),
+            Sentence(
+                index=1, text="It says two things.", start=17, end=36, predicates=1
+            ),
+        ],
+    )
+
+    assert service._digested(short) == []
+
+
+def test_a_passage_long_enough_is_still_digested() -> None:
+    """The floor is a floor, not a way of turning digests off."""
+    from extraction.service import ExtractionService
+
+    class Digest:
+        method = "llm"
+        provenance = None
+
+        def extract(self, passage):
+            return ["a digest"]
+
+    class Checker:
+        def check(self, passage, candidate, method, provenance=None):
+            return candidate
+
+    service = ExtractionService(
+        repository=None,  # type: ignore[arg-type]
+        extractors=None,  # type: ignore[arg-type]
+        checker=Checker(),  # type: ignore[arg-type]
+        digest=Digest(),  # type: ignore[arg-type]
+        digest_min_chars=10,
+    )
+    long = PassageToExtract(
+        id=1,
+        text="x" * 200,
+        section_path=None,
+        block_type="text",
+        language="en",
+        sentences=[
+            Sentence(index=0, text="one", start=0, end=3, predicates=1),
+            Sentence(index=1, text="two", start=4, end=7, predicates=1),
+        ],
+    )
+
+    assert service._digested(long) == ["a digest"]

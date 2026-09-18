@@ -181,6 +181,18 @@ SETTINGS: tuple[Setting, ...] = (
         "stored facts against a new value without calling the model.",
     ),
     Setting(
+        name="EXTRACTION_DIGEST_MIN_CHARS",
+        service="extraction",
+        kind="integer",
+        low=0,
+        invalidates=("extraction",),
+        help="The shortest passage worth digesting, in characters. A digest "
+        "is a fixed size whatever it is given, so how much it condenses is "
+        "decided by the passage: under 400 characters the median summary "
+        "came to 99% of its passage and 92% were refused as not_condensed. "
+        "0 digests every passage carrying enough claims.",
+    ),
+    Setting(
         name="EXTRACTION_MIN_OTHER_SHARE",
         service="extraction",
         kind="decimal",

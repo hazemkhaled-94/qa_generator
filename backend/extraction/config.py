@@ -58,6 +58,8 @@ class Settings:
         kinds: Which fact kinds a run produces.
         digest_share: The longest a summary or an outline may be, as a share
             of the passage it stands in for.
+        digest_min_chars: The shortest passage worth digesting at all. 0
+            digests every passage that carries enough claims.
         min_other_share: The smallest share of a passage's facts that may be
             something other than atomic. 0 turns the cap off.
         bridges_per_topic: How many bridge calls one topic is worth.
@@ -67,6 +69,7 @@ class Settings:
 
     kinds: frozenset[str]
     digest_share: float
+    digest_min_chars: int
     min_other_share: float
     bridges_per_topic: int
     bridge_passages: int
@@ -99,6 +102,7 @@ class Settings:
         return cls(
             kinds=_kinds("EXTRACTION_KINDS", source),
             digest_share=decimal("EXTRACTION_DIGEST_MAX_SHARE", source),
+            digest_min_chars=integer("EXTRACTION_DIGEST_MIN_CHARS", source),
             min_other_share=decimal("EXTRACTION_MIN_OTHER_SHARE", source),
             bridges_per_topic=integer("EXTRACTION_BRIDGES_PER_TOPIC", source),
             bridge_passages=integer("EXTRACTION_BRIDGE_PASSAGES", source),

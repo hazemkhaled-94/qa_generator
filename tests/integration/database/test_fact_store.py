@@ -703,3 +703,35 @@ def test_the_service_counts_what_it_owns(store, corpus) -> None:
     assert counts["facts"] == 2
     assert counts["validated"] == 1
     assert counts[Status.EXTRACTED] == 1
+
+
+def test_a_re_judgement_never_reaches_a_fact_the_cap_refused(engine, database) -> None:
+    """`over_cap` is the one verdict no check can reach.
+
+    It says the passage had no room left, which is a fact about that
+    passage's budget rather than about this claim. The checks make nothing
+    of it, so a re-judgement would hand the row back validated and quietly
+    undo EXTRACTION_MIN_OTHER_SHARE across the corpus. `make extract-recap`
+    is what re-applies it.
+    """
+    from seed import digest, document, fact, passage
+    from sqlalchemy.orm import Session
+
+    from extraction.repository import FactCatalog
+
+    with Session(engine) as session:
+        sha = digest("c")
+        session.add(document(sha))
+        at = passage(sha, ordinal=1, text="The device weighs 4 kg.", language="en")
+        session.add(at)
+        session.flush()
+        kept = fact(at.id)
+        refused = fact(at.id)
+        refused.validated = False
+        refused.rejection_code = Rejection.OVER_CAP
+        session.add_all([kept, refused])
+        session.commit()
+
+    offered = list(FactCatalog().judged())
+
+    assert len(offered) == 1, "the capped fact was offered for re-judgement"
