@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 
 from llm.client import Client
 from llm.config import Settings as ModelSettings
@@ -28,25 +27,49 @@ def lease(settings: Settings, model: ModelSettings):
     return settings.lease(model.timeout_seconds * model.max_attempts)
 
 
+def models(
+    settings: Settings, shared: ModelSettings
+) -> tuple[ModelSettings, ModelSettings]:
+    """The model that writes a question, and the model that checks it.
+
+    Either may be named by a setting of this stage's own - QUESTIONS_MODEL
+    and QUESTIONS_VERIFIER_MODEL - and either absent is whatever LLM_MODEL
+    names.
+
+    Returned as a pair rather than as a flag, because what the gates need to
+    know is not whether a setting was set but whether the two came out
+    different. Naming one model in both is the same problem as naming
+    neither, and naming only the writer leaves a verifier that is
+    independent without QUESTIONS_VERIFIER_MODEL saying so.
+    """
+    return shared.overridden(settings.model), shared.overridden(settings.verifier_model)
+
+
 def build_service(
     settings: Settings, model: ModelSettings
 ) -> QuestionGenerationService:
     """Wires the service and its collaborators.
 
-    The verifier is a second model, named by QUESTIONS_VERIFIER_MODEL and
-    served wherever the writer is. A model marking its own work agrees with
-    itself, so running without one is worth saying out loud rather than
-    letting the numbers quietly flatter the writer.
+    Two models, each named by a setting of this stage's own and served
+    wherever the shared one is: QUESTIONS_MODEL writes and
+    QUESTIONS_VERIFIER_MODEL checks. Either absent is the model LLM_MODEL
+    names.
+
+    A model marking its own work agrees with itself, so a verifier that
+    turns out to be the writer is worth saying out loud rather than letting
+    the numbers quietly flatter the writer. Read off the two resolved names
+    rather than off whether the setting was set: naming the same model in
+    both is the same problem as naming none.
     """
-    verifier_model = model
-    if settings.verifier_model:
-        verifier_model = replace(model, model=settings.verifier_model)
-    else:
+    writer_model, verifier_model = models(settings, model)
+    independent = verifier_model.model != writer_model.model
+    if not independent:
         log.warning(
-            "QUESTIONS_VERIFIER_MODEL is unset, so %s is verifying its own "
-            "questions. A model marking its own work agrees with itself, and "
-            "the recoverability gate is the one gate that matters most.",
-            model.model,
+            "%s is verifying its own questions. A model marking its own work "
+            "agrees with itself, and the recoverability gate is the one gate "
+            "that matters most. Set QUESTIONS_VERIFIER_MODEL to a different "
+            "model.",
+            writer_model.model,
         )
 
     catalog = QuestionCatalog()
@@ -54,7 +77,7 @@ def build_service(
         repository=QuestionQueue(
             lease=lease(settings, model), kinds=settings.fact_kinds
         ),
-        writer=QuestionWriter(Client(model)),
+        writer=QuestionWriter(Client(writer_model)),
         checker=QuestionChecker(
             embedder=Embedder(settings.embedding_model, settings.max_tokens),
             verifier=Verifier(Client(verifier_model)),
@@ -65,11 +88,11 @@ def build_service(
             # ECB and NCAs, who conducts the due diligence check?` for
             # naming nothing, which is the kind of loss a gate must not
             # cause. Recoverability is unaffected: that one is checkable.
-            judge_phrasing=bool(settings.verifier_model),
+            judge_phrasing=independent,
             # For the same reason, and it matters more here: the entailment
             # pass can only accept, so a writer running it over its own
             # answer would wave through everything its own recall missed.
-            entail=bool(settings.verifier_model),
+            entail=independent,
             bounds=settings.answer_chars,
             overlap=settings.answer_overlap,
             long_answer_chars=settings.long_answer_chars,

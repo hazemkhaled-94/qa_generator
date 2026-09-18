@@ -137,6 +137,8 @@ class Settings:
     release_difficulty: dict[str, int]
     embedding_model: str
     max_tokens: int
+    #: The model that writes a question, or None for the shared one.
+    model: str | None
     verifier_model: str | None
 
     def lease(self, call_seconds: float) -> timedelta:
@@ -231,6 +233,8 @@ class Settings:
             # measures distance in a space the corpus was never put in.
             embedding_model=required("EMBEDDING_MODEL", source),
             max_tokens=integer("EMBEDDING_MAX_TOKENS", source),
+            # Absent means the model LLM_MODEL names.
+            model=optional("QUESTIONS_MODEL", source),
             # Absent means the writer verifies its own questions, which is
             # worth knowing about rather than guessing at, so the service
             # warns rather than failing.

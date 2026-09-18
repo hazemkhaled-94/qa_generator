@@ -217,6 +217,15 @@ SETTINGS: tuple[Setting, ...] = (
         help="How many passages one bridge call is shown. Below two there is "
         "nothing to bridge.",
     ),
+    Setting(
+        name="EXTRACTION_MODEL",
+        service="extraction",
+        kind="text",
+        optional=True,
+        help="The model that reads a passage for its facts. Absent calls the "
+        "one LLM_MODEL names. Facts already extracted keep the model they "
+        "were written by, which is recorded on each of them.",
+    ),
     # ── Topic modelling ───────────────────────────────────────────────────
     Setting(
         name="TOPIC_LANGUAGE_NAMES",
@@ -294,6 +303,15 @@ SETTINGS: tuple[Setting, ...] = (
         invalidates=("topics",),
         help="A term in more than this share of passages is dropped from the "
         "vocabulary, being too common to tell two topics apart.",
+    ),
+    Setting(
+        name="TOPIC_MODEL",
+        service="topics",
+        kind="text",
+        optional=True,
+        help="The model that names a topic from its terms. Absent calls the "
+        "one LLM_MODEL names. Topics already fitted keep the label they were "
+        "given, and what named them is recorded.",
     ),
     # ── Question generation ───────────────────────────────────────────────
     Setting(
@@ -471,13 +489,20 @@ SETTINGS: tuple[Setting, ...] = (
         "unanswerable questions, which are always easy.",
     ),
     Setting(
+        name="QUESTIONS_MODEL",
+        service="questions",
+        kind="text",
+        optional=True,
+        help="The model that writes a question. Absent calls the one LLM_MODEL names.",
+    ),
+    Setting(
         name="QUESTIONS_VERIFIER_MODEL",
         service="questions",
         kind="text",
         optional=True,
         help="The second model, which checks that a question's answer is in "
-        "the passages it cites. Absent means the writer marks its own work, "
-        "which it will always pass.",
+        "the passages it cites. Naming the writer's own model, or none at "
+        "all, turns off the two gates only an independent model may apply.",
     ),
     # ── The platform the stages share ─────────────────────────────────────
     Setting(

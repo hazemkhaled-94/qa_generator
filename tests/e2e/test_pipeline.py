@@ -138,6 +138,7 @@ QUESTIONS = QuestionSettings(
     release_difficulty={"easy": 1, "medium": 1, "hard": 1},
     embedding_model="stub",
     max_tokens=512,
+    model=None,
     verifier_model="ollama/verifier",
 )
 

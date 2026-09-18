@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from database.qa_generator import FactKind
-from settings import Source, csv, decimal, integer
+from settings import Source, csv, decimal, integer, optional
 
 #: The kind the routed extractor always produces. It is not optional: a
 #: passage read for nothing else is still read for its claims.
@@ -62,6 +62,7 @@ class Settings:
             something other than atomic. 0 turns the cap off.
         bridges_per_topic: How many bridge calls one topic is worth.
         bridge_passages: How many passages one bridge call is shown.
+        model: The model that reads a passage, or None for the shared one.
     """
 
     kinds: frozenset[str]
@@ -69,6 +70,7 @@ class Settings:
     min_other_share: float
     bridges_per_topic: int
     bridge_passages: int
+    model: str | None
 
     @property
     def digests(self) -> tuple[str, ...]:
@@ -100,4 +102,7 @@ class Settings:
             min_other_share=decimal("EXTRACTION_MIN_OTHER_SHARE", source),
             bridges_per_topic=integer("EXTRACTION_BRIDGES_PER_TOPIC", source),
             bridge_passages=integer("EXTRACTION_BRIDGE_PASSAGES", source),
+            # Absent means the model LLM_MODEL names, which is what every
+            # stage called before any of them could name its own.
+            model=optional("EXTRACTION_MODEL", source),
         )

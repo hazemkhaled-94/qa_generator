@@ -35,14 +35,18 @@ def main(argv: list[str] | None = None) -> int:
 
     def build():
         """Builds the service, naming the model it will call."""
-        log.info("extracting with %s at %s", model.model, model.base_url)
+        # The effective model, not the shared one: EXTRACTION_MODEL is what
+        # this stage will actually call, and a line naming the other is a
+        # line that sends somebody looking in the wrong place.
+        calling = model.overridden(settings.model)
+        log.info("extracting with %s at %s", calling.model, calling.base_url)
         return build_service(model, settings)
 
     def run_bridge(within) -> int:
         """Reads every topic's passage groups for the claims they share."""
         return bridge(
             FactCatalog(),
-            build_bridge(model),
+            build_bridge(model, settings),
             FactChecker(settings.digest_share),
             settings.bridges_per_topic,
             settings.bridge_passages,

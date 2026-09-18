@@ -12,7 +12,9 @@ from settings import Source, csv, decimal, integer, optional
 class Settings:
     """Runtime configuration, read from the environment."""
 
-    #: The model that names a topic, or None when none is configured.
+    #: The model that names a topic, or None when none is configured. Already
+    #: carries TOPIC_MODEL where one is set, so a caller reads this and needs
+    #: to know nothing about the override.
     model: llm.config.Settings | None
     #: ISO 639-1 code to the language's name, for the naming prompt.
     languages: dict[str, str]
@@ -36,7 +38,12 @@ class Settings:
             source: Where to read them, or None for the process environment.
         """
         return cls(
-            model=llm.config.Settings.load(source)
+            # TOPIC_MODEL names the model that labels a topic, where naming
+            # the topics is worth a different one from reading the passages.
+            # Absent keeps the shared one.
+            model=llm.config.Settings.load(source).overridden(
+                optional("TOPIC_MODEL", source)
+            )
             if optional("LLM_MODEL", source)
             else None,
             languages=dict(

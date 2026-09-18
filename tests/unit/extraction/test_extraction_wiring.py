@@ -44,7 +44,9 @@ def _no_engine_left_behind():
     sessions.cache_clear()
 
 
-def settings(*kinds: str, share: float = 0.6, other: float = 0.0) -> Settings:
+def settings(
+    *kinds: str, share: float = 0.6, other: float = 0.0, model: str | None = None
+) -> Settings:
     """The extraction settings, built rather than read.
 
     `other` is off by default, so a test about the wiring is not also a
@@ -56,6 +58,7 @@ def settings(*kinds: str, share: float = 0.6, other: float = 0.0) -> Settings:
         min_other_share=other,
         bridges_per_topic=5,
         bridge_passages=2,
+        model=model,
     )
 
 

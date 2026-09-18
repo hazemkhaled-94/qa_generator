@@ -31,7 +31,7 @@ def build_service(
         The service a worker drains the passage queue with.
     """
     settings = settings or Settings.load()
-    client = Client(model)
+    client = Client(model.overridden(settings.model))
     digests = settings.digests
     cap = settings.atomic_cap
     return ExtractionService(
@@ -48,13 +48,18 @@ def build_service(
     )
 
 
-def build_bridge(model: ModelSettings) -> BridgeExtractor:
+def build_bridge(
+    model: ModelSettings, settings: Settings | None = None
+) -> BridgeExtractor:
     """Builds the reader of a group of passages.
 
     Args:
         model: Which model to call, where, and how patiently.
+        settings: What extraction writes, for the model it names. Read from
+            the environment when not given.
 
     Returns:
         The extractor the bridge pass calls once per group.
     """
-    return BridgeExtractor(Client(model))
+    settings = settings or Settings.load()
+    return BridgeExtractor(Client(model.overridden(settings.model)))

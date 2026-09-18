@@ -50,6 +50,7 @@ SETTINGS = Settings(
     release_difficulty={Difficulty.EASY: 1, Difficulty.MEDIUM: 1, Difficulty.HARD: 1},
     embedding_model="stub",
     max_tokens=512,
+    model=None,
     verifier_model="ollama/verifier",
 )
 
@@ -373,11 +374,19 @@ def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
     )
 
 
-def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
-    """The factory decides it, from the one setting that says so."""
-    from dataclasses import replace
+def test_the_phrasing_gate_is_off_when_one_model_does_both() -> None:
+    """The factory decides it, from the two models it resolved.
 
+    Through `models`, which is what the factory calls, rather than through a
+    copy of the rule here: the rule changed once already, when the writer
+    became overridable, and a test carrying its own copy went on passing.
+
+    Every combination of the two settings is in
+    tests/unit/questions/test_models.py. This is the wiring: that the flag
+    the checker ends up holding is the one the resolution produced.
+    """
     from llm.config import Settings as ModelSettings
+    from question_generation.factory import models
     from question_generation.verification import QuestionChecker
 
     model = ModelSettings(
@@ -393,19 +402,23 @@ def test_the_phrasing_gate_is_off_when_no_second_model_is_named() -> None:
 
     def built(verifier: str | None) -> bool:
         """Whether a checker wired for this verifier may judge phrasing."""
+        writer, checker_model = models(
+            replace(SETTINGS, model=None, verifier_model=verifier), model
+        )
         checker = QuestionChecker(
             embedder=object(),
             verifier=object(),
             nearest=lambda embedding: None,
             threshold=0.93,
-            judge_phrasing=bool(
-                replace(SETTINGS, verifier_model=verifier).verifier_model
-            ),
+            judge_phrasing=writer.model != checker_model.model,
         )
         return checker._judge_phrasing
 
     assert built("ollama/verifier") is True
     assert built(None) is False
+    # Naming the writer's own model is the same as naming none, which the
+    # setting being set would have hidden.
+    assert built("ollama/writer") is False
     assert model.model == "ollama/writer"
 
 

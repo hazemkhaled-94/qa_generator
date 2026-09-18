@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
 from settings import Source, decimal, integer, optional, required
@@ -15,6 +15,12 @@ class Settings:
     One set of values for every stage that calls a model: extraction reads
     passages with it and topic modelling names topics with it, and two
     settings for one served model is how the two come to disagree.
+
+    A stage may name a different model with `overridden`, and only the model:
+    where it is served, how it is made to answer in a shape, and how patient
+    to be are properties of the deployment rather than of the stage, and a
+    stage that could set its own timeout would be a stage whose lease nobody
+    could derive.
     """
 
     model: str
@@ -42,6 +48,18 @@ class Settings:
         worked. Doubled for the backoff between attempts and the checks after.
         """
         return timedelta(seconds=self.timeout_seconds * self.max_attempts * 2)
+
+    def overridden(self, model: str | None) -> Settings:
+        """These settings, calling a named model instead of the shared one.
+
+        `None` is the whole point rather than an edge case: every override is
+        optional, and absent means the stage calls whatever LLM_MODEL names.
+        Returning self then, so a caller needs no branch of its own.
+
+        Args:
+            model: The model to call, or None to keep the shared one.
+        """
+        return self if not model else replace(self, model=model)
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:
