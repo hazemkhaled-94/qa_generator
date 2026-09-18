@@ -28,8 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         name="parsing",
         module="preprocessing.parsing.run",
         repository=ParseQueue,
-        # Read when the service is built rather than captured here, so a
-        # watching worker answers to a value written since it started.
+        # Read when the service is built, not captured here.
         build_service=lambda: build_service(Settings.load(resolved())),
         argv=sys.argv[1:] if argv is None else argv,
     )

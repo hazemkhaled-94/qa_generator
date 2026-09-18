@@ -36,11 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         """Reads the settings as they stand, and what that configuration is.
 
         Called rather than captured, so every operation below answers to a
-        value written since this process started. A worker that read them
-        once would answer to the file it booted with for as long as it ran.
-
-        One read for both, so the settings a fact is extracted under and the
-        version recorded on it cannot come from two different moments.
+        value written since this process started. One read for both, so the
+        settings and the version recorded cannot come from two moments.
         """
         source, version = snapshot()
         return ModelSettings.load(source), Settings.load(source), version
@@ -48,9 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     def build():
         """Builds the service, naming the model it will call."""
         model, settings, version = configured()
-        # The effective model, not the shared one: EXTRACTION_MODEL is what
-        # this stage will actually call, and a line naming the other is a
-        # line that sends somebody looking in the wrong place.
+        # The effective model, which EXTRACTION_MODEL may have replaced.
         calling = model.overridden(settings.model)
         log.info("extracting with %s at %s", calling.model, calling.base_url)
         return build_service(model, settings, version)

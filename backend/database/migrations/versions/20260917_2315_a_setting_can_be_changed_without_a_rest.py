@@ -1,36 +1,24 @@
 """A setting can be changed without a restart.
 
-Every tuning value was read once, out of the process environment, when a
-service started. Changing one meant editing `configs/env/backend.env` and
-recreating six containers, which is why nothing in the UI could configure
-anything: the API cannot write that file and must not restart a worker.
-
-`service_settings` is where a change goes instead. One row per setting, the
-value as text exactly as the environment would hand it over, so the parsers
-in `settings.env` read a stored setting and an environment one the same way
-and a number is checked by the same reader either way.
+Tuning values were read once, out of the process environment, when a service
+started. `service_settings` is where a change goes instead: one row per
+setting, the value as text exactly as the environment would hand it over, so
+`settings.env` reads a stored setting and an environment one with the same
+reader.
 
 A row is an override and never a default. The environment still supplies
-every setting and a missing variable still stops a service at start-up
-naming itself; deleting a row is what returns a setting to what the file
-says. That is why there is no column for a default, and why the table is
-empty on a deployment nobody has configured - an empty table means the
-files are being obeyed exactly.
+every setting, and deleting a row returns one to what the file says. An
+empty table means the files are being obeyed exactly.
 
 Names are unique across the table rather than per service. The `service`
-column says which page configures a setting, and resolution ignores it: a
-worker overlays every row, because extraction reads its own settings and the
-platform's, and scoping the overlay by service is how it would come to miss
-a change to LLM_MODEL.
+column says which page configures a setting; resolution ignores it, because
+a stage reads its own settings and the platform's.
 
-There is no version column. What configuration is running is read off the
-rows as a digest of them, because a counter kept here would fall when a row
-was deleted and a version that falls describes an older configuration than
-the one running.
+There is no version column: what configuration is running is a digest of the
+rows, in settings.store.
 
 Additive and empty, so the workers running against this database when it is
-applied keep working: they read the environment until they are restarted, and
-an empty table resolves to exactly that.
+applied keep reading the environment until they are restarted.
 
 Revision: b8f24e07d3a1
 """
@@ -89,8 +77,7 @@ def upgrade() -> None:
         "read this when they claim a row, so a change reaches them without a "
         "restart.",
     )
-    # One row per setting. Without this, which value a stage reads would
-    # depend on which row came back first.
+    # One row per setting, or row order would decide the value.
     op.create_unique_constraint(
         "service_settings_name_unique", "service_settings", ["name"]
     )
@@ -101,9 +88,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drops the table, and with it every setting anybody changed.
 
-    The settings themselves are not lost: the environment still carries all
-    of them, and dropping the overrides returns every service to what
-    `configs/env/backend.env` and `.env` say.
+    No setting is lost: the environment carries all of them, so every
+    service returns to what the files say.
     """
     op.drop_index("ix_service_settings_service", table_name="service_settings")
     op.drop_constraint(

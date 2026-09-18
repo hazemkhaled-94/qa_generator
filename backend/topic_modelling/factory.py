@@ -25,8 +25,7 @@ def build_service(
     Args:
         settings: The environment this deployment reads.
         version: The configuration these settings came from, recorded on
-            every topic the fit stores. A fit is not reproducible without
-            the parameters it used, and the seed is only one of them.
+            every topic the fit stores.
 
     Returns:
         The service, ready to drain the fit queue.

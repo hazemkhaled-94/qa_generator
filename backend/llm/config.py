@@ -16,11 +16,9 @@ class Settings:
     passages with it and topic modelling names topics with it, and two
     settings for one served model is how the two come to disagree.
 
-    A stage may name a different model with `overridden`, and only the model:
-    where it is served, how it is made to answer in a shape, and how patient
-    to be are properties of the deployment rather than of the stage, and a
-    stage that could set its own timeout would be a stage whose lease nobody
-    could derive.
+    A stage may name a different model with `overridden`, and only the
+    model: the address, the mode and the patience are the deployment's, and
+    the lease is derived from the last of those.
     """
 
     model: str
@@ -52,9 +50,7 @@ class Settings:
     def overridden(self, model: str | None) -> Settings:
         """These settings, calling a named model instead of the shared one.
 
-        `None` is the whole point rather than an edge case: every override is
-        optional, and absent means the stage calls whatever LLM_MODEL names.
-        Returning self then, so a caller needs no branch of its own.
+        Returns self when nothing is named, so a caller needs no branch.
 
         Args:
             model: The model to call, or None to keep the shared one.

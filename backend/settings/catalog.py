@@ -1,27 +1,19 @@
 """Every setting a deployment may change, and what each one is.
 
-`configs/env/backend.env` says what a setting means at length, for whoever is
-reading that file. This says the same thing in one line, plus the type, the
-bounds and the closed set of values where there is one - what a page needs to
-draw a control and what a route needs to refuse a value before it reaches a
-parser.
+One line each, plus the type, the bounds and the closed set of values where
+there is one: what a page needs to draw a control and what a route needs to
+refuse a value. `configs/env/backend.env` carries the long form.
 
-Declared here rather than in each `config.py` because a setting is not always
-read by a `Settings.load`: the spaCy pipelines, the worker poll and the pool
-sizes are read where they are used, and they are settings all the same. One
-table, so a page asking what it may configure asks in one place.
+One table rather than one per `config.py`, because the spaCy pipelines, the
+worker poll and the pool sizes are read where they are used.
 
-`invalidates` names the stages whose stored output was produced under this
-setting and is no longer what it would be now. Direct staleness only: parsing
-a document again replaces its passages, which cascades to the facts and the
-questions drawn from them, so naming `parsing` is naming all of it. A setting
-that only shapes what the next run writes invalidates nothing - the questions
-already stored are what the plan asked for at the time.
+`invalidates` names the stages whose stored output this setting produced.
+Direct staleness only: naming `parsing` names the passages, facts and
+questions that cascade from it. A setting that only shapes the next run
+names nothing.
 
-`fixed` is a setting the API serves but will not write: an address, a
-credential or a pool size, which belongs to the deployment rather than to the
-pipeline and needs a restart to change. Shown so that somebody reading a page
-can see it without opening a shell, and refused so that nobody tries.
+`fixed` is served but never written: the deployment owns it and it needs a
+restart.
 """
 
 from __future__ import annotations
@@ -29,12 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-#: How a value is read, which is also the name of the reader in
-#: `settings.env` that reads it and the control a page draws for it.
+#: How a value is read. Also the name of its reader in `settings.env` and
+#: the control a page draws for it.
 Kind = Literal["integer", "decimal", "boolean", "text", "csv", "mapping"]
 
-#: The services a setting may belong to. Six stages and the platform the six
-#: of them share; one page configures exactly one of these.
+#: The services a setting may belong to: six stages, and the platform they
+#: share. One page configures exactly one.
 Service = Literal[
     "ingestion",
     "parsing",
@@ -75,9 +67,8 @@ class Setting:
     fixed: bool = False
 
 
-#: Every setting, by service, in the order `configs/env/backend.env` declares
-#: them. A page renders its own service's entries top to bottom, so this order
-#: is the order they appear in.
+#: Every setting, by service, in the order backend.env declares them, which
+#: is the order a page draws them in.
 SETTINGS: tuple[Setting, ...] = (
     # ── Ingestion ─────────────────────────────────────────────────────────
     Setting(

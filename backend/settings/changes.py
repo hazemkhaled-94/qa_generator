@@ -1,20 +1,12 @@
 """Deciding whether a change may be made, and making it.
 
-Shared by the route and the command line, so what a page is refused with and
-what a terminal is refused with are the same decision rather than two that
-agree today. The HTTP shapes stay in the route and the printing stays in the
-command line; what is here is the part that must not differ.
+Shared by the route and the command line. The HTTP shapes stay in the route
+and the printing stays in the command line.
 
 A value is written only if every service that could read it still parses its
-settings afterwards. The parser is the stage's own `Settings.load`, handed
-the environment overlaid with what is stored and with what is proposed - so
-what a caller is refused with is the message the worker would have failed at
-start-up with, written once, in the stage.
-
-A change is refused when it breaks something that worked, and not when
-something was already broken. A deployment that has never configured a model
-should still be able to change a parsing threshold, and would not be if any
-failure at all were enough to refuse.
+settings afterwards, through the stage's own `Settings.load`. A change is
+refused when it breaks something that was working, not when something was
+already broken.
 """
 
 from __future__ import annotations
@@ -34,16 +26,10 @@ import topic_modelling.config
 from settings import catalog
 from settings.store import Settings as Store
 
-#: What must still parse after a change. Every one of them on every write,
-#: not just the service being changed: EMBEDDING_MODEL belongs to the
-#: platform and is read by chunking and by question generation, so a change
-#: to it that only the platform had to accept would be a change that stops
-#: two workers that never appeared in the request.
-#:
-#: `platform` is llm.config, which is the only settings object the shared
-#: values make on their own. The spaCy pipelines and the tokenizer are read
-#: where they are used rather than loaded into a dataclass, so what checks
-#: those is the stage that reads them.
+#: What must still parse after a change. All of them on every write, because
+#: a platform setting is read by stages that were not named in the request.
+#: `platform` is llm.config; the spaCy pipelines and the tokenizer are
+#: checked by the stages that read them.
 PARSERS: dict[str, Any] = {
     "ingestion": ingestion.config.Settings.load,
     "parsing": preprocessing.parsing.config.Settings.load,
@@ -56,11 +42,10 @@ PARSERS: dict[str, Any] = {
 
 
 class Refused(Exception):
-    """A change the deployment will not accept, and why.
+    """A change the deployment will not accept.
 
-    Carries a stable code beside its sentence, so a caller can branch on the
-    code and a person can read the sentence. The route answers with both and
-    the command line prints the second.
+    Carries a stable code beside its sentence: the route answers with both,
+    the command line prints the sentence.
     """
 
     def __init__(self, code: str, detail: str) -> None:
@@ -88,8 +73,7 @@ class Outcome:
     """What one change moved, and what it left stale.
 
     `stale` names the stages whose stored output was produced under the old
-    value. Nothing is requeued: which of them to rebuild, and when, is a
-    decision with a corpus-sized cost behind it.
+    value. Nothing is requeued.
     """
 
     version: str
@@ -133,11 +117,7 @@ def owned(service: str, names: list[str]) -> dict[str, catalog.Setting]:
 def offered(setting: catalog.Setting, value: str) -> list[str]:
     """What a value names, which is what `choices` is a list of.
 
-    A closed set constrains one value for a `text` setting, every entry for
-    a list, and every key for a mix. Checking the whole string against the
-    list instead would make every setting that takes more than one thing
-    unwritable: `EXTRACTION_KINDS=summary,outline` names two kinds that are
-    both on the list and is not itself on it.
+    One value for `text`, every entry for a list, every key for a mix.
     """
     if setting.kind == "csv":
         return [part.strip() for part in value.split(",") if part.strip()]
@@ -153,9 +133,8 @@ def offered(setting: catalog.Setting, value: str) -> list[str]:
 def within_bounds(setting: catalog.Setting, value: str) -> None:
     """Refuses a value the catalogue says is out of range or off the list.
 
-    What the stage's own parser cannot say. `QUESTIONS_ANSWER_OVERLAP=2` is
-    a number and parses; it is also a share of something, and a share above
-    one is a gate nothing can pass.
+    What the stage's own parser cannot say: a share above one parses as a
+    number and is still a gate nothing passes.
 
     Raises:
         Refused: `not_a_choice` or `out_of_range`.
@@ -173,8 +152,7 @@ def within_bounds(setting: catalog.Setting, value: str) -> None:
     try:
         number = float(value)
     except ValueError:
-        # Left to the stage's parser, which names the setting and says what
-        # it wanted. Refusing here would say it twice, differently.
+        # Left to the stage's parser, which names the setting.
         return
     if setting.low is not None and number < setting.low:
         raise Refused(
@@ -195,8 +173,7 @@ def failing(source: Mapping[str, str]) -> dict[str, str]:
         try:
             load(source)
         except (KeyError, ValueError) as exc:
-            # KeyError stringifies with its quotes, which reads badly in a
-            # message a person is shown.
+            # Stripped: a KeyError stringifies with its quotes.
             refused[service] = str(exc).strip("'\"")
     return refused
 
@@ -238,9 +215,8 @@ def apply(
         What moved, and what it left stale.
 
     Raises:
-        Refused: If any one setting or value is refused. The whole change is
-            refused with it: half a change is a configuration nobody asked
-            for.
+        Refused: If any one setting or value is refused. The whole change
+            goes with it.
     """
     store = store or Store()
     resolved = store.resolved()
@@ -253,8 +229,7 @@ def apply(
         if value is not None:
             within_bounds(settings[name], value)
 
-    # What the source would be if this landed. A null is what the files say,
-    # which is what clearing the override leaves behind.
+    # What the source would be if this landed. A null reads as the file.
     candidate = dict(resolved)
     for name, value in values.items():
         candidate[name] = os.environ.get(name, "") if value is None else value.strip()

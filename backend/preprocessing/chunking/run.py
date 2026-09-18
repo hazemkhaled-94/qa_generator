@@ -39,9 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         name="chunking",
         module="preprocessing.chunking.run",
         repository=ChunkQueue,
-        # Read when the service is built rather than captured here, so a
-        # watching worker answers to a value written since it started.
-        # Building it loads the tokenizer EMBEDDING_MODEL names.
+        # Read when the service is built, not captured here. Building it
+        # loads the tokenizer EMBEDDING_MODEL names.
         build_service=lambda: build_service(Settings.load(resolved())),
         argv=sys.argv[1:] if argv is None else argv,
         extra=_EXTRA,

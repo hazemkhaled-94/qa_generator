@@ -9,16 +9,12 @@ falls back to INFO because it is configured before a service has read its
 settings.
 
 Every reader takes an optional `source`. Absent, it is the process
-environment, which is how a container starts. Given, it is whatever the
-caller resolved - the environment overlaid with the rows a service's stored
-settings hold - so one value set through the API, the CLI or a page reaches a
-stage without a restart. The environment stays required either way: a source
-overrides a setting, it never supplies one.
+environment. Given, it is whatever the caller resolved - the environment
+overlaid with the stored rows. The environment stays required either way: a
+source overrides a setting, it never supplies one.
 
-Passing a source rather than reading an ambient one, so a candidate value can
-be parsed without touching the environment the process is running under. That
-is what lets the API validate a proposed setting with the same parser the
-stage itself uses.
+Passed rather than ambient, so a candidate value can be parsed without
+touching the environment the process runs under.
 """
 
 from __future__ import annotations

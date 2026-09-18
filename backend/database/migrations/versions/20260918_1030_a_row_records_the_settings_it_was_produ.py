@@ -1,33 +1,24 @@
 """A row records the settings it was produced under.
 
-Settings used to be read once, out of a file, when a service started. A
-corpus was therefore produced under one configuration, whatever the files
-said, and a reader asking what a fact was extracted under could read the
-file.
+A setting can now be changed while the pipeline runs, and the next row a
+worker claims is worked under the new one. So a corpus is no longer produced
+under one configuration, and nothing recorded which rows were produced under
+which.
 
-Now a setting can be changed while the pipeline runs, and the next row a
-worker claims is worked under the new one. That makes the question real:
-these twenty thousand facts were not all read the same way, and nothing
-recorded which of them were read which way.
-
-So one column on each of the three tables that hold produced work. It holds
-the version `settings.store` computes - a digest of the overrides, or
-`environment` where there are none - which names a configuration by its
-content. Two rows carrying the same version were produced under the same
-settings, and a reader comparing two runs can select on it.
+One column on each of the three tables that hold produced work, holding the
+version settings.store computes: a digest of the overrides, or `environment`
+where there are none. Two rows carrying the same version were produced the
+same way.
 
 A digest rather than a description. What the settings were is in
-service_settings, and what a row needs is a name for the set of them; the
-existing columns already carry the values worth reading off a single fact,
-which is the model, the prompt version and the temperature.
+service_settings; the existing columns carry the model, the prompt version
+and the temperature.
 
-NULL on every row written before this, and on every row a worker writes
-until it is restarted. That is honest rather than unfortunate: those rows
-were produced under settings this column cannot name, because nothing was
-recording one.
+NULL on every row written before this, and by any worker not yet restarted.
+Those rows were produced under settings nothing was recording.
 
-Additive and nullable, so the five workers running against this database
-when it is applied keep inserting exactly as they do now.
+Additive and nullable, so the five workers running against this database when
+it is applied keep inserting as they do now.
 
 Revision: d3c81f4a2e57
 """
@@ -43,8 +34,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 #: The tables that hold work a stage produced, and the comment each column
-#: carries. Written out rather than built from a template: these are the
-#: comments the models declare, and tests/integration asserts the two agree.
+#: carries. Written out because these are the comments the models declare,
+#: which tests/integration asserts against.
 _TABLES = {
     "facts": "The configuration this fact was extracted under, as the digest "
     "settings.store computes, or 'environment' when nothing was overridden. "
@@ -72,9 +63,7 @@ def upgrade() -> None:
             table,
             sa.Column("settings_version", sa.Text(), nullable=True, comment=comment),
         )
-        # Partial: what anyone asks for is the rows produced under one
-        # configuration, or the ones produced under none, and the column is
-        # low-cardinality either way.
+        # Partial: the column is low-cardinality and mostly NULL.
         op.create_index(
             f"ix_{table}_settings_version",
             table,

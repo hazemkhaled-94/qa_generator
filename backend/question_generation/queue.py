@@ -210,7 +210,7 @@ class QuestionQueue(RowQueue):
         the only shape every prompt and gate here was written for.
 
         `version` is the configuration every question it writes was written
-        under, which for this stage is the only provenance a question gets.
+        under.
         """
         super().__init__(lease)
         self._kinds = kinds

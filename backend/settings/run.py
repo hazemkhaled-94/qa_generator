@@ -6,13 +6,11 @@ Every flag is the same operation as the route beside it under /settings:
   python -m settings.run --service topics --set K=V      PATCH
   python -m settings.run --service topics --unset K      PATCH, with a null
 
-One command for all seven services rather than a flag on each stage's own
-line, because `platform` has no stage and no worker to hang a flag off. The
-Makefile wraps it per service, which is where the per-stage wording lives.
+One command for all seven services, `platform` included. The Makefile wraps
+it per service.
 
 Nothing here runs a stage. A setting written reaches a worker when that
-worker next claims a row; what a change staled is printed, and rebuilding it
-is the stage's own rerun.
+worker next claims a row, and what a change staled is printed.
 """
 
 from __future__ import annotations
@@ -37,8 +35,7 @@ def parser() -> argparse.ArgumentParser:
         "--service",
         required=True,
         choices=sorted({one.service for one in catalog.SETTINGS}),
-        help="which service to read or change. One service per command, "
-        "because one page configures one service.",
+        help="which service to read or change. One per command.",
     )
     built.add_argument(
         "--set",
@@ -46,9 +43,8 @@ def parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=VALUE",
         dest="written",
-        help="change one setting. Repeatable; every change in one command is "
-        "written together, and the whole command is refused if any one value "
-        "is.",
+        help="change one setting. Repeatable; a command is written together "
+        "and one refusal refuses all of it.",
     )
     built.add_argument(
         "--unset",
@@ -87,12 +83,8 @@ def proposed(written: list[str], cleared: list[str]) -> dict[str, str | None]:
 def report(service: str, store: Settings) -> list[str]:
     """Reads what one service is configured to do, one line per setting.
 
-    The value it reads now beside what the files say, so the two are
-    comparable at a glance and a changed setting is obvious without having
-    to know which file to open.
-
-    Returns the lines rather than logging them, so what a person sees is
-    what a test can read.
+    The value it reads now beside what the files say. Returned rather than
+    logged, so what a person sees is what a test reads.
     """
     resolved = store.resolved()
     overrides = store.overrides()
@@ -113,13 +105,8 @@ def report(service: str, store: Settings) -> list[str]:
 def change(service: str, values: dict[str, str | None], store: Settings) -> list[str]:
     """Writes what a command asked for, refusing what the stage would not read.
 
-    Through `settings.changes`, which is what the route uses too, so a
-    terminal is refused for the same reasons a page is and in the same
-    words. No version is given: a person at a terminal is deciding against
-    what they just read, and there is no page that went stale in between.
-
-    Returns the lines rather than logging them, for the same reason `report`
-    does.
+    Through `settings.changes`, which the route uses too. No version is
+    given: a terminal decides against what it just read.
 
     Raises:
         SystemExit: If a setting is not this service's, is one the deployment

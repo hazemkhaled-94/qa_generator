@@ -191,9 +191,8 @@ _SOURCES = (
 class PassageQueue(RowQueue):
     """Reads the extraction queue and records what became of each passage.
 
-    Holds the settings version so every fact it writes records what produced
-    it. A queue built without one writes NULL, which is what a reader should
-    see for a fact nothing was recording a configuration for.
+    Holds the settings version, which every fact it writes records. Built
+    without one, it writes NULL.
     """
 
     columns = Columns(
@@ -281,8 +280,7 @@ def _write(session, facts: list[CheckedFact], version: str | None = None) -> int
         session: The open transaction.
         facts: Checked facts of any kind, refused ones included.
         version: The configuration these were extracted under, recorded on
-            each of them. None for a caller that does not know, which reads
-            as a fact produced before settings could be changed at all.
+            each of them.
 
     Returns:
         How many facts were written.
@@ -342,9 +340,8 @@ class FactCatalog(Repository):
 
     Separate from the queue: the API serves these and never claims a row.
 
-    Holds the settings version for the two operations that write a verdict -
-    a bridge pass and a re-judgement - so a fact says which configuration
-    decided it. The API builds this without one and never writes.
+    Holds the settings version for the two operations that write a verdict,
+    a bridge pass and a re-judgement. The API builds this without one.
     """
 
     def __init__(self, version: str | None = None) -> None:
@@ -567,10 +564,7 @@ class FactCatalog(Repository):
                         "unresolved_references": checked.unresolved_references,
                         "spacy_model": checked.spacy_model,
                         "spacy_version": checked.spacy_version,
-                        # Rewritten with the verdict: a re-judgement is what
-                        # the current shares decided, so a fact left carrying
-                        # the version that first wrote it would name settings
-                        # that are no longer what it was held to.
+                        # Rewritten with the verdict it was reached under.
                         "settings_version": self._version,
                     }
                     for fact_id, checked in verdicts

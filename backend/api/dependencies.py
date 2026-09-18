@@ -25,16 +25,10 @@ from question_generation.queue import QuestionQueue
 from settings.store import resolved
 from topic_modelling.repository import TopicCatalog, TopicQueue
 
-#: Read at import so a bad allowlist stops the API at start-up naming itself,
-#: as every other setting does, rather than on the first upload.
+#: Read at import so a bad allowlist or mix stops the API at start-up naming
+#: itself. Not what a route answers with: a stored setting can change while
+#: the API runs, so `ingesting` below and /questions/plan read per request.
 settings = Settings.load()
-
-#: The same, for what generation was asked to write: a mix naming a type
-#: nothing answers to is a start-up failure and not a page that will not draw.
-#:
-#: Neither is what a route answers with. A stored setting can change while the
-#: API runs, so anything that reports or enforces one reads it per request -
-#: `ingesting` below, and /questions/plan. These two exist to fail early.
 question_settings = QuestionSettings.load()
 
 # Before anything else: a line logged earlier carries no trace id.
@@ -69,14 +63,11 @@ removal_service = build_removal()
 def ingesting() -> IngestService:
     """The ingest service, built from the settings as they stand.
 
-    Ingestion is the one service with no worker: the API is what runs it, so
-    a setting it reads has nowhere else to be picked up. The upload route
-    builds it per request for that reason, and the instance above serves the
-    routes that only read what is already stored.
+    Ingestion has no worker, so the upload route builds it per request. The
+    instance above serves the routes that read no setting.
 
-    Cheap to build. The repository captures the cached session factory and
-    the bucket wraps the cached S3 client, so this is three settings and two
-    thin objects rather than a connection.
+    Cheap: the repository captures the cached session factory and the bucket
+    wraps the cached S3 client.
     """
     return build_service(Settings.load(resolved()))
 

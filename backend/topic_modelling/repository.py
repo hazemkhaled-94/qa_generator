@@ -71,9 +71,7 @@ class TopicQueue(StageQueue):
     ) -> None:
         """Binds to the session factory, with a lease and a settings version.
 
-        A fit is not reproducible without the parameters it used, and the
-        seed is only one of them, so every topic it stores records which
-        configuration produced it.
+        Every topic it stores records the configuration that produced it.
         """
         super().__init__(lease)
         self._version = version

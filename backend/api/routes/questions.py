@@ -153,10 +153,9 @@ def questions(
 def plan() -> GenerationPlan:
     """Reports what generation is configured to write.
 
-    The mix of types and bands, the shares, and the answer bounds each form is
-    held to. Read per request, stored values included, so this is what the
-    next run will do rather than what the last one did or what the API
-    happened to start with.
+    The mix of types and bands, the shares, and the answer bounds each form
+    is held to. Read per request, stored values included: what the next run
+    will do rather than what the last one did.
     """
     settings = QuestionSettings.load(resolved())
     return GenerationPlan(

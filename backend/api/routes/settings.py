@@ -1,24 +1,13 @@
 """Reading and changing what a service is configured to do.
 
-One service per request, because one page configures one service. The stages
-are `ingestion`, `parsing`, `chunking`, `extraction`, `topics` and
-`questions`; `platform` is the model, the tokenizer and the language
-pipelines the six of them share.
+One service per request: the six stages, and `platform` for the model, the
+tokenizer and the language pipelines they share.
 
-A value is written only if every service that could read it still parses its
-settings afterwards. The parser is the stage's own `Settings.load`, handed
-the environment overlaid with what is stored and with what this request
-proposes - so what a page is refused with is the message the worker would
-have failed at start-up with, written once, in the stage.
-
-A change is refused when it breaks something that worked, and not when
-something was already broken. A deployment that has never configured a model
-should still be able to change a parsing threshold, and would not be if any
-failure at all were enough to refuse.
+The shapes are here; what decides whether a change may be made is
+`settings.changes`, shared with the command line.
 
 Nothing here runs a stage. A setting reaches a worker when that worker next
-claims a row; what a change staled is named in the answer, and rebuilding it
-is the stage's own rerun.
+claims a row, and what a change staled is named in the answer.
 """
 
 from __future__ import annotations
@@ -40,9 +29,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-#: What each refusal is answered with. The decision is `settings.changes`,
-#: shared with the command line; which status code it reads as is HTTP's and
-#: belongs here.
+#: Which status code each refusal reads as.
 _STATUS = {
     "unknown_setting": 404,
     "wrong_service": 400,
@@ -53,9 +40,8 @@ _STATUS = {
     "version_moved": 409,
 }
 
-#: The service a request names. A Literal rather than a free string, so the
-#: OpenAPI document lists them and anything else is refused before it reaches
-#: the catalogue.
+#: The service a request names. A Literal, so the OpenAPI document lists
+#: them and anything else is refused before it reaches the catalogue.
 Service = Literal[
     "ingestion",
     "parsing",
@@ -73,12 +59,9 @@ store = SettingsStore()
 class SettingState:
     """One setting, as a page needs it to draw a control.
 
-    `value` is what the service reads now and `default` is what the files
-    say. The two differ exactly when `stored` is true, which is what a page
-    marks and what its reset button clears.
-
-    Both are null when a setting is absent, which is a state only a setting
-    whose absence means something can be in.
+    `value` is what the service reads now, `default` is what the files say,
+    and the two differ exactly when `stored` is true. Both are null when the
+    setting is absent.
     """
 
     name: str
@@ -101,8 +84,7 @@ class ServiceSettings:
     """Everything one service is configured by.
 
     `version` names this configuration by its content. A page hands it back
-    when it writes, and a write carrying a version that is no longer current
-    is refused rather than landing on a change nobody saw.
+    when it writes; a stale one is refused.
     """
 
     service: str
@@ -113,9 +95,8 @@ class ServiceSettings:
 class Change(BaseModel):
     """What a page is asking to change.
 
-    `version` is optional, and giving it is what makes a write safe against
-    a second person changing the same service. Absent, the write lands
-    whatever has happened since the page was drawn.
+    `version` is optional. Absent, the write lands whatever has happened
+    since the page was drawn.
     """
 
     values: dict[str, str | None] = Field(
@@ -134,8 +115,7 @@ class Changed:
     """What one write moved, and what it left stale.
 
     `stale` names the stages whose stored output was produced under the old
-    value. Nothing is requeued here: which of them to rebuild, and when, is
-    a decision with a corpus-sized cost behind it.
+    value. Nothing is requeued.
     """
 
     service: str
@@ -199,13 +179,10 @@ def write(service: Service, change: Change) -> Changed:
     """Changes what one service is configured to do.
 
     A value of null returns that setting to whatever the files say. Every
-    setting named must belong to this service, and the whole request is
-    refused if any one of them is refused: half a change is a configuration
-    nobody asked for.
+    setting named must belong to this service, and one refusal refuses the
+    whole request.
 
-    The next row a worker claims is worked under the new settings. Nothing
-    is requeued, and what was produced under the old ones is named in
-    `stale`.
+    The next row a worker claims is worked under the new settings.
 
     Raises:
         ApiError: 404 `unknown_setting`; 400 `wrong_service`,

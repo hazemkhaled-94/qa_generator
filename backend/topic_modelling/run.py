@@ -56,10 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         """Builds the service from the settings as they stand.
 
         Called rather than captured: a watching worker rebuilds when a
-        setting changes, so a fit queued after one answers to the new value.
-
-        One read for the settings and the version, so the parameters a fit
-        used and the version recorded on its topics cannot disagree.
+        setting changes. One read for the settings and the version.
         """
         source, version = snapshot()
         return build_service(Settings.load(source), version)

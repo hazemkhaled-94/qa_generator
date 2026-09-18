@@ -160,9 +160,7 @@ async def add_document(request: Request, file: UploadFile) -> IngestResult:
             accepted type. Each code is the ingest outcome itself.
     """
     filename = file.filename or "unnamed"
-    # Built per upload, from the settings as they stand: ingestion has no
-    # worker to pick a change up, so the limit this is measured against and
-    # the types it accepts would otherwise be the ones the API started with.
+    # Per upload: ingestion has no worker to pick a changed limit up.
     service = ingesting()
 
     # Checked before the body is touched. Content-Length covers the whole

@@ -28,12 +28,8 @@ def main(argv: list[str] | None = None) -> int:
         """Reads the settings as they stand, and what that configuration is.
 
         Called rather than captured, so every operation below answers to a
-        value written since this process started - which for this stage
-        includes the mix a plan aims for and the bounds a gate holds an
-        answer to.
-
-        One read for both, so the settings a question is written under and
-        the version recorded on it cannot come from two different moments.
+        value written since this process started. One read for both, so the
+        settings and the version recorded cannot come from two moments.
         """
         source, version = snapshot()
         return Settings.load(source), ModelSettings.load(source), version

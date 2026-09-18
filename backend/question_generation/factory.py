@@ -34,15 +34,9 @@ def models(
 ) -> tuple[ModelSettings, ModelSettings]:
     """The model that writes a question, and the model that checks it.
 
-    Either may be named by a setting of this stage's own - QUESTIONS_MODEL
-    and QUESTIONS_VERIFIER_MODEL - and either absent is whatever LLM_MODEL
-    names.
-
-    Returned as a pair rather than as a flag, because what the gates need to
-    know is not whether a setting was set but whether the two came out
-    different. Naming one model in both is the same problem as naming
-    neither, and naming only the writer leaves a verifier that is
-    independent without QUESTIONS_VERIFIER_MODEL saying so.
+    QUESTIONS_MODEL and QUESTIONS_VERIFIER_MODEL name them; either absent is
+    LLM_MODEL. A pair rather than a flag: what the gates need is whether the
+    two came out different, not whether a setting was set.
     """
     return shared.overridden(settings.model), shared.overridden(settings.verifier_model)
 
@@ -52,16 +46,9 @@ def build_service(
 ) -> QuestionGenerationService:
     """Wires the service and its collaborators.
 
-    Two models, each named by a setting of this stage's own and served
-    wherever the shared one is: QUESTIONS_MODEL writes and
-    QUESTIONS_VERIFIER_MODEL checks. Either absent is the model LLM_MODEL
-    names.
-
-    A model marking its own work agrees with itself, so a verifier that
-    turns out to be the writer is worth saying out loud rather than letting
-    the numbers quietly flatter the writer. Read off the two resolved names
-    rather than off whether the setting was set: naming the same model in
-    both is the same problem as naming none.
+    Two models, served wherever the shared one is: QUESTIONS_MODEL writes
+    and QUESTIONS_VERIFIER_MODEL checks. A verifier that turns out to be the
+    writer is warned about.
     """
     writer_model, verifier_model = models(settings, model)
     independent = verifier_model.model != writer_model.model
@@ -79,8 +66,7 @@ def build_service(
         repository=QuestionQueue(
             lease=lease(settings, model),
             kinds=settings.fact_kinds,
-            # Recorded on every question written, and the only provenance a
-            # question carries.
+            # Recorded on every question written.
             version=version,
         ),
         writer=QuestionWriter(Client(writer_model)),

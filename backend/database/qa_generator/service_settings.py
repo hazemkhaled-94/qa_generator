@@ -13,27 +13,18 @@ from database.qa_generator.base import Base
 class ServiceSetting(Base):
     """One setting a deployment changed, overriding what the environment says.
 
-    A row is an override and never a default: `configs/env/backend.env` and
-    `.env` still supply every setting, and a missing variable still stops a
-    service at start-up naming itself. Deleting a row is what returns a
-    setting to what the file says, which is why there is no column for a
-    default.
+    A row is an override and never a default: the files still supply every
+    setting, and deleting a row returns one to what the file says. There is
+    no column for a default.
 
-    The value is text, as the environment hands it over, so the parsers in
-    `settings.env` read a stored setting and an environment one the same way.
-    A number is checked by the same reader either way rather than by a second
-    copy of the rule that agrees with it today.
+    The value is text, as the environment hands it over, so `settings.env`
+    reads a stored setting and an environment one with the same reader.
 
-    An empty value is how a setting is overridden to absent, and is stored
-    only for the settings whose absence means something. `optional` reads
-    empty as absent, so a file naming a verifier model or a reasoning effort
-    can be overridden back to neither. For every other setting empty is what
-    `required` refuses, and the store will not write one.
+    An empty value overrides a setting to absent, and is stored only for the
+    settings whose absence means something.
 
-    There is no version column. What version the settings are at is read off
-    the rows themselves, as a digest of them - see `settings.store.version` -
-    because a counter kept here would fall when a row was deleted, and a
-    version that falls describes an older configuration than the one running.
+    There is no version column: what version the settings are at is a digest
+    of the rows, in `settings.store.version`.
     """
 
     __tablename__ = "service_settings"

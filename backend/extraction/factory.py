@@ -29,8 +29,7 @@ def build_service(
         settings: What extraction writes. Read from the environment when not
             given.
         version: The configuration these settings came from, recorded on
-            every fact written. None records nothing, which is what a caller
-            that resolved no settings should leave behind.
+            every fact written. None records nothing.
 
     Returns:
         The service a worker drains the passage queue with.

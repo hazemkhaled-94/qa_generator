@@ -1,28 +1,13 @@
 """The settings a deployment changed, and the source a stage reads.
 
-The environment is what a container starts from and the store is what a
-person changed since. `resolved` is the two of them together, which is what
-every `Settings.load` is handed: the environment overlaid with the stored
-rows, so a setting nobody has touched reads exactly as the file says it.
+`resolved` is the environment overlaid with every stored row. Resolution
+ignores the service column: names are unique across the table, and a stage
+reads its own settings and the platform's.
 
-Names are unique across the whole table, so resolving takes every row rather
-than one service's. A stage reads its own settings and the platform's - a
-worker calls a model and embeds with a tokenizer - and scoping the overlay to
-one service is how extraction would come to miss a change to LLM_MODEL.
+`version` names a configuration by its content, as a digest of the
+overrides. It changes when anything changes, deletions included.
 
-`version` is a digest of the overrides rather than a counter. A counter is
-the obvious thing and it is wrong here: the largest revision a set of rows
-carries falls when a row is deleted, so returning a setting to the file would
-hand out a version describing an older configuration than the one running. A
-digest changes when anything changes, deletions included, and two callers
-computing it from the same rows agree without having to coordinate. It is an
-identity rather than an order, which is what both readers of it want: a row
-recording what produced it, and a write refusing to land on a change it never
-saw.
-
-Importing this reaches the database. Nothing that has to answer before a
-connection exists may use it: the pool sizes and the log level are read from
-the environment where they are used, which is why they are not configurable.
+Importing this reaches the database.
 """
 
 from __future__ import annotations
@@ -42,21 +27,17 @@ from settings import catalog
 
 log = logging.getLogger(__name__)
 
-#: How much of the digest is kept. Long enough that two configurations will
-#: not collide in one deployment's lifetime, short enough to read out loud
-#: and to sit in a column beside a fact.
+#: How much of the digest is kept.
 _VERSION_CHARS = 12
 
-#: What `version` answers when nothing is stored, so the environment on its
-#: own has a name a row can record.
+#: What `version` answers when nothing is stored.
 UNCHANGED = "environment"
 
 
 def version(overrides: Mapping[str, str]) -> str:
     """Names one configuration by its content.
 
-    Sorted and JSON-encoded before hashing, so the same overrides give the
-    same name whatever order the rows came back in.
+    Sorted before hashing, so the name does not depend on row order.
     """
     if not overrides:
         return UNCHANGED
@@ -67,9 +48,8 @@ def version(overrides: Mapping[str, str]) -> str:
 def resolved() -> dict[str, str]:
     """The environment overlaid with what a deployment changed.
 
-    The one a command line wants: built when it is called rather than held,
-    so a process reaches the database when it needs a setting and not when
-    it is working out whether it was asked for `--help`.
+    Built when called rather than held, so a process reaches the database
+    only when it needs a setting.
     """
     return Settings().resolved()
 
@@ -82,9 +62,7 @@ def current() -> str:
 def snapshot() -> tuple[dict[str, str], str]:
     """The source to read settings from, and the name of that configuration.
 
-    Both from one read of the table, so the settings a stage loads and the
-    version it records on what it produces cannot come from two different
-    moments - which is the one way a row could end up stamped with a
+    Both from one read of the table, so a row cannot be stamped with a
     configuration it was not produced under.
     """
     overrides = Settings().overrides()
@@ -117,9 +95,7 @@ class Settings:
     def resolved(self) -> dict[str, str]:
         """The environment, overlaid with what a deployment changed.
 
-        What every `Settings.load` is handed. A copy rather than a view: the
-        result is read many times while a row is worked and must not change
-        underneath it.
+        A copy, not a view: it must not change while a row is worked.
         """
         return {**os.environ, **self.overrides()}
 
@@ -130,11 +106,9 @@ class Settings:
     def write(self, name: str, value: str) -> str:
         """Stores one setting, and returns the version it produced.
 
-        Validates nothing about the value beyond what the catalogue says of
-        the setting itself. What a value has to parse as is the stage's own
-        `Settings.load`, which a caller runs over the resolved source before
-        calling this: a value stored and then found unparseable would stop
-        the stage rather than the request.
+        Checks only what the catalogue says of the setting. What a value has
+        to parse as is the stage's own `Settings.load`, which a caller runs
+        first.
 
         Raises:
             KeyError: If nothing is configurable under that name.
@@ -161,8 +135,7 @@ class Settings:
                 )
             else:
                 stored.value = value
-                # Written every time: a setting that moved service between
-                # releases would otherwise keep answering to the old page.
+                # Rewritten in case the setting moved service.
                 stored.service = setting.service
 
         log.info("%s set to %r", name, value)
@@ -171,8 +144,8 @@ class Settings:
     def clear(self, name: str) -> bool:
         """Deletes one override, saying whether there was one.
 
-        What returns a setting to whatever the environment says, which is the
-        only way back: there is no stored copy of a default to restore.
+        Returns the setting to whatever the environment says. There is no
+        stored copy of a default to restore.
 
         Raises:
             KeyError: If nothing is configurable under that name.
