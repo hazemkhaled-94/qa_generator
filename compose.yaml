@@ -80,12 +80,23 @@ x-model-env: &model-env
   # absence means something: the writer then marks its own work.
   QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_MODEL:-}
 
-# Credentials for a hosted provider. Only a process that actually calls one,
-# which is not the api: it reads the model settings above and never sends a
-# request to the model.
-x-model-keys: &model-keys
-  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+# Whatever env vars the configured provider needs, credentials included:
+# ANTHROPIC_API_KEY or GEMINI_API_KEY for a hosted one, AZURE_TENANT_ID and
+# its two companions for Entra ID, AWS_* for Bedrock, OLLAMA_API_KEY for a
+# self-hosted runtime behind a gateway. litellm reads whichever its own
+# provider needs, so a file rather than a list of names here: a deployment
+# that switches provider edits its own file and nothing in this one.
+#
+# Optional, because a plain Ollama needs none of it. Unset stays unset -
+# naming them here as ${VAR:-} would set them empty instead, and an empty
+# AZURE_OPENAI_AD_TOKEN is taken over a working credential.
+#
+# Only given to a process that actually calls a model, which is not the api:
+# it reads the model settings above and never sends a request to the model.
+x-model-env-files: &model-env-files
+  - configs/env/backend.env
+  - path: configs/env/provider.env
+    required: false
 
 # ── Workers ────────────────────────────────────────────────────────────────
 
@@ -477,8 +488,9 @@ services:
   extract-worker:
     <<: *worker
     command: ["python", "-m", "extraction.run", "--watch"]
+    env_file: *model-env-files
     environment:
-      <<: [*service-env, *model-env, *model-keys]
+      <<: [*service-env, *model-env]
     deploy:
       resources:
         limits: { cpus: "1.0", memory: 1G }
@@ -488,10 +500,11 @@ services:
   topic-worker:
     <<: *worker
     command: ["python", "-m", "topic_modelling.run", "--watch"]
+    env_file: *model-env-files
     environment:
       # The model names each topic once the fit is done. The store holds the
       # figure each fit draws of itself.
-      <<: [*service-env, *model-env, *model-keys, *store-env]
+      <<: [*service-env, *model-env, *store-env]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 2G }
@@ -507,8 +520,9 @@ services:
   question-worker:
     <<: *worker
     command: ["python", "-m", "question_generation.run", "--watch"]
+    env_file: *model-env-files
     environment:
-      <<: [*service-env, *model-env, *model-keys]
+      <<: [*service-env, *model-env]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 6G }

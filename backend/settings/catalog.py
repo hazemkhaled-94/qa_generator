@@ -569,9 +569,11 @@ SETTINGS: tuple[Setting, ...] = (
         service="platform",
         kind="text",
         optional=True,
-        choices=("low", "medium", "high"),
+        choices=("none", "low", "medium", "high"),
         help="How much a thinking model may think before answering. Absent "
-        "turns thinking off, which is what a structured answer wants.",
+        "turns thinking off, which is what a structured answer wants. A "
+        "hosted reasoning model wants `none` for that, and refuses a "
+        "temperature other than 1 without it.",
     ),
     Setting(
         name="EMBEDDING_MODEL",

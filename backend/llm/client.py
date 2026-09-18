@@ -63,6 +63,9 @@ class Client:
         # the instrumentor imports litellm, and this module is the one that
         # already has. Idempotent, and two stages build two clients.
         telemetry.instrument_llm()
+        # Lets an azure/* model authenticate with Entra ID instead of a key.
+        # Read on the azure path only, and only when no key is set.
+        litellm.enable_azure_ad_token_refresh = True
         self._settings = settings
         # Any: instructor replaces create() at run time, so a checker would
         # match these keywords against the unpatched signature.

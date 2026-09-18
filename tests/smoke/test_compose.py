@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -341,3 +342,38 @@ def test_the_orchestrator_does_not_run_the_backend_image(resolved, service) -> N
     service_image = resolved["services"][service].get("image", "")
 
     assert service_image != resolved["services"]["api"].get("image"), service_image
+
+
+#: The services that call a model, and so the only ones given the configured
+#: provider's credentials.
+MODEL_CALLERS = {"extract-worker", "topic-worker", "question-worker"}
+
+
+def _env_files(service: dict) -> list[str]:
+    """The paths one service's env_file names, in either spelling."""
+    declared = service.get("env_file") or []
+    if isinstance(declared, str):
+        declared = [declared]
+    return [one["path"] if isinstance(one, dict) else one for one in declared]
+
+
+def test_only_a_process_that_calls_a_model_holds_the_provider_credentials() -> None:
+    """A credential reaches the three stages that send requests, and no more.
+
+    The api reads the model settings and serves them, and refuses a bad
+    value for one; it never sends a request to the model, so a key it held
+    would be a key nothing there uses.
+
+    Read from the source rather than from `resolved`: resolving inlines
+    every env_file into the environment, so which file a service was given
+    is the one thing the resolved form no longer says.
+    """
+    declared = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
+
+    given = {
+        name
+        for name, service in declared.items()
+        if any("provider.env" in path for path in _env_files(service))
+    }
+
+    assert given == MODEL_CALLERS, sorted(given ^ MODEL_CALLERS)

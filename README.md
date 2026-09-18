@@ -1093,7 +1093,7 @@ PyPI's build, which has no CUDA variant to avoid.
 | `configs/grafana/` | The datasources and the three dashboards, provisioned |
 | `configs/dagster/` | The Dagster instance and its one code location |
 | `frontend/` | Streamlit application |
-| `configs/env/` | The settings that are decisions rather than credentials, and so live in git |
+| `configs/env/` | The settings that are decisions rather than credentials, and so live in git. `provider.env` is the exception, and is not in git |
 | `configs/` | Service configuration and init scripts |
 
 The frontend holds one address, `BACKEND_URL`, and no knowledge of the
@@ -1404,6 +1404,7 @@ The files, split by what the value is rather than by which service reads it:
 | `configs/env/orchestration.env` | yes | How patiently Dagster watches a stage it started |
 | `configs/env/review.env` | yes | How a review sample is drawn |
 | `configs/env/evaluation.env` | yes | What a golden-set run is called in Phoenix |
+| `configs/env/provider.env` | no | Whatever env vars the configured model provider needs, credentials included. Optional, and absent for a plain Ollama; read by the three services that call a model, and by nothing else |
 | `.env` | no | Credentials, ports, and the addresses a host reaches a service at. `.env.example` lists it |
 
 compose hands each file to the services that need it with `env_file`, and the
