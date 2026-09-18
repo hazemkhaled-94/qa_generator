@@ -112,13 +112,23 @@ setup.template.append_fields:
     type: keyword
   - name: queue.value
     type: keyword
-  # One model call. duration_ms is what the latency percentiles read.
+  # One model call. duration_ms is what the latency percentiles read, and the
+  # three below are what it was billed as. cost_usd is a double because a
+  # single call against a hosted provider costs a fraction of a cent, and a
+  # long would floor every one of them to nothing and sum to zero. Absent on
+  # a self-hosted model, which litellm has no price for.
   - name: llm.model
     type: keyword
   - name: llm.shape
     type: keyword
   - name: llm.duration_ms
     type: long
+  - name: llm.tokens.input
+    type: long
+  - name: llm.tokens.output
+    type: long
+  - name: llm.cost_usd
+    type: double
   # What a stage produced, for the throughput panels.
   - name: facts.stored
     type: long

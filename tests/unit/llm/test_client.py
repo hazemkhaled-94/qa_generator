@@ -2,6 +2,10 @@
 
 Only a transient failure is worth another attempt: retrying a bad model name
 or a malformed schema costs the backoff on every call and buries the error.
+
+A rate limit is transient and is still not retried here. It is retried by
+litellm, which reads the provider's Retry-After; the policy in this module
+cannot see that header and would give up inside three seconds.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
-from llm.client import Client, ModelUnavailable, mode
+from llm.client import Client, ModelUnavailable, mode, priced, spend
 from llm.config import Settings
 
 
@@ -39,10 +43,22 @@ def settings(**overrides) -> Settings:
 
 
 def transient() -> Exception:
-    """A failure worth another attempt."""
+    """A failure worth another attempt here."""
+    return litellm.exceptions.Timeout(
+        message="too slow", llm_provider="ollama", model="test-model"
+    )
+
+
+def rate_limited() -> Exception:
+    """A failure worth another attempt, but not one this module makes."""
     return litellm.exceptions.RateLimitError(
         message="slow down", llm_provider="ollama", model="test-model"
     )
+
+
+def answered(shape):
+    """What `_ask` hands back: the parsed answer and the response it came in."""
+    return shape(), None
 
 
 def permanent() -> Exception:
@@ -88,7 +104,7 @@ def test_a_transient_failure_is_retried_and_can_succeed(monkeypatch) -> None:
         attempts.append(user)
         if len(attempts) == 1:
             raise transient()
-        return shape()
+        return answered(shape)
 
     monkeypatch.setattr(Client, "_ask", flaky)
     answer = Client(settings()).answer(system="s", user="u", shape=Shape)
@@ -107,15 +123,24 @@ def test_a_transient_failure_that_never_clears_gives_up(monkeypatch) -> None:
         raise transient()
 
     monkeypatch.setattr(Client, "_ask", always)
-    with pytest.raises(ModelUnavailable, match="RateLimitError"):
+    with pytest.raises(ModelUnavailable, match="Timeout"):
         Client(settings(max_attempts=3)).answer(system="s", user="u", shape=Shape)
 
     assert len(attempts) == 3, attempts
 
 
-@pytest.mark.parametrize("failure", [permanent, lambda: ValueError("bad schema")])
-def test_a_permanent_failure_is_raised_at_once(monkeypatch, failure) -> None:
-    """One attempt, not three: the backoff would only bury the reason."""
+@pytest.mark.parametrize(
+    "failure", [permanent, rate_limited, lambda: ValueError("bad schema")]
+)
+def test_a_failure_this_module_does_not_retry_is_raised_at_once(
+    monkeypatch, failure
+) -> None:
+    """One attempt, not three.
+
+    For a bad key or a bad schema the backoff would only bury the reason. For
+    a rate limit litellm has already spent the retries, each of them waiting
+    as long as the provider asked, so trying again here adds nothing.
+    """
     attempts = []
 
     def refuses(self, system, user, shape):
@@ -163,9 +188,9 @@ def sent(**overrides) -> dict:
     def record(**kwargs):
         """Keeps the call and answers in the shape asked for."""
         seen.update(kwargs)
-        return Shape()
+        return Shape(), None
 
-    client._client.chat.completions.create = record
+    client._client.chat.completions.create_with_completion = record
     client._attempt = lambda system, user, shape: client._ask(system, user, shape)
     client.answer(system="s", user="u", shape=Shape)
     return seen
@@ -199,3 +224,103 @@ def test_the_reasoning_effort_reaches_the_runtime_when_one_is_set() -> None:
 def test_nothing_is_sent_about_thinking_when_none_is_set() -> None:
     """Which leaves a model its own default."""
     assert "reasoning_effort" not in sent(reasoning_effort=None)
+
+
+def test_the_rate_limit_retries_are_handed_to_the_runtime() -> None:
+    """One budget covers both paths, so a 429 gets the tries a timeout does.
+
+    litellm reads the provider's Retry-After and waits that long; a hosted
+    provider asks for twenty to sixty seconds, which is why this is not the
+    exponential backoff around `_ask`.
+    """
+    assert sent(max_attempts=3)["num_retries"] == 2
+
+
+def test_a_single_attempt_asks_the_runtime_for_no_retries() -> None:
+    """Nothing to spend, rather than one retry nobody asked for."""
+    assert sent(max_attempts=1)["num_retries"] == 0
+
+
+# ── What a call is recorded as having cost ────────────────────────────────
+
+
+class Usage:
+    """What a provider reports it billed for."""
+
+    def __init__(self, prompt_tokens=None, completion_tokens=None) -> None:
+        """Initialises the counts one response carries."""
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
+class Response:
+    """A completion, as far as the fields read off one are concerned."""
+
+    def __init__(self, usage=None) -> None:
+        """Initialises the response with the usage it reports, if any."""
+        self.usage = usage
+
+
+def test_the_tokens_a_provider_reports_are_recorded(monkeypatch) -> None:
+    """Read off the response: the provider is what knows what it billed for."""
+    monkeypatch.setattr(litellm, "completion_cost", lambda **_: 0.0042)
+    fields = spend(Response(Usage(prompt_tokens=1204, completion_tokens=88)))
+
+    assert fields["llm.tokens.input"] == 1204
+    assert fields["llm.tokens.output"] == 88
+    assert fields["llm.cost_usd"] == pytest.approx(0.0042)
+
+
+def test_a_model_with_no_published_price_records_no_cost(monkeypatch) -> None:
+    """Absent, not zero.
+
+    Zero is what litellm costs a self-hosted model at, and a zero is a number
+    a dashboard sums and reports as free. The tokens are still recorded.
+    """
+    monkeypatch.setattr(litellm, "completion_cost", lambda **_: 0.0)
+    fields = spend(Response(Usage(prompt_tokens=10, completion_tokens=2)))
+
+    assert "llm.cost_usd" not in fields
+    assert fields["llm.tokens.input"] == 10
+
+
+def test_a_response_the_pricing_cannot_read_costs_nothing(monkeypatch) -> None:
+    """A paid-for answer is not lost to the arithmetic about what it cost."""
+
+    def unreadable(**_):
+        """What litellm raises for a response it cannot read a model off."""
+        raise ValueError("Model is None and does not exist in completion_response")
+
+    monkeypatch.setattr(litellm, "completion_cost", unreadable)
+
+    assert spend(Response(Usage(prompt_tokens=10, completion_tokens=2))) == {
+        "llm.tokens.input": 10,
+        "llm.tokens.output": 2,
+    }
+
+
+def test_a_response_carrying_no_usage_records_nothing(monkeypatch) -> None:
+    """A field with nothing behind it is worse than no field."""
+    monkeypatch.setattr(litellm, "completion_cost", lambda **_: 0.0)
+
+    assert spend(Response()) == {}
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({}, ""),
+        ({"llm.tokens.input": 1204}, " (1,204 in)"),
+        (
+            {
+                "llm.tokens.input": 1204,
+                "llm.tokens.output": 88,
+                "llm.cost_usd": 0.0042,
+            },
+            " (1,204 in, 88 out, $0.0042)",
+        ),
+    ],
+)
+def test_what_a_person_watching_the_logs_reads(fields, expected) -> None:
+    """The JSON copy carries the fields whether or not this renders them."""
+    assert priced(fields) == expected

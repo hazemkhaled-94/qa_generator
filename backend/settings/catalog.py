@@ -552,7 +552,8 @@ SETTINGS: tuple[Setting, ...] = (
         kind="integer",
         low=1,
         help="How many times one call is tried before the row fails. Only a "
-        "connection, a timeout or a rate limit is retried.",
+        "connection, a timeout or a rate limit is retried, and a rate limit "
+        "waits as long as the provider asks.",
     ),
     Setting(
         name="LLM_NUM_CTX",

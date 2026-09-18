@@ -25,12 +25,18 @@ from llm.config import Settings
 
 log = logging.getLogger(__name__)
 
-#: Failures worth another attempt. An authentication failure, an unknown
+#: Failures worth another attempt here. An authentication failure, an unknown
 #: model or a malformed schema is none of these and is raised at once.
+#:
+#: A rate limit is deliberately absent, and is handled a layer down instead. A
+#: hosted provider answers 429 with a Retry-After of twenty to sixty seconds;
+#: tenacity cannot see that header, so the backoff below would retry twice
+#: inside three seconds and fail the row for a condition that clears itself.
+#: `num_retries` on the call becomes litellm's `max_retries`, which becomes
+#: `max_retries` on the provider's own SDK client, and that one does read it.
 _TRANSIENT = (
     litellm.exceptions.APIConnectionError,
     litellm.exceptions.Timeout,
-    litellm.exceptions.RateLimitError,
     litellm.exceptions.InternalServerError,
     litellm.exceptions.ServiceUnavailableError,
     InstructorRetryException,
@@ -41,6 +47,57 @@ Shape = TypeVar("Shape", bound=BaseModel)
 
 class ModelUnavailable(Exception):
     """Raised when the model could not be reached or would not answer."""
+
+
+def spend(completion: Any) -> dict[str, Any]:
+    """What one answer consumed, as the fields it is logged under.
+
+    Tokens and money are read off the response rather than counted here: the
+    provider is the only thing that knows what it billed for, and a count of
+    our own would disagree with the invoice over a cached prefix or a
+    reasoning trace.
+
+    A model with no published price - anything self-hosted - is costed at
+    zero by litellm, and zero yields no `llm.cost_usd` at all rather than the
+    field set to it. Zero is a number a dashboard sums and reports as free;
+    absent is a field it has nothing to sum, which is the truth about a model
+    somebody is running on their own hardware.
+
+    Never raises. A call that has already been paid for and answered must not
+    be lost because the arithmetic about what it cost went wrong.
+    """
+    fields: dict[str, Any] = {}
+    usage = getattr(completion, "usage", None)
+    if usage is not None:
+        fields["llm.tokens.input"] = getattr(usage, "prompt_tokens", None)
+        fields["llm.tokens.output"] = getattr(usage, "completion_tokens", None)
+    try:
+        cost = litellm.completion_cost(completion_response=completion)
+    except ValueError:
+        # What it raises for a response it cannot read a model off. An
+        # unpriced model is not this: that comes back as zero.
+        cost = 0.0
+    if cost:
+        fields["llm.cost_usd"] = float(cost)
+    return {name: value for name, value in fields.items() if value is not None}
+
+
+def priced(fields: dict[str, Any]) -> str:
+    """What `spend` found, for the end of a log line a person reads.
+
+    The JSON copy carries the fields whether or not this renders them; this
+    is the half somebody watching `make logs` sees, and a run against a
+    hosted provider is one where what it has cost so far is the number
+    being watched.
+    """
+    written = []
+    if "llm.tokens.input" in fields:
+        written.append(f"{fields['llm.tokens.input']:,} in")
+    if "llm.tokens.output" in fields:
+        written.append(f"{fields['llm.tokens.output']:,} out")
+    if "llm.cost_usd" in fields:
+        written.append(f"${fields['llm.cost_usd']:.4f}")
+    return f" ({', '.join(written)})" if written else ""
 
 
 def mode(name: str) -> instructor.Mode:
@@ -94,11 +151,12 @@ class Client:
     def answer(self, *, system: str, user: str, shape: type[Shape]) -> Shape:
         """Asks the model one question and parses the answer into `shape`.
 
-        Timed and logged either way. The model is the pipeline's bottleneck -
-        a median passage measured at 473 s - so how long a call took is the
-        one number worth having per call, and having it in the logs as well
-        as in the traces is what makes it readable when the collector is
-        down or was never configured.
+        Timed, counted and logged either way. The model is the pipeline's
+        bottleneck - a median passage measured at 473 s - so how long a call
+        took is the one number worth having per call, and against a hosted
+        provider what it cost is the second. Both are in the logs as well as
+        in the traces, which is what makes them readable when the collector
+        is down or was never configured.
 
         Raises:
             ModelUnavailable: If it could not be reached, or did not return
@@ -112,7 +170,7 @@ class Client:
             "llm.shape": shape.__name__,
         }
         try:
-            answered = self._attempt(system, user, shape)
+            answered, completion = self._attempt(system, user, shape)
         except Exception as exc:
             # Logged with the traceback before it is rewrapped: what the
             # caller records against the row is one line, and litellm's own
@@ -126,12 +184,14 @@ class Client:
             raise ModelUnavailable(f"{type(exc).__name__}: {exc}") from exc
 
         elapsed = self._since(started)
+        spent = spend(completion)
         log.info(
-            "%s answered %s in %.1fs",
+            "%s answered %s in %.1fs%s",
             self._settings.model,
             shape.__name__,
             elapsed / 1000,
-            extra=about | {"llm.duration_ms": elapsed},
+            priced(spent),
+            extra=about | {"llm.duration_ms": elapsed} | spent,
         )
         return answered
 
@@ -140,10 +200,26 @@ class Client:
         """Milliseconds since a monotonic reading."""
         return round((time.monotonic() - started) * 1000)
 
-    def _ask(self, system: str, user: str, shape: type[Shape]) -> Shape:
-        """Sends one request."""
-        return self._client.chat.completions.create(
+    def _ask(self, system: str, user: str, shape: type[Shape]) -> tuple[Shape, Any]:
+        """Sends one request, returning the answer and the response it came in.
+
+        `create_with_completion` rather than `create` because the tokens and
+        the price are on the response and not on the parsed shape, and a
+        second call to ask what the first one cost would be billed for.
+        """
+        return self._client.chat.completions.create_with_completion(
             model=self._settings.model,
+            # Rate limits are retried below this call rather than by the
+            # policy around it, because the provider's SDK reads Retry-After
+            # and tenacity cannot see it. litellm documents this keyword as
+            # the way to pass retries through instructor, which is what is
+            # between us and it.
+            #
+            # One budget for both paths, so a call refused for a rate limit
+            # gets the same number of tries as one that could not connect.
+            # The lease absorbs it: a 429 comes back at once, so what this
+            # adds is the waiting and not another timeout.
+            num_retries=max(self._settings.max_attempts - 1, 0),
             # Omitted when unset: a provider with its own address would be
             # sent to the wrong one by a base URL meant for Ollama.
             **(

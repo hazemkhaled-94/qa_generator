@@ -91,14 +91,20 @@
       "id": 3,
       "type": "stat",
       "title": "Model calls, and what they cost",
-      "description": "Every call the three model-calling stages made in the window, and the time spent waiting for them.",
+      "description": "Every call the three model-calling stages made in the window: how many, the time spent waiting, the tokens the provider billed for and what it charged. Cost is missing rather than zero for a model litellm has no price for, which is every self-hosted one — a stack serving its own model shows tokens and no money, which is the truth about it.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
       "gridPos": { "h": 9, "w": 8, "x": 16, "y": 9 },
       "fieldConfig": {
         "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } },
         "overrides": [
           { "matcher": { "id": "byName", "options": "Total wait" },
-            "properties": [{ "id": "unit", "value": "ms" }] }
+            "properties": [{ "id": "unit", "value": "ms" }] },
+          { "matcher": { "id": "byName", "options": "Cost" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "decimals", "value": 2 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ] }
         ]
       },
       "options": {
@@ -124,6 +130,42 @@
           "query": "_exists_:llm.duration_ms",
           "alias": "Total wait",
           "metrics": [{ "id": "1", "type": "sum", "field": "llm.duration_ms" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.tokens.input",
+          "alias": "Tokens in",
+          "metrics": [{ "id": "1", "type": "sum", "field": "llm.tokens.input" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.tokens.output",
+          "alias": "Tokens out",
+          "metrics": [{ "id": "1", "type": "sum", "field": "llm.tokens.output" }],
+          "bucketAggs": [
+            { "id": "2", "type": "date_histogram", "field": "@timestamp",
+              "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }
+          ],
+          "timeField": "@timestamp"
+        },
+        {
+          "refId": "E",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "_exists_:llm.cost_usd",
+          "alias": "Cost",
+          "metrics": [{ "id": "1", "type": "sum", "field": "llm.cost_usd" }],
           "bucketAggs": [
             { "id": "2", "type": "date_histogram", "field": "@timestamp",
               "settings": { "interval": "auto", "min_doc_count": "0", "trimEdges": "0" } }

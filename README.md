@@ -912,6 +912,46 @@ That is what `questions-reverify` exists to find — it re-reads the stored form
 and bounds, so a question is never re-judged under a kind it was not written
 as.
 
+## The embedding model
+
+`EMBEDDING_MODEL` is the one pretrained model in this pipeline, and the one
+thing in it that does **not** move when you change providers. It runs locally,
+in the worker, whatever `LLM_MODEL` names — a hosted provider serves the
+writer and the verifier and has nothing to do with this.
+
+It does two jobs, and they are one setting because they must agree:
+
+| | |
+|---|---|
+| Chunking | Counts a passage's tokens. `EMBEDDING_MAX_TOKENS` is the model's window and so the longest passage the chunker emits. |
+| The `duplicate` gate | Embeds each question into `questions.embedding`, which the HNSW index serves. `answerable_after_all` reads the same probe. |
+
+A passage sized by one tokenizer and embedded by another is silently truncated
+at embed time, and a benchmark built on truncated passages misreports its own
+coverage. One name is what makes that impossible.
+
+**Changing it is a migration, not a setting.** `questions.embedding` is
+`vector(1024)`, and the worker refuses a model of another width at start-up
+rather than letting the database refuse it one row at a time with nothing
+saying why. A different model means altering that column, re-embedding every
+stored question, and re-chunking if its window differs — so the passages are
+sized in the unit they are embedded in. The default,
+`intfloat/multilingual-e5-large`, is 1024 wide with a 512-token window and
+covers German and English.
+
+It stays local deliberately. The gate runs once per candidate question, which
+is tens of thousands of vectors over a corpus, and a hosted embedding API
+would bill for every one of them to answer a question — "have I already asked
+this?" — that a 560M-parameter model answers well. It is also what keeps a
+question measured in the same space the corpus was put in.
+
+The cost is the first start: 2.2 GB of weights into the `models` volume before
+`question-worker` claims anything, which is why the topics sit `pending` and
+`make logs` is where it says so. Later starts read the volume. `question-worker`
+is given 6 GB because of it, and that is the number to remember when deciding
+between more worker containers and more lanes inside one — the weights are
+per container, not per lane.
+
 ## Topic modelling
 
 This stage has its own full description in
