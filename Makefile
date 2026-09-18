@@ -495,6 +495,43 @@ questions-reverify:
 questions-balance:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
 
+# ── Settings ───────────────────────────────────────────────────────────────
+#
+# What each service is configured to do, and changing it. The same operation
+# as the route beside it, and the same as the Configuration panel on that
+# service's page:
+#
+#   make settings SERVICE=topics                GET  /settings/topics
+#   make settings-set SERVICE=topics SET=...   PATCH /settings/topics
+#   make settings-unset SERVICE=topics UNSET=…  PATCH, with a null
+#
+# A value written here reaches a worker when that worker next claims a row.
+# Nothing is requeued: if the change stales what a stage already produced,
+# the command says so and the stage's own -rerun is what rebuilds it.
+#
+# The environment still supplies every setting. These write an override over
+# it, and -unset deletes that override rather than writing a default, so
+# configs/env/backend.env and .env decide again.
+
+# Report one service's settings, beside what the files say.
+#   make settings SERVICE=extraction
+settings:
+	@[ -n "$(SERVICE)" ] || { echo "usage: make settings SERVICE=<name>"; exit 2; }
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m settings.run --service $(SERVICE)
+
+# Change one or more of them. Repeat SET for each, space separated.
+#   make settings-set SERVICE=topics SET="TOPIC_PASSES=20"
+#   make settings-set SERVICE=platform SET="LLM_MODEL=ollama_chat/qwen3:14b"
+settings-set:
+	@[ -n "$(SERVICE)" ] && [ -n "$(SET)" ] || { echo 'usage: make settings-set SERVICE=<name> SET="NAME=VALUE"'; exit 2; }
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m settings.run --service $(SERVICE) $(foreach one,$(SET),--set $(one))
+
+# Return one or more to what the files say.
+#   make settings-unset SERVICE=topics UNSET="TOPIC_PASSES"
+settings-unset:
+	@[ -n "$(SERVICE)" ] && [ -n "$(UNSET)" ] || { echo 'usage: make settings-unset SERVICE=<name> UNSET="NAME"'; exit 2; }
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m settings.run --service $(SERVICE) $(foreach one,$(UNSET),--unset $(one))
+
 # ── Documents ──────────────────────────────────────────────────────────────
 
 # List every stored document with its digest and parse state.

@@ -27,25 +27,31 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-import extraction.config
-import ingestion.config
-import llm.config
-import preprocessing.chunking.config
-import preprocessing.parsing.config
-import question_generation.config
-import topic_modelling.config
 from api.errors import ApiError, ErrorBody
-from settings import catalog
+from settings import catalog, changes
 from settings.store import Settings as SettingsStore
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+#: What each refusal is answered with. The decision is `settings.changes`,
+#: shared with the command line; which status code it reads as is HTTP's and
+#: belongs here.
+_STATUS = {
+    "unknown_setting": 404,
+    "wrong_service": 400,
+    "fixed_setting": 400,
+    "not_a_choice": 400,
+    "out_of_range": 400,
+    "would_not_load": 400,
+    "version_moved": 409,
+}
 
 #: The service a request names. A Literal rather than a free string, so the
 #: OpenAPI document lists them and anything else is refused before it reaches
@@ -59,26 +65,6 @@ Service = Literal[
     "questions",
     "platform",
 ]
-
-#: What must still parse after a change. Every one of them on every write,
-#: not just the service being changed: EMBEDDING_MODEL belongs to the
-#: platform and is read by chunking and by question generation, so a change
-#: to it that only the platform had to accept would be a change that stops
-#: two workers.
-#:
-#: `platform` is llm.config, which is the only settings object the shared
-#: values make on their own. The spaCy pipelines and the tokenizer are read
-#: where they are used rather than loaded into a dataclass, so what checks
-#: those is the stage that reads them.
-_PARSERS: dict[str, Any] = {
-    "ingestion": ingestion.config.Settings.load,
-    "parsing": preprocessing.parsing.config.Settings.load,
-    "chunking": preprocessing.chunking.config.Settings.load,
-    "extraction": extraction.config.Settings.load,
-    "topics": topic_modelling.config.Settings.load,
-    "questions": question_generation.config.Settings.load,
-    "platform": llm.config.Settings.load,
-}
 
 store = SettingsStore()
 
@@ -193,133 +179,6 @@ def _described(service: str) -> tuple[ServiceSettings, dict[str, str]]:
     )
 
 
-def _owned(service: str, names: list[str]) -> list[catalog.Setting]:
-    """Looks up the settings a request named, refusing what it may not write.
-
-    Raises:
-        ApiError: 404 `unknown_setting` for a name nothing configures, 400
-            `wrong_service` for one another page owns, 400 `fixed_setting`
-            for one the deployment owns.
-    """
-    found = []
-    for name in names:
-        try:
-            setting = catalog.writable(name)
-        except KeyError as exc:
-            raise ApiError(404, "unknown_setting", str(exc)) from None
-        except ValueError as exc:
-            raise ApiError(400, "fixed_setting", str(exc)) from None
-        if setting.service != service:
-            raise ApiError(
-                400,
-                "wrong_service",
-                f"{name} is configured by {setting.service}, not by "
-                f"{service}. One page configures one service.",
-            )
-        found.append(setting)
-    return found
-
-
-def _offered(setting: catalog.Setting, value: str) -> list[str]:
-    """What a value names, which is what `choices` is a list of.
-
-    A closed set constrains one value for a `text` setting, every entry for
-    a list, and every key for a mix. Checking the whole string against the
-    list instead would make every setting that takes more than one thing
-    unwritable: `EXTRACTION_KINDS=summary,outline` names two kinds that are
-    both on the list and is not itself on it.
-    """
-    if setting.kind == "csv":
-        return [part.strip() for part in value.split(",") if part.strip()]
-    if setting.kind == "mapping":
-        return [
-            entry.split(":", 1)[0].strip()
-            for entry in value.split(",")
-            if entry.strip()
-        ]
-    return [value]
-
-
-def _within_bounds(setting: catalog.Setting, value: str) -> None:
-    """Refuses a value the catalogue says is out of range or not on the list.
-
-    What the stage's own parser cannot say. `QUESTIONS_ANSWER_OVERLAP=2` is
-    a number and parses; it is also a share of something, and a share above
-    one is a gate nothing can pass.
-
-    Raises:
-        ApiError: 400 `out_of_range` or `not_a_choice`.
-    """
-    if setting.choices:
-        unknown = [
-            one for one in _offered(setting, value) if one not in setting.choices
-        ]
-        if unknown:
-            raise ApiError(
-                400,
-                "not_a_choice",
-                f"{setting.name} takes {', '.join(setting.choices)}; "
-                f"{', '.join(unknown)} is not among them.",
-            )
-    if setting.low is None and setting.high is None:
-        return
-    try:
-        number = float(value)
-    except ValueError:
-        # Left to the stage's parser, which names the setting and says what
-        # it wanted. Refusing here would say it twice, differently.
-        return
-    if setting.low is not None and number < setting.low:
-        raise ApiError(
-            400,
-            "out_of_range",
-            f"{setting.name} may not be below {setting.low:g}; {value!r} is.",
-        )
-    if setting.high is not None and number > setting.high:
-        raise ApiError(
-            400,
-            "out_of_range",
-            f"{setting.name} may not be above {setting.high:g}; {value!r} is.",
-        )
-
-
-def _parses(source: dict[str, str]) -> dict[str, str]:
-    """Which services fail to load from a source, and what each said."""
-    failed = {}
-    for service, load in _PARSERS.items():
-        try:
-            load(source)
-        except (KeyError, ValueError) as exc:
-            # KeyError stringifies with its quotes, which reads badly in a
-            # message a person is shown.
-            failed[service] = str(exc).strip("'\"")
-    return failed
-
-
-def _still_parses(failing: dict[str, str], candidate: dict[str, str]) -> None:
-    """Refuses a change that stops a service that was working.
-
-    Compared against what the deployment does now rather than judged on its
-    own, so a service already failing for a reason nobody is changing does
-    not block an unrelated setting. A deployment with no model configured
-    can still change a parsing threshold.
-
-    Args:
-        failing: The services that do not load as things stand, by name.
-        candidate: The source that would be read if the change landed.
-
-    Raises:
-        ApiError: 400 `would_not_load`, carrying the stage's own message.
-    """
-    for service, reason in _parses(candidate).items():
-        if service not in failing:
-            raise ApiError(
-                400,
-                "would_not_load",
-                f"{service} would not start with that: {reason}",
-            )
-
-
 @router.get("/{service}")
 def read(service: Service) -> ServiceSettings:
     """Reports what one service is configured to do.
@@ -353,58 +212,16 @@ def write(service: Service, change: Change) -> Changed:
             `fixed_setting`, `not_a_choice`, `out_of_range` or
             `would_not_load`; 409 `version_moved`.
     """
-    described, resolved = _described(service)
-    if change.version is not None and change.version != described.version:
-        raise ApiError(
-            409,
-            "version_moved",
-            f"this was sent against version {change.version} and the "
-            f"settings are at {described.version}, so somebody has changed "
-            f"them since the page was drawn. Read them again and decide "
-            f"against what is there now.",
-        )
+    try:
+        moved = changes.apply(service, change.values, change.version, store)
+    except changes.Refused as refusal:
+        raise ApiError(_STATUS[refusal.code], refusal.code, refusal.detail) from None
 
-    settings = {one.name: one for one in _owned(service, list(change.values))}
-    for name, value in change.values.items():
-        if value is not None:
-            _within_bounds(settings[name], value)
-
-    # What the source would be if this landed. A null is what the files say,
-    # which is what clearing the override leaves behind.
-    candidate = dict(resolved)
-    for name, value in change.values.items():
-        candidate[name] = os.environ.get(name, "") if value is None else value.strip()
-    _still_parses(_parses(resolved), candidate)
-
-    changed, cleared = [], []
-    for name, value in change.values.items():
-        if value is None:
-            if store.clear(name):
-                cleared.append(name)
-        elif value.strip() != (resolved.get(name) or ""):
-            store.write(name, value)
-            changed.append(name)
-
-    moved = changed + cleared
-    stale = sorted({stage for name in moved for stage in settings[name].invalidates})
     return Changed(
         service=service,
-        version=store.version(),
-        changed=changed,
-        cleared=cleared,
-        stale=stale,
-        detail=_detail(moved, stale),
-    )
-
-
-def _detail(moved: list[str], stale: list[str]) -> str:
-    """Says what happened, and what is now worth rebuilding."""
-    if not moved:
-        return "nothing changed; every value given is the one already set."
-    written = f"{len(moved)} setting(s) changed. Workers pick them up on the row they claim next."
-    if not stale:
-        return written
-    return (
-        f"{written} What {', '.join(stale)} already produced was made under "
-        f"the old values; rerun that stage to rebuild it."
+        version=moved.version,
+        changed=moved.changed,
+        cleared=moved.cleared,
+        stale=moved.stale,
+        detail=moved.detail,
     )
