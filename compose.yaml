@@ -63,11 +63,15 @@ x-store-env: &store-env
   S3_ACCESS_KEY: ${S3_ACCESS_KEY}
   S3_SECRET_KEY: ${S3_SECRET_KEY}
 
-# The stages that call a served model: extraction reads passages with it,
-# topic modelling names topics with it, question generation writes and checks
-# questions with it. Its mode, temperature, timeout and attempt count are in
-# backend.env; which model and where it is served stay here, because that is
-# one deployment's choice rather than a project default.
+# Which model, and where it is served. Its mode, temperature, timeout and
+# attempt count are in backend.env; these stay here, because that is one
+# deployment's choice rather than a project default.
+#
+# Read by the stages that call one - extraction reads passages with it, topic
+# modelling names topics with it, question generation writes and checks
+# questions with it - and by the api, which calls no model and serves these
+# as settings. A page showing which model is configured, and a route refusing
+# a bad value for one, both need the value the workers are reading.
 x-model-env: &model-env
   LLM_MODEL: ${LLM_MODEL}
   # Container's view of the model, not the host's.
@@ -75,6 +79,11 @@ x-model-env: &model-env
   # The second model, which checks what the first wrote. Optional, and its
   # absence means something: the writer then marks its own work.
   QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_MODEL:-}
+
+# Credentials for a hosted provider. Only a process that actually calls one,
+# which is not the api: it reads the model settings above and never sends a
+# request to the model.
+x-model-keys: &model-keys
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
@@ -407,7 +416,10 @@ services:
     restart: unless-stopped
     env_file: [configs/env/backend.env]
     environment:
-      <<: [*service-env, *store-env]
+      # model-env without model-keys: the api serves the model settings and
+      # refuses a bad value for one, which needs the value the workers read.
+      # It calls no model, so it needs no provider credential.
+      <<: [*service-env, *store-env, *model-env]
     volumes:
       - ./backend/api:/app/api:ro
       - ./backend/database:/app/database:ro
@@ -466,7 +478,7 @@ services:
     <<: *worker
     command: ["python", "-m", "extraction.run", "--watch"]
     environment:
-      <<: [*service-env, *model-env]
+      <<: [*service-env, *model-env, *model-keys]
     deploy:
       resources:
         limits: { cpus: "1.0", memory: 1G }
@@ -479,7 +491,7 @@ services:
     environment:
       # The model names each topic once the fit is done. The store holds the
       # figure each fit draws of itself.
-      <<: [*service-env, *model-env, *store-env]
+      <<: [*service-env, *model-env, *model-keys, *store-env]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 2G }
@@ -496,7 +508,7 @@ services:
     <<: *worker
     command: ["python", "-m", "question_generation.run", "--watch"]
     environment:
-      <<: [*service-env, *model-env]
+      <<: [*service-env, *model-env, *model-keys]
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 6G }

@@ -428,6 +428,29 @@
       ]
     }
   },
+  "/settings/{service}": {
+    "get": {
+      "parameters": [
+        "service"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    },
+    "patch": {
+      "parameters": [
+        "service"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "409",
+        "422"
+      ]
+    }
+  },
   "/status": {
     "get": {
       "parameters": [],

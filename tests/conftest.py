@@ -342,6 +342,10 @@ def application(postgres: str, s3: dict[str, str]):
 
     os.environ["DATABASE_URL"] = postgres
     os.environ.update(s3)
+    # Model identity, which compose gives the api and configs/env/backend.env
+    # does not carry: the settings routes serve these and refuse a bad value
+    # for one, and both need the value the workers are reading.
+    os.environ.setdefault("LLM_MODEL", "ollama_chat/test-model")
     connect.cache_clear()
     sessions.cache_clear()
 
