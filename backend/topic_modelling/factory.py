@@ -15,13 +15,18 @@ from topic_modelling.topics import TopicFitter
 log = logging.getLogger(__name__)
 
 
-def build_service(settings: Settings) -> TopicModellingService:
+def build_service(
+    settings: Settings, version: str | None = None
+) -> TopicModellingService:
     """Wires the service and its collaborators.
 
     The labeller is left out when no model is configured.
 
     Args:
         settings: The environment this deployment reads.
+        version: The configuration these settings came from, recorded on
+            every topic the fit stores. A fit is not reproducible without
+            the parameters it used, and the seed is only one of them.
 
     Returns:
         The service, ready to drain the fit queue.
@@ -33,7 +38,7 @@ def build_service(settings: Settings) -> TopicModellingService:
         log.warning("no model configured; topics will be named by their terms only")
 
     return TopicModellingService(
-        repository=TopicQueue(),
+        repository=TopicQueue(version=version),
         export=ExportBucket(),
         fitter=TopicFitter(
             num_topics=settings.num_topics,

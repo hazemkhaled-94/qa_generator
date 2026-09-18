@@ -125,6 +125,15 @@ class Fact(Base):
         comment="spaCy version. The parser decides the verdict, so it is "
         "provenance in the same way the prompt version is.",
     )
+    settings_version: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The configuration this fact was extracted under, as the digest "
+        "settings.store computes, or 'environment' when nothing was overridden. "
+        "The columns above name the model and the prompt; this names the rest of "
+        "it, including the shares the checks held this fact to. NULL for a fact "
+        "written before a setting could be changed without a restart.",
+    )
     statement_predicates: Mapped[int] = mapped_column(
         Integer,
         server_default="0",

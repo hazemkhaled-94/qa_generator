@@ -15,7 +15,7 @@ import telemetry
 from blob_store.seaweedfs import ExportBucket
 from database.qa_generator import engine
 from settings import decimal
-from settings.store import resolved
+from settings.store import snapshot
 from stages import watch
 from stages.cli import parser, reloading
 from topic_modelling.config import Settings
@@ -57,8 +57,12 @@ def main(argv: list[str] | None = None) -> int:
 
         Called rather than captured: a watching worker rebuilds when a
         setting changes, so a fit queued after one answers to the new value.
+
+        One read for the settings and the version, so the parameters a fit
+        used and the version recorded on its topics cannot disagree.
         """
-        return build_service(Settings.load(resolved()))
+        source, version = snapshot()
+        return build_service(Settings.load(source), version)
 
     telemetry.configure("topic_modelling")
     telemetry.trace_engine(engine())

@@ -46,7 +46,7 @@ def models(
 
 
 def build_service(
-    settings: Settings, model: ModelSettings
+    settings: Settings, model: ModelSettings, version: str | None = None
 ) -> QuestionGenerationService:
     """Wires the service and its collaborators.
 
@@ -75,7 +75,11 @@ def build_service(
     catalog = QuestionCatalog()
     return QuestionGenerationService(
         repository=QuestionQueue(
-            lease=lease(settings, model), kinds=settings.fact_kinds
+            lease=lease(settings, model),
+            kinds=settings.fact_kinds,
+            # Recorded on every question written, and the only provenance a
+            # question carries.
+            version=version,
         ),
         writer=QuestionWriter(Client(writer_model)),
         checker=QuestionChecker(

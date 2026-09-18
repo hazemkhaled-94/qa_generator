@@ -217,6 +217,77 @@ def test_when_a_setting_was_changed_is_recorded(store) -> None:
     assert set(store.changed_at()) == {"TOPIC_PASSES"}
 
 
+def test_the_source_and_the_version_come_from_one_read(store) -> None:
+    """A row must not be stamped with a configuration it was not produced under.
+
+    Two reads could straddle a write: the settings from before it and the
+    version from after, which would name a configuration the row was never
+    worked under. `snapshot` answers both from one read of the table.
+    """
+    from settings.store import snapshot, version
+
+    store.write("TOPIC_PASSES", "42")
+    source, named = snapshot()
+
+    assert source["TOPIC_PASSES"] == "42"
+    assert named == version({"TOPIC_PASSES": "42"})
+    assert named == store.version()
+
+
+def test_a_fact_records_the_configuration_it_was_extracted_under(store, engine) -> None:
+    """What makes a corpus produced under changing settings readable.
+
+    The model, the prompt and the temperature were already recorded on a
+    fact. The shares the checks held it to were not, and they are settings
+    that can now change while a run is in flight.
+    """
+    from facts import FactStore, checked
+
+    written = FactStore(engine, version="a-configuration")
+    passages = written.corpus(("one", ["A duty applies to every firm."]))
+    first = passages["one"][0]
+    written.store(first, checked(first, "A duty applies."))
+
+    assert written.rows("settings_version") == [("a-configuration",)]
+
+
+def test_a_fact_written_by_a_worker_that_knows_no_version_records_none(
+    store, engine
+) -> None:
+    """Honest rather than unfortunate: nothing was recording a configuration."""
+    from facts import FactStore, checked
+
+    written = FactStore(engine)
+    passages = written.corpus(("one", ["A duty applies to every firm."]))
+    first = passages["one"][0]
+    written.store(first, checked(first, "A duty applies."))
+
+    assert written.rows("settings_version") == [(None,)]
+
+
+def test_re_judging_a_fact_records_the_settings_that_judged_it(store, engine) -> None:
+    """A verdict and the settings it was reached under are one fact about a row.
+
+    `extract-revalidate` rewrites the verdict from the current shares, so a
+    fact left carrying the version that first wrote it would name settings
+    it is no longer being held to.
+    """
+    from facts import FactStore, checked
+
+    from extraction.service import revalidate
+
+    written = FactStore(engine, version="first")
+    passages = written.corpus(("one", ["A duty applies to every firm."]))
+    first = passages["one"][0]
+    written.store(first, checked(first, "A duty applies."))
+
+    from extraction.repository import FactCatalog
+
+    revalidate(FactCatalog(version="second"))
+
+    assert written.rows("settings_version") == [("second",)]
+
+
 def test_an_unparseable_value_is_the_stage_refusing_it_not_the_store(
     store,
 ) -> None:

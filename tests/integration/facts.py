@@ -77,17 +77,21 @@ def checked(
 class FactStore:
     """Writes the rows a facts test needs and reads back what it produced."""
 
-    def __init__(self, engine, language: str = "en") -> None:
+    def __init__(
+        self, engine, language: str = "en", version: str | None = None
+    ) -> None:
         """Initialises the driver against the migrated database.
 
         Args:
             engine: The engine the fixtures built.
             language: The language every seeded document is in.
+            version: The settings version to record on what it writes, as a
+                worker records the configuration it was built from.
         """
         self.engine = engine
         self.language = language
-        self.queue = PassageQueue()
-        self.catalog = FactCatalog()
+        self.queue = PassageQueue(version=version)
+        self.catalog = FactCatalog(version=version)
 
     def corpus(self, *documents: tuple[str, list[str]]) -> dict[str, list[int]]:
         """Writes documents and their passages.

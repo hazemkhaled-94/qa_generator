@@ -378,14 +378,23 @@ class QuestionQueue(RowQueue):
     done = Status.GENERATED
     next_pending = _NEXT_PENDING
 
-    def __init__(self, lease=None, kinds: tuple[str, ...] = ASKABLE) -> None:
+    def __init__(
+        self,
+        lease=None,
+        kinds: tuple[str, ...] = ASKABLE,
+        version: str | None = None,
+    ) -> None:
         """Binds to the session factory, with the kinds of fact it may offer.
 
         `kinds` is QUESTIONS_FACT_KINDS. `atomic` alone by default, which is
         the only shape every prompt and gate here was written for.
+
+        `version` is the configuration every question it writes was written
+        under, which for this stage is the only provenance a question gets.
         """
         super().__init__(lease)
         self._kinds = kinds
+        self._version = version
 
     def claim(self) -> TopicToCover | None:
         """Takes the next topic off the queue."""
@@ -541,6 +550,7 @@ class QuestionQueue(RowQueue):
                             status=question.status,
                             rejected_reason=question.rejected_reason,
                             status_changed_at=func.now(),
+                            settings_version=self._version,
                             follows_id=follows,
                             thread_position=position,
                         )

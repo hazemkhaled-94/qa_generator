@@ -79,6 +79,18 @@ def current() -> str:
     return Settings().version()
 
 
+def snapshot() -> tuple[dict[str, str], str]:
+    """The source to read settings from, and the name of that configuration.
+
+    Both from one read of the table, so the settings a stage loads and the
+    version it records on what it produces cannot come from two different
+    moments - which is the one way a row could end up stamped with a
+    configuration it was not produced under.
+    """
+    overrides = Settings().overrides()
+    return {**os.environ, **overrides}, version(overrides)
+
+
 class Settings:
     """The stored overrides, read and written one setting at a time."""
 

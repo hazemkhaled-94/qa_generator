@@ -264,6 +264,16 @@ class Question(Base):
         "accepted, and writes this. NULL means accepted but not drawn - kept, "
         "queryable, and available to the next draw.",
     )
+    settings_version: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The configuration this question was written under, as the digest "
+        "settings.store computes, or 'environment' when nothing was overridden. "
+        "The only provenance a question carries: which model wrote it, what mix "
+        "the plan aimed for and what bounds the gates held it to are all in the "
+        "settings that version names. NULL for a question written before a "
+        "setting could be changed without a restart.",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

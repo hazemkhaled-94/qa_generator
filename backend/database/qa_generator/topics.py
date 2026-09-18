@@ -161,6 +161,15 @@ class Topic(Base):
         comment="How many passages the fit could place in no topic. Those, and the "
         "facts drawn from them, are absent from every topic-weighted report.",
     )
+    settings_version: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The configuration this topic was fitted under, as the digest "
+        "settings.store computes, or 'environment' when nothing was overridden. "
+        "A fit is not reproducible without the parameters it used, and the seed "
+        "is only one of them. NULL for a topic fitted before a setting could be "
+        "changed without a restart.",
+    )
 
     passage_links: Mapped[list[PassageTopic]] = relationship(
         back_populates="topic", cascade="all, delete-orphan", passive_deletes=True

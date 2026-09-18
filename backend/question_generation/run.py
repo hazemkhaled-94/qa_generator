@@ -14,7 +14,7 @@ from question_generation.config import Settings
 from question_generation.factory import build_service, lease, models
 from question_generation.repository import QuestionCatalog, QuestionQueue
 from question_generation.service import balance, reverify
-from settings.store import resolved
+from settings.store import snapshot
 from stages.cli import queue_main
 
 log = logging.getLogger(__name__)
@@ -23,16 +23,19 @@ log = logging.getLogger(__name__)
 def main(argv: list[str] | None = None) -> int:
     """Runs the question generation command line."""
 
-    def configured() -> tuple[Settings, ModelSettings]:
-        """Reads the settings as they stand, stored values included.
+    def configured() -> tuple[Settings, ModelSettings, str]:
+        """Reads the settings as they stand, and what that configuration is.
 
         Called rather than captured, so every operation below answers to a
         value written since this process started - which for this stage
         includes the mix a plan aims for and the bounds a gate holds an
         answer to.
+
+        One read for both, so the settings a question is written under and
+        the version recorded on it cannot come from two different moments.
         """
-        source = resolved()
-        return Settings.load(source), ModelSettings.load(source)
+        source, version = snapshot()
+        return Settings.load(source), ModelSettings.load(source), version
 
     #: This stage's own operation. No model is called: it puts the stored
     #: questions through the gates that need none, which is how a fact
@@ -55,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def build():
         """Builds the service, naming the models it will call."""
-        settings, model = configured()
+        settings, model, version = configured()
         writer, verifier = models(settings, model)
         log.info(
             "writing with %s, verifying with %s, at %s",
@@ -63,12 +66,17 @@ def main(argv: list[str] | None = None) -> int:
             verifier.model,
             model.base_url,
         )
-        return build_service(settings, model)
+        return build_service(settings, model, version)
+
+    def queue() -> QuestionQueue:
+        """The queue, with the lease this stage's settings derive."""
+        settings, model, _ = configured()
+        return QuestionQueue(lease=lease(settings, model))
 
     return queue_main(
         name="questions",
         module="question_generation.run",
-        repository=lambda: QuestionQueue(lease=lease(*configured())),
+        repository=queue,
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,

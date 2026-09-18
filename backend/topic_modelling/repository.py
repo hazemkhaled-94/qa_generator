@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
@@ -64,6 +65,18 @@ class TopicQueue(StageQueue):
     )
     done = Status.MODELLED
     next_pending = _NEXT_PENDING
+
+    def __init__(
+        self, lease: timedelta | None = None, version: str | None = None
+    ) -> None:
+        """Binds to the session factory, with a lease and a settings version.
+
+        A fit is not reproducible without the parameters it used, and the
+        seed is only one of them, so every topic it stores records which
+        configuration produced it.
+        """
+        super().__init__(lease)
+        self._version = version
 
     def request(self) -> int:
         """Asks for a fit by putting a request row on the queue.
@@ -221,6 +234,7 @@ class TopicQueue(StageQueue):
                     "corpus_passages": fitting.passages,
                     "corpus_vocabulary": fitting.vocabulary,
                     "passages_without_topics": fitting.without_topics,
+                    "settings_version": self._version,
                 }
                 for fitting in fittings
                 for topic in fitting.topics

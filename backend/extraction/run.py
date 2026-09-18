@@ -16,7 +16,7 @@ from extraction.repository import FactCatalog, PassageQueue
 from extraction.service import bridge, recap, revalidate
 from extraction.validation import FactChecker
 from llm.config import Settings as ModelSettings
-from settings.store import resolved
+from settings.store import snapshot
 from stages.cli import queue_main
 
 log = logging.getLogger(__name__)
@@ -32,31 +32,34 @@ def main(argv: list[str] | None = None) -> int:
         The process exit code.
     """
 
-    def configured() -> tuple[ModelSettings, Settings]:
-        """Reads the settings as they stand, stored values included.
+    def configured() -> tuple[ModelSettings, Settings, str]:
+        """Reads the settings as they stand, and what that configuration is.
 
         Called rather than captured, so every operation below answers to a
         value written since this process started. A worker that read them
         once would answer to the file it booted with for as long as it ran.
+
+        One read for both, so the settings a fact is extracted under and the
+        version recorded on it cannot come from two different moments.
         """
-        source = resolved()
-        return ModelSettings.load(source), Settings.load(source)
+        source, version = snapshot()
+        return ModelSettings.load(source), Settings.load(source), version
 
     def build():
         """Builds the service, naming the model it will call."""
-        model, settings = configured()
+        model, settings, version = configured()
         # The effective model, not the shared one: EXTRACTION_MODEL is what
         # this stage will actually call, and a line naming the other is a
         # line that sends somebody looking in the wrong place.
         calling = model.overridden(settings.model)
         log.info("extracting with %s at %s", calling.model, calling.base_url)
-        return build_service(model, settings)
+        return build_service(model, settings, version)
 
     def run_bridge(within) -> int:
         """Reads every topic's passage groups for the claims they share."""
-        model, settings = configured()
+        model, settings, version = configured()
         return bridge(
-            FactCatalog(),
+            FactCatalog(version=version),
             build_bridge(model, settings),
             FactChecker(settings.digest_share),
             settings.bridges_per_topic,
@@ -71,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         "revalidate": (
             "judge every stored fact again, without calling the model",
             "judged again",
-            lambda within: revalidate(FactCatalog(), within),
+            lambda within: revalidate(FactCatalog(version=configured()[2]), within),
         ),
         "bridge": (
             "read every topic's passage groups for the claims they share",
@@ -81,7 +84,11 @@ def main(argv: list[str] | None = None) -> int:
         "recap": (
             "refuse the atomic facts over the cap, without calling the model",
             "refused",
-            lambda within: recap(FactCatalog(), configured()[1].atomic_cap, within),
+            lambda within: recap(
+                FactCatalog(version=configured()[2]),
+                configured()[1].atomic_cap,
+                within,
+            ),
         ),
     }
 

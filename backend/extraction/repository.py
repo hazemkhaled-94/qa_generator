@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from itertools import groupby
 from typing import ClassVar, cast
 
@@ -188,7 +189,12 @@ _SOURCES = (
 
 
 class PassageQueue(RowQueue):
-    """Reads the extraction queue and records what became of each passage."""
+    """Reads the extraction queue and records what became of each passage.
+
+    Holds the settings version so every fact it writes records what produced
+    it. A queue built without one writes NULL, which is what a reader should
+    see for a fact nothing was recording a configuration for.
+    """
 
     columns = Columns(
         entity=Passage,
@@ -205,6 +211,13 @@ class PassageQueue(RowQueue):
     }
     done = Status.EXTRACTED
     next_pending = _NEXT_PENDING
+
+    def __init__(
+        self, lease: timedelta | None = None, version: str | None = None
+    ) -> None:
+        """Binds to the session factory, with a lease and a settings version."""
+        super().__init__(lease)
+        self._version = version
 
     def claim(self) -> PassageToExtract | None:
         """Takes the next unread passage off the queue.
@@ -247,7 +260,7 @@ class PassageQueue(RowQueue):
                     ),
                 )
             )
-            _write(session, facts)
+            _write(session, facts, self._version)
             self._finish(passage_id, session=session)
         return len(facts)
 
@@ -261,12 +274,15 @@ class PassageQueue(RowQueue):
         return {**self.counts_by_status(), "facts": total, "validated": valid}
 
 
-def _write(session, facts: list[CheckedFact]) -> int:
+def _write(session, facts: list[CheckedFact], version: str | None = None) -> int:
     """Writes facts and the passages each rests on, in the caller's transaction.
 
     Args:
         session: The open transaction.
         facts: Checked facts of any kind, refused ones included.
+        version: The configuration these were extracted under, recorded on
+            each of them. None for a caller that does not know, which reads
+            as a fact produced before settings could be changed at all.
 
     Returns:
         How many facts were written.
@@ -278,7 +294,7 @@ def _write(session, facts: list[CheckedFact]) -> int:
     # than in whatever order the insert chose.
     ids = session.scalars(
         insert(Fact).returning(Fact.id, sort_by_parameter_order=True),
-        [_row(fact) for fact in facts],
+        [_row(fact, version) for fact in facts],
     ).all()
     links = [
         {
@@ -297,9 +313,10 @@ def _write(session, facts: list[CheckedFact]) -> int:
     return len(facts)
 
 
-def _row(fact: CheckedFact) -> dict:
+def _row(fact: CheckedFact, version: str | None = None) -> dict:
     """Turns one checked fact into the columns the facts table holds."""
     return {
+        "settings_version": version,
         "kind": fact.kind,
         "statement": fact.statement,
         "evidence_text": fact.evidence_text,
@@ -324,7 +341,16 @@ class FactCatalog(Repository):
     """Reads back the facts extraction produced, and writes the bridges.
 
     Separate from the queue: the API serves these and never claims a row.
+
+    Holds the settings version for the two operations that write a verdict -
+    a bridge pass and a re-judgement - so a fact says which configuration
+    decided it. The API builds this without one and never writes.
     """
+
+    def __init__(self, version: str | None = None) -> None:
+        """Binds to the session factory, with the settings version to record."""
+        super().__init__()
+        self._version = version
 
     def by_topic(self, within=None) -> Iterator[tuple[int, list[PassageToExtract]]]:
         """Streams each topic's passages, in document and reading order.
@@ -442,7 +468,7 @@ class FactCatalog(Repository):
             How many were written.
         """
         with self._session.begin() as session:
-            return _write(session, facts)
+            return _write(session, facts, self._version)
 
     def judged(
         self, within=None
@@ -541,6 +567,11 @@ class FactCatalog(Repository):
                         "unresolved_references": checked.unresolved_references,
                         "spacy_model": checked.spacy_model,
                         "spacy_version": checked.spacy_version,
+                        # Rewritten with the verdict: a re-judgement is what
+                        # the current shares decided, so a fact left carrying
+                        # the version that first wrote it would name settings
+                        # that are no longer what it was held to.
+                        "settings_version": self._version,
                     }
                     for fact_id, checked in verdicts
                 ],

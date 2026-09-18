@@ -18,7 +18,9 @@ from llm.config import Settings as ModelSettings
 
 
 def build_service(
-    model: ModelSettings, settings: Settings | None = None
+    model: ModelSettings,
+    settings: Settings | None = None,
+    version: str | None = None,
 ) -> ExtractionService:
     """Wires the per-passage service and its collaborators.
 
@@ -26,6 +28,9 @@ def build_service(
         model: Which model to call, where, and how patiently.
         settings: What extraction writes. Read from the environment when not
             given.
+        version: The configuration these settings came from, recorded on
+            every fact written. None records nothing, which is what a caller
+            that resolved no settings should leave behind.
 
     Returns:
         The service a worker drains the passage queue with.
@@ -35,7 +40,7 @@ def build_service(
     digests = settings.digests
     cap = settings.atomic_cap
     return ExtractionService(
-        repository=PassageQueue(lease=model.lease),
+        repository=PassageQueue(lease=model.lease, version=version),
         extractors=ExtractorRegistry(
             extractors=(TableExtractor(),), default=LlmExtractor(client, cap)
         ),
