@@ -2,6 +2,11 @@
 
 One drain on the host, in the foreground, against the same database the
 workers use. The flags mirror the stage's HTTP surface one for one.
+
+A watching worker builds its service again when the settings change, so a
+value written through a page or a route reaches it without a restart. It
+never rebuilds part-way through a row: the check sits between drains, which
+is where nothing is claimed.
 """
 
 from __future__ import annotations
@@ -53,6 +58,49 @@ def parser(module: str, actions: dict[str, str]) -> argparse.ArgumentParser:
     )
     built.add_argument("--watch", action="store_true", help="drain and keep draining")
     return built
+
+
+def reloading(
+    name: str, build_service: Callable[[], StageService]
+) -> Callable[[Callable[[], bool]], int]:
+    """Wraps a drain so it rebuilds the service when the settings change.
+
+    The service is built from settings, and holds what they decided: which
+    model to call, what a passage is measured against, what a gate lets
+    through. A worker that read them once answers to the file it started
+    with for as long as it runs, which is what made the UI unable to
+    configure anything.
+
+    The version is a digest of the stored overrides, so this is one small
+    query per poll and a rebuild only when something actually moved.
+
+    ponytail: checked between drains rather than per row. A drain works the
+    queue until it is empty, so a change made during a long run is picked up
+    when that run finishes rather than part-way through - which is the right
+    trade for question generation, where rebuilding means loading 2.2 GB of
+    embedding weights again. The upgrade, if a long run ever has to turn on
+    a sixpence, is to check in `StageService.drain`'s loop and rebuild only
+    the collaborators whose settings differ.
+    """
+    from settings.store import current
+
+    held: dict[str, Any] = {}
+
+    def drain(stopping: Callable[[], bool]) -> int:
+        """Drains the queue, on a service built from the current settings."""
+        version = current()
+        if held.get("version") != version:
+            if held:
+                log.info(
+                    "%s: settings are now %s; building the service again",
+                    name,
+                    version,
+                )
+            held["service"] = build_service()
+            held["version"] = version
+        return held["service"].drain(stopping)
+
+    return drain
 
 
 def narrowing(queue: StageQueue, only: str | None):
@@ -123,10 +171,11 @@ def queue_main(
     if args.rerun:
         log.info("%s: %d row(s) queued again", name, act(lambda q, w: q.reset(w)))
 
-    service = build_service()
     if not args.watch:
-        service.drain()
+        # Built once, from the settings as they stand: one drain cannot
+        # outlive a change to them.
+        build_service().drain()
         return 0
 
-    watch(service.drain, decimal("WORKER_POLL_SECONDS"))
+    watch(reloading(name, build_service), decimal("WORKER_POLL_SECONDS"))
     return 0

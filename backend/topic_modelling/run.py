@@ -15,8 +15,9 @@ import telemetry
 from blob_store.seaweedfs import ExportBucket
 from database.qa_generator import engine
 from settings import decimal
+from settings.store import resolved
 from stages import watch
-from stages.cli import parser
+from stages.cli import parser, reloading
 from topic_modelling.config import Settings
 from topic_modelling.factory import build_service
 from topic_modelling.repository import TopicCatalog, TopicQueue
@@ -51,7 +52,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv[1:] if argv is None else argv
     )
 
-    settings = Settings.load()
+    def build():
+        """Builds the service from the settings as they stand.
+
+        Called rather than captured: a watching worker rebuilds when a
+        setting changes, so a fit queued after one answers to the new value.
+        """
+        return build_service(Settings.load(resolved()))
+
     telemetry.configure("topic_modelling")
     telemetry.trace_engine(engine())
 
@@ -90,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         log.info("returned %d fit(s) to the queue", TopicQueue().retry())
         return 0
 
-    service = build_service(settings)
+    service = build()
 
     if args.discover:
         log.info("queued topic fit %d", service.request())
@@ -99,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         service.drain()
         return 0
 
-    watch(service.drain, decimal("WORKER_POLL_SECONDS"))
+    watch(reloading("topic_modelling", build), decimal("WORKER_POLL_SECONDS"))
     return 0
 
 

@@ -11,6 +11,7 @@ import sys
 from preprocessing.parsing.config import Settings
 from preprocessing.parsing.factory import build_service
 from preprocessing.parsing.repository import ParseQueue
+from settings.store import resolved
 from stages.cli import queue_main
 
 
@@ -23,12 +24,13 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         The process exit code.
     """
-    settings = Settings.load()
     return queue_main(
         name="parsing",
         module="preprocessing.parsing.run",
         repository=ParseQueue,
-        build_service=lambda: build_service(settings),
+        # Read when the service is built rather than captured here, so a
+        # watching worker answers to a value written since it started.
+        build_service=lambda: build_service(Settings.load(resolved())),
         argv=sys.argv[1:] if argv is None else argv,
     )
 

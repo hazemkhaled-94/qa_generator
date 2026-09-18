@@ -64,6 +64,21 @@ def version(overrides: Mapping[str, str]) -> str:
     return hashlib.sha256(written.encode()).hexdigest()[:_VERSION_CHARS]
 
 
+def resolved() -> dict[str, str]:
+    """The environment overlaid with what a deployment changed.
+
+    The one a command line wants: built when it is called rather than held,
+    so a process reaches the database when it needs a setting and not when
+    it is working out whether it was asked for `--help`.
+    """
+    return Settings().resolved()
+
+
+def current() -> str:
+    """Names the configuration running now."""
+    return Settings().version()
+
+
 class Settings:
     """The stored overrides, read and written one setting at a time."""
 

@@ -8,6 +8,7 @@ store; everything else is the real code.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterator
 
@@ -392,6 +393,10 @@ class CommandDriver:
         monkeypatch.setattr(module, "TopicCatalog", Catalog)
         monkeypatch.setattr(module, "ExportBucket", Export)
         monkeypatch.setattr(module, "build_service", lambda _: Service())
+        # The settings the command reads, without the database they are
+        # stored in. The environment is what a deployment with nothing
+        # configured resolves to, and Settings.load is still the real one.
+        monkeypatch.setattr(module, "resolved", lambda: dict(os.environ))
         monkeypatch.setattr(module, "_DRAWN", written)
         monkeypatch.setattr(module.telemetry, "configure", lambda *_: None)
         monkeypatch.setattr(module.telemetry, "trace_engine", lambda *_: None)

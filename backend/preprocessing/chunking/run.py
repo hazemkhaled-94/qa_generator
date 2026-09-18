@@ -12,6 +12,7 @@ from preprocessing.chunking.config import Settings
 from preprocessing.chunking.factory import build_service
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from preprocessing.chunking.service import revocabulary
+from settings.store import resolved
 from stages.cli import queue_main
 
 #: This stage's own operation, beyond the shared queue verbs: re-reads the
@@ -34,12 +35,14 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         The process exit code.
     """
-    settings = Settings.load()
     return queue_main(
         name="chunking",
         module="preprocessing.chunking.run",
         repository=ChunkQueue,
-        build_service=lambda: build_service(settings),
+        # Read when the service is built rather than captured here, so a
+        # watching worker answers to a value written since it started.
+        # Building it loads the tokenizer EMBEDDING_MODEL names.
+        build_service=lambda: build_service(Settings.load(resolved())),
         argv=sys.argv[1:] if argv is None else argv,
         extra=_EXTRA,
     )

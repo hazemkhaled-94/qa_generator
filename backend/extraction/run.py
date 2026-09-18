@@ -16,6 +16,7 @@ from extraction.repository import FactCatalog, PassageQueue
 from extraction.service import bridge, recap, revalidate
 from extraction.validation import FactChecker
 from llm.config import Settings as ModelSettings
+from settings.store import resolved
 from stages.cli import queue_main
 
 log = logging.getLogger(__name__)
@@ -30,11 +31,20 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         The process exit code.
     """
-    model = ModelSettings.load()
-    settings = Settings.load()
+
+    def configured() -> tuple[ModelSettings, Settings]:
+        """Reads the settings as they stand, stored values included.
+
+        Called rather than captured, so every operation below answers to a
+        value written since this process started. A worker that read them
+        once would answer to the file it booted with for as long as it ran.
+        """
+        source = resolved()
+        return ModelSettings.load(source), Settings.load(source)
 
     def build():
         """Builds the service, naming the model it will call."""
+        model, settings = configured()
         # The effective model, not the shared one: EXTRACTION_MODEL is what
         # this stage will actually call, and a line naming the other is a
         # line that sends somebody looking in the wrong place.
@@ -44,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def run_bridge(within) -> int:
         """Reads every topic's passage groups for the claims they share."""
+        model, settings = configured()
         return bridge(
             FactCatalog(),
             build_bridge(model, settings),
@@ -70,14 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         "recap": (
             "refuse the atomic facts over the cap, without calling the model",
             "refused",
-            lambda within: recap(FactCatalog(), settings.atomic_cap, within),
+            lambda within: recap(FactCatalog(), configured()[1].atomic_cap, within),
         ),
     }
 
     return queue_main(
         name="extraction",
         module="extraction.run",
-        repository=lambda: PassageQueue(lease=model.lease),
+        repository=lambda: PassageQueue(lease=configured()[0].lease),
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
