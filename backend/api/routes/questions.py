@@ -16,15 +16,17 @@ from typing import Literal
 from fastapi import Query
 from pydantic import BaseModel
 
-from api.dependencies import question_catalog, question_settings, questions_queue
+from api.dependencies import question_catalog, questions_queue
 from api.errors import ApiError, ErrorBody
 from api.routes.stage import stage_router
 from database.qa_generator import QuestionStatus
+from question_generation.config import Settings as QuestionSettings
 from question_generation.models import (
     QuestionDetail,
     QuestionQuality,
     StoredQuestion,
 )
+from settings.store import resolved
 
 #: The columns `q` may look in, and the states a question may be filtered to
 #: or moved to. Literals rather than free strings, so the OpenAPI document
@@ -152,20 +154,21 @@ def plan() -> GenerationPlan:
     """Reports what generation is configured to write.
 
     The mix of types and bands, the shares, and the answer bounds each form is
-    held to. Read from the environment at start-up, so this is what the next
-    run will do rather than what the last one did.
+    held to. Read per request, stored values included, so this is what the
+    next run will do rather than what the last one did or what the API
+    happened to start with.
     """
+    settings = QuestionSettings.load(resolved())
     return GenerationPlan(
-        types=question_settings.type_mix,
-        difficulty=question_settings.difficulty_mix,
-        followup_types=list(question_settings.followup_types),
-        per_topic=question_settings.per_topic,
-        unanswerable_share=question_settings.unanswerable_share,
-        followup_share=question_settings.followup_share,
-        max_followups=question_settings.max_followups,
+        types=settings.type_mix,
+        difficulty=settings.difficulty_mix,
+        followup_types=list(settings.followup_types),
+        per_topic=settings.per_topic,
+        unanswerable_share=settings.unanswerable_share,
+        followup_share=settings.followup_share,
+        max_followups=settings.max_followups,
         answer_chars={
-            form: list(bounds)
-            for form, bounds in question_settings.answer_chars.items()
+            form: list(bounds) for form, bounds in settings.answer_chars.items()
         },
     )
 

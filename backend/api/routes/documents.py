@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Query, Request, Response, UploadFile
 
-from api.dependencies import ingest_service, removal_service
+from api.dependencies import ingest_service, ingesting, removal_service
 from api.errors import ApiError, ErrorBody
 from database.qa_generator import Outcome
 from ingestion.models import (
@@ -160,19 +160,23 @@ async def add_document(request: Request, file: UploadFile) -> IngestResult:
             accepted type. Each code is the ingest outcome itself.
     """
     filename = file.filename or "unnamed"
+    # Built per upload, from the settings as they stand: ingestion has no
+    # worker to pick a change up, so the limit this is measured against and
+    # the types it accepts would otherwise be the ones the API started with.
+    service = ingesting()
 
     # Checked before the body is touched. Content-Length covers the whole
     # multipart body, so it is an upper bound rather than the file's size.
     declared = _declared_size(request)
-    if declared is not None and declared > ingest_service.max_file_size_bytes:
-        return _respond(ingest_service.refuse_oversized(filename, declared))
+    if declared is not None and declared > service.max_file_size_bytes:
+        return _respond(service.refuse_oversized(filename, declared))
 
     # ponytail: a request declaring no length is still read in full and
     # measured afterwards. Every client that posts a file sets Content-Length;
     # the upgrade path for one that does not is a bounded chunked read, or a
     # body limit on a reverse proxy in front of this.
     upload = UploadedFile(filename=filename, data=await file.read())
-    return _respond(ingest_service.ingest(upload))
+    return _respond(service.ingest(upload))
 
 
 def _declared_size(request: Request) -> int | None:

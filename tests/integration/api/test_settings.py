@@ -380,6 +380,51 @@ def test_writing_empty_over_an_absence_changes_nothing(client) -> None:
     assert answered.json()["changed"] == []
 
 
+def test_the_upload_limit_takes_effect_without_a_restart(client, pdf) -> None:
+    """Ingestion is the one service with no worker, so the API is the worker.
+
+    The limit was baked into a service built at import, which is why this is
+    the one setting a change could not have reached.
+    """
+    client.patch("/settings/ingestion", json={"values": {"MAX_FILE_SIZE_MB": "1"}})
+
+    refused = client.post(
+        "/documents",
+        files={
+            "file": (
+                "big.pdf",
+                b"%PDF-1.4" + b"0" * (2 * 1024 * 1024),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert refused.status_code == 413, refused.text
+
+
+def test_raising_the_upload_limit_takes_effect_too(client, pdf) -> None:
+    """The same change in the other direction, so it is the limit that moved."""
+    client.patch("/settings/ingestion", json={"values": {"MAX_FILE_SIZE_MB": "1"}})
+    client.patch("/settings/ingestion", json={"values": {"MAX_FILE_SIZE_MB": "100"}})
+
+    accepted = client.post(
+        "/documents", files={"file": ("small.pdf", pdf, "application/pdf")}
+    )
+
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_the_generation_plan_reports_a_changed_mix(client) -> None:
+    """What was asked for, beside what came out, has to be what is asked now.
+
+    The plan was read at start-up, so a mix changed through a page would have
+    been reported as whatever the API booted with.
+    """
+    client.patch("/settings/questions", json={"values": {"QUESTIONS_PER_TOPIC": "3"}})
+
+    assert client.get("/questions/plan").json()["per_topic"] == 3
+
+
 def test_the_model_litellm_calls_can_be_changed(client) -> None:
     """The setting this was all for, and the one furthest from a database.
 
