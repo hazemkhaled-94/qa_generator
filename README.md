@@ -423,6 +423,8 @@ PostgreSQL's `max_connections`.
 | `GET /questions/{id}` | One question with the facts it was written from |
 | `GET /questions/quality` | How many questions hold up, which gate stopped the rest, and how much of the corpus's subject matter is covered |
 | `PATCH /questions/{id}` | Accept or reject one question |
+| `GET /settings/{service}` | What one service is configured to do: each setting's value, what the files say it would be, its type, its bounds and whether somebody changed it |
+| `PATCH /settings/{service}` | Change it. A null value returns one setting to what the files say; the whole request is refused if any one value is |
 | `GET /health` | That the process is up, for the container healthcheck |
 | `GET /status` | Every component behind the API, and what each service holds |
 
@@ -468,15 +470,15 @@ own, so no two rows can disagree about which topic a passage is in.
 
 One page per stage, and a page runs that stage and no other:
 
-| Page | Lists | Runs | Over |
-|---|---|---|---|
-| Upload | — | ingestion | the files you choose |
-| Documents | documents | parsing | a document |
-| Passages | passages | chunking | a document |
-| Facts | facts | extraction | a passage |
-| Topics | topics | topic modelling | the whole corpus |
-| Questions | questions | question generation | a topic |
-| System health | components | nothing | — |
+| Page | Lists | Runs | Over | Configures |
+|---|---|---|---|---|
+| Upload | — | ingestion | the files you choose | ingestion |
+| Documents | documents | parsing | a document | parsing |
+| Passages | passages | chunking | a document | chunking |
+| Facts | facts | extraction | a passage | extraction |
+| Topics | topics | topic modelling | the whole corpus | topics |
+| Questions | questions | question generation | a topic | questions |
+| System health | components | nothing | — | the platform all six share |
 
 A page lists what its stage produces and runs the stage that produced it.
 The queue's unit is not always the row: chunking replaces all of a
@@ -486,9 +488,16 @@ thing its stage actually queues over. The page says so where it offers the
 control.
 
 Every page is the same sequence of panels: the few figures worth seeing on
-arrival, an `Analysis` fold nobody has to open, the stage's controls, the
-search box, the filters, the table, and — only once a row is picked —
-everything held about that row, as one table of every field it has. Two
+arrival, an `Analysis` fold nobody has to open, the stage's controls with a
+`Configuration` fold beside them, the search box, the filters, the table,
+and — only once a row is picked — everything held about that row, as one
+table of every field it has.
+
+The configuration is where it is because the remedy for changing it is
+directly above it: a setting that stales what the stage already produced is
+rebuilt by the Redo button in the same panel. Its controls are drawn from
+what the API says each setting is, so the page holds no list of settings and
+adding one to `settings/catalog.py` adds it to the page. Two
 pages carry a delete box, because two things can be deleted: a document
 with or without what was derived from it, and the topics, all at once. A
 passage, a fact and a question have no delete: a passage belongs to its
@@ -1073,7 +1082,7 @@ PyPI's build, which has no CUDA variant to avoid.
 | `backend/topic_modelling/` | Each language becomes topics over its own vocabulary — see its own [README](backend/topic_modelling/README.md) |
 | `backend/question_generation/` | Each topic's facts become questions with known answers |
 | `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
-| `backend/settings/` | Reading configuration out of the environment, and nowhere else |
+| `backend/settings/` | Reading configuration: the environment, the overrides stored over it, what may be configured and what a change stales |
 | `tests/` | The test suite, one directory per layer; see Tests below |
 | `.github/workflows/` | What CI runs, and when |
 | `telemetry/` | Logging and OpenTelemetry configuration |
@@ -1331,8 +1340,61 @@ temperature.
 
 ## Configuration
 
-All configuration is environment variables, split by what the value is rather
-than by which service reads it:
+Every setting has two places it can come from. The files below supply all of
+them, and a deployment can override one through the UI, the API or the command
+line without restarting anything.
+
+The files are the default and stay required: a variable missing from both of
+them stops the service at start-up naming itself, as it always did. An
+override is a row in `service_settings`, and deleting that row is what returns
+a setting to whatever the file says — there is no stored copy of a default,
+because the file is the copy.
+
+A worker picks a change up on the row it claims next. Nothing is requeued: if
+the change means what a stage already produced was made under the old value,
+whichever surface you used says so and names the stage, and that stage's own
+`-rerun` is what rebuilds it. Every fact, topic and question records the
+configuration it was produced under, so a corpus built across a change can
+still be read.
+
+Three ways to change one, all going through the same validation — the stage's
+own `Settings.load`, so what you are refused with is the message the worker
+would have failed at start-up with:
+
+```bash
+# On the page that runs the service, under Configuration in its service panel.
+
+# Or the API, one service per request:
+curl -s localhost:8000/settings/topics
+curl -s -X PATCH localhost:8000/settings/topics \
+  -H 'content-type: application/json' \
+  -d '{"values": {"TOPIC_PASSES": "20"}}'
+
+# Or a terminal:
+make settings SERVICE=topics
+make settings-set SERVICE=topics SET="TOPIC_PASSES=20"
+make settings-unset SERVICE=topics UNSET="TOPIC_PASSES"
+```
+
+The seven services each configure their own settings and no others:
+`ingestion` on Upload, `parsing` on Documents, `chunking` on Passages,
+`extraction` on Facts, `topics` on Topics, `questions` on Questions, and
+`platform` — the model, the tokenizer and the language pipelines the six of
+them share — on System health. A stage that wants a different model from the
+rest names one of its own: `EXTRACTION_MODEL`, `TOPIC_MODEL`,
+`QUESTIONS_MODEL`, each absent by default and each meaning `LLM_MODEL`.
+
+`settings/catalog.py` is the list of what may be configured, what type each
+setting is, what it may hold and which stages' output it stales. A setting the
+code reads and the catalogue does not describe cannot be configured at all,
+and one the catalogue describes and nothing reads is a control that does
+nothing; `tests/static` refuses both.
+
+The pool sizes and the addresses are not configurable. They are read before a
+service could ask a database for anything, so they are served read-only and
+marked as the deployment's.
+
+The files, split by what the value is rather than by which service reads it:
 
 | File | In git | Holds |
 |---|---|---|
@@ -1364,7 +1426,8 @@ The values most likely to need changing:
 | `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. Medium, not small: the small German model does not tag a modal as a finite verb |
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | — | Where that model is served |
-| `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Unset means the writer marks its own work, which it will always pass; the worker warns on every start |
+| `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Naming the writer's own model, or none at all, turns off the two gates only an independent model may apply; the worker warns on every start |
+| `EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model from the rest. Each replaces the model only — where it is served and how patient to be stay `LLM_*`, because a stage that could set its own timeout would be a stage whose lease nobody could derive. Unset means `LLM_MODEL` |
 | `QUESTIONS_PER_TOPIC` | `backend.env` | 20 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
 | `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, divided between the passages the sample holds. The writer picks which of them one question needs |
 | `QUESTIONS_TYPE_MIX` | `backend.env` | eleven kinds | Which kinds of question are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |

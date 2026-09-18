@@ -59,6 +59,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         extract-rerun extract-revalidate extract-bridge extract-recap \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
+        settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-rerun questions-reverify questions-balance \
         documents delete delete-derived \
