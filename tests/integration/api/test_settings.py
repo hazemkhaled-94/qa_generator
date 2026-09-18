@@ -370,8 +370,17 @@ def test_a_setting_whose_absence_means_something_can_be_turned_off(client) -> No
     assert Settings.load(Store().resolved()).verifier_model is None
 
 
-def test_writing_empty_over_an_absence_changes_nothing(client) -> None:
-    """Absent already, so there is nothing to turn off and no row to write."""
+def test_writing_empty_over_an_absence_changes_nothing(client, monkeypatch) -> None:
+    """Absent already, so there is nothing to turn off and no row to write.
+
+    The absence is made rather than assumed. `.env` carries a verifier on a
+    developer's machine and not in CI, so a test that read whichever the
+    shell happened to export passed on one and failed on the other - and
+    the environment is half of what `resolved` compares a new value
+    against, which is the thing under test here.
+    """
+    monkeypatch.delenv("QUESTIONS_VERIFIER_MODEL", raising=False)
+
     answered = client.patch(
         "/settings/questions", json={"values": {"QUESTIONS_VERIFIER_MODEL": ""}}
     )
