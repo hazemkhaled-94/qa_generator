@@ -148,7 +148,7 @@ def test_the_walk_finds_the_modules_it_is_meant_to_guard() -> None:
     """
     assert len(REACHED) > 30, sorted(REACHED)
     assert "api.dependencies" in REACHED
-    assert "question_generation.repository" in REACHED, (
+    assert "question_generation.catalog" in REACHED, (
         "the api serves /questions, so it must reach that catalogue"
     )
     assert "extraction.repository" in REACHED

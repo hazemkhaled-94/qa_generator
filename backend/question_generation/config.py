@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from database.qa_generator import AnswerForm, Difficulty
-from question_generation.repository import ASKABLE
+from question_generation.queue import ASKABLE
 from question_generation.types import SPECS
 from settings import Source, csv, decimal, integer, mapping, optional, required
 

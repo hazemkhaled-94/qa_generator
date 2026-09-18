@@ -14,7 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database.qa_generator import QuestionFact, Status
-from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.catalog import QuestionCatalog
+from question_generation.queue import QuestionQueue
 from topic_modelling.repository import TopicQueue
 
 pytestmark = pytest.mark.integration
@@ -581,8 +582,8 @@ def test_a_question_keeps_the_kind_the_form_and_the_band_it_was_planned_as(
     Without them a set cannot be filtered to its reasons, and a run cannot
     say whether the mix it was asked for is the mix it produced.
     """
+    from question_generation.catalog import QuestionCatalog
     from question_generation.models import CheckedQuestion, criteria_of
-    from question_generation.repository import QuestionCatalog
 
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -622,8 +623,8 @@ def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
     corpus,
 ) -> None:
     """The realised mix beside the planned one is the whole measurement."""
+    from question_generation.catalog import QuestionCatalog
     from question_generation.models import CheckedQuestion, criteria_of
-    from question_generation.repository import QuestionCatalog
 
     written = corpus(topics=1, facts_per_topic=2)
     topic_id = written["topics"][0]
@@ -862,7 +863,7 @@ def test_a_re_check_leaves_a_bridge_backed_question_accepted(engine, database) -
     question stored `multi_passage` and reject every one of them as
     `source_changed` on its first run.
     """
-    from question_generation.repository import QuestionCatalog
+    from question_generation.catalog import QuestionCatalog
     from question_generation.service import reverify
 
     with Session(engine) as session:
@@ -913,7 +914,7 @@ def test_a_bridge_backed_question_is_found_by_either_of_its_documents(
     engine, database
 ) -> None:
     """The page must not contradict the cross_document it was stored with."""
-    from question_generation.repository import QuestionCatalog
+    from question_generation.catalog import QuestionCatalog
 
     with Session(engine) as session:
         session.add_all([document(digest("a")), document(digest("b"))])

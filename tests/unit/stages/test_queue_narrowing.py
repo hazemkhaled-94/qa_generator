@@ -41,7 +41,7 @@ def test_a_queue_over_part_of_a_table_carries_that_condition_everywhere() -> Non
     Without this every inherited verb would reach the request row, and
     `start` would queue the asking as though it were a topic.
     """
-    from question_generation.repository import QuestionQueue
+    from question_generation.queue import QuestionQueue
 
     narrowed = where(QuestionQueue(), None)
 

@@ -19,7 +19,7 @@ import sys
 
 import telemetry
 from database.qa_generator import engine
-from question_generation.repository import QuestionCatalog
+from question_generation.catalog import QuestionCatalog
 from review import datasets
 from review.config import Settings
 from review.records import ReviewRepository

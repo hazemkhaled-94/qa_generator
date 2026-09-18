@@ -19,8 +19,9 @@ from ingestion.repository import DocumentRepository
 from ingestion.service import IngestService
 from preprocessing.chunking.repository import ChunkQueue, PassageCatalog
 from preprocessing.parsing.repository import ParseQueue
+from question_generation.catalog import QuestionCatalog
 from question_generation.config import Settings as QuestionSettings
-from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.queue import QuestionQueue
 from settings.store import resolved
 from topic_modelling.repository import TopicCatalog, TopicQueue
 

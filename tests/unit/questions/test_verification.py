@@ -16,11 +16,9 @@ from database.qa_generator import (
     QuestionStatus,
     QuestionType,
 )
-from question_generation.models import Neighbour
-from question_generation.verification import (
+from question_generation.checker import QuestionChecker
+from question_generation.gates import (
     OVERLAP,
-    QuestionChecker,
-    Reading,
     agrees,
     anchored,
     fitting,
@@ -28,6 +26,8 @@ from question_generation.verification import (
     on_topic,
     structural,
 )
+from question_generation.models import Neighbour
+from question_generation.verifier import Reading
 
 pytestmark = pytest.mark.nlp
 
@@ -1229,7 +1229,7 @@ def test_the_verifier_is_told_to_answer_in_the_language_of_the_passages() -> Non
     and share not one lemma, so a correct question was rejected as
     not_recoverable.
     """
-    from question_generation.verification import _VERIFY
+    from question_generation.verifier import _VERIFY
 
     assert "language" in _VERIFY
 

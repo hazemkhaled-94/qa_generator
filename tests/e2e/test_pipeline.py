@@ -38,11 +38,13 @@ from preprocessing.parsing.models import Conversion, SourceDocument
 from preprocessing.parsing.pipelines import Pipeline, PipelineRegistry
 from preprocessing.parsing.repository import ParseQueue
 from preprocessing.parsing.service import ParsingService
+from question_generation.catalog import QuestionCatalog
+from question_generation.checker import QuestionChecker
 from question_generation.config import Settings as QuestionSettings
 from question_generation.generation import QuestionWriter
-from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.queue import QuestionQueue
 from question_generation.service import QuestionGenerationService, reverify
-from question_generation.verification import QuestionChecker, Verifier
+from question_generation.verifier import Verifier
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 

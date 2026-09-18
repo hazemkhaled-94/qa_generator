@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database.qa_generator import QuestionFact
-from question_generation.repository import QuestionCatalog
+from question_generation.catalog import QuestionCatalog
 
 pytestmark = pytest.mark.integration
 

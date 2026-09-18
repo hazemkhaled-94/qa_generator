@@ -9,7 +9,10 @@ from opentelemetry.trace import Span
 
 from database.qa_generator import Difficulty, QuestionRejection, QuestionStatus
 from question_generation.balance import choose, composition, largest, quota_of
+from question_generation.catalog import QuestionCatalog
+from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
+from question_generation.gates import near_verdict, structural
 from question_generation.generation import QuestionWriter
 from question_generation.models import (
     CheckedQuestion,
@@ -19,14 +22,9 @@ from question_generation.models import (
     criteria_of,
 )
 from question_generation.planning import Plan, plans
-from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.queue import QuestionQueue
 from question_generation.selection import Deal, spread
 from question_generation.types import SPECS, spec
-from question_generation.verification import (
-    QuestionChecker,
-    near_verdict,
-    structural,
-)
 from stages import StageService
 from telemetry import tracer, working
 

@@ -10,9 +10,10 @@ import logging
 import sys
 
 from llm.config import Settings as ModelSettings
+from question_generation.catalog import QuestionCatalog
 from question_generation.config import Settings
 from question_generation.factory import build_service, lease, models
-from question_generation.repository import QuestionCatalog, QuestionQueue
+from question_generation.queue import QuestionQueue
 from question_generation.service import balance, reverify
 from settings.store import snapshot
 from stages.cli import queue_main

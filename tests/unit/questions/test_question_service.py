@@ -386,8 +386,8 @@ def test_the_phrasing_gate_is_off_when_one_model_does_both() -> None:
     the checker ends up holding is the one the resolution produced.
     """
     from llm.config import Settings as ModelSettings
+    from question_generation.checker import QuestionChecker
     from question_generation.factory import models
-    from question_generation.verification import QuestionChecker
 
     model = ModelSettings(
         model="ollama/writer",
