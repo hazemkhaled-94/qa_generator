@@ -5,7 +5,7 @@ from __future__ import annotations
 import requests
 import streamlit as st
 
-from lib import backend, page
+from lib import backend, configure, page
 from lib.backend.upload import UploadApi
 
 
@@ -30,18 +30,23 @@ def view() -> None:
             }
         )
 
-    with page.panel("Ingestion"), st.form("upload", border=False):
-        files = st.file_uploader(
-            "PDFs",
-            type=["pdf"],
-            accept_multiple_files=True,
-            help="Stored under the digest of its own bytes. A file the "
-            "corpus already holds is recorded and stores nothing.",
-        )
-        submit, *_ = st.columns(4)
-        submitted = submit.form_submit_button(
-            "Upload all", type="primary", width="stretch"
-        )
+    with page.panel("Ingestion"):
+        with st.form("upload", border=False):
+            files = st.file_uploader(
+                "PDFs",
+                type=["pdf"],
+                accept_multiple_files=True,
+                help="Stored under the digest of its own bytes. A file the "
+                "corpus already holds is recorded and stores nothing.",
+            )
+            submit, *_ = st.columns(4)
+            submitted = submit.form_submit_button(
+                "Upload all", type="primary", width="stretch"
+            )
+        # Outside the upload form and inside the panel: a form cannot hold
+        # another, and the configuration belongs beside the service it
+        # configures.
+        configure.panel("ingestion")
 
     if not submitted:
         return

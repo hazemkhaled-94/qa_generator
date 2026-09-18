@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, page, stage
+from lib import backend, catalog, configure, page, stage
 
 #: The one stage this page runs. It queues over a document and replaces all
 #: of its passages at once, so a passage picked below is run by its document.
@@ -76,6 +76,7 @@ def view() -> None:
 
     with service, page.panel("Chunking"):
         stage.service(client, _CHUNKING)
+        configure.panel("chunking")
 
     with page.panel(f"Passages · {total:,}"):
         if not rows:

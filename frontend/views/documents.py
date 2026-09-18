@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, page, stage
+from lib import backend, catalog, configure, page, stage
 
 #: The one stage this page runs. Chunking is the Passages page's and
 #: extraction is the Facts page's; neither can be reached from here.
@@ -67,6 +67,7 @@ def view() -> None:
 
     with page.panel("Parsing"):
         stage.service(client, _PARSING)
+        configure.panel("parsing")
 
     words, _ = catalog.search("documents", _FIELDS)
     chosen, pager = catalog.filters(

@@ -15,15 +15,18 @@ from lib import config
 from lib.backend.base import Endpoint
 from lib.backend.catalog import CatalogApi
 from lib.backend.health import HealthApi
+from lib.backend.settings import SettingsApi
 from lib.backend.upload import UploadApi
 
 __all__ = [
     "CatalogApi",
     "Endpoint",
     "HealthApi",
+    "SettingsApi",
     "UploadApi",
     "catalog_api",
     "health_api",
+    "settings_api",
     "upload_api",
 ]
 
@@ -51,3 +54,8 @@ def health_api() -> HealthApi:
 def catalog_api() -> CatalogApi:
     """Returns the client the Documents, Passages and Facts pages share."""
     return CatalogApi(config.BACKEND_URL, _session())
+
+
+def settings_api() -> SettingsApi:
+    """Returns the client every page's configuration panel uses."""
+    return SettingsApi(config.BACKEND_URL, _session())

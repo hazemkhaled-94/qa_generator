@@ -20,6 +20,7 @@ from pages import (
     View,
     answers,
     changed,
+    settings,
     status,
 )
 
@@ -51,9 +52,15 @@ OUTSIDE = {
 
 
 def opened(run_view, name: str) -> View:
-    """Opens any page, whichever client it happens to hold."""
+    """Opens any page, whichever client it happens to hold.
+
+    Every page also draws a configuration panel, which holds a client of
+    its own, so every page is given one here: a panel that cannot reach the
+    backend draws a caption instead of its controls, and a page test should
+    be looking at the controls.
+    """
     clients = OUTSIDE.get(name) or {"catalog_api": Answers(**answers())}
-    return View(run_view(name, **clients), name)
+    return View(run_view(name, settings_api=Answers(**settings()), **clients), name)
 
 
 # ── Every page ────────────────────────────────────────────────────────────
@@ -73,8 +80,13 @@ def test_a_page_draws_no_progress_bar(run_view, name) -> None:
 
 @pytest.mark.parametrize("name", LISTING)
 def test_a_page_opens_an_analysis_fold_rather_than_spilling_it(run_view, name) -> None:
-    """Everything beyond the headline figures is folded away on arrival."""
-    assert opened(run_view, name).folds() == ["Analysis"]
+    """Everything beyond the headline figures is folded away on arrival.
+
+    Two folds now: the analysis, and the configuration of the one service
+    this page runs. Neither is what anybody arrives to do, and a page that
+    opened with forty numbers on it is a page nobody reads.
+    """
+    assert opened(run_view, name).folds() == ["Analysis", "Configuration"]
 
 
 @pytest.mark.parametrize("name", LISTING)

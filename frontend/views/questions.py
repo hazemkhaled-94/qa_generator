@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, page, stage
+from lib import backend, catalog, configure, page, stage
 
 #: The one stage this page runs. It queues over topics, which the Topics
 #: page fits; nothing here can fit them.
@@ -155,6 +155,7 @@ def view() -> None:
 
     with service, page.panel("Question generation"):
         stage.service(client, _QUESTIONS)
+        configure.panel("questions")
 
     with page.panel(f"Questions · {total:,}"):
         if not rows:

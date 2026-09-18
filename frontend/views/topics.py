@@ -7,7 +7,7 @@ from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
-from lib import backend, catalog, page, stage
+from lib import backend, catalog, configure, page, stage
 
 #: The one stage this page runs. A fit is all-or-nothing over one
 #: vocabulary, so it has no per-topic form.
@@ -37,6 +37,7 @@ def view() -> None:
 
     with page.panel("Topic modelling"):
         stage.fit(client, _TOPICS)
+        configure.panel("topics")
 
     words, field = catalog.search("topics", _FIELDS)
     chosen, pager = catalog.filters(

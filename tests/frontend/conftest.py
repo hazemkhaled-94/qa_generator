@@ -66,12 +66,25 @@ def run_view(monkeypatch):
 @pytest.fixture
 def open_view(run_view):
     """Opens one view as the page object a test works it through."""
-    from pages import View, answers
+    from pages import View, answers, settings
 
-    def opened(name: str, client: Answers | None = None, **replaced) -> View:
-        """Opens `frontend/views/{name}.py` with the catalogue stubbed."""
+    def opened(
+        name: str,
+        client: Answers | None = None,
+        configured: Answers | None = None,
+        **replaced,
+    ) -> View:
+        """Opens `frontend/views/{name}.py` with the backend stubbed.
+
+        Two clients, because every page draws a configuration panel beside
+        the service it runs and that panel holds a client of its own.
+        """
         return View(
-            run_view(name, catalog_api=client or Answers(**answers(**replaced))),
+            run_view(
+                name,
+                catalog_api=client or Answers(**answers(**replaced)),
+                settings_api=configured or Answers(**settings()),
+            ),
             name,
         )
 

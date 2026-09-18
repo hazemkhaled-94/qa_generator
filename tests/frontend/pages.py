@@ -276,6 +276,71 @@ def answers(**replaced: Any) -> dict:
     return {**CATALOG, **replaced}
 
 
+def setting(name: str, **replaced: Any) -> dict:
+    """One setting as /settings/{service} describes it."""
+    return {
+        "name": name,
+        "kind": "integer",
+        "help": "What it does, in one line.",
+        "value": "5",
+        "default": "5",
+        "stored": False,
+        "optional": False,
+        "fixed": False,
+        "invalidates": [],
+        "changed_at": None,
+        "low": None,
+        "high": None,
+        "choices": [],
+        **replaced,
+    }
+
+
+#: What a service is configured by, as a page draws it. One of each control
+#: the panel knows how to draw, so a page test covers every branch of it.
+SETTINGS: dict[str, Any] = {
+    "service": "any",
+    "version": "a1b2c3d4e5f6",
+    "settings": [
+        setting("A_COUNT", low=1),
+        setting("A_SHARE", kind="decimal", value="0.5", default="0.5", low=0, high=1),
+        setting("A_FLAG", kind="boolean", value="true", default="true"),
+        setting(
+            "A_MODE",
+            kind="text",
+            value="fast",
+            default="fast",
+            choices=["fast", "accurate"],
+        ),
+        setting(
+            "A_LIST",
+            kind="csv",
+            value="one,two",
+            default="one,two",
+            choices=["one", "two", "three"],
+        ),
+        setting("A_NAME", kind="text", value="a name", default="a name"),
+        setting("A_MODEL", kind="text", value=None, default=None, optional=True),
+        setting("A_POOL", value="5", default="5", fixed=True),
+    ],
+}
+
+
+def settings(**replaced: Any) -> dict:
+    """The scripted settings backend, with whatever a test needs changed."""
+    return {
+        "settings": lambda service: {**SETTINGS, **replaced},
+        "change_settings": lambda service, values, version: {
+            "service": service,
+            "version": "changed",
+            "changed": sorted(values),
+            "cleared": [],
+            "stale": [],
+            "detail": "1 setting(s) changed.",
+        },
+    }
+
+
 class View:
     """Any view, as a reader sees and works it."""
 

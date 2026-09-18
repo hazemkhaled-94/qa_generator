@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, page, stage
+from lib import backend, catalog, configure, page, stage
 
 #: The one stage this page runs. It queues over a passage, so a fact picked
 #: below is run by the passage it was drawn from.
@@ -155,6 +155,7 @@ def view() -> None:
 
     with service, page.panel("Extraction"):
         stage.service(client, _EXTRACTION)
+        configure.panel("extraction")
 
     with page.panel(f"Facts · {total:,}"):
         if not rows:

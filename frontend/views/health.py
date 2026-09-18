@@ -1,10 +1,10 @@
-"""System health view. Runs nothing: it only reports."""
+"""System health view. Runs nothing, and configures what the stages share."""
 
 from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, config, page
+from lib import backend, config, configure, page
 
 #: What a service's own figures count, keyed by the service and the name it
 #: reports the figure under. Both parts are needed: `documents` is a bucket
@@ -67,6 +67,13 @@ def view() -> None:
                 ),
             }
         )
+
+    # The one service this page configures. Not a stage: the model, the
+    # tokenizer and the language pipelines are what all six of them share,
+    # so they are configured here rather than six times over. A stage that
+    # wants a different model names one of its own, on its own page.
+    with page.panel("Platform"):
+        configure.panel("platform")
 
     with page.panel(f"Components · {len(rows):,}"):
         picked = page.table(
