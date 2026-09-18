@@ -1,16 +1,13 @@
 """The configuration panel, beside the controls that run the stage.
 
-One page configures one service, which is the same service that page runs, so
-this is drawn inside the page's service panel: the remedy for a change that
-stales something is the Redo button already there.
+Drawn inside the page's service panel, where the Redo button that rebuilds
+what a change staled already is.
 
-Every control is derived from what the API says about the setting - its type,
-its bounds, the closed set of values where there is one - so there is no list
-of settings here and adding one to the catalogue adds it to the page. Nothing
-about which settings exist is known on this side.
+Every control is derived from what the API says about the setting - its
+type, its bounds, the closed set of values where there is one - so there is
+no list of settings here.
 
-Collapsed by default. Configuring a stage is not what anybody arrives to do,
-and a page that opens with forty numbers on it is a page nobody reads.
+Collapsed by default.
 """
 
 from __future__ import annotations
@@ -23,9 +20,7 @@ import streamlit as st
 
 from lib import backend
 
-#: How a value is written back. Everything goes to the API as text, because
-#: that is what the environment would have handed the stage, and the stage's
-#: own reader is what parses it.
+#: How a flag is written back. Everything goes to the API as text.
 _TRUE, _FALSE = "true", "false"
 
 #: Where a message waits out the rerun that a save causes.
@@ -33,11 +28,9 @@ _SAID = "settings-said-{service}"
 
 
 def refusal(error: requests.exceptions.RequestException) -> str:
-    """Reads what the API refused a change with.
+    """Reads the sentence the API refused a change with.
 
-    Every deliberate refusal carries a code and a sentence saying what to
-    fix; an HTTPError stringifies as the status line alone, which is the one
-    thing a person cannot act on.
+    An HTTPError stringifies as its status line alone.
     """
     response = getattr(error, "response", None)
     if response is None:
@@ -52,9 +45,7 @@ def refusal(error: requests.exceptions.RequestException) -> str:
 def panel(service: str) -> None:
     """Draws one service's configuration, inside the panel that runs it.
 
-    Builds its own client: every page draws one of these and two of them
-    hold no other client, so threading one through would mean the Upload
-    page reaching for a client named after the Documents page.
+    Builds its own client: two of the pages that draw this hold no other.
     """
     client = backend.settings_api()
     try:
@@ -63,10 +54,7 @@ def panel(service: str) -> None:
         st.caption(f"Configuration unavailable: {refusal(error)}")
         return
 
-    # Drawn before the fold and outside it, so it is read whether or not
-    # anybody opens the panel again. A save reruns the page to redraw what
-    # the change moved, and the rerun is what would otherwise take this
-    # away on the way past.
+    # Outside the fold, so it is read without opening the panel again.
     said = st.session_state.pop(_SAID.format(service=service), None)
     if said:
         st.warning(said)
@@ -117,9 +105,7 @@ def _save(client, service: str, values: dict[str, str | None], version: str) -> 
     st.toast(answer.get("detail") or f"{service}: settings saved")
     moved = answer.get("changed") or answer.get("cleared")
     if answer.get("stale"):
-        # Held rather than drawn: what this says to do costs a corpus-sized
-        # run and is the person's decision, so it has to outlive the rerun
-        # below rather than flash past with it.
+        # Held, not drawn: it has to outlive the rerun below.
         st.session_state[_SAID.format(service=service)] = answer["detail"]
     if moved:
         st.rerun(scope="app")
@@ -128,9 +114,8 @@ def _save(client, service: str, values: dict[str, str | None], version: str) -> 
 def _control(service: str, setting: dict) -> str | None:
     """Draws one setting's control, and reads back what it holds as text.
 
-    Returns None for a setting this page will not write, which is one the
-    deployment owns: it is drawn so somebody can see it without opening a
-    shell, and disabled so nobody tries.
+    Returns None for a setting the deployment owns, which is drawn disabled
+    and never written.
     """
     name = setting["name"]
     key = f"setting-{service}-{name}"
@@ -153,9 +138,8 @@ def _control(service: str, setting: dict) -> str | None:
         return _chosen(setting, label, key, help)
 
     if setting["optional"]:
-        # Typed by hand even when it is a number: an empty box is how a
-        # setting whose absence means something is turned off, and a number
-        # box has no way to say nothing.
+        # Typed by hand even for a number: a number box cannot say nothing,
+        # and an empty box is how one is turned off.
         return st.text_input(label, value=value or "", key=key, help=help)
 
     if setting["kind"] == "integer":
@@ -205,12 +189,10 @@ def _chosen(setting: dict, label: str, key: str, help: str) -> str:
         )
         return ",".join(picked)
 
-    # A blank first entry when absence means something, so the control can
-    # say nothing as well as say a value.
+    # A blank first entry when absence means something.
     offered = ["", *choices] if setting["optional"] else list(choices)
     current = setting["value"] or ""
-    # `or ""`: a picker with an index always hands one back, and nothing
-    # chosen reads as absent, which is what the blank entry above means.
+    # `or ""`: nothing chosen reads as absent.
     return (
         st.selectbox(
             label,

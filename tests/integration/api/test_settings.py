@@ -1,13 +1,11 @@
 """Reading and changing what a service is configured to do, over HTTP.
 
-The routes are a trust boundary: what they accept becomes what every worker
-does on the row it claims next, and what they refuse is the only thing
-between a typed value and a worker that will not start.
+What the routes accept becomes what every worker does on the row it claims
+next.
 
-Every test runs against the real wiring - the real store, the real
-catalogue, and each stage's real `Settings.load` - because what is being
-checked is that the validation a page is refused by is the validation the
-worker would have failed at start-up with.
+Against the real wiring - the real store, the real catalogue, each stage's
+real `Settings.load` - so what a page is refused by is what the worker would
+have failed at start-up with.
 """
 
 from __future__ import annotations

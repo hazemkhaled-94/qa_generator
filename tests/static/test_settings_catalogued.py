@@ -1,18 +1,12 @@
 """Every setting the code reads is described, and every description is read.
 
 `test_settings_documented` checks that a setting is declared in a file a
-deployment edits. This checks the other half: that it is also in
-`settings.catalog`, which is what a page draws a control from and what a
-route refuses a bad value with.
+deployment edits. This checks that it is also in `settings.catalog`.
 
-Both directions matter. A setting the code reads and the catalogue does not
-describe cannot be configured through the API at all, which is the whole
-point of the catalogue. A setting the catalogue describes and nothing reads
-is a control that does nothing - worse than a missing one, because it looks
-like it works.
+Both directions: a setting read but undescribed cannot be configured, and
+one described but unread is a control that does nothing.
 
-Read as syntax rather than by importing, the way the sibling scan is, so a
-failure names the setting rather than needing an environment to load one.
+Read as syntax rather than by importing, so a failure names the setting.
 """
 
 from __future__ import annotations

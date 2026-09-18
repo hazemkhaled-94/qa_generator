@@ -1,14 +1,10 @@
 """Reading a setting from somewhere other than the process environment.
 
 Every reader takes an optional source, and every stage's `load` threads it
-through. That is what lets a value stored for a service reach the stage
-without a restart, and what lets the API parse a proposed value with the
-same parser the stage itself uses rather than a second one that agrees with
-it today.
+through.
 
-The environment is still what a container starts from, so the tests here
-check both: a source overrides a setting, and nothing about it makes the
-environment optional.
+Both directions are checked: a source overrides a setting, and nothing about
+it makes the environment optional.
 """
 
 from __future__ import annotations

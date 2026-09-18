@@ -67,11 +67,8 @@ x-store-env: &store-env
 # attempt count are in backend.env; these stay here, because that is one
 # deployment's choice rather than a project default.
 #
-# Read by the stages that call one - extraction reads passages with it, topic
-# modelling names topics with it, question generation writes and checks
-# questions with it - and by the api, which calls no model and serves these
-# as settings. A page showing which model is configured, and a route refusing
-# a bad value for one, both need the value the workers are reading.
+# Read by the stages that call one, and by the api, which calls no model and
+# serves these as settings.
 x-model-env: &model-env
   LLM_MODEL: ${LLM_MODEL}
   # Container's view of the model, not the host's.
@@ -427,9 +424,8 @@ services:
     restart: unless-stopped
     env_file: [configs/env/backend.env]
     environment:
-      # model-env without model-keys: the api serves the model settings and
-      # refuses a bad value for one, which needs the value the workers read.
-      # It calls no model, so it needs no provider credential.
+      # model-env, and no provider.env: the api serves the model settings
+      # and calls no model.
       <<: [*service-env, *store-env, *model-env]
     volumes:
       - ./backend/api:/app/api:ro

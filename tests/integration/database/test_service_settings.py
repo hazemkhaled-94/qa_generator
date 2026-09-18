@@ -1,12 +1,11 @@
 """The settings a deployment changed, and what a stage then reads.
 
-The store is a trust boundary twice over: what it writes decides how every
-stage behaves on its next row, and what it refuses is the only thing between
-a typed value and a worker that will not start.
+A trust boundary twice over: what the store writes decides how every stage
+behaves on its next row, and what it refuses is what stands between a typed
+value and a worker that will not start.
 
-The environment is what these run under - tests/conftest.py puts
-configs/env/backend.env in it - so `resolved` here is that file overlaid with
-whatever a test stored.
+tests/conftest.py puts configs/env/backend.env in the environment, so
+`resolved` here is that file overlaid with whatever a test stored.
 """
 
 from __future__ import annotations

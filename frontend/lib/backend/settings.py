@@ -1,9 +1,7 @@
 """What each service is configured to do, read and changed.
 
-Its own client rather than calls on a page's: six pages draw a
-configuration panel and two of them - Upload and System health - hold no
-catalogue client at all, so these would otherwise be reached through a
-client named for somebody else's page.
+Its own client: six pages draw a configuration panel and two of them hold
+no catalogue client at all.
 """
 
 from __future__ import annotations
@@ -17,9 +15,8 @@ class SettingsApi(Endpoint):
     def settings(self, service: str) -> dict:
         """Fetches what one service is configured to do.
 
-        Everything a control needs comes back with it - the type, the bounds,
-        the closed set of values where there is one - so a page draws its
-        panel from this and holds no list of settings of its own.
+        Everything a control needs comes with it: the type, the bounds, and
+        the closed set of values where there is one.
         """
         return self._request("GET", f"/settings/{service}").json()
 
@@ -29,8 +26,7 @@ class SettingsApi(Endpoint):
         """Changes what one service is configured to do.
 
         A null value returns that setting to whatever the files say. The
-        version is the one the panel was drawn from, so a save that would
-        land on somebody else's change is refused rather than overwriting it.
+        version is the one the panel was drawn from; a stale one is refused.
         """
         return self._request(
             "PATCH",

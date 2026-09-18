@@ -43,9 +43,7 @@ def view() -> None:
             submitted = submit.form_submit_button(
                 "Upload all", type="primary", width="stretch"
             )
-        # Outside the upload form and inside the panel: a form cannot hold
-        # another, and the configuration belongs beside the service it
-        # configures.
+        # Outside the upload form, inside the panel: a form holds no form.
         configure.panel("ingestion")
 
     if not submitted:

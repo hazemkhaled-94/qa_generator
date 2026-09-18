@@ -1,11 +1,10 @@
 """Changing a setting from a terminal.
 
 The command line and the route are one decision: both call
-`settings.changes`, so a value refused on a page is refused here in the same
-words, and one of them cannot quietly grow a rule the other lacks.
+`settings.changes`.
 
-What is its own is the reading and the printing - which service a command
-names, what `--set NAME=VALUE` parses as, and what a person sees.
+Its own is the reading and the printing - which service a command names, what
+`--set NAME=VALUE` parses as, and what a person sees.
 """
 
 from __future__ import annotations

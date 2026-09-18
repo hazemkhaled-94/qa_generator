@@ -68,10 +68,8 @@ def view() -> None:
             }
         )
 
-    # The one service this page configures. Not a stage: the model, the
-    # tokenizer and the language pipelines are what all six of them share,
-    # so they are configured here rather than six times over. A stage that
-    # wants a different model names one of its own, on its own page.
+    # The model, the tokenizer and the language pipelines the six stages
+    # share. A stage naming its own model does it on its own page.
     with page.panel("Platform"):
         configure.panel("platform")
 

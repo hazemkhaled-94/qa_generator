@@ -1,14 +1,10 @@
 """A worker picks up a changed setting without being restarted.
 
-The whole point of storing settings: a value written through a page reaches
-the five workers, which are long-running processes that used to read their
-settings once and answer to the file they booted with for as long as they
-ran.
+The five workers are long-running processes that used to read their settings
+once.
 
-The check sits between drains, which is where nothing is claimed. A drain
-works the queue until it is empty, so a change made during a long run is
-picked up when that run finishes rather than part-way through a row - and
-what a row was produced under is recorded on the row rather than guessed at.
+The check sits between drains, where nothing is claimed, so a change made
+during a long run is picked up when that run finishes.
 """
 
 from __future__ import annotations

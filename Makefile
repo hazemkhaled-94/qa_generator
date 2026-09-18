@@ -499,20 +499,19 @@ questions-balance:
 # ── Settings ───────────────────────────────────────────────────────────────
 #
 # What each service is configured to do, and changing it. The same operation
-# as the route beside it, and the same as the Configuration panel on that
-# service's page:
+# as the route beside it, and as the Configuration panel on that service's
+# page:
 #
 #   make settings SERVICE=topics                GET  /settings/topics
 #   make settings-set SERVICE=topics SET=...   PATCH /settings/topics
 #   make settings-unset SERVICE=topics UNSET=…  PATCH, with a null
 #
-# A value written here reaches a worker when that worker next claims a row.
-# Nothing is requeued: if the change stales what a stage already produced,
-# the command says so and the stage's own -rerun is what rebuilds it.
+# A value written here reaches a worker when it next claims a row. Nothing is
+# requeued: the command names what it staled, and that stage's -rerun is what
+# rebuilds it.
 #
-# The environment still supplies every setting. These write an override over
-# it, and -unset deletes that override rather than writing a default, so
-# configs/env/backend.env and .env decide again.
+# The environment still supplies every setting; these write an override over
+# it, and -unset deletes that override.
 
 # Report one service's settings, beside what the files say.
 #   make settings SERVICE=extraction

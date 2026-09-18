@@ -1,13 +1,10 @@
 """The configuration panel, on the page that runs the service it configures.
 
-The panel holds no list of settings: every control is derived from what the
-API says about the setting, so what these cover is the deriving. A page test
-is the only place that reaches it, because what a control does with a type
-and a pair of bounds is not visible from either side on its own.
+Every control is derived from what the API says about the setting, so what
+these cover is the deriving.
 
-The backend is stubbed, including the answers that are refusals - which is
-the half no integration test reaches, and the half a person actually needs
-to read.
+The backend is stubbed, refusals included, which is the half no integration
+test reaches.
 """
 
 from __future__ import annotations
