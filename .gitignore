@@ -238,3 +238,9 @@ configs/env/provider.env
 
 # Claude Code
 .claude
+
+# Coursework and reports kept beside the code but not part of it. Named
+# rather than left untracked: `git add -A` in a public repository is one
+# keystroke, and these carry a real name and a module code.
+Project_Report_*.docx
+Project_Report_*.pdf
