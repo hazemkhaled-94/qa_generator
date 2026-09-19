@@ -7,8 +7,10 @@ last time rather than adding to it.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
-from drivers import DIGEST_SHARE, Catalogue, Model, group
+from drivers import DIGEST_SHARE, Catalogue, Model, group, passage
 
 from database.qa_generator import FactKind
 from extraction.extractors.bridge import BridgeExtractor
@@ -126,6 +128,44 @@ def test_a_topic_that_bridges_nothing_writes_nothing() -> None:
 
     assert run(catalog, Model({"facts": []})) == 0
     assert catalog.written == []
+
+
+class TestThePassageGate:
+    """The same gate the per-passage stage applies, applied here too.
+
+    `by_topic` asks only that a passage was segmented, so without this a
+    group is spent on a table of contents or a bare heading - which is what
+    `skipped` exists to refuse, and the index this corpus renders as a code
+    block yielded 95 facts from four passages before it did.
+    """
+
+    def test_navigation_is_not_offered_to_the_model(self) -> None:
+        """A group of two, one of which is a contents page, is not a group."""
+        listing = replace(pair()[1], block_type="document_index", doc_sha256="doc-1")
+        catalog, model = Catalogue(support=[pair()[0], listing]), Model(ANSWER)
+
+        assert run(catalog, model) == 0
+        assert model.calls == 0, "one readable passage is not a pair"
+
+    def test_a_heading_is_not_offered_either(self) -> None:
+        """It asserts nothing, so there is nothing for it to bridge."""
+        heading = passage(
+            "Response times",
+            section_path="Support > Response times",
+            id=22,
+            doc_sha256="doc-1",
+        )
+        catalog, model = Catalogue(support=[pair()[0], heading]), Model(ANSWER)
+
+        assert run(catalog, model) == 0
+        assert model.calls == 0
+
+    def test_the_readable_passages_of_a_topic_still_group(self) -> None:
+        """The gate takes the junk out, it does not refuse the topic."""
+        listing = replace(pair()[1], block_type="document_index", doc_sha256="doc-9")
+        catalog = Catalogue(support=[*pair(), listing])
+
+        assert run(catalog, Model(ANSWER)) == 1
 
 
 def test_the_narrowing_reaches_both_the_clear_and_the_read() -> None:

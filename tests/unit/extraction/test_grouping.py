@@ -100,6 +100,42 @@ def test_the_groups_are_spread_over_the_topic_rather_than_its_start() -> None:
     assert max(reached) > 8, reached
 
 
+@pytest.mark.parametrize("passages", [46, 60, 25, 30, 24])
+def test_the_last_group_reaches_the_end_of_the_topic(passages: int) -> None:
+    """Whatever the topic's size against the number of groups asked for.
+
+    A stride of `len(whole) // wanted` floors to 1 for any topic holding
+    fewer than twice as many groups as were wanted, and 12 a topic is the
+    configured number: a topic of 46 passages offers 23 groups, strode by
+    one, and gave the first 12 - passages 1 to 24, with the back half of
+    the subject never read.
+    """
+    groups = grouped(topic(*["a"] * passages), wanted=12, size=2)
+
+    reached = [one.id for group in groups for one in group]
+    assert max(reached) >= passages - 1, (passages, max(reached))
+
+
+@pytest.mark.parametrize("passages", [46, 60, 25, 30, 24])
+def test_as_many_groups_as_were_asked_for_are_still_returned(passages: int) -> None:
+    """Reaching the end must not cost half the calls.
+
+    A ceiling stride reaches the end and returns ten groups where twelve
+    were wanted, which is the other way to get this wrong.
+    """
+    groups = grouped(topic(*["a"] * passages), wanted=12, size=2)
+
+    assert len(groups) == 12, (passages, len(groups))
+
+
+def test_no_group_is_offered_twice() -> None:
+    """Spacing must not land two of them on the same pair."""
+    groups = grouped(topic(*["a"] * 26), wanted=12, size=2)
+
+    identified = [tuple(one.id for one in group) for group in groups]
+    assert len(set(identified)) == len(identified), identified
+
+
 @pytest.mark.parametrize("size", [2, 3, 4])
 def test_a_group_holds_as_many_passages_as_asked(size) -> None:
     """The size is the number the prompt numbers, whatever it is."""

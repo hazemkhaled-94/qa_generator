@@ -101,7 +101,9 @@ def upgrade() -> None:
         _TYPES,
         "questions",
         "question_type IS NULL OR question_type IN ("
-        + ", ".join(f"'{one}'" for one in (*_TYPES_BEFORE, "implication", "application"))
+        + ", ".join(
+            f"'{one}'" for one in (*_TYPES_BEFORE, "implication", "application")
+        )
         + ")",
     )
 

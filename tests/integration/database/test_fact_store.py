@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import pytest
 from facts import FactStore, checked
+from seed import digest
 from sqlalchemy.exc import IntegrityError
 
-from database.qa_generator import FactKind, Rejection, Status
+from database.qa_generator import FactKind, Passage, Rejection, Status
 from extraction.models import Citation
 
 pytestmark = pytest.mark.integration
@@ -298,8 +299,6 @@ class TestBridges:
         """`--only document=…` replaces that document's bridges and no others."""
         from seed import digest
 
-        from database.qa_generator import Passage
-
         a_anchor, b_anchor = corpus["a"][0], corpus["b"][0]
         store.bridges(
             checked(
@@ -410,6 +409,37 @@ class TestGroups:
         assert sorted(one for group in found.values() for one in group) == sorted(
             corpus["a"] + corpus["b"]
         )
+
+    def test_narrowing_to_one_document_reads_its_topics_whole(
+        self, store, corpus
+    ) -> None:
+        """Both sides of a cross-document bridge, or it cannot be rewritten.
+
+        `clear_bridges` deletes any bridge resting on a passage of the named
+        document, and a bridge rests on two. Reading back only that
+        document's passages would leave one side of each in hand, so a
+        narrowed run would delete the cross-document bridges and be unable
+        to write them again - and those are the ones worth having.
+        """
+        spanning = store.topic("Support", corpus["a"][0], corpus["b"][0])
+
+        found = dict(
+            store.catalog.by_topic(Passage.doc_sha256 == digest("a")),
+        )
+        assert list(found) == [spanning]
+        assert sorted(one.id for one in found[spanning]) == sorted(
+            [corpus["a"][0], corpus["b"][0]]
+        ), "the passage in document b is the other half of the bridge"
+
+    def test_a_topic_the_narrowing_does_not_touch_is_left_out(
+        self, store, corpus
+    ) -> None:
+        """Reading topics whole is not reading the corpus."""
+        store.topic("Support", corpus["a"][0])
+        store.topic("Access", corpus["b"][0])
+
+        found = dict(store.catalog.by_topic(Passage.doc_sha256 == digest("a")))
+        assert [one.id for group in found.values() for one in group] == [corpus["a"][0]]
 
 
 class TestListing:
@@ -670,8 +700,6 @@ class TestRejudging:
     ) -> None:
         """A narrowing on the fact must not drop the other half of its group."""
         from seed import digest
-
-        from database.qa_generator import Passage
 
         anchor, other = corpus["a"][0], corpus["b"][0]
         store.bridges(

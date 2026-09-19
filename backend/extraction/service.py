@@ -180,7 +180,15 @@ def grouped(
         interleaved[at : at + size]
         for at in range(0, len(interleaved) - size + 1, size)
     ]
-    return whole[:: max(1, len(whole) // wanted)][:wanted]
+    # Evenly spaced from the first group to the last, rather than a stride.
+    # A stride of len(whole) // wanted floors to 1 for any topic holding
+    # fewer than twice as many groups as were asked for, which is the
+    # ordinary case at twelve a topic - it then takes the first twelve of
+    # twenty-three and the back half of the topic is never read. Ceiling
+    # instead returns ten groups where twelve were wanted.
+    chosen = min(wanted, len(whole))
+    step = (len(whole) - 1) / (chosen - 1) if chosen > 1 else 0
+    return [whole[round(at * step)] for at in range(chosen)]
 
 
 def bridge(
@@ -202,7 +210,7 @@ def bridge(
         checker: What judges what it proposed.
         groups_per_topic: How many groups one topic is worth.
         size: How many passages one group holds.
-        within: A condition narrowing which passages are read, or None.
+        within: A condition selecting the topics to read, or None.
 
     Returns:
         How many bridge facts were stored, refused ones included.
@@ -210,7 +218,13 @@ def bridge(
     log.info("replacing %d bridge fact(s)", catalog.clear_bridges(within))
     written = 0
     for topic_id, passages in catalog.by_topic(within):
-        for offered in grouped(passages, groups_per_topic, size):
+        # The same gate the per-passage stage applies, so the two cannot
+        # drift. Without it a group is spent on a table of contents or a
+        # heading: `by_topic` asks only that a passage was segmented, and
+        # the index this corpus renders as a code block yielded 95 facts
+        # from four passages before the gate existed.
+        readable = [one for one in passages if skipped(one) is None]
+        for offered in grouped(readable, groups_per_topic, size):
             try:
                 proposed = extractor.extract(offered)
             except ExtractionFailed as exc:

@@ -373,7 +373,14 @@ class FactCatalog(Repository):
         what puts two of them in the same group.
 
         Args:
-            within: A condition narrowing which passages are read, or None.
+            within: A condition selecting passages, or None for the corpus.
+                Every topic holding one of them is read WHOLE, which is not
+                the same as reading the passages it selects. `clear_bridges`
+                deletes any bridge resting on a selected passage, and a
+                bridge rests on two - so narrowing the read to one document
+                would delete the cross-document bridges and then be unable
+                to write them again, having kept only one side of each. The
+                cross-document bridge is the one worth having.
 
         Yields:
             One topic's id and its passages.
@@ -394,7 +401,13 @@ class FactCatalog(Repository):
             .order_by(DOMINANT.c.topic_id, Passage.doc_sha256, Passage.ordinal)
         )
         if within is not None:
-            query = query.where(within)
+            query = query.where(
+                DOMINANT.c.topic_id.in_(
+                    select(DOMINANT.c.topic_id)
+                    .join(Passage, Passage.id == DOMINANT.c.passage_id)
+                    .where(within)
+                )
+            )
 
         with self._session() as session:
             held: list[PassageToExtract] = []
