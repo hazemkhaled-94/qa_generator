@@ -464,6 +464,7 @@ class QuestionGenerationService(StageService):
         threads: list[list[CheckedQuestion]] = []
         accepted: list[CheckedQuestion] = []
         written = 0
+        followed = 0
         for index, plan in enumerate(planned):
             sample = deal.sample(plan.shape)
             if sample is None:
@@ -482,7 +483,8 @@ class QuestionGenerationService(StageService):
             if checked.accepted:
                 accepted.append(checked)
                 if spread(index, self._settings.followup_share):
-                    thread += self._followups(sample, plan, checked, accepted)
+                    thread += self._followups(sample, plan, checked, accepted, followed)
+                    followed += 1
             threads.append(thread)
         current.set_attribute("questions.samples", written)
         return threads
@@ -524,12 +526,24 @@ class QuestionGenerationService(StageService):
         plan: Plan,
         root: CheckedQuestion,
         accepted: list[CheckedQuestion],
+        followed: int = 0,
     ) -> list[CheckedQuestion]:
         """Writes the questions somebody would ask after this one.
 
         Each turn takes the next type in QUESTIONS_FOLLOWUP_TYPES, so a thread
         moves from a value to the circumstances it applies in to the reason
         behind it rather than asking the same kind of thing three times.
+
+        The cycle starts where this thread sits among the followed ones, not
+        at zero. Starting every thread at the first type means a run never
+        reaches past QUESTIONS_MAX_FOLLOWUPS of them: two turns over three
+        configured types left `comparison` unwritten across 3,119 questions,
+        and every follow-up in the set came out `condition` or `reason`.
+
+        Counted over the threads that were followed rather than over the plan,
+        because QUESTIONS_FOLLOWUP_SHARE picks by position too: a share of 0.5
+        takes every odd slot, so offsetting by the slot number would hold
+        `index % 2` at 1 forever and rotate nothing.
 
         Only after an accepted, answerable root. A thread whose first turn
         has no answer has nothing to follow on from - the chatbot was
@@ -552,7 +566,7 @@ class QuestionGenerationService(StageService):
                 sample,
                 tuple(turns),
                 Plan(
-                    spec=SPECS[names[turn % len(names)]],
+                    spec=SPECS[names[(followed + turn) % len(names)]],
                     band=plan.band,
                     shape=plan.shape,
                     answerable=True,

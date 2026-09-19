@@ -31,7 +31,7 @@ from database.qa_generator import (
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "6"
+PROMPT_VERSION = "7"
 
 #: How every question must READ, whatever it is for. Shared by the writer and
 #: by the perturbation that writes the unanswerable ones: a rule in one prompt
@@ -58,9 +58,16 @@ Rules, all of them mandatory:
 - DO NOT HAND THE FACT BACK. Taking the sentence and replacing one part with a
   question word is the failure this task is about. Ask what a person would ask.
 
-- NO PADDING WORDS. Nobody typing a question into a search box writes
-  "specific", "concrete", "particular", "spezifisch" or "konkret" - they are
-  filler that makes a question read like a form. Ask "Which criteria ...",
+- POINT AT NOTHING THE ASKER CANNOT SEE. No "this", "these", "that one", "the
+  said", "the two above", "the aforementioned" - the reader has no passage in
+  front of them, so a word pointing outside the question points at nothing.
+  Name the thing instead: "between these two syllabi" is unanswerable, "between
+  the 2022 and 2024 editions" is a question. This applies to every question
+  asked cold; only a follow-up in a conversation may lean on what came before.
+
+- NO PADDING WORDS. Nobody typing a question into a search box writes the
+  equivalent of "specific", "concrete" or "particular" - in any language they
+  are filler that makes a question read like a form. Ask "Which criteria ...",
   never "Which specific criteria ...". Say the thing plainly.
 
 - NEVER PUT THE ANSWER IN THE QUESTION, or the word the answer is a kind of.
@@ -93,8 +100,8 @@ _SPAN = """
   question word, one thing asked. Do NOT weld two questions together with
   "and":
 
-    WRONG  "Which rules govern lending AND how high is the fee for funds?"
-    WRONG  "Why did the position ease in 2025 AND how is lending assessed?"
+    WRONG  "Which steps prepare a site AND how high is the fee for a permit?"
+    WRONG  "Why did the backlog ease in 2025 AND how is cover assessed?"
            (two questions in a trenchcoat; a chatbot answering one of them is
             neither right nor wrong, and nobody types this)
 
@@ -103,9 +110,20 @@ _SPAN = """
     RIGHT  "How do the reply times for standard and urgent requests differ?"
            (one thing asked, which happens to need both facts)
 
+- THE FACTS MUST MEET. Two facts belong in one question only when they are
+  about the same thing: the same subject seen twice, one naming what the
+  other defines, two values of one measure, two parties under one duty. Two
+  facts that merely arrived together do NOT meet, and no question spans them
+  honestly.
+
+    WRONG  "How do X and Y differ in category and date of first use?"
+           (one fact gives a category, the other a date; there is no
+            comparison here, only two unrelated facts forced into one shape)
+
 - IF THE FACTS HAVE NO SINGLE HONEST QUESTION BETWEEN THEM, ask about one of
-  them alone and name only the facts you used. A narrower question that
-  somebody would actually type beats a wide one nobody would.
+  them alone and name only the facts you used. THIS IS THE EXPECTED ANSWER,
+  not a failure: a narrower question somebody would actually type beats a
+  wide one nobody would, and citing one fact of three is a correct outcome.
 """
 
 _FORMS: dict[str, str] = {

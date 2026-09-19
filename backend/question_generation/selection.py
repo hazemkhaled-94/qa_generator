@@ -21,9 +21,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from enum import StrEnum
+from functools import lru_cache
 from itertools import zip_longest
 
 from database.qa_generator import FactKind
+from nlp.analysis import content
 from question_generation.models import FactGroup, SourceFact
 
 
@@ -73,6 +75,54 @@ def overlap(left: Sequence[SourceFact], right: Sequence[SourceFact]) -> float:
     if not first or not second:
         return 0.0
     return len(first & second) / len(first | second)
+
+
+@lru_cache(maxsize=8192)
+def _words(statement: str, language: str | None) -> frozenset[str]:
+    """The content lemmas of one statement, remembered between samples.
+
+    The same reading `overlap` uses over a passage, taken over a fact
+    instead. Cached because a passage is dealt once per round but every one
+    of its facts is weighed against every candidate on the other side.
+    """
+    return content(statement, language)
+
+
+def meets(chosen: Sequence[SourceFact], candidate: SourceFact) -> float:
+    """How much one fact has in common with the facts already offered, in [0, 1].
+
+    Jaccard over content lemmas, the same measure `overlap` pairs passages
+    with, one level down. Two passages the corpus says are about related
+    things still hold facts that are about nothing in common, and pairing
+    the top-ranked fact of each produced questions welding a date to a
+    category: `Wodurch unterscheiden sich MT und modellbasiertes Testen
+    hinsichtlich Einordnung und erstmaliger Nennung?` is two facts in a
+    trenchcoat, and no honest question spans them.
+    """
+    subject = frozenset().union(
+        *(_words(one.statement, one.language) for one in chosen)
+    )
+    other = _words(candidate.statement, candidate.language)
+    if not subject or not other:
+        return 0.0
+    return len(subject & other) / len(subject | other)
+
+
+def closest(
+    chosen: Sequence[SourceFact], candidates: Sequence[SourceFact], wanted: int
+) -> list[SourceFact]:
+    """The candidates with most in common with what is already offered.
+
+    Rank order when nothing is offered yet, which is the first passage of
+    every sample: there is nothing to be close to, and `ranked` has already
+    said which of a passage's facts is worth asking about.
+
+    Ties go to the lower fact id, so the same corpus deals the same sample
+    twice.
+    """
+    if not chosen or not candidates:
+        return list(candidates[:wanted])
+    return sorted(candidates, key=lambda one: (-meets(chosen, one), one.id))[:wanted]
 
 
 #: The order the kinds are interleaved in. Atomic first because it is the
@@ -320,6 +370,13 @@ class Deal:
         A passage a chosen fact rests on but which was not itself offered is
         used up whole - that is a bridge's second passage, which has been
         asked about once the bridge has.
+
+        The second passage's share is the facts closest to what the first
+        offered, not its own best. Its own best is what it would have given
+        to a question of its own, and two passages the corpus calls related
+        still hold facts with nothing between them: offering those produced
+        a question welding them together with "and", which is the failure
+        the span rules spend three paragraphs on.
         """
         each = max(1, self._size // len(passages))
         offered = {passage[0].passage_id for passage in passages}
@@ -327,7 +384,7 @@ class Deal:
         for passage in passages:
             pid = passage[0].passage_id
             self._offered[pid] = self._offered.get(pid, 0) + 1
-            facts.extend(self._left(passage)[:each])
+            facts.extend(closest(facts, self._left(passage), each))
         for fact in facts:
             self._spent.add(fact.id)
             for one in fact.passages:

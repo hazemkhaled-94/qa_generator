@@ -181,14 +181,16 @@ class StubChecker:
         )
 
 
-def build(topic: TopicToCover | None, facts=(), writer=None, checker=None):
+def build(
+    topic: TopicToCover | None, facts=(), writer=None, checker=None, settings=None
+):
     """A service over a scripted queue and a scripted pair of collaborators."""
     queue = StubQueue(topic, facts)
     service = QuestionGenerationService(
         repository=queue,
         writer=writer or StubWriter(),
         checker=checker or StubChecker(),
-        settings=SETTINGS,
+        settings=settings or SETTINGS,
     )
     return service, queue
 
@@ -530,7 +532,10 @@ def test_the_turns_of_a_thread_take_the_kinds_they_were_configured_to() -> None:
     """A conversation that asks the same kind three times is one question.
 
     QUESTIONS_FOLLOWUP_TYPES is cycled down the thread, so it moves from a
-    value to the circumstances it applies in to the reason behind it.
+    value to the circumstances it applies in to the reason behind it. The
+    cycle starts where the thread sits among the followed ones rather than
+    always at the first type, so a list longer than QUESTIONS_MAX_FOLLOWUPS
+    is a rotation and not a prefix with a dead tail.
     """
     facts = [source(n, document="a", passage_id=n) for n in range(8)]
     writer = StubWriter()
@@ -538,8 +543,39 @@ def test_the_turns_of_a_thread_take_the_kinds_they_were_configured_to() -> None:
 
     service.process_next()
 
-    followed = next(one for one in queue.stored[0] if len(one) > 2)
-    assert [one.question_type for one in followed[1:]] == list(SETTINGS.followup_types)
+    names = list(SETTINGS.followup_types)
+    threads = [one for one in queue.stored[0] if len(one) > 1]
+    assert threads, "no thread was followed up"
+    for thread in threads:
+        turns = [one.question_type for one in thread[1:]]
+        start = names.index(turns[0])
+        assert turns == [names[(start + n) % len(names)] for n in range(len(turns))], (
+            "a thread repeated a kind instead of cycling the configured list"
+        )
+
+
+def test_every_configured_follow_up_kind_is_reached_over_a_run() -> None:
+    """The defect the rotation fixes.
+
+    A thread runs QUESTIONS_MAX_FOLLOWUPS turns. Starting every one of them
+    at the first configured type means nothing past that many is ever
+    written, however many are configured: three types and two turns left the
+    third unwritten in a whole corpus.
+    """
+    names = (QuestionType.CONDITION, QuestionType.REASON, QuestionType.COMPARISON)
+    # Enough slots that three threads are followed: the share takes every
+    # other slot and the unanswerable ones are never followed, so a topic of
+    # four reaches one thread and rotates nothing.
+    settings = replace(SETTINGS, followup_types=names, max_followups=2, per_topic=12)
+    facts = [source(n, document="a", passage_id=n) for n in range(40)]
+    service, queue = build(topic(), facts, writer=StubWriter(), settings=settings)
+
+    service.process_next()
+
+    written = {
+        one.question_type for thread in queue.stored[0] for one in thread if one.follows
+    }
+    assert set(names) <= written, f"never wrote {set(names) - written}"
 
 
 # ── The plan, which is what makes the set configurable ────────────────────

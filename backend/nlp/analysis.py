@@ -133,6 +133,21 @@ def _verbs(span: Doc | Span) -> int:
 _INTERROGATIVE = ("W", "PW")
 
 
+def _interrogative(token) -> bool:
+    """Whether a token is a question word, under either naming.
+
+    Two readings because no one of them covers every pipeline. Penn and STTS
+    say so in the tag, and the English model leaves the morphology empty;
+    a Universal Dependencies tagset says so in `PronType=Int` and its tags
+    carry no such prefix. Either answer is taken, so a language whose
+    pipeline uses only one of the two conventions still reports its question
+    words.
+    """
+    return token.tag_.startswith(_INTERROGATIVE) or "Int" in token.morph.get(
+        "PronType", []
+    )
+
+
 def interrogatives(text: str, language: str | None) -> tuple[str, ...]:
     """The question words one question uses.
 
@@ -145,9 +160,7 @@ def interrogatives(text: str, language: str | None) -> tuple[str, ...]:
     real questions, the question words separated 16.
     """
     return tuple(
-        token.text
-        for token in pipeline(language)(text)
-        if token.tag_.startswith(_INTERROGATIVE)
+        token.text for token in pipeline(language)(text) if _interrogative(token)
     )
 
 
@@ -204,6 +217,33 @@ def _refers(token) -> bool:
 def _references(span: Doc | Span) -> tuple[str, ...]:
     """Collects the pronouns that leave a statement dependent on its context."""
     return tuple(sorted({t.text.casefold() for t in span if _refers(t)}))
+
+
+def demonstratives(text: str, language: str | None) -> tuple[str, ...]:
+    """The words in a text that point at something outside it.
+
+    `PronType=Dem` off the morphology, which every Universal Dependencies
+    tagset marks and so no word list per language is needed. Determiners as
+    well as pronouns: `diesen beiden Lehrplänen` and `these two syllabi`
+    point outward through the determiner, and the noun beside it is what
+    makes the pointing look harmless.
+
+    A measurement and not a verdict. Pointing is only a fault when there is
+    nothing in the text to point AT, and half the questions carrying one set
+    a case up first and then refer back to it - `Wenn ein KI-System ...,
+    wie wird dieses Problem eingeordnet?` is self-contained. Deciding which
+    is which is a reading, so this only says a pointer is present and the
+    verifier says whether it lands.
+    """
+    return tuple(
+        sorted(
+            {
+                token.text.casefold()
+                for token in pipeline(language)(text)
+                if "Dem" in token.morph.get("PronType", [])
+            }
+        )
+    )
 
 
 def _foreign(token, language: str) -> bool:

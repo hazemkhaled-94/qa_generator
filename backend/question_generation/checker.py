@@ -37,7 +37,7 @@ from database.qa_generator import (
     QuestionRejection,
     QuestionStatus,
 )
-from nlp.analysis import content
+from nlp.analysis import content, demonstratives
 from question_generation.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
@@ -239,6 +239,32 @@ class QuestionChecker:
                 return QuestionRejection.UNANCHORED, reason
             # Logged and kept. An opinion needs an independent holder, and
             # there is none when the writer is marking its own work.
+            log.info(
+                "keeping %r: %s, but the writer judged itself",
+                candidate.question_text,
+                reason,
+            )
+
+        # The same bargain as above, over the other way a question can fail
+        # to stand on its own: not naming too little, but pointing at
+        # something the asker cannot see. The measurement is cheap and
+        # over-fires - a question that sets a case up and refers back to it
+        # carries a pointer and is fine - so the verdict is the verifier's
+        # and this may only veto it. Never for a follow-up, which leans on
+        # the thread by design.
+        pointers = (
+            ()
+            if read.self_contained or candidate.follows
+            else demonstratives(candidate.question_text, candidate.group.language)
+        )
+        if pointers:
+            reason = (
+                f"it points outward with {', '.join(repr(one) for one in pointers)} "
+                "and the verifier finds nothing in the question to point at, so "
+                "only somebody holding the passage could have asked it"
+            )
+            if self._judge_phrasing:
+                return QuestionRejection.UNANCHORED, reason
             log.info(
                 "keeping %r: %s, but the writer judged itself",
                 candidate.question_text,

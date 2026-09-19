@@ -468,3 +468,83 @@ def test_one_kind_is_left_in_its_own_order() -> None:
     facts = facts_of(1, "a", count=4)
 
     assert [fact.id for fact in ranked(facts)] == [one.id for one in facts]
+
+
+# ── Which facts a wide sample offers, which is what welds two into one ────
+
+
+def test_a_wide_sample_offers_the_facts_the_two_passages_have_in_common() -> None:
+    """The defect that produced two facts in a trenchcoat.
+
+    Both passages are dealt, and each one's own best fact is its first. Taking
+    those two independently paired a date with a category and the writer
+    joined them with "and". The second passage's share is chosen for what it
+    has in common with the first instead.
+    """
+    head = [
+        source(
+            1,
+            document="a",
+            passage_id=1,
+            statement="Metamorphic testing is a technique.",
+        ),
+        source(
+            2,
+            document="a",
+            passage_id=1,
+            statement="Metamorphic testing was proposed in 1998.",
+        ),
+    ]
+    partner = [
+        # The two its own rank puts first - a fact carrying a value leads -
+        # and neither is about anything the head is about.
+        source(
+            3,
+            document="b",
+            passage_id=2,
+            statement="The northern site employs 40 people.",
+            units=("40",),
+        ),
+        source(
+            5,
+            document="b",
+            passage_id=2,
+            statement="The southern site employs 25 people.",
+            units=("25",),
+        ),
+        # Last by rank, and the only one the head meets.
+        source(
+            4,
+            document="b",
+            passage_id=2,
+            statement="Metamorphic testing needs a source test case.",
+        ),
+    ]
+    deal = Deal(head + partner, wanted=2, size=4)
+
+    offered = deal.sample(Shape.CROSS)
+
+    assert offered is not None
+    chosen = {fact.id for fact in offered.facts}
+    assert chosen >= {1, 2}, "the head passage was not offered whole"
+    assert 4 in chosen, "the related fact was passed over for the passage's own best"
+
+
+def test_the_first_passage_is_still_offered_in_rank_order() -> None:
+    """Relatedness only decides the second side; there is nothing to relate to yet."""
+    facts = [
+        source(1, document="a", passage_id=1, statement="It is reviewed regularly."),
+        source(
+            2,
+            document="a",
+            passage_id=1,
+            statement="Reviewed every 4 years.",
+            units=("4",),
+        ),
+    ]
+    deal = Deal(facts, wanted=1, size=2)
+
+    offered = deal.sample(Shape.SINGLE)
+
+    assert offered is not None
+    assert [fact.id for fact in offered.facts] == [2, 1]

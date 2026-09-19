@@ -86,6 +86,14 @@ Rules, all of them mandatory:
   section or a heading, here as anywhere else.
 - DO NOT REPEAT a question already in the conversation, and do not ask one
   the last answer already gave. It has to want something new.
+- ONE THING ASKED. Do not weld two questions together with "and" because two
+  facts were offered: a chatbot answering half of one is neither right nor
+  wrong. If the facts have no single honest question between them, ask about
+  one of them and name only the facts you used.
+- ASK THE KIND OF QUESTION BELOW, and mean it. If the facts hold no answer of
+  that kind - no circumstance to give, no reason stated - ask what they do
+  hold rather than forcing the shape onto them. A question whose answer does
+  not fit what it asked is worse than a plainer one.
 - Write in the language of the facts.
 - `facts` is the NUMBERS of the facts your question needs.
 """
@@ -195,7 +203,8 @@ class QuestionWriter:
         written = self._client.answer(
             system=(
                 f"{_FOLLOW}\nWHAT TO ASK NEXT: {plan.spec.asks}\n\n"
-                f"THE ANSWER IS {plan.spec.answer_rule}"
+                f"THE ANSWER IS {plan.spec.answer_rule}\n\n"
+                f"{plan.spec.directive}"
             ),
             user=f"{self._prompt(sample)}\n\n{self._conversation(thread)}",
             shape=_Answered,

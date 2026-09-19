@@ -38,8 +38,8 @@ knowledge.
   round, a party or a period they never name.
 - `answer` is the answer, taken from the passages, when in_passage is true.
   Leave it empty otherwise. IN THE WORDS OF THE PASSAGES, and so in their
-  language: an answer translated into English is compared against a German
-  target and agrees with nothing.
+  language, whatever it is: an answer translated into any other language is
+  compared against a target in the material's own and agrees with nothing.
 
 Saying it is not in the passages is a correct answer whenever it is true, and
 inventing one is the failure. But so is refusing an answer that IS there
@@ -52,27 +52,29 @@ things and are easy to confuse, so read both.
   quoting a document, a report, a circular, a regulation by name, a section or
   a heading?
 
-  TRUE:  "Laut den 'Risiken im Fokus 2026', wie viele Risiken werden genannt?"
-  TRUE:  "Gemäß der MaRisk, wie viele Modelltypen sind betroffen?"
-  TRUE:  "According to the annual report, what were the fees?"
-  TRUE:  "Under 'Fees > Banking', what is the charge?"
-  FALSE: "Wie viele Modelltypen unterliegen den Anforderungen?"
-  FALSE: "What fee applies to a banking licence application?"
-  FALSE: "How many cyber incidents were reported to BaFin in 2025?"
-                          (BaFin is who they were reported TO, not a source)
+  TRUE:  "According to the service agreement, how long may a reply take?"
+  TRUE:  "Under 'Support > Response times', what is the urgent reply time?"
+  TRUE:  "What does section 4 say about weekend cover?"
+  FALSE: "How long is allowed for answering an urgent support request?"
+  FALSE: "Who approves a change to the shift plan?"
+  FALSE: "How many faults were reported to the site manager in 2025?"
+              (the site manager is who they were reported TO, not a source)
 
-  Naming a party, a duty, a period or a thing being regulated is NOT naming a
+  Naming a party, a duty, a period or a thing being governed is NOT naming a
   source. Only saying which material holds the answer is.
+
+  The question may be in any language. Judge what it does, not what it is
+  written in.
 
 - `subject`: COPY the thing the question is about, word for word out of the
   question. Not what it asks for - what it asks ABOUT.
 
-  "What fee applies to a banking licence application?"  -> "banking licence
-                                                            application"
-  "How many incidents were reported in 2025?"           -> "incidents
-                                                            reported in 2025"
-  "What specific components are included?"              -> ""
-  "For which models do the requirements apply?"         -> ""
+  "How quickly is an urgent support request answered?" -> "urgent support
+                                                           request"
+  "How many faults were reported in 2025?"             -> "faults reported
+                                                           in 2025"
+  "What specific components are included?"             -> ""
+  "For which items do the requirements apply?"         -> ""
 
   Leave it EMPTY only when the question names nothing at all - when every
   noun in it is a bare word like "components", "requirements" or "criteria"
@@ -82,6 +84,27 @@ things and are easy to confuse, so read both.
   A question you could not answer still has a subject. Not finding the answer
   in the passages says nothing about this, and the two are constantly
   confused: answer this one by reading the QUESTION, not the passages.
+
+- `self_contained`: does every POINTING WORD in the question - "this",
+  "these", "that one", "the said", "the two above" - have something inside
+  the question itself to point at?
+
+  The asker has not seen the material. A pointing word that reaches outside
+  the question reaches nothing they could know.
+
+  TRUE:  "If a system meets its target by editing the stored score instead of
+          doing the task, how is this behaviour classified?"
+                          ("this behaviour" is the case the question just set
+                           out, so it points at something present)
+  TRUE:  "How do the reply times for standard and urgent requests differ?"
+                          (nothing points anywhere)
+  FALSE: "What changed in this version?"
+                          (no version is named anywhere in the question)
+  FALSE: "How long is the gap between these two editions?"
+                          (which two? the asker cannot know)
+
+  Judge the question alone. A question whose pointing word is answered by the
+  PASSAGES but not by the question is exactly the failure this catches.
 
 All the judgements are independent. A question can be answerable by the
 passages, name no source, and still name no subject either.
@@ -105,15 +128,18 @@ one. One thing only: do these passages say what this answer says?
 - You have no knowledge outside the passages. An answer that is true in the
   world but that these passages do not give is not supported.
 
-  TRUE:  passages "Anträge werden binnen 48 Stunden beantwortet."
-         answer   "48 Stunden"
-  TRUE:  passages "Der Standortleiter genehmigt jede Änderung."
-         answer   "der Standortleiter"
-  FALSE: passages "Anträge werden binnen 48 Stunden beantwortet."
-         answer   "4 Stunden"
-  FALSE: passages "Anträge werden binnen 48 Stunden beantwortet."
-         answer   "binnen 48 Stunden, an Werktagen"
+  TRUE:  passages "Requests are answered within 48 hours."
+         answer   "48 hours"
+  TRUE:  passages "The site manager approves every change."
+         answer   "the site manager"
+  FALSE: passages "Requests are answered within 48 hours."
+         answer   "4 hours"
+  FALSE: passages "Requests are answered within 48 hours."
+         answer   "within 48 hours, on working days"
          (the working-day part is not in the passages)
+
+The passages and the answer may be in any language, and the examples above
+are in English only because these instructions are. Judge what they say.
 """
 
 
@@ -131,12 +157,15 @@ That it does not appear is expected and is not a reason to say no.
 - You have no knowledge outside the passages. Do not supply a missing figure
   from anywhere else.
 
-  TRUE:  passages "Der Nordstandort beschäftigt 40 Personen." and "Der
-                   Südstandort beschäftigt 25 Personen."
+  TRUE:  passages "The northern site employs 40 people." and "The southern
+                   site employs 25 people."
          answer   "65"
   FALSE: same passages, answer "68"           (the arithmetic gives 65)
   FALSE: passages naming only the northern site, answer "65"
                                                (the other figure is missing)
+
+The passages and the answer may be in any language, and the examples above
+are in English only because these instructions are.
 """
 
 
@@ -156,14 +185,17 @@ is expected and is not a reason to say no.
   nothing was derived and the question is a lookup wearing this kind's
   name.
 
-  TRUE:  passages "Anträge werden binnen 48 Stunden beantwortet." and "Die
-                   48 Stunden zählen nur Werktage."
-         answer   "ein Freitagsantrag ist am Dienstag fällig, weil das
-                   Wochenende nicht zählt"
-  FALSE: same passages, answer "am Sonntag"     (the weekend does not count)
-  FALSE: passages naming only the 48 hours, answer "am Dienstag"
+  TRUE:  passages "Requests are answered within 48 hours." and "The 48 hours
+                   count working days only."
+         answer   "a request raised on Friday is due on Tuesday, because the
+                   weekend does not count"
+  FALSE: same passages, answer "on Sunday"      (the weekend does not count)
+  FALSE: passages naming only the 48 hours, answer "on Tuesday"
                                                 (the working-day premise is
                                                  not there)
+
+The passages and the answer may be in any language, and the examples above
+are in English only because these instructions are.
 """
 
 
@@ -202,6 +234,14 @@ class _Recovered(BaseModel):
         "the question, not the passages: a question you could not answer "
         "still has a subject.",
     )
+    self_contained: bool = Field(
+        default=True,
+        description="True when every pointing word in the question - this, "
+        "these, that one, the said, the two above - has something inside the "
+        "question itself to point at. False when one points outside it, so "
+        "the asker would have to have seen the material to know what is "
+        "meant. Read the question, not the passages.",
+    )
 
 
 @dataclass(frozen=True)
@@ -217,6 +257,9 @@ class Reading:
     recovered: str | None
     stands_alone: bool
     names_its_source: bool = False
+    #: Whether every pointing word in the question has an antecedent inside
+    #: it. False is a question only somebody holding the passage could ask.
+    self_contained: bool = True
 
 
 class Verifier:
@@ -376,4 +419,5 @@ class Verifier:
             # confuse with reading the passages.
             stands_alone=bool(got.subject.strip()),
             names_its_source=got.names_its_source,
+            self_contained=got.self_contained,
         )

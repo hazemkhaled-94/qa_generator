@@ -88,6 +88,23 @@ A topic sitting in one document has no cross-document question in it. The deal
 falls back to the widest sample it can give — the nearest passage of the same
 document, by ordinal — rather than writing nothing about that subject.
 
+Shared vocabulary pairs the **passages**, and then it picks the **facts**. The
+second passage's share of the sample is the facts closest to what the first
+offered, not its own best: its own best is what it would have given a question
+of its own, and two passages the corpus calls related still hold facts with
+nothing between them. Offering those produced a question welding a date to a
+category — *"Wodurch unterscheiden sich MT und modellbasiertes Testen
+hinsichtlich Einordnung und erstmaliger Nennung?"* — which no honest question
+spans. Measured over 120 real cross-document pairs, choosing the second side
+for what it meets rather than for its own rank halved the pairs offered with
+nothing in common, from 73 to 38.
+
+Where nothing in the second passage meets the first, the sample is still
+offered and the writer is told to narrow: the span rules end by saying that if
+the facts have no single honest question between them, ask about one of them
+and cite only that. `difficulty` is read off what it cited, so a question that
+took the narrower option bands as what it actually is.
+
 ### Step 3 — Write one question
 
 **Where:** [`generation.py`](generation.py), [`types.py`](types.py).
@@ -280,7 +297,7 @@ behind it. Thirteen codes, and `questions.rejected_reason` holds exactly these.
 | `duplicate` | is a near twin of one already accepted | one index probe |
 | `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
 | `compound` | asks two things, so half an answer is neither right nor wrong | nothing |
-| `unanchored` | nobody could have asked without the passage in front of them | the round trip |
+| `unanchored` | nobody could have asked without the passage in front of them: it names too little, or it points at something only the passage holds | the round trip |
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
 | `answerable_elsewhere` | was written to have no answer and a passage it does not cite answers it | a lemma probe and a second call |
 | `source_changed` | rests on a fact that no longer passes its own checks | nothing |
@@ -332,6 +349,17 @@ so `4 hours` never passes for `48 hours`.
 `unanchored` and `leaks_source` ride on that same call, for nothing extra. Each
 is a judgement rather than a measurement, and no structural check makes either
 — but a model already looking at the question and the material can.
+
+`unanchored` covers two ways of failing to stand alone, and the second has its
+own measurement. A question may name too little — that is `anchored()`, which
+counts what it names. Or it may name plenty and still **point outward**:
+*"Wie groß ist der Unterschied … zwischen diesen beiden Lehrplänen?"* names
+four things and is unanswerable, because nothing says which two. That one is
+read off `PronType=Dem`, which every Universal Dependencies tagset marks, so no
+word list per language is needed. It over-fires on purpose — half the questions
+carrying a pointer set a case up first and refer back to it, which is the
+`application` type working — so like `anchored()` it may only **veto** the
+verifier's verdict, never make one.
 
 They are also the only gates here that are **opinions**, and an opinion needs
 an independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks
@@ -390,6 +418,11 @@ carry it.
 Each turn takes the next kind in `QUESTIONS_FOLLOWUP_TYPES`, cycled, so a
 conversation moves from a value to the circumstances it applies in to the
 reason behind it rather than asking the same kind of thing three times.
+
+The cycle **starts where the thread sits** among the followed ones rather than
+at the first kind, so a list longer than `QUESTIONS_MAX_FOLLOWUPS` is a
+rotation and not a prefix with a dead tail. Starting every thread at the first
+kind left `comparison` unwritten across 3,119 questions.
 
 A follow-up **may lean on the conversation** — *"And for an urgent one?"* — and
 that is the point: a chatbot answering one has to carry the thread, which is a

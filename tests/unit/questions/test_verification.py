@@ -305,12 +305,14 @@ class Recording:
         stands_alone: bool = True,
         names_its_source: bool = False,
         backs: bool = False,
+        self_contained: bool = True,
     ):
         """Initialises with what to answer, and nothing asked yet."""
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
         self.names_its_source = names_its_source
+        self.self_contained = self_contained
         #: What the entailment pass answers. False by default, so a test
         #: about recall measures recall: the pass can only ever rescue, and
         #: one that always said yes would hide every rejection below it.
@@ -334,6 +336,7 @@ class Recording:
             recovered=self.recovers,
             stands_alone=self.stands_alone,
             names_its_source=self.names_its_source,
+            self_contained=self.self_contained,
         )
 
     def supports(self, question: str, answer: str, passages, thread=()) -> bool:
@@ -1595,3 +1598,57 @@ def test_a_target_asserting_nothing_numeric_reaches_the_pass() -> None:
 
     assert result.status == "accepted"
     assert recording.supported == 1
+
+
+# ── Pointing at what the asker cannot see ─────────────────────────────────
+
+
+def test_a_question_pointing_outside_itself_is_refused() -> None:
+    """The failure that shipped: correct arithmetic, unanswerable question.
+
+    `Wie groß ist der Unterschied ... zwischen diesen beiden Lehrplänen?` was
+    accepted over two facts that do differ by the answer it gives. Nobody can
+    answer it, because nothing says which two.
+    """
+    recording = Recording(recovers="2.5 hours", self_contained=False)
+
+    result = build(recording).check(
+        candidate(question_text="How long is the gap between these two editions?")
+    )
+
+    assert result.rejected_reason == QuestionRejection.UNANCHORED
+
+
+def test_a_question_that_sets_its_own_case_up_is_kept() -> None:
+    """The measurement over-fires and may only veto, so the verifier decides.
+
+    Half the questions carrying a pointer name what it points at first. They
+    are the `application` type working as designed, and a rule reading the
+    pointer alone would throw every one of them out.
+    """
+    recording = Recording(recovers="4 kg", self_contained=True)
+
+    result = build(recording).check(
+        candidate(
+            question_text=(
+                "If a system meets its target by editing the stored score, "
+                "how is this behaviour classified?"
+            )
+        )
+    )
+
+    assert result.status == QuestionStatus.ACCEPTED
+
+
+def test_a_follow_up_may_point_at_the_conversation() -> None:
+    """Leaning on the thread is what a follow-up is for."""
+    recording = Recording(recovers="4 kg", self_contained=False)
+
+    result = build(recording).check(
+        candidate(
+            question_text="And how long does that one take?",
+            thread=(("What does the device weigh?", "4 kg"),),
+        )
+    )
+
+    assert result.rejected_reason != QuestionRejection.UNANCHORED
