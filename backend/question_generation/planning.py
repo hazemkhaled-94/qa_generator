@@ -86,9 +86,13 @@ def plans(
 ) -> list[Plan]:
     """The questions one topic is to be asked, in the order they are written.
 
-    A type that needs more than one passage is never planned as `easy`: the
-    band is a request for a shape of sample, and a comparison drawn from one
-    passage is a question about one thing.
+    A slot that came up `easy` is raised to whatever floor its type declares.
+    Usually that is `easy` and nothing moves. A type needing more than one
+    passage cannot be easy by construction - the band is a request for a
+    shape of sample and `easy` offers one passage, so a comparison drawn
+    from one is a question about one thing. A type needing one passage may
+    still decline the band: an `application` puts a rule in the material to
+    a case that is not, which is not a lookup however little it reaches.
 
     An unanswerable question is planned `easy` and single whatever its slot
     said. It is written by moving one fact out of reach, so a second passage
@@ -118,8 +122,8 @@ def plans(
             name = alone[perturbed % len(alone)]
             perturbed += 1
         spec = SPECS[name]
-        if spec.spans and band == Difficulty.EASY:
-            band = Difficulty.MEDIUM
+        if band == Difficulty.EASY:
+            band = spec.floor
         if not answerable:
             band = Difficulty.EASY
         shape = Shape.SINGLE if not answerable else SHAPES[band]

@@ -57,8 +57,16 @@ QuestionType = Literal[
     "comparison",
     "aggregation",
     "temporal",
+    "implication",
+    "application",
 ]
 AnswerForm = Literal["value", "list", "explanation"]
+
+#: How much a question asks of whoever answers it, declared by its type.
+#: A different axis from the band: `difficulty` says how far the answer is
+#: spread and so how hard it is to FIND, and a question reaching two
+#: documents can still be a bare lookup once both are in hand.
+CognitiveLevel = Literal["recall", "understand", "apply", "analyse"]
 
 router = stage_router(name="questions", repository=questions_queue)
 
@@ -114,6 +122,7 @@ def questions(
     difficulty: Band | None = None,
     planned_difficulty: Band | None = None,
     question_type: QuestionType | None = None,
+    cognitive_level: CognitiveLevel | None = None,
     answer_form: AnswerForm | None = None,
     follows: bool | None = None,
     limit: int = Query(default=50, ge=1, le=500),
@@ -143,6 +152,7 @@ def questions(
         difficulty=difficulty,
         planned_difficulty=planned_difficulty,
         question_type=question_type,
+        cognitive_level=cognitive_level,
         answer_form=answer_form,
         follows=follows,
     )
@@ -186,6 +196,7 @@ def quality(
     difficulty: Band | None = None,
     planned_difficulty: Band | None = None,
     question_type: QuestionType | None = None,
+    cognitive_level: CognitiveLevel | None = None,
     answer_form: AnswerForm | None = None,
     follows: bool | None = None,
 ) -> QuestionQuality:
@@ -209,6 +220,7 @@ def quality(
         difficulty=difficulty,
         planned_difficulty=planned_difficulty,
         question_type=question_type,
+        cognitive_level=cognitive_level,
         answer_form=answer_form,
         follows=follows,
     )

@@ -603,6 +603,7 @@ def test_a_question_keeps_the_kind_the_form_and_the_band_it_was_planned_as(
                     rejected_reason=None,
                     fact_ids=(written["facts"][topic_id][0],),
                     question_type="reason",
+                    cognitive_level="analyse",
                     answer_form="explanation",
                     planned_difficulty="medium",
                 )
@@ -614,9 +615,14 @@ def test_a_question_keeps_the_kind_the_form_and_the_band_it_was_planned_as(
 
     assert total == 1
     assert rows[0].question_type == "reason"
+    assert rows[0].cognitive_level == "analyse"
     assert rows[0].answer_form == "explanation"
     assert rows[0].planned_difficulty == "medium"
     assert QuestionCatalog().page(question_type="factoid")[0] == 0
+    assert QuestionCatalog().page(cognitive_level="analyse")[0] == 1
+    assert QuestionCatalog().page(cognitive_level="recall")[0] == 0, (
+        "a level the set does not hold selects nothing"
+    )
 
 
 def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
@@ -645,6 +651,7 @@ def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
                     rejected_reason=None,
                     fact_ids=(fact_id,),
                     question_type=kind,
+                    cognitive_level="recall",
                     answer_form="value",
                     # The first got the band it was planned as; the second
                     # was planned harder than it came out.
@@ -660,6 +667,7 @@ def test_the_quality_report_counts_the_kinds_and_what_the_plan_asked_for(
     quality = QuestionCatalog().quality()
 
     assert quality.question_type == {"factoid": 1, "entity": 1}
+    assert quality.cognitive_level == {"recall": 2}
     assert quality.answer_form == {"value": 2}
     assert quality.planned_difficulty == {"easy": 1, "hard": 1}
     assert quality.planned_met == 1

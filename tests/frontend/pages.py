@@ -163,6 +163,7 @@ QUESTION = {
     "thread_position": 1,
     "follows_id": None,
     "question_type": "factoid",
+    "cognitive_level": "recall",
     "answer_form": "value",
     "planned_difficulty": "easy",
 }
@@ -192,6 +193,7 @@ QUESTION_QUALITY = {
     "document_scope": {"single_document": 1},
     "topic_scope": {"single_topic": 1},
     "question_type": {"factoid": 1},
+    "cognitive_level": {"recall": 1},
     "answer_form": {"value": 1},
     "planned_difficulty": {"easy": 1},
     "planned_met": 1,

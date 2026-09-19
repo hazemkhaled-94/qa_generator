@@ -88,6 +88,7 @@ SCOPES = {
     "difficulty": Question.difficulty,
     "planned_difficulty": Question.planned_difficulty,
     "question_type": Question.question_type,
+    "cognitive_level": Question.cognitive_level,
     "answer_form": Question.answer_form,
 }
 
@@ -165,6 +166,7 @@ def _listing() -> Select:
                 Question.thread_position,
                 Question.follows_id,
                 Question.question_type,
+                Question.cognitive_level,
                 Question.answer_form,
                 Question.planned_difficulty,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
@@ -209,6 +211,7 @@ def _stored(row: Any) -> StoredQuestion:
         thread_position=row.thread_position,
         follows_id=row.follows_id,
         question_type=row.question_type,
+        cognitive_level=row.cognitive_level,
         answer_form=row.answer_form,
         planned_difficulty=row.planned_difficulty,
     )
@@ -629,6 +632,7 @@ class QuestionCatalog(Repository):
             "difficulty": Question.difficulty,
             "planned_difficulty": Question.planned_difficulty,
             "question_type": Question.question_type,
+            "cognitive_level": Question.cognitive_level,
             "answer_form": Question.answer_form,
             "passage_scope": Question.passage_scope,
             "document_scope": Question.document_scope,
@@ -687,6 +691,7 @@ class QuestionCatalog(Repository):
             document_scope=spread["document_scope"],
             topic_scope=spread["topic_scope"],
             question_type=spread["question_type"],
+            cognitive_level=spread["cognitive_level"],
             answer_form=spread["answer_form"],
             planned_difficulty=spread["planned_difficulty"],
             planned_met=row.planned_met,

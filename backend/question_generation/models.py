@@ -489,6 +489,9 @@ class StoredQuestion:
     question_type: str | None = None
     answer_form: str | None = None
     planned_difficulty: str | None = None
+    #: What its type asks of whoever answers it. A different axis from
+    #: `difficulty`, which says how far the answer is spread.
+    cognitive_level: str | None = None
 
 
 @dataclass(frozen=True)
@@ -551,5 +554,9 @@ class QuestionQuality:
     question_type: dict[str, int]
     answer_form: dict[str, int]
     planned_difficulty: dict[str, int]
+    #: How much the set asks of a reader, as against how far its answers are
+    #: spread. A set that is all `recall` is a lookup benchmark however many
+    #: of its questions reach two documents.
+    cognitive_level: dict[str, int]
     #: Questions whose band is the one the plan asked for.
     planned_met: int

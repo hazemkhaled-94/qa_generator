@@ -24,6 +24,7 @@ from database.qa_generator import (
     AnswerForm,
     CognitiveLevel,
     Derivation,
+    Difficulty,
     QuestionType,
 )
 
@@ -161,11 +162,34 @@ class TypeSpec:
     #: and stored beside `difficulty`, which measures something else: how
     #: far the answer is spread, not what has to be done with it.
     level: str = CognitiveLevel.RECALL
+    #: The lowest band this type may be planned at, when needing more than
+    #: one passage is not the reason. Only a type that needs ONE and is
+    #: still not a lookup has to say so; see `floor`.
+    least: str | None = None
 
     @property
     def spans(self) -> bool:
         """Whether this type needs facts from more than one passage."""
         return self.passages > 1
+
+    @property
+    def floor(self) -> str:
+        """The lowest band this type may be planned at.
+
+        A band is a request for the SHAPE of a sample - `easy` offers one
+        passage, and that is the whole of what the band means - so a type
+        needing two cannot be planned easy whatever else is true of it.
+
+        That is not the only reason a type is not easy, and conflating the
+        two was costing `application` half its slots. It needs one passage,
+        because the rule it applies sits in one; it is still not a lookup,
+        because the case it puts that rule to is not in the material. The
+        same distinction `cognitive_level` draws against `difficulty`:
+        how far the answer is spread is not how much work it takes.
+        """
+        if self.least:
+            return self.least
+        return Difficulty.MEDIUM if self.spans else Difficulty.EASY
 
     @property
     def forms(self) -> tuple[str, ...]:
@@ -459,6 +483,10 @@ Worked example. Facts:
         form=AnswerForm.EXPLANATION,
         also=(AnswerForm.VALUE,),
         passages=1,
+        # One passage, because the rule it applies sits in one. Never easy,
+        # because the case it puts that rule to is not in the material, so
+        # answering is not a lookup however little of the corpus it reaches.
+        least=Difficulty.MEDIUM,
         asks="which rule the material gives governs a case it does not mention",
         directive="""Put a CASE the material does not name to a rule it does.
 The rule has to be in the facts; the case must not be, or there is nothing to

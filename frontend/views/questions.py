@@ -19,18 +19,21 @@ _FIELDS = {
 }
 
 #: Every gate a question is put through, by the code it is rejected under,
-#: and what the gate tests. Listed whether or not anything failed it.
+#: and what the gate tests. Listed whether or not anything failed it, in the
+#: order the checker applies them: cheapest first.
 _GATES = {
     "malformed": "The question is a question, in the language of its facts.",
     "answer_too_short": "The answer clears the floor its form is held to.",
     "answer_too_long": "The answer is within the ceiling its form is held to.",
     "wrong_form": "A value names a thing, an explanation explains one.",
-    "wrong_type": "The question asks for the kind of thing its type asks for.",
-    "unanchored": "Somebody who never read the passage could tell what is asked.",
     "leaks_source": "The question does not say which document holds the answer.",
+    "off_topic": "An unanswerable question is about what the material covers.",
     "duplicate": "The question is far enough from every question accepted.",
-    "not_recoverable": "A second model got the answer out of the cited passages.",
     "answerable_after_all": "A question written to have no answer has none.",
+    "compound": "The question uses one interrogative, so it asks one thing.",
+    "unanchored": "Somebody who never read the passage could tell what is asked.",
+    "not_recoverable": "A second model got the answer out of the cited passages.",
+    "answerable_elsewhere": "No passage it leaves uncited answers it either.",
     "source_changed": "Every fact the question rests on still passes its checks.",
 }
 
@@ -46,8 +49,8 @@ _CRITERIA = {
 #: three criteria, a long answer, and being a follow-up.
 _DIFFICULTY = {
     "easy": "None or one of the five things that make a question harder.",
-    "medium": "Two or three of them.",
-    "hard": "Four or five of them.",
+    "medium": "Two of them.",
+    "hard": "Three or more of them.",
 }
 
 #: Every kind of question that can be asked, and what each asks for.
@@ -63,6 +66,18 @@ _TYPES = {
     "comparison": "How two named things differ.",
     "aggregation": "A total no single fact states.",
     "temporal": "What changed between two periods.",
+    "implication": "What must be true when two stated things both hold.",
+    "application": "Which stated rule governs a case the material omits.",
+}
+
+#: How much a question asks of whoever answers it, declared by its kind.
+#: A different axis from the band: that one says how far the answer is
+#: spread and so how hard it is to find.
+_LEVELS = {
+    "recall": "The answer is a value stated in one place.",
+    "understand": "The answer restates what the material means.",
+    "apply": "The answer maps a stated rule onto a case.",
+    "analyse": "The answer is not stated anywhere and has to be worked out.",
 }
 
 #: What each answer form is, which the length bounds are applied against.
@@ -96,6 +111,11 @@ def view() -> None:
                 "Whether the gates, or a person, accepted it.",
             ),
             "question_type": ("Kinds", list(_TYPES), "What the question asks for."),
+            "cognitive_level": (
+                "Levels",
+                list(_LEVELS),
+                "What it asks of whoever answers it.",
+            ),
             "answer_form": ("Shapes", list(_FORMS), "The shape the answer takes."),
             "difficulty": (
                 "Difficulties",
@@ -113,6 +133,7 @@ def view() -> None:
         "field": field,
         "status": chosen["status"],
         "question_type": chosen["question_type"],
+        "cognitive_level": chosen["cognitive_level"],
         "answer_form": chosen["answer_form"],
         "difficulty": chosen["difficulty"],
         "follows": _TURNS.get(chosen["follows"] or ""),
@@ -250,6 +271,18 @@ def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:
         for name, what in _TYPES.items()
         if weights.get(name) or written.get(name)
     ]
+    levels = quality["cognitive_level"]
+    rows += [
+        {
+            "Check": f"Level: {name}",
+            "Value": page.share(levels.get(name, 0), sum(levels.values())),
+            "Should be": "—",
+            "State": "—",
+            "What it means": what,
+        }
+        for name, what in _LEVELS.items()
+        if levels.get(name)
+    ]
     rows += [
         {
             "Check": label,
@@ -297,6 +330,7 @@ def _detail(client, question: dict) -> None:
                 "State": question["status"],
                 "Failed gate": question["rejected_reason"],
                 "Kind": question["question_type"],
+                "Level": question["cognitive_level"],
                 "Answer shape": question["answer_form"],
                 "Answerable": question["answerable"],
                 "Difficulty": question["difficulty"],

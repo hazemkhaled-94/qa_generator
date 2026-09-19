@@ -109,6 +109,45 @@ def test_a_type_needing_two_passages_is_never_planned_easy() -> None:
     assert all(one.shape != Shape.SINGLE for one in spanning)
 
 
+def test_a_type_needing_one_passage_may_still_decline_easy() -> None:
+    """An `application` puts a rule in the material to a case that is not.
+
+    Needing two passages is one reason not to be easy and was being read as
+    the only one, which cost this type its medium and hard slots to a band
+    it should never have been planned at.
+    """
+    built = plans(
+        wanted=30,
+        types={QuestionType.APPLICATION: 1},
+        bands=BANDS,
+        unanswerable_share=0.0,
+    )
+
+    assert built
+    assert not any(one.spec.spans for one in built), "it needs one passage"
+    assert all(one.band != Difficulty.EASY for one in built)
+    assert {one.band for one in built} == {Difficulty.MEDIUM, Difficulty.HARD}
+
+
+def test_a_type_declaring_no_floor_is_still_planned_easy() -> None:
+    """The floor is an exception, not a new default."""
+    built = plans(
+        wanted=30,
+        types={QuestionType.FACTOID: 1},
+        bands=BANDS,
+        unanswerable_share=0.0,
+    )
+
+    assert any(one.band == Difficulty.EASY for one in built)
+
+
+def test_the_floor_is_read_off_the_type_rather_than_its_passage_count() -> None:
+    """Both reasons reach the same field, so the planner asks once."""
+    assert SPECS[QuestionType.FACTOID].floor == Difficulty.EASY
+    assert SPECS[QuestionType.COMPARISON].floor == Difficulty.MEDIUM, "spans"
+    assert SPECS[QuestionType.APPLICATION].floor == Difficulty.MEDIUM, "declared"
+
+
 def test_an_unanswerable_question_is_planned_easy_and_from_one_passage() -> None:
     """It is written by moving one fact out of reach.
 

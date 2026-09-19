@@ -651,28 +651,38 @@ same kind of question.
 A weight of `0`, or a name left out, is never written. That is the switch for
 choosing what a run produces.
 
-### The eleven kinds
+### The thirteen kinds
 
 Every one of them is a question **form**, never a subject, so the same list
 applies to a manual, a contract, a policy or a report. Nothing in any prompt
 names a domain.
 
-| Kind | Asks for | Answer | Passages |
-|---|---|---|---|
-| `factoid` | one checkable value — how many, how much, by when | value | 1 |
-| `definition` | what a named thing or status is, as the material defines it | explanation | 1 |
-| `entity` | who does, decides, owns or must be told something | value | 1 |
-| `enumeration` | which things belong to a named set | list | 1 |
-| `condition` | when, or under what circumstances, something applies | list | 1 |
-| `reason` | why something is required, done, or the way it is | explanation | 1 |
-| `procedure` | how something is done, or in what order | explanation | 1 |
-| `consequence` | what happens when something is or is not done | explanation | 1 |
-| `comparison` | how two named things differ | list | 2 |
-| `aggregation` | a total no single fact states on its own | value | 2 |
-| `temporal` | what changed between two periods | list | 2 |
+`Level` is `cognitive_level`, declared by the kind and stored on every
+question it writes — see below for why it is a different axis from the band.
 
-The last three need facts from two passages and are never planned `easy`: a
-comparison drawn from one passage is a question about one thing.
+| Kind | Asks for | Answer | Passages | Level |
+|---|---|---|---|---|
+| `factoid` | one checkable value — how many, how much, by when | value | 1 | recall |
+| `definition` | what a named thing or status is, as the material defines it | explanation | 1 | understand |
+| `entity` | who does, decides, owns or must be told something | value | 1 | recall |
+| `enumeration` | which things belong to a named set | list | 1 | understand |
+| `condition` | when, or under what circumstances, something applies | list | 1 | apply |
+| `reason` | why something is required, done, or the way it is | explanation | 1 | analyse |
+| `procedure` | how something is done, or in what order | explanation | 1 | apply |
+| `consequence` | what happens when something is or is not done | explanation | 1 | analyse |
+| `comparison` | how two named things differ | list | 2 | analyse |
+| `aggregation` | a total no single fact states on its own | value | 2 | analyse |
+| `temporal` | what changed between two periods | list | 2 | analyse |
+| `implication` | what must be true when two stated things both hold | explanation | 2 | analyse |
+| `application` | which stated rule governs a case the material omits | explanation | 1 | apply |
+
+A band is a request for the **shape of a sample**, so a kind needing two
+passages is never planned `easy` — `easy` offers one passage, and a
+comparison drawn from one is a question about one thing. Needing two is not
+the only reason to decline the band: `application` needs one passage,
+because the rule it applies sits in one, and is still never `easy`, because
+the case it puts that rule to is not in the material. Each kind declares the
+lowest band it may be planned at.
 
 One shared rule block holds what is true of every question — do not name the
 source, name the subject, one question, the language of the facts — and each
@@ -764,6 +774,34 @@ threshold of four would have made a question spanning two documents and two
 subjects — the hardest thing a retriever faces — only medium. Nothing is
 weighted, because a weighting is an opinion and the point of deriving
 difficulty rather than judging it is that nobody has to hold one.
+
+### The other axis: what it asks of a reader
+
+`difficulty` measures how far an answer is **spread** — over two passages, two
+documents, two subjects — which is how hard it is to *find*. It says nothing
+about what has to be done once it is found, and a question reaching two
+documents can be a bare lookup with both of them in hand.
+
+`cognitive_level` is that second axis: `recall`, `understand`, `apply`,
+`analyse`. Like difficulty it is **derived, not judged** — declared once per
+kind rather than decided per question, so nobody holds an opinion about a row.
+`GET /questions` filters on it and `GET /questions/quality` reports the spread,
+which is the number that says whether a set is a retrieval benchmark or a
+reasoning one: a set that is all `recall` is a lookup benchmark however many of
+its questions reach two documents.
+
+Eleven of the thirteen kinds are answered by a sentence in the corpus — the
+recoverability gate refuses one whose answer is not — so a level on them
+describes the reading, not the reasoning. `implication` and `application` are
+what make the column worth having: the premises are in the material and the
+conclusion is not. They face a gate of their own for that reason, as
+`aggregation` already did, because recoverability asks them the wrong
+question.
+
+The column is NULL on every question written before it existed, and
+deliberately not backfilled from `question_type`: a kind's level can change,
+and a column filled in afterwards would say a row was judged when nothing had
+judged it.
 
 ### How a band is asked for without being judged
 
@@ -1558,7 +1596,7 @@ The values most likely to need changing:
 | `EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model from the rest. Each replaces the model only — where it is served and how patient to be stay `LLM_*`, because a stage that could set its own timeout would be a stage whose lease nobody could derive. Unset means `LLM_MODEL` |
 | `QUESTIONS_PER_TOPIC` | `backend.env` | 20 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
 | `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, divided between the passages the sample holds. The writer picks which of them one question needs |
-| `QUESTIONS_TYPE_MIX` | `backend.env` | eleven kinds | Which kinds of question are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
+| `QUESTIONS_TYPE_MIX` | `backend.env` | thirteen kinds | Which kinds of question are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
 | `QUESTIONS_DIFFICULTY_MIX` | `backend.env` | `easy:2,medium:2,hard:1` | Which bands the plan aims for, as `band:weight`. A request for a shape of sample; the band itself stays derived |
 | `QUESTIONS_ANSWER_CHARS` | `backend.env` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form, as `form:min:max` |
 | `QUESTIONS_ANSWER_OVERLAP` | `backend.env` | 0.6 | How much of a list or an explanation has to come back for the verifier to have recovered it. Numbers are always exact |

@@ -305,6 +305,7 @@
       "parameters": [
         "answer_form",
         "answerable",
+        "cognitive_level",
         "difficulty",
         "document",
         "document_scope",
@@ -339,6 +340,7 @@
       "parameters": [
         "answer_form",
         "answerable",
+        "cognitive_level",
         "difficulty",
         "document",
         "document_scope",
