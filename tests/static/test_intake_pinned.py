@@ -42,7 +42,6 @@ READERS = frozenset({"required", "optional", "integer", "decimal", "boolean", "c
 #: are absent because database and blob_store own theirs.
 SETTINGS = frozenset(
     {
-        "PIPELINE_VERSION",
         "MAX_FILE_SIZE_MB",
         "ALLOWED_MIME_TYPES",
         "PARSING_OCR_CHAR_THRESHOLD",

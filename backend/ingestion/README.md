@@ -84,7 +84,7 @@ missing object fails every later stage. If the row cannot be written, the
 object is taken back out.
 
 The stored object carries four pieces of S3 user metadata — the digest, the
-original filename, the time, and `PIPELINE_VERSION` — which is enough for
+original filename, the time, and the pipeline version — which is enough for
 the bucket alone to rebuild the row. Nothing mutable is included, because S3
 metadata cannot change without rewriting the object.
 
@@ -164,9 +164,15 @@ with a value nobody chose. Tuning lives in
 [`configs/env/backend.env`](../../configs/env/backend.env), which is in git;
 credentials, ports and addresses live in `.env`, which is not.
 
+One thing this service records is not a setting. The `pipeline-version`
+written into every stored object's metadata is read from `version` in
+`pyproject.toml`, because it describes the build rather than the
+deployment: two deployments of one image produce the same thing and
+should say so. Documents already held keep the version they arrived
+under.
+
 | Setting | What it does |
 |---|---|
-| `PIPELINE_VERSION` | Written into every stored object's metadata. Bump it when what the pipeline produces changes meaning. |
 | `MAX_FILE_SIZE_MB` | Largest upload accepted, by both the `Content-Length` check and the measured size. Keep in step with `server.maxUploadSize` in `frontend/.streamlit/config.toml`, or Streamlit refuses the file before the API sees it. |
 | `ALLOWED_MIME_TYPES` | Comma-separated. May only name types this build can detect from leading bytes — currently `application/pdf`. Anything else stops the service at start-up rather than reading as support that does not exist. |
 

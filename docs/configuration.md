@@ -111,7 +111,7 @@ read-only and marked as the deployment's.
 |---|---|---|---|
 | `MAX_FILE_SIZE_MB` | `backend.env` | 100 | Largest upload accepted. Keep in step with `server.maxUploadSize` in `frontend/.streamlit/config.toml`, or Streamlit rejects the file before the API sees it |
 | `ALLOWED_MIME_TYPES` | `backend.env` | `application/pdf` | Types with a parser behind them |
-| `PIPELINE_VERSION` | `backend.env` | `0.0.1` | Recorded on each document as it is stored |
+| `PIPELINE_VERSION` | — | — | Not a setting. Read from `version` in `pyproject.toml` and recorded on each object as it is stored: it describes the build, not the deployment |
 
 ### Question generation
 

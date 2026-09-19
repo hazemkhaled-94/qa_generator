@@ -71,13 +71,9 @@ class Setting:
 #: is the order a page draws them in.
 SETTINGS: tuple[Setting, ...] = (
     # ── Ingestion ─────────────────────────────────────────────────────────
-    Setting(
-        name="PIPELINE_VERSION",
-        service="ingestion",
-        kind="text",
-        help="Recorded on each document as it is stored. Documents already "
-        "held keep the version they arrived under.",
-    ),
+    # PIPELINE_VERSION is deliberately absent: it is read from
+    # pyproject.toml, because a version describes the build and a
+    # deployment given the ability to name its own can only use it to lie.
     Setting(
         name="MAX_FILE_SIZE_MB",
         service="ingestion",
