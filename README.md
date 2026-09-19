@@ -214,6 +214,24 @@ re-read keeps the passages and their sentence offsets, so every citation still
 resolves to the text it was checked against. Fit the topics afterwards for a
 re-read to show.
 
+Two kinds of fact `extract-revalidate` steps over rather than re-judging, and
+both for the same reason — there is nothing for the checks to read. One is a
+fact the cap refused: `over_cap` is the only verdict here no check reaches, so
+they would make nothing of it and hand the row back validated, quietly undoing
+`EXTRACTION_MIN_OTHER_SHARE` across the corpus. `make extract-recap` is what
+re-applies that. The other is a fact whose citation resolved to no sentence —
+a refusal for `evidence_absent`, or a bridge drawn before prompt version 2.
+What such a fact cited survives nowhere but its own `validation_error`, because
+the link rows carry NULL to say the numbers resolved to nothing; re-judging it
+would reach the same verdict and overwrite the only record of what the model
+named.
+
+A narrowed bridge run reads whole topics, not the passages `--only` selects.
+`clear_bridges` deletes any bridge resting on a selected passage and a bridge
+rests on two, so reading back one document would leave half of each
+cross-document bridge in hand and no way to write it again. It costs more and
+it finishes what it starts.
+
 Documents are ingestion's, not a stage's:
 
 ```bash
@@ -536,9 +554,24 @@ not in a log.
 | `unresolved_reference` | leaves a pronoun a reader who cannot see the passage is unable to resolve |
 
 The last two are the ones no lexical measure could make. `unsupported_addition`
-is a hallucination check: every accepted fact has an empty `units_added`, which
-is what says nothing was invented. `unresolved_reference` is what decides
-whether a question written from the fact can be answered on its own.
+is a hallucination check: every accepted fact a model wrote has an empty
+`units_added`, which is what says nothing was invented. `unresolved_reference`
+is what decides whether a question written from the fact can be answered on its
+own. Both are CHECK constraints as well as checks, so a bug in the checker
+cannot store a fact that contradicts them.
+
+`unresolved_reference` is applied to a claim and not to a digest, and the
+constraint says so: a summary or an outline stands in for a whole passage
+rather than asserting something about it, so it is held to length and to
+inventing nothing and may open with a pronoun. That is why
+`QUESTIONS_FACT_KINDS` names `atomic` — adding `summary` to it offers the
+writer facts nothing has checked for standing alone.
+
+A statement faces these gates against **the sentences it cited and no
+others**. A claim citing 0 and 2 of a three-sentence passage is judged on
+those two; the span stored in `fact_passages` still covers all three, because
+that is what a reader sees highlighted, and `sentence_ids` is the record the
+checks work from.
 
 `not_atomic` replaced a similarity threshold. Counting finite verbs is what
 "one claim" actually means; measuring how many words a statement shares with
@@ -554,10 +587,26 @@ statement keeps all of them, the passage was restated rather than broken up.
 The Facts page shows all of it in its Analysis fold, and says plainly
 when a number is wrong.
 
+The counts there are over every fact the filter selects and the means over the
+accepted ones alone. The first is the rate at which the model fails; the second
+is what it does when it does not. Averaging them together made the ratio partly
+a statement about the refusals — a fact refused for `evidence_absent` cites
+nothing and entered both evidence means as a zero.
+
 A table is read by a deterministic cell reader, not by the model. It cites the
 numbered rendered row its own value sits in, so a table citation is an index
 like any other and the checks need no rule of their own. Only the checks that
-apply to a written sentence are applied to a composed one.
+apply to a written sentence are applied to a composed one, and a composed one
+does not compete for the atomic cap: that cap exists to leave room for the
+digests, and a table yields none.
+
+The chunker labels a passage `table` if **any** item in it is one, and
+`CHUNKING_MERGE_PEERS` puts a table together with the prose around it — so a
+passage can be both. One carrying lines that no cell claims and that do carry a
+finite verb is read twice: the cell reader for the grid, the model for the
+rest. Measured over this corpus, 161 of 188 table passages carry text outside
+their grids, about 145,000 characters of it, and before this none of that was
+read by anything.
 
 ## What a question is
 
@@ -653,6 +702,44 @@ Why, how, what-happens-if and which-things were not badly written. They were
 **unwritable**. The verb rule now applies to a `value` alone; an `explanation`
 is refused for carrying *no* verb, which is the opposite failure; and each form
 has its own length bounds in `QUESTIONS_ANSWER_CHARS`.
+
+### What a question asks of a reader
+
+`difficulty` says how far an answer is spread — over two passages, two
+documents, two subjects — which is how hard it is to **find**. It says
+nothing about what has to be done once it is found, and a question spanning
+two documents can still be a bare lookup with both of them in hand.
+
+`cognitive_level` is the other axis, and it is derived from the question's
+type the way difficulty is derived from its scopes. Nobody judges a row.
+
+| level | types |
+|---|---|
+| `recall` | factoid, entity |
+| `understand` | definition, enumeration |
+| `apply` | condition, procedure, **application** |
+| `analyse` | reason, consequence, comparison, aggregation, temporal, **implication** |
+
+The two in bold are what make the column a measurement rather than a label.
+Every other type's answer is *stated* in the passages — the recoverability
+gate refuses one whose answer is not — so the level of a retrieval question
+describes the shape of a lookup. These two are **derived**: the premises are
+in the material and the conclusion is not, so answering means reasoning.
+
+An `implication` puts two statements together and asks what they come to. An
+`application` puts a rule the material gives to a case it does not mention.
+Both need the conclusion to be absent — if the material already says it, that
+is a `consequence`, and the gate refuses it.
+
+Because their answers are absent by construction, recoverability asks them
+the wrong question, so they face one of their own — the same bargain
+`aggregation` already had. Which one depends on how the type derives:
+`arithmetic` asks whether the figures come to the total, `entailment` asks
+whether the conclusion follows from the premises. They are not
+interchangeable: *do the arithmetic* is the wrong instruction for a
+conclusion drawn from two rules, and *does this follow* is the wrong one for
+a total, which follows from anything if the reader is generous about
+addition.
 
 ### The three criteria, and the band they feed
 

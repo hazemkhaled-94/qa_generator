@@ -20,7 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from database.qa_generator import AnswerForm, QuestionType
+from database.qa_generator import (
+    AnswerForm,
+    CognitiveLevel,
+    Derivation,
+    QuestionType,
+)
 
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
@@ -145,11 +150,17 @@ class TypeSpec:
     #: for the form they arrived in rather than for being wrong, and the
     #: stricter comparison a `value` is held to then refused them twice.
     also: tuple[str, ...] = ()
-    #: Whether the answer is worked out from the facts rather than stated by
-    #: them. True only for aggregation, and it changes which gate applies:
-    #: recoverability asks whether the passages STATE the answer, which this
-    #: type's own directive forbids them from doing.
-    derived: bool = False
+    #: How an answer that is not stated is got out of the material, or None
+    #: when the material states it outright. It decides which gate the
+    #: question faces: recoverability asks whether the passages STATE the
+    #: answer, and for a derived type that is the wrong question - the whole
+    #: point is that the answer is not there to be found.
+    derived: str | None = None
+    #: How much the question asks of whoever answers it. Declared by the
+    #: type rather than judged per question, so two readers cannot disagree,
+    #: and stored beside `difficulty`, which measures something else: how
+    #: far the answer is spread, not what has to be done with it.
+    level: str = CognitiveLevel.RECALL
 
     @property
     def spans(self) -> bool:
@@ -184,6 +195,7 @@ class TypeSpec:
 _SPECS = (
     TypeSpec(
         name=QuestionType.FACTOID,
+        level=CognitiveLevel.RECALL,
         form=AnswerForm.VALUE,
         passages=1,
         also=(AnswerForm.LIST,),
@@ -206,6 +218,7 @@ _SPECS = (
     ),
     TypeSpec(
         name=QuestionType.ENTITY,
+        level=CognitiveLevel.RECALL,
         form=AnswerForm.VALUE,
         passages=1,
         also=(AnswerForm.LIST,),
@@ -223,6 +236,7 @@ _SPECS = (
     ),
     TypeSpec(
         name=QuestionType.DEFINITION,
+        level=CognitiveLevel.UNDERSTAND,
         form=AnswerForm.EXPLANATION,
         passages=1,
         also=(AnswerForm.VALUE,),
@@ -243,6 +257,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.ENUMERATION,
+        level=CognitiveLevel.UNDERSTAND,
         form=AnswerForm.LIST,
         passages=1,
         asks="which things belong to a named set - the items, not how many",
@@ -264,6 +279,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.CONDITION,
+        level=CognitiveLevel.APPLY,
         form=AnswerForm.LIST,
         passages=1,
         also=(AnswerForm.VALUE,),
@@ -284,6 +300,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.REASON,
+        level=CognitiveLevel.ANALYSE,
         form=AnswerForm.EXPLANATION,
         passages=1,
         asks="why something is required, done, or the way it is",
@@ -304,6 +321,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.PROCEDURE,
+        level=CognitiveLevel.APPLY,
         form=AnswerForm.EXPLANATION,
         passages=1,
         also=(AnswerForm.LIST,),
@@ -324,6 +342,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.CONSEQUENCE,
+        level=CognitiveLevel.ANALYSE,
         form=AnswerForm.EXPLANATION,
         passages=1,
         asks="what happens, or what follows, when something is or is not done",
@@ -342,6 +361,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.COMPARISON,
+        level=CognitiveLevel.ANALYSE,
         form=AnswerForm.LIST,
         passages=2,
         also=(AnswerForm.EXPLANATION,),
@@ -362,9 +382,10 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.AGGREGATION,
+        level=CognitiveLevel.ANALYSE,
         form=AnswerForm.VALUE,
         passages=2,
-        derived=True,
+        derived=Derivation.ARITHMETIC,
         asks="a total, a count or a sum that no single fact states on its own",
         directive="""The answer must be something the material does not write down
 anywhere - it has to be worked out from two or more facts. If one fact already
@@ -383,6 +404,7 @@ Worked example. Facts:
     ),
     TypeSpec(
         name=QuestionType.TEMPORAL,
+        level=CognitiveLevel.ANALYSE,
         form=AnswerForm.LIST,
         passages=2,
         also=(AnswerForm.EXPLANATION,),
@@ -397,6 +419,66 @@ Worked example. Facts:
   RIGHT  question: "How did the reply time for a standard request change from
                     2024 to 2025?"
          answer:   "from 72 hours in 2024 to 48 hours in 2025"
+         facts:    [1, 2]
+""",
+    ),
+    TypeSpec(
+        name=QuestionType.IMPLICATION,
+        level=CognitiveLevel.ANALYSE,
+        derived=Derivation.ENTAILMENT,
+        form=AnswerForm.EXPLANATION,
+        passages=2,
+        asks="what must be true when two things the material states both hold",
+        directive="""Both premises must be in the facts, and the conclusion must
+be in NEITHER. If the material already says it, that is a `consequence` and not
+this: what makes this kind worth asking is that somebody has to put two
+statements together and see what they come to.
+
+Do not invent a premise. If the facts do not settle the question between them,
+there is no implication here to ask about.
+
+Worked example. Facts:
+
+  [1] A standard request is answered within 48 hours.
+  [2] The 48-hour time counts working days only.
+
+  WRONG  "How long is allowed for a standard request?"
+         (that is fact [1] with its number deleted; nobody has to reason)
+
+  RIGHT  question: "What is the latest a request raised on a Friday can be
+                    answered?"
+         answer:   "the following Tuesday, because the 48 hours count only
+                    working days and the weekend does not"
+         facts:    [1, 2]
+""",
+    ),
+    TypeSpec(
+        name=QuestionType.APPLICATION,
+        level=CognitiveLevel.APPLY,
+        derived=Derivation.ENTAILMENT,
+        form=AnswerForm.EXPLANATION,
+        also=(AnswerForm.VALUE,),
+        passages=1,
+        asks="which rule the material gives governs a case it does not mention",
+        directive="""Put a CASE the material does not name to a rule it does.
+The rule has to be in the facts; the case must not be, or there is nothing to
+apply and the answer is a lookup.
+
+The case must be one the rule actually settles. A case the material leaves open
+is an unanswerable question, which is a different kind.
+
+Worked example. Facts:
+
+  [1] A request marked urgent is answered within 4 hours.
+  [2] A request is marked urgent when it stops work at a site.
+
+  WRONG  "When is a request marked urgent?"
+         (that is fact [2] read back; no case, no application)
+
+  RIGHT  question: "A site cannot dispatch because its scanner is down and a
+                    request is raised. How quickly must it be answered?"
+         answer:   "within 4 hours, because work has stopped at the site and
+                    that is what marks a request urgent"
          facts:    [1, 2]
 """,
     ),

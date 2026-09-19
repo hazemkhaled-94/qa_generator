@@ -26,6 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database.qa_generator.base import Base
 from database.qa_generator.outcomes import (
     AnswerForm,
+    CognitiveLevel,
     Difficulty,
     DocumentScope,
     PassageScope,
@@ -90,6 +91,10 @@ class Question(Base):
         CheckConstraint(
             f"answer_form IS NULL OR {one_of('answer_form', AnswerForm)}",
             name="questions_answer_form_valid",
+        ),
+        CheckConstraint(
+            f"cognitive_level IS NULL OR {one_of('cognitive_level', CognitiveLevel)}",
+            name="questions_cognitive_level_valid",
         ),
         # The listing filters on the type and the quality report groups on it.
         Index("ix_questions_question_type", "question_type"),
@@ -253,6 +258,17 @@ class Question(Base):
         "Non-NULL means the question is withheld from the open export and kept "
         "encrypted, so there is a test the development team has not tuned against. "
         "NULL means it is in the open set.",
+    )
+    cognitive_level: Mapped[str | None] = mapped_column(
+        Text,
+        comment="recall | understand | apply | analyse, enforced by a CHECK "
+        "constraint. How much the question asks of whoever answers it, "
+        "declared by its type rather than judged per row - the same bargain "
+        "difficulty makes with the scopes. A different axis from difficulty, "
+        "and deliberately not merged with it: difficulty says how far the "
+        "answer is spread and so how hard it is to FIND, and a question "
+        "spanning two documents can still be a bare lookup once both are in "
+        "hand. This says how much has to be done with what was found.",
     )
     release_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,

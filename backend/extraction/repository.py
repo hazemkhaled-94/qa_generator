@@ -32,6 +32,7 @@ from database.qa_generator import (
 from database.qa_generator.passage_topics import DOMINANT
 from database.qa_generator.repository import Repository, matching
 from extraction.models import (
+    WRITTEN,
     CandidateFact,
     CheckedFact,
     Cited,
@@ -80,6 +81,7 @@ _PASSAGE_COLUMNS = (
     Passage.text,
     Passage.section_path,
     Passage.block_type,
+    Passage.language,
     Passage.sentences,
     Passage.table_cells,
     Passage.doc_sha256,
@@ -101,13 +103,25 @@ def _sentences(text: str, stored: list[dict] | None) -> list[Sentence]:
 
 
 def _passage(row, language: str | None) -> PassageToExtract:
-    """Reads one row of `_PASSAGE_COLUMNS` as a passage to extract from."""
+    """Reads one row of `_PASSAGE_COLUMNS` as a passage to extract from.
+
+    Args:
+        row: The selected columns.
+        language: The document's language, which is the fallback.
+
+    Returns:
+        The passage, reading in its own language where it has one. Chunking
+        detects the language per passage and segmented this one under it, so
+        the document's label would judge a statement with one pipeline
+        against sentence counts another produced. One file carries a German
+        report and its English summary, which is what the column is for.
+    """
     return PassageToExtract(
         id=row.id,
         text=row.text,
         section_path=row.section_path,
         block_type=row.block_type,
-        language=language,
+        language=row.language or language,
         sentences=_sentences(row.text, row.sentences),
         table_cells=row.table_cells or [],
         doc_sha256=row.doc_sha256,
@@ -227,6 +241,10 @@ class PassageQueue(RowQueue):
         claimed = self._claim(*_PASSAGE_COLUMNS)
         if claimed is None:
             return None
+        if claimed.language:
+            return _passage(claimed, None)
+        # Only for a passage too short to tell its own language. Asked here
+        # rather than joined into the claim, which is an UPDATE.
         with self._session() as session:
             language = session.scalar(
                 select(Document.language).where(Document.sha256 == claimed.doc_sha256)
@@ -356,13 +374,27 @@ class FactCatalog(Repository):
         what puts two of them in the same group.
 
         Args:
-            within: A condition narrowing which passages are read, or None.
+            within: A condition selecting passages, or None for the corpus.
+                Every topic holding one of them is read WHOLE, which is not
+                the same as reading the passages it selects. `clear_bridges`
+                deletes any bridge resting on a selected passage, and a
+                bridge rests on two - so narrowing the read to one document
+                would delete the cross-document bridges and then be unable
+                to write them again, having kept only one side of each. The
+                cross-document bridge is the one worth having.
 
         Yields:
             One topic's id and its passages.
         """
         query = (
-            select(*_PASSAGE_COLUMNS, Document.language, DOMINANT.c.topic_id)
+            select(
+                *_PASSAGE_COLUMNS,
+                # Labelled, because `_PASSAGE_COLUMNS` now carries the
+                # passage's own and two `language` keys in one row is one
+                # key too few.
+                Document.language.label("document_language"),
+                DOMINANT.c.topic_id,
+            )
             .select_from(Passage)
             .join(Document, Document.sha256 == Passage.doc_sha256)
             .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
@@ -370,7 +402,13 @@ class FactCatalog(Repository):
             .order_by(DOMINANT.c.topic_id, Passage.doc_sha256, Passage.ordinal)
         )
         if within is not None:
-            query = query.where(within)
+            query = query.where(
+                DOMINANT.c.topic_id.in_(
+                    select(DOMINANT.c.topic_id)
+                    .join(Passage, Passage.id == DOMINANT.c.passage_id)
+                    .where(within)
+                )
+            )
 
         with self._session() as session:
             held: list[PassageToExtract] = []
@@ -380,7 +418,7 @@ class FactCatalog(Repository):
                     if held:
                         yield cast("int", current), held
                     current, held = row.topic_id, []
-                held.append(_passage(row, row.language))
+                held.append(_passage(row, row.document_language))
             if held:
                 yield cast("int", current), held
 
@@ -394,8 +432,9 @@ class FactCatalog(Repository):
         than re-read over hours.
 
         Ranked exactly as `over_cap` ranks a passage in flight - the facts
-        asserting a number, a date or a name first, ties by id - so a
-        passage re-extracted later keeps the same facts this leaves.
+        a model wrote, asserting a number, a date or a name first, ties by
+        id - so a passage re-extracted later keeps the same facts this
+        leaves.
 
         Args:
             cap: The most validated atomic facts one passage may keep.
@@ -423,7 +462,14 @@ class FactCatalog(Repository):
                 FactPassage,
                 (FactPassage.fact_id == Fact.id) & (FactPassage.position == 0),
             )
-            .where(Fact.kind == FactKind.ATOMIC, Fact.validated)
+            .where(
+                Fact.kind == FactKind.ATOMIC,
+                Fact.validated,
+                # As `over_cap` ranks one in flight: a statement composed
+                # from a grid does not compete. The cap exists to leave room
+                # for the digests, and a table yields none.
+                Fact.extraction_method == WRITTEN,
+            )
         )
         if within is not None:
             ranked = ranked.where(_resting(within))
@@ -490,7 +536,7 @@ class FactCatalog(Repository):
                 Fact.extraction_method,
                 FactPassage.sentence_ids,
                 *_PASSAGE_COLUMNS,
-                Document.language,
+                Document.language.label("document_language"),
             )
             .select_from(Fact)
             .join(FactPassage, FactPassage.fact_id == Fact.id)
@@ -519,7 +565,7 @@ class FactCatalog(Repository):
                 rows = list(found)
                 yield (
                     fact_id,
-                    [_passage(row, row.language) for row in rows],
+                    [_passage(row, row.document_language) for row in rows],
                     CandidateFact(
                         statement=rows[0].statement,
                         sentences=tuple(rows[0].sentence_ids or ()),
@@ -716,6 +762,15 @@ class FactCatalog(Repository):
         Rejections are grouped on the code rather than the message: a message
         carrying a measurement gives one bucket per measurement.
 
+        The counts are over everything the filter selects, refused facts
+        included - that rate is the measurement. The means are over the
+        accepted ones only. They are there to answer whether the model is
+        decomposing a passage or restating it, and a fact refused as
+        `evidence_absent` carries no evidence at all: it enters both
+        evidence means as a zero and pulls the ratio the README reads as
+        "claims per statement against claims per cited sentence" towards a
+        number describing the failures rather than the work.
+
         Args:
             document: Only facts resting on a passage of this document.
             search: Text to match, in the columns `field` names.
@@ -732,18 +787,22 @@ class FactCatalog(Repository):
                     func.count().label("total"),
                     func.count().filter(Fact.validated).label("validated"),
                     func.count(func.distinct(_OPENS.passage_id)).label("passages"),
-                    func.coalesce(func.avg(func.length(Fact.statement)), 0.0).label(
-                        "statement_chars"
-                    ),
-                    func.coalesce(func.avg(func.length(Fact.evidence_text)), 0.0).label(
-                        "evidence_chars"
-                    ),
-                    func.coalesce(func.avg(Fact.statement_predicates), 0.0).label(
-                        "statement_predicates"
-                    ),
-                    func.coalesce(func.avg(Fact.evidence_predicates), 0.0).label(
-                        "evidence_predicates"
-                    ),
+                    func.coalesce(
+                        func.avg(func.length(Fact.statement)).filter(Fact.validated),
+                        0.0,
+                    ).label("statement_chars"),
+                    func.coalesce(
+                        func.avg(func.length(Fact.evidence_text)).filter(
+                            Fact.validated
+                        ),
+                        0.0,
+                    ).label("evidence_chars"),
+                    func.coalesce(
+                        func.avg(Fact.statement_predicates).filter(Fact.validated), 0.0
+                    ).label("statement_predicates"),
+                    func.coalesce(
+                        func.avg(Fact.evidence_predicates).filter(Fact.validated), 0.0
+                    ).label("evidence_predicates"),
                 )
             ),
             document,

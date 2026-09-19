@@ -140,6 +140,33 @@ That it does not appear is expected and is not a reason to say no.
 """
 
 
+_FOLLOWS = """You check whether one ANSWER FOLLOWS from some PASSAGES.
+
+The answer is deliberately not written in the passages. The passages state
+the premises; the answer is what they come to when put together, or what a
+rule in them says about a case they do not mention. That it does not appear
+is expected and is not a reason to say no.
+
+- `supported` is true when every premise the conclusion needs is in the
+  passages AND the conclusion really follows from them. Reason it through.
+- It is false when a premise is missing, when the passages settle the
+  question differently, or when the answer needs something you know from
+  outside them. A conclusion that is merely plausible does not follow.
+- It is also false when the answer is simply STATED in the passages. Then
+  nothing was derived and the question is a lookup wearing this kind's
+  name.
+
+  TRUE:  passages "Anträge werden binnen 48 Stunden beantwortet." and "Die
+                   48 Stunden zählen nur Werktage."
+         answer   "ein Freitagsantrag ist am Dienstag fällig, weil das
+                   Wochenende nicht zählt"
+  FALSE: same passages, answer "am Sonntag"     (the weekend does not count)
+  FALSE: passages naming only the 48 hours, answer "am Dienstag"
+                                                (the working-day premise is
+                                                 not there)
+"""
+
+
 class _Supported(BaseModel):
     """Whether the passages back one proposed answer."""
 
@@ -222,6 +249,27 @@ class Verifier:
                 answer in the shape.
         """
         return self._judge(_COMPUTES, question, answer, passages, thread)
+
+    def follows(
+        self,
+        question: str,
+        answer: str,
+        passages: Sequence[str],
+        thread: Sequence[tuple[str, str | None]] = (),
+    ) -> bool:
+        """Whether a conclusion follows from the premises in the passages.
+
+        The entailment half of what `computes` does for arithmetic. An
+        `implication` puts two statements together and an `application`
+        puts a rule to a case, and in both the answer is absent from the
+        material by construction - so recoverability, which asks whether
+        the passages state it, would refuse every one of them.
+
+        Raises:
+            ModelUnavailable: If the model could not be reached or would not
+                answer in the shape.
+        """
+        return self._judge(_FOLLOWS, question, answer, passages, thread)
 
     def supports(
         self,

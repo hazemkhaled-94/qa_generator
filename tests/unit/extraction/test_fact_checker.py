@@ -195,6 +195,52 @@ def test_a_citation_naming_one_sentence_twice_resolves_once(checker) -> None:
     assert only(repeated).sentence_ids == [0]
 
 
+@pytest.fixture(scope="module")
+def spaced() -> Checker:
+    """Three sentences, the middle one carrying a number of its own."""
+    return Checker(
+        passage(
+            "The device weighs 4 kg. A spare part costs 99 euro. It arrives in March."
+        )
+    )
+
+
+class TestSentencesWithAGapBetweenThem:
+    """A claim citing 0 and 2 rests on two sentences, not on three.
+
+    The span recorded covers all three, because that is what a reader sees
+    highlighted. What the checks read is the two.
+    """
+
+    def test_the_span_still_covers_the_whole_range(self, spaced) -> None:
+        """One offset pair per passage is what fact_passages holds."""
+        cited = only(spaced.atomic("The device arrives in March.", (0, 2)))
+
+        assert cited.sentence_ids == [0, 2]
+        assert cited.start == 0
+        assert cited.end == len(spaced.passage.text)
+
+    def test_the_evidence_leaves_out_what_was_not_cited(self, spaced) -> None:
+        """It is what the checks read, so it carries what was named."""
+        drawn = spaced.atomic("The device arrives in March.", (0, 2))
+
+        assert "99 euro" not in drawn.evidence_text
+        assert "weighs 4 kg" in drawn.evidence_text
+        assert "arrives in March" in drawn.evidence_text
+
+    def test_a_unit_from_the_uncited_sentence_is_an_addition(self, spaced) -> None:
+        """The defect this is all for.
+
+        `unsupported_addition` is what says nothing was invented. Judged
+        against the covering range it would accept 99 from a sentence the
+        claim never cited.
+        """
+        borrowed = spaced.atomic("The device costs 99 euro.", (0, 2))
+
+        assert borrowed.rejection_code == Rejection.UNSUPPORTED_ADDITION
+        assert "99" in borrowed.units_added
+
+
 def test_a_deterministic_statement_is_judged_on_its_citation_alone(checker) -> None:
     """A statement composed from a grid is neither a sentence nor written."""
     composed = checker.composed("Device - Mass: 4 kg")

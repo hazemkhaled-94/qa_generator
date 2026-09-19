@@ -62,6 +62,20 @@ def main(argv: list[str] | None = None) -> int:
             within,
         )
 
+    def run_revalidate(within) -> int:
+        """Judges every stored fact again, under the settings as they stand."""
+        _, settings, version = configured()
+        return revalidate(
+            FactCatalog(version=version),
+            FactChecker(settings.digest_share),
+            within,
+        )
+
+    def run_recap(within) -> int:
+        """Refuses the atomic facts already stored above the cap."""
+        _, settings, version = configured()
+        return recap(FactCatalog(version=version), settings.atomic_cap, within)
+
     #: This stage's own operations. `revalidate` calls no model: it re-reads
     #: what the checks read off facts already stored, which is how a change to
     #: the checks reaches facts extracted before it.
@@ -69,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         "revalidate": (
             "judge every stored fact again, without calling the model",
             "judged again",
-            lambda within: revalidate(FactCatalog(version=configured()[2]), within),
+            run_revalidate,
         ),
         "bridge": (
             "read every topic's passage groups for the claims they share",
@@ -79,11 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         "recap": (
             "refuse the atomic facts over the cap, without calling the model",
             "refused",
-            lambda within: recap(
-                FactCatalog(version=configured()[2]),
-                configured()[1].atomic_cap,
-                within,
-            ),
+            run_recap,
         ),
     }
 

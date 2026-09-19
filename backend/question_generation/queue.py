@@ -360,6 +360,7 @@ class QuestionQueue(RowQueue):
                             difficulty=question.criteria.difficulty,
                             planned_difficulty=question.planned_difficulty,
                             question_type=question.question_type,
+                            cognitive_level=question.cognitive_level,
                             answer_form=question.answer_form,
                             passage_scope=question.criteria.passage_scope,
                             document_scope=question.criteria.document_scope,

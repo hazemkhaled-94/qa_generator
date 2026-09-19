@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 from database.qa_generator import FactKind
 from nlp.models import Sentence
 
+#: The method whose statements a model writes, as `extraction_method`
+#: records it. A deterministic reader composes its statement from the grid,
+#: so it is neither a sentence nor expected to read like one.
+#:
+#: Here rather than beside the checks that read it: the repository asks the
+#: same question in SQL, and the api holds a repository. A catalogue must
+#: not import the module that loads a pipeline.
+WRITTEN = "llm"
+
 #: What each line of a stored outline opens with.
 BULLET = "- "
 
@@ -79,9 +88,13 @@ class Citation:
     Attributes:
         passage_id: The passage.
         sentence_ids: Which of its sentences, in order, or None when the
-            claim named no sentence this passage has.
+            claim named no sentence this passage has. The record of what the
+            claim rests on; the offsets below are the range covering them.
         start: Offset of the span in that passage's text, or None with the
-            sentences.
+            sentences. The range from the first cited sentence to the last,
+            which is what a reader sees highlighted - so it covers a
+            sentence between two cited ones that was not itself cited. The
+            checks read `sentence_ids`, never this.
         end: Offset one past its last character, or None with the sentences.
     """
 
@@ -216,10 +229,14 @@ class StoredFact:
 class FactQuality:
     """How well extraction did, over whatever the caller filtered to.
 
+    The counts are over everything the filter selects and the means over
+    the accepted facts alone: the first is the rate at which the model
+    fails, and the second is what it does when it does not.
+
     Attributes:
         total: Facts matching the filter, refused ones included.
         validated: How many of them passed.
-        mean_statement_chars: Mean length of a statement.
+        mean_statement_chars: Mean length of an accepted statement.
         mean_evidence_chars: Mean length of the text one cites.
         mean_statement_predicates: Mean finite verbs in a statement.
         mean_evidence_predicates: Mean finite verbs in the text one cites.

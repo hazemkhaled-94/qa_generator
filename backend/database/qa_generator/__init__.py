@@ -12,6 +12,8 @@ from database.qa_generator.facts import Fact
 from database.qa_generator.ingest_events import IngestEvent
 from database.qa_generator.outcomes import (
     AnswerForm,
+    CognitiveLevel,
+    Derivation,
     Difficulty,
     DocumentScope,
     FactKind,
@@ -36,6 +38,8 @@ from database.qa_generator.topics import Topic
 __all__ = [
     "AnswerForm",
     "Base",
+    "CognitiveLevel",
+    "Derivation",
     "Difficulty",
     "Document",
     "DocumentScope",

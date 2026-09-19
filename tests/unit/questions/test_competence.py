@@ -1,0 +1,220 @@
+"""The types whose answers are reasoned to rather than found.
+
+Every other kind of question here is answered by a sentence in the corpus -
+the recoverability gate refuses one whose answer is not - so however much
+reading it takes, answering is retrieval. `implication` and `application`
+are not: the premises are in the material and the conclusion is not, which
+is what makes a cognitive level a measurement rather than a label.
+"""
+
+from __future__ import annotations
+
+import pytest
+from factories import candidate, group, source
+
+from database.qa_generator import CognitiveLevel, Derivation, QuestionType
+from question_generation.types import SPECS
+from question_generation.verifier import Reading
+
+pytestmark = pytest.mark.nlp
+
+
+# ── What a type declares ───────────────────────────────────────────────────
+
+
+def test_every_type_declares_a_level() -> None:
+    """The column is written from this, so a type without one writes NULL."""
+    missing = [name for name, spec in SPECS.items() if not spec.level]
+
+    assert missing == []
+
+
+def test_every_level_is_one_a_question_may_carry() -> None:
+    """The CHECK on the column is the same list."""
+    unknown = {spec.level for spec in SPECS.values()} - set(CognitiveLevel)
+
+    assert unknown == set()
+
+
+@pytest.mark.parametrize(
+    ("kind", "level"),
+    [
+        (QuestionType.FACTOID, CognitiveLevel.RECALL),
+        (QuestionType.DEFINITION, CognitiveLevel.UNDERSTAND),
+        (QuestionType.CONDITION, CognitiveLevel.APPLY),
+        (QuestionType.APPLICATION, CognitiveLevel.APPLY),
+        (QuestionType.REASON, CognitiveLevel.ANALYSE),
+        (QuestionType.IMPLICATION, CognitiveLevel.ANALYSE),
+    ],
+)
+def test_a_type_asks_what_its_level_says(kind: str, level: str) -> None:
+    """Pinned, because the level is read off the type and nothing else."""
+    assert SPECS[kind].level == level
+
+
+def test_only_the_derived_types_are_derived() -> None:
+    """A derived type skips recoverability, so this list is load-bearing.
+
+    Marking a retrieval type derived would send its questions to a gate
+    that asks whether the answer FOLLOWS, and never check that the corpus
+    actually contains it.
+    """
+    derived = {name for name, spec in SPECS.items() if spec.derived}
+
+    assert derived == {
+        QuestionType.AGGREGATION,
+        QuestionType.IMPLICATION,
+        QuestionType.APPLICATION,
+    }
+
+
+def test_arithmetic_and_entailment_are_told_apart() -> None:
+    """They are checked by different prompts and must not share one.
+
+    `Do the arithmetic` is the wrong instruction for a conclusion drawn
+    from two rules, and `does this follow` is the wrong one for a total,
+    which follows from anything if the reader is generous about addition.
+    """
+    assert SPECS[QuestionType.AGGREGATION].derived == Derivation.ARITHMETIC
+    assert SPECS[QuestionType.IMPLICATION].derived == Derivation.ENTAILMENT
+    assert SPECS[QuestionType.APPLICATION].derived == Derivation.ENTAILMENT
+
+
+def test_an_implication_needs_two_passages() -> None:
+    """A conclusion from one statement is that statement."""
+    assert SPECS[QuestionType.IMPLICATION].spans
+
+
+# ── Which gate a derived question faces ────────────────────────────────────
+
+
+class Recording:
+    """A verifier that records which question it was asked."""
+
+    def __init__(self, answer: bool = True) -> None:
+        """Initialises with the verdict it will give."""
+        self.answer = answer
+        self.asked: list[str] = []
+        self.vector = [1.0] + [0.0] * 1023
+
+    def embed(self, text: str) -> list[float]:
+        """The one vector."""
+        return self.vector
+
+    def read(self, question, passages, thread=()):
+        """Recall, which a derived question must never reach."""
+        self.asked.append("read")
+        return Reading(recovered=None, stands_alone=True)
+
+    def computes(self, question, answer, passages, thread=()) -> bool:
+        """The arithmetic gate."""
+        self.asked.append("computes")
+        return self.answer
+
+    def follows(self, question, answer, passages, thread=()) -> bool:
+        """The entailment gate."""
+        self.asked.append("follows")
+        return self.answer
+
+    def supports(self, question, answer, passages, thread=()) -> bool:
+        """The rescue pass, which a derived question does not use."""
+        self.asked.append("supports")
+        return self.answer
+
+
+def build(recording: Recording):
+    """A checker over the scripted verifier."""
+    from question_generation.checker import QuestionChecker
+
+    return QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        bounds={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+    )
+
+
+#: An answer of the shape each derived type asks for. A total is a value
+#: and is held to 80 characters; a conclusion is an explanation and must
+#: carry a verb, so one answer cannot serve both.
+_ANSWERS = {
+    QuestionType.AGGREGATION: "65",
+    QuestionType.IMPLICATION: (
+        "the following Tuesday, because the hours count only working days"
+    ),
+    QuestionType.APPLICATION: (
+        "within four hours, because work has stopped at the site"
+    ),
+}
+
+
+def reasoned(kind: str):
+    """One derived question, with an answer the passages do not state."""
+    return candidate(
+        question_text="A site cannot dispatch and a request is raised. How fast?",
+        target_answer=_ANSWERS[kind],
+        question_type=kind,
+        facts=group(source(passage_text="An urgent request is answered in 4 hours.")),
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "gate"),
+    [
+        (QuestionType.AGGREGATION, "computes"),
+        (QuestionType.IMPLICATION, "follows"),
+        (QuestionType.APPLICATION, "follows"),
+    ],
+)
+def test_a_derived_question_is_sent_to_its_own_gate(kind: str, gate: str) -> None:
+    """And never judged on whether the passages state the answer."""
+    recording = Recording(answer=True)
+
+    result = build(recording).check(reasoned(kind))
+
+    assert gate in recording.asked
+    assert result.status == "accepted"
+
+
+@pytest.mark.parametrize("kind", [QuestionType.IMPLICATION, QuestionType.APPLICATION])
+def test_a_conclusion_that_does_not_follow_is_refused(kind: str) -> None:
+    """The gate has to be able to say no, or it is not a gate."""
+    from database.qa_generator import QuestionRejection
+
+    recording = Recording(answer=False)
+
+    result = build(recording).check(reasoned(kind))
+
+    assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+
+
+def test_a_retrieval_question_still_faces_recall() -> None:
+    """The derived path must not swallow the types it was not built for."""
+    recording = Recording(answer=False)
+
+    build(recording).check(candidate(question_type=QuestionType.FACTOID))
+
+    assert "read" in recording.asked
+    assert "follows" not in recording.asked
+
+
+# ── What reaches the row ───────────────────────────────────────────────────
+
+
+def test_the_level_is_carried_onto_the_question() -> None:
+    """Written from the spec, so a reader can group on it without re-deriving."""
+    recording = Recording(answer=True)
+
+    result = build(recording).check(reasoned(QuestionType.IMPLICATION))
+
+    assert result.cognitive_level == CognitiveLevel.ANALYSE
+
+
+def test_a_retrieval_question_carries_its_level_too() -> None:
+    """Every type declares one, so every row gets one."""
+    recording = Recording()
+
+    result = build(recording).check(candidate(question_type=QuestionType.FACTOID))
+
+    assert result.cognitive_level == CognitiveLevel.RECALL

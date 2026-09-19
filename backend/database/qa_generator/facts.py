@@ -62,6 +62,30 @@ class Fact(Base):
         CheckConstraint(
             "validated = (rejection_code IS NULL)", name="facts_verdict_agrees"
         ),
+        # What an accepted fact means, in the table rather than only in the
+        # checker's control flow: a bug there could otherwise store the
+        # opposite and question generation would offer it.
+        #
+        # `llm` only, for both. A statement composed from a grid faces the
+        # copy check and nothing else, because it is neither written nor a
+        # sentence, so it is accepted carrying whatever the reading found.
+        CheckConstraint(
+            "extraction_method <> 'llm' OR validated IS FALSE OR "
+            "cardinality(units_added) = 0",
+            name="facts_accepted_invented_nothing",
+        ),
+        # Narrower than the one above, because `_self_contained` is applied
+        # to a claim and not to a digest: a summary standing in for a whole
+        # passage may open with a pronoun and 291 accepted ones do. So this
+        # holds for the kinds a question is actually written from, which is
+        # what QUESTIONS_FACT_KINDS names, and not for the two that stand
+        # in for a passage rather than assert something about it.
+        CheckConstraint(
+            "extraction_method <> 'llm' OR validated IS FALSE OR "
+            "kind NOT IN ('atomic', 'bridge') OR "
+            "cardinality(unresolved_references) = 0",
+            name="facts_accepted_claim_stands_alone",
+        ),
         CheckConstraint(
             f"reviewed_verdict IS NULL OR {one_of('reviewed_verdict', ReviewVerdict)}",
             name="facts_reviewed_verdict_valid",
@@ -160,8 +184,11 @@ class Fact(Base):
     unresolved_references: Mapped[list[str]] = mapped_column(
         ARRAY(Text),
         comment="Pronouns leaving the statement dependent on its context. Empty on "
-        "every accepted fact, which is what makes a question from it answerable "
-        "alone.",
+        "every accepted atomic fact and bridge, which is what makes a question from "
+        "one answerable alone. A summary and an outline are not held to it: they "
+        "stand in for a whole passage rather than assert something about it, so "
+        "they are checked on length and on inventing nothing and may open with a "
+        "pronoun.",
     )
     validated: Mapped[bool] = mapped_column(
         Boolean, server_default=false(), comment="Whether every check passed."

@@ -18,8 +18,8 @@ from extraction.extractors import (
 )
 from extraction.models import CheckedFact, PassageToExtract
 from extraction.repository import FactCatalog, PassageQueue
-from extraction.validation import FactChecker
-from nlp.analysis import normalised
+from extraction.validation import WRITTEN, FactChecker
+from nlp.analysis import claim, normalised
 from stages import StageService
 from telemetry import tracer, working
 
@@ -33,18 +33,24 @@ _REJUDGE_BATCH = 500
 _DIGESTIBLE = 2
 
 
-def revalidate(catalog: FactCatalog, within=None) -> int:
+def revalidate(catalog: FactCatalog, checker: FactChecker, within=None) -> int:
     """Judges every stored fact again, without calling the model.
 
     Args:
         catalog: Where the facts are read from and written back to.
+        checker: What judges them, holding the shares this configuration
+            sets. Passed rather than built here, as the bridge pass already
+            does: built here it would read the process environment, and a
+            deployment that changed EXTRACTION_DIGEST_MAX_SHARE through
+            /settings stores the new value rather than exporting it - so a
+            digest would be re-judged against the file while the fact was
+            stamped with the stored configuration's version.
         within: A condition narrowing which facts are re-judged, or None for
             all of them.
 
     Returns:
         How many facts were written back.
     """
-    checker = FactChecker()
     verdicts: list[tuple[int, CheckedFact]] = []
     written = 0
 
@@ -66,9 +72,11 @@ def revalidate(catalog: FactCatalog, within=None) -> int:
     log.info("re-judged %d fact(s)", written)
     if skipped:
         log.warning(
-            "left %d bridge(s) alone: they were drawn before the prompt recorded "
-            "which sentences they rest on, so there is nothing to judge them "
-            "against. Run --bridge to replace them.",
+            "left %d fact(s) alone: their citation resolved to no sentence, so "
+            "there is nothing to judge them against and re-judging would "
+            "overwrite the only record of what they cited. A bridge among them "
+            "was drawn before the prompt recorded its sentences; run --bridge "
+            "to replace those.",
             skipped,
         )
     return written
@@ -101,16 +109,29 @@ def recap(catalog: FactCatalog, cap: int | None, within=None) -> int:
 
 
 def _uncitable(candidate) -> bool:
-    """Whether a stored bridge recorded no sentence to judge it against.
+    """Whether a stored fact recorded no sentence to judge it against.
+
+    Two kinds of row look like this and neither is worth re-reading.
 
     A bridge drawn before prompt version 2 named its passages and not the
     sentences in them. Judging one would resolve nothing and refuse it as
     evidence_absent, which would throw away a fact that was correct under the
     prompt that wrote it.
+
+    A fact already refused as evidence_absent is the other. The numbers its
+    citation named survive nowhere but its own `validation_error`: the link
+    rows carry NULL, which is what says they resolved to nothing. Re-judging
+    one rebuilds the candidate from those NULLs, reaches the same verdict,
+    and rewrites the message as `names (none)` - so the only record of what
+    the model actually cited is lost to a pass that learned nothing.
+
+    Read off the field `_rejudge` will read, which is not the same one for
+    both kinds: a bridge is judged against the sentences named per passage
+    and everything else against the candidate's own.
     """
-    return candidate.kind == FactKind.BRIDGE and not any(
-        one.sentences for one in candidate.passages
-    )
+    if candidate.kind == FactKind.BRIDGE:
+        return not any(one.sentences for one in candidate.passages)
+    return not candidate.sentences
 
 
 def _rejudge(
@@ -159,7 +180,15 @@ def grouped(
         interleaved[at : at + size]
         for at in range(0, len(interleaved) - size + 1, size)
     ]
-    return whole[:: max(1, len(whole) // wanted)][:wanted]
+    # Evenly spaced from the first group to the last, rather than a stride.
+    # A stride of len(whole) // wanted floors to 1 for any topic holding
+    # fewer than twice as many groups as were asked for, which is the
+    # ordinary case at twelve a topic - it then takes the first twelve of
+    # twenty-three and the back half of the topic is never read. Ceiling
+    # instead returns ten groups where twelve were wanted.
+    chosen = min(wanted, len(whole))
+    step = (len(whole) - 1) / (chosen - 1) if chosen > 1 else 0
+    return [whole[round(at * step)] for at in range(chosen)]
 
 
 def bridge(
@@ -181,7 +210,7 @@ def bridge(
         checker: What judges what it proposed.
         groups_per_topic: How many groups one topic is worth.
         size: How many passages one group holds.
-        within: A condition narrowing which passages are read, or None.
+        within: A condition selecting the topics to read, or None.
 
     Returns:
         How many bridge facts were stored, refused ones included.
@@ -189,7 +218,13 @@ def bridge(
     log.info("replacing %d bridge fact(s)", catalog.clear_bridges(within))
     written = 0
     for topic_id, passages in catalog.by_topic(within):
-        for offered in grouped(passages, groups_per_topic, size):
+        # The same gate the per-passage stage applies, so the two cannot
+        # drift. Without it a group is spent on a table of contents or a
+        # heading: `by_topic` asks only that a passage was segmented, and
+        # the index this corpus renders as a code block yielded 95 facts
+        # from four passages before the gate existed.
+        readable = [one for one in passages if skipped(one) is None]
+        for offered in grouped(readable, groups_per_topic, size):
             try:
                 proposed = extractor.extract(offered)
             except ExtractionFailed as exc:
@@ -307,6 +342,36 @@ def skipped(passage: PassageToExtract) -> str | None:
     return None
 
 
+def _unread_prose(passage: PassageToExtract) -> bool:
+    """Whether a table passage also carries lines no reader would reach.
+
+    The chunker labels a merged passage `table` if ANY item in it is one,
+    and numbers the whole of it by rendered line rather than by sentence -
+    `lines_of` records `predicates: 0` for every line, so `claims` is zero
+    for every table and the prose merged into one is invisible to each of
+    the signals above. The cell reader then walks the grid and nothing
+    reads the rest.
+
+    Measured over this corpus: 161 of 188 table passages carry lines
+    outside their grids, about 145,000 characters. Most of it is rendered
+    rows and `|---|` separators, and the rest is ordinary German prose -
+    "In diesem Abschnitt werden die geschäftlichen Nutzen aufgeführt...".
+    A finite verb is what tells the two apart, so it is asked here rather
+    than read off a column that was written as zero.
+    """
+    if not passage.table_cells:
+        return False
+    gridded = {
+        cell.get("line")
+        for grid in passage.table_cells
+        for cell in grid.get("cells", ())
+    }
+    return any(
+        one.index not in gridded and claim(one.text, passage.language).predicates
+        for one in passage.sentences
+    )
+
+
 def over_cap(facts: Sequence[CheckedFact], cap: int | None) -> set[int]:
     """Which of one passage's facts the atomic cap refuses, by position.
 
@@ -319,13 +384,25 @@ def over_cap(facts: Sequence[CheckedFact], cap: int | None) -> set[int]:
     a name is what a checkable question is written from. Ties go to the
     order the model wrote them in, so one passage read twice keeps the same
     facts.
+
+    A statement a deterministic reader composed does not compete. The cap is
+    EXTRACTION_MIN_OTHER_SHARE read the other way round - the share of a
+    passage's facts that may be something other than atomic - and what makes
+    a floor on the others a cap on these is that a passage yields a FIXED
+    number of digests beside them. A table yields none: its rendered rows
+    carry no finite verb, so `_DIGESTIBLE` is never met and there is no
+    other kind for the share to be. Applying the cap there is arithmetic
+    about a quantity that is zero, and it threw away 56 of a 60-cell grid -
+    the cheapest and most checkable facts in the corpus - by grid position.
     """
     if cap is None:
         return set()
     competing = [
         (position, fact)
         for position, fact in enumerate(facts)
-        if fact.kind == FactKind.ATOMIC and fact.validated
+        if fact.kind == FactKind.ATOMIC
+        and fact.validated
+        and fact.extraction_method == WRITTEN
     ]
     if len(competing) <= cap:
         return set()
@@ -442,12 +519,10 @@ class ExtractionService(StageService):
             current.set_attribute("extract.skipped", reason)
             return []
 
-        extractor = self._extractors.for_block_type(passage.block_type)
         facts = [
-            self._checker.check(
-                passage, candidate, extractor.method, extractor.provenance
-            )
-            for candidate in extractor.extract(passage)
+            self._checker.check(passage, candidate, reader.method, reader.provenance)
+            for reader in self._readers(passage, current)
+            for candidate in reader.extract(passage)
         ]
         cap = self._atomic_cap
         refused = over_cap(facts, cap)
@@ -458,6 +533,20 @@ class ExtractionService(StageService):
                 for position, fact in enumerate(facts)
             ]
         return facts + self._digested(passage)
+
+    def _readers(self, passage: PassageToExtract, current) -> list:
+        """Which extractors read one passage, in the order they are applied.
+
+        Usually the one its block type routes to. A passage that merged a
+        table with the prose around it gets both: the cell reader for the
+        grid and the model for the rest.
+        """
+        routed = self._extractors.for_block_type(passage.block_type)
+        default = self._extractors.default
+        if routed is default or not _unread_prose(passage):
+            return [routed]
+        current.set_attribute("extract.prose_beside_a_table", True)
+        return [routed, default]
 
     def _digested(self, passage: PassageToExtract) -> list[CheckedFact]:
         """Reads what the passage is about, when there is enough to condense.

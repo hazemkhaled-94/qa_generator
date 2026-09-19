@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import pytest
 from facts import FactStore, checked
+from seed import digest
 from sqlalchemy.exc import IntegrityError
 
-from database.qa_generator import FactKind, Rejection, Status
+from database.qa_generator import FactKind, Passage, Rejection, Status
 from extraction.models import Citation
 
 pytestmark = pytest.mark.integration
@@ -40,7 +41,7 @@ class TestClaiming:
         assert store.queue.claim() is None
 
     def test_a_queued_passage_comes_back_whole(self, store, corpus) -> None:
-        """Its text, its sentences and the language of its document."""
+        """Its text, its sentences and its language."""
         first = corpus["a"][0]
         store.queued(first)
 
@@ -49,8 +50,35 @@ class TestClaiming:
         assert claimed.id == first
         assert claimed.text.startswith("Standard requests")
         assert [one.index for one in claimed.sentences] == [0]
-        assert claimed.language == "en", "read off the document, not the passage"
+        assert claimed.language == "en"
         assert claimed.doc_sha256
+
+    def test_a_passage_is_read_in_its_own_language(self, store, corpus) -> None:
+        """One file carries a German report and its English summary.
+
+        Chunking detects the language per passage and segments it under
+        that one, so a document-wide label would judge the statement with
+        one pipeline against sentence counts another produced.
+        """
+        first = corpus["a"][0]
+        store.language_of(first, "de")
+        store.queued(first)
+
+        claimed = store.queue.claim()
+        assert claimed is not None
+        assert claimed.language == "de", "the passage's, not its document's"
+
+    def test_a_passage_too_short_to_tell_falls_back_to_its_document(
+        self, store, corpus
+    ) -> None:
+        """Which is what NULL in that column means."""
+        first = corpus["a"][0]
+        store.language_of(first, None)
+        store.queued(first)
+
+        claimed = store.queue.claim()
+        assert claimed is not None
+        assert claimed.language == "en"
 
     def test_claiming_marks_the_row_in_progress(self, store, corpus) -> None:
         """So a second worker takes the following row instead."""
@@ -271,8 +299,6 @@ class TestBridges:
         """`--only document=…` replaces that document's bridges and no others."""
         from seed import digest
 
-        from database.qa_generator import Passage
-
         a_anchor, b_anchor = corpus["a"][0], corpus["b"][0]
         store.bridges(
             checked(
@@ -383,6 +409,37 @@ class TestGroups:
         assert sorted(one for group in found.values() for one in group) == sorted(
             corpus["a"] + corpus["b"]
         )
+
+    def test_narrowing_to_one_document_reads_its_topics_whole(
+        self, store, corpus
+    ) -> None:
+        """Both sides of a cross-document bridge, or it cannot be rewritten.
+
+        `clear_bridges` deletes any bridge resting on a passage of the named
+        document, and a bridge rests on two. Reading back only that
+        document's passages would leave one side of each in hand, so a
+        narrowed run would delete the cross-document bridges and be unable
+        to write them again - and those are the ones worth having.
+        """
+        spanning = store.topic("Support", corpus["a"][0], corpus["b"][0])
+
+        found = dict(
+            store.catalog.by_topic(Passage.doc_sha256 == digest("a")),
+        )
+        assert list(found) == [spanning]
+        assert sorted(one.id for one in found[spanning]) == sorted(
+            [corpus["a"][0], corpus["b"][0]]
+        ), "the passage in document b is the other half of the bridge"
+
+    def test_a_topic_the_narrowing_does_not_touch_is_left_out(
+        self, store, corpus
+    ) -> None:
+        """Reading topics whole is not reading the corpus."""
+        store.topic("Support", corpus["a"][0])
+        store.topic("Access", corpus["b"][0])
+
+        found = dict(store.catalog.by_topic(Passage.doc_sha256 == digest("a")))
+        assert [one.id for group in found.values() for one in group] == [corpus["a"][0]]
 
 
 class TestListing:
@@ -593,6 +650,40 @@ class TestQuality:
         assert quality.mean_evidence_predicates == 2.0
         assert quality.facts_per_passage == 2.0
 
+    def test_the_means_leave_out_the_facts_that_failed(self, store, corpus) -> None:
+        """They say what the model does, not how often it fails.
+
+        The counts above are the failure rate. A fact refused as
+        `evidence_absent` cites nothing, so it enters the evidence means as
+        a zero and drags the ratio towards a number about the refusals.
+        """
+        first = corpus["a"][0]
+        store.store(
+            first,
+            checked(
+                first,
+                "A claim.",
+                evidence_text="A claim and another.",
+                statement_predicates=1,
+                evidence_predicates=2,
+            ),
+            checked(
+                first,
+                "Cites nothing.",
+                evidence_text="",
+                validated=False,
+                rejection_code=Rejection.EVIDENCE_ABSENT,
+                statement_predicates=0,
+                evidence_predicates=0,
+            ),
+        )
+        quality = store.catalog.quality()
+
+        assert quality.total == 2, "the refusal is still counted"
+        assert quality.validated == 1
+        assert quality.mean_evidence_predicates == 2.0, "not 1.0"
+        assert quality.mean_evidence_chars == 20.0, "not 10.0"
+
     def test_an_empty_corpus_reports_zeroes_rather_than_dividing_by_one(
         self, store
     ) -> None:
@@ -643,8 +734,6 @@ class TestRejudging:
     ) -> None:
         """A narrowing on the fact must not drop the other half of its group."""
         from seed import digest
-
-        from database.qa_generator import Passage
 
         anchor, other = corpus["a"][0], corpus["b"][0]
         store.bridges(

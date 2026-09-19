@@ -154,3 +154,45 @@ def test_a_table_is_read_without_a_model() -> None:
     assert run.model.calls == 0, "a table needs no model"
     assert run.queue.stored[1], "and still yields facts"
     assert run.queue.stored[1][0].extraction_method == "deterministic"
+
+
+class TestProseMergedWithATable:
+    """The chunker labels a passage `table` if ANY item in it is one.
+
+    It then numbers the whole of it by rendered line with no predicates
+    recorded, so `claims` is zero for every table and prose merged into one
+    is invisible. The cell reader walks the grid; nothing read the rest.
+    Measured over this corpus: 161 of 188 table passages carry lines
+    outside their grids, about 145,000 characters.
+    """
+
+    #: One line, one finite verb, and nothing in the grid.
+    PROSE = "The compact model replaced the previous range in March."
+
+    def test_the_prose_is_read_by_the_model_as_well(self) -> None:
+        """Both readers, so neither half of the passage is thrown away."""
+        run = Extraction(table_passage(prose=self.PROSE), facts=ATOMIC)
+        run.next()
+
+        assert run.model.calls == 1, "the prose beside the grid is worth a call"
+        methods = {one.extraction_method for one in run.queue.stored[1]}
+        assert methods == {"deterministic", "llm"}
+
+    def test_a_table_with_no_prose_still_needs_no_model(self) -> None:
+        """The rendered rows and the `|---|` separator carry no finite verb."""
+        run = Extraction(table_passage(), facts=ATOMIC)
+        run.next()
+
+        assert run.model.calls == 0
+
+    def test_the_cell_facts_are_kept_beside_the_prose(self) -> None:
+        """The grid is still read deterministically, which is what it is for."""
+        run = Extraction(table_passage(prose=self.PROSE), facts=ATOMIC)
+        run.next()
+
+        composed = [
+            one
+            for one in run.queue.stored[1]
+            if one.extraction_method == "deterministic"
+        ]
+        assert composed, "the grid is still read from its cells"

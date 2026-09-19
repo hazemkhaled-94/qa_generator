@@ -100,11 +100,14 @@ GRID: dict[str, Any] = {
 }
 
 
-def table_passage(grid: dict | None = None) -> PassageToExtract:
+def table_passage(grid: dict | None = None, *, prose: str = "") -> PassageToExtract:
     """Builds a table passage, numbered by line as chunking stores it.
 
     Args:
         grid: The cell grid behind it. The one above when not given.
+        prose: A paragraph merged in after the table, as `merge_peers`
+            puts one there. Numbered by line with no predicates, which is
+            what `lines_of` records for every line of a table passage.
 
     Returns:
         The passage.
@@ -112,9 +115,10 @@ def table_passage(grid: dict | None = None) -> PassageToExtract:
     from nlp.models import Sentence
     from preprocessing.chunking.passages import lines_of
 
+    text = f"{RENDERED}{prose}\n" if prose else RENDERED
     return PassageToExtract(
         id=1,
-        text=RENDERED,
+        text=text,
         section_path="Models",
         block_type="table",
         language="en",
@@ -123,10 +127,10 @@ def table_passage(grid: dict | None = None) -> PassageToExtract:
                 index=line["i"],
                 start=line["start"],
                 end=line["end"],
-                text=RENDERED[line["start"] : line["end"]],
+                text=text[line["start"] : line["end"]],
                 predicates=0,
             )
-            for line in lines_of(RENDERED)
+            for line in lines_of(text)
         ],
         table_cells=[grid if grid is not None else GRID],
     )

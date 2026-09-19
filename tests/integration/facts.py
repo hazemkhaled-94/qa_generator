@@ -134,6 +134,14 @@ class FactStore:
             ids=list(passage_ids),
         )
 
+    def language_of(self, passage_id: int, language: str | None) -> None:
+        """Sets one passage's own language, NULL for too short to tell."""
+        self._execute(
+            "UPDATE passages SET language = :language WHERE id = :id",
+            language=language,
+            id=passage_id,
+        )
+
     def topic(self, name: str, *passage_ids: int, weight: float = 0.9) -> int:
         """Puts passages in one topic, which is what groups them.
 

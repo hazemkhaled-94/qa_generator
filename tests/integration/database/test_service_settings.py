@@ -274,6 +274,7 @@ def test_re_judging_a_fact_records_the_settings_that_judged_it(store, engine) ->
     from facts import FactStore, checked
 
     from extraction.service import revalidate
+    from extraction.validation import FactChecker
 
     written = FactStore(engine, version="first")
     passages = written.corpus(("one", ["A duty applies to every firm."]))
@@ -282,7 +283,7 @@ def test_re_judging_a_fact_records_the_settings_that_judged_it(store, engine) ->
 
     from extraction.repository import FactCatalog
 
-    revalidate(FactCatalog(version="second"))
+    revalidate(FactCatalog(version="second"), FactChecker(0.6))
 
     assert written.rows("settings_version") == [("second",)]
 
