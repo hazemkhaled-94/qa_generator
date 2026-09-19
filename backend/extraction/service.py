@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 from itertools import zip_longest
@@ -221,6 +222,57 @@ def _is_heading(passage: PassageToExtract) -> bool:
 #: question asked of either measures a reader's page-turning.
 _NAVIGATION = frozenset({"document_index", "code"})
 
+#: How many characters a passage may carry per claim before it stops
+#: reading as prose. The parser labels what it recognises, and an index it
+#: does not recognise arrives as `text`: one did, at 1,568 characters
+#: carrying a single finite verb, and became questions asking which pages a
+#: term appears on. Prose in this corpus runs 166 characters per claim at
+#: the median and 357 at the 95th percentile.
+#:
+#: Why not `claims` alone: that check already exists and refuses only a
+#: passage with none. A thousand characters of index with one stray verb in
+#: it passes, which is what happened.
+_CHARS_PER_CLAIM = 500
+
+#: The share of a passage's words that may carry a digit before it reads as
+#: a list of references. Sparseness alone is not enough to judge on: a
+#: German bullet list is sparse because its points are infinitives rather
+#: than sentences, and those are content. Measured over the passages this
+#: pair of rules selects:
+#:
+#:     content bullets      0.0%      bibliography    9-16%
+#:     content prose        1.0%      contents page    25%
+#:                                    index          41-56%
+#:
+#: So both must hold. Digits rather than any word, so this says nothing
+#: about a language or a subject; a passage genuinely about numbers is a
+#: `table` and exempt above.
+_NUMERIC_WORDS = 0.05
+
+#: The glyph a copyright notice opens with, in any language. Front matter
+#: asserts things a model will turn into facts - who holds a right, which
+#: edition a thing belongs to - and they are about the document rather than
+#: about what it says.
+_COPYRIGHT = "\u00a9"
+
+_HAS_DIGIT = re.compile(r"\d")
+
+
+def _reference_list(passage: PassageToExtract) -> bool:
+    """Whether the passage is a list of references rather than prose.
+
+    Both halves, because either alone is wrong. Sparse-in-claims catches a
+    content bullet list; numeric-in-words catches a passage that is simply
+    about measurements. An index, a bibliography and a contents page are
+    the only things that are both.
+    """
+    text = normalised(passage.text)
+    words = text.split()
+    if not words or len(text) <= _CHARS_PER_CLAIM * passage.claims:
+        return False
+    numeric = sum(1 for one in words if _HAS_DIGIT.search(one)) / len(words)
+    return numeric > _NUMERIC_WORDS
+
 
 def skipped(passage: PassageToExtract) -> str | None:
     """Says why a passage is not worth a model call.
@@ -244,6 +296,14 @@ def skipped(passage: PassageToExtract) -> str | None:
         return "heading"
     if not passage.claims:
         return "no finite verb"
+    # What the checks above are for, applied to what the parser did not
+    # label. Between them these produced questions asking which pages a
+    # term appears on and how the document is licensed - answerable,
+    # checkable, and about the document rather than about its subject.
+    if _COPYRIGHT in passage.text:
+        return "a copyright notice, which is about the document"
+    if _reference_list(passage):
+        return "an index, a bibliography or a contents page rather than prose"
     return None
 
 

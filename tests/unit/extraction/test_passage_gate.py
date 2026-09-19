@@ -63,3 +63,88 @@ def test_a_navigation_passage_is_skipped_before_its_sentences_are_read() -> None
 
     assert prose.claims, "this passage does assert something"
     assert skipped(prose) is not None
+
+
+# ── Navigation the parser did not label ────────────────────────────────────
+#
+# Every text below is a real passage from a corpus this was measured on,
+# shortened. The parser labelled each of them `text`, so the block-type
+# check above never saw them; between them they produced questions asking
+# which pages a term appears on and how the document is licensed.
+
+
+def test_an_index_the_parser_labelled_prose_is_skipped() -> None:
+    """A term and the pages it appears on, over and over."""
+    index = passage(
+        "Überdeckung 22, 23, 46, 47, 48, 49, 50, 53 Überdeckung aller Übergänge 49 "
+        "rundreiseüberdeckung, 35 schlüsselwort, 13 grenzwertanalyse, 30 "
+        "grundursachenanalyse, 58, 76 abstrakter testfall, 13, 18 ad-hoc-review, 52 "
+        "technisches review 42 test 16, 17 frühes testen 20, 21 fehlerzustand 19, 24",
+        language="de",
+    )
+
+    assert skipped(index) is not None
+
+
+def test_a_bibliography_is_skipped() -> None:
+    """Names, years and page ranges, which is not a claim about anything."""
+    works = passage(
+        "- BAKER, Paul; DAI, Zhen Ru; GRABOWSKI, Jens, 2008. Model-Driven Testing. "
+        "Springer, pp. 12-48. - ALYAHYA, Sultan, 2020. Crowdsourced Software "
+        "Testing: A Systematic Literature Review. In: Journal 61, pp. 1-22. "
+        "- Kahler, T. (2008). The Process Therapy Model. Taibi, 1st ed., 340 pp.",
+        language="en",
+    )
+
+    assert skipped(works) is not None
+
+
+def test_a_copyright_notice_is_skipped() -> None:
+    """Front matter asserts things, and they are about the document.
+
+    It has to be caught by the glyph rather than by the verb check above:
+    a real notice is a paragraph of prose that says who holds what, so it
+    carries finite verbs and reads as content to everything else here.
+    """
+    notice = passage(
+        "Dieser Lehrplan ist urheberrechtlich geschützt. Das Urheberrecht © 2019 "
+        "gehört den Autoren der englischen Originalausgabe. Die Nutzung ist nur "
+        "mit ausdrücklicher Zustimmung der Inhaber gestattet, und jede Ausgabe "
+        "nennt die Organisation, die sie herausgegeben hat.",
+        language="de",
+    )
+
+    assert skipped(notice) == "a copyright notice, which is about the document"
+
+
+def test_a_bullet_list_of_content_is_not_skipped() -> None:
+    """The false positive the numeric half of the rule exists to prevent.
+
+    A German bullet list is sparse in finite verbs because its points are
+    infinitives - `Evaluieren von Arbeitsergebnissen` asserts nothing a
+    parser can count - so claim density alone reads it as a list. It
+    carries no numbers, and an index is nothing but numbers.
+    """
+    objectives = passage(
+        "Typische Testziele sind: - Evaluieren von Arbeitsergebnissen wie "
+        "Anforderungen, User-Storys und Code - Auslösen von Fehlerwirkungen und "
+        "Auffinden von Fehlerzuständen - Sicherstellen der erforderlichen "
+        "Überdeckung eines Testobjekts - Verringern des Risikos einer "
+        "unzureichenden Softwarequalität - Zusammenarbeit mit Stakeholdern, um "
+        "die Erfüllung der Akzeptanzkriterien zu überprüfen",
+        language="de",
+    )
+
+    assert skipped(objectives) is None
+
+
+def test_prose_carrying_a_reference_is_not_skipped() -> None:
+    """One citation in a sentence does not make the sentence a bibliography."""
+    prose = passage(
+        "KI kann mit einer breiten Palette von Techniken implementiert werden "
+        "(siehe [B02] für weitere Informationen), und die Wahl der Technik "
+        "bestimmt, wie das System getestet werden muss.",
+        language="de",
+    )
+
+    assert skipped(prose) is None
