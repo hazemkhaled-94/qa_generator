@@ -32,7 +32,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 
-from database.qa_generator import QuestionRejection, QuestionStatus
+from database.qa_generator import (
+    Derivation,
+    QuestionRejection,
+    QuestionStatus,
+)
 from nlp.analysis import content
 from question_generation.embedding import Embedder, cosine
 from question_generation.gates import (
@@ -285,13 +289,19 @@ class QuestionChecker:
         return self._corpus(candidate)
 
     def _computable(self, candidate: Candidate, target: str) -> tuple[str, str] | None:
-        """Whether a derived answer follows from the figures in the passages.
+        """Whether a derived answer follows from what the passages do state.
 
-        The gate an `aggregation` gets instead of recoverability, because
-        the two ask opposite questions. Recoverability asks whether the
-        passages STATE the answer; this type is defined by their not doing
-        so, and the answer is right when the figures it needs are there and
-        the arithmetic comes out.
+        The gate a derived type gets instead of recoverability, because the
+        two ask opposite questions. Recoverability asks whether the passages
+        STATE the answer; these types are defined by their not doing so, and
+        the answer is right when what it needs is there and the step from
+        there to here holds.
+
+        Which step is asked depends on how the type derives. Arithmetic is
+        not entailment: `Do the arithmetic` is the wrong instruction for a
+        conclusion drawn from two rules, and `does this follow` is the wrong
+        one for a total, which follows from anything if the reader is
+        generous about addition.
 
         Still a model's judgement, and still the verifier's rather than the
         writer's, so nothing here marks its own work.
@@ -299,9 +309,14 @@ class QuestionChecker:
         if not target:
             return (
                 QuestionRejection.NOT_RECOVERABLE,
-                "it carries no total to check the passages against",
+                "it carries no answer to check the passages against",
             )
-        if self._verifier.computes(
+        asked = (
+            self._verifier.computes
+            if candidate.spec.derived == Derivation.ARITHMETIC
+            else self._verifier.follows
+        )
+        if asked(
             candidate.question_text,
             target,
             candidate.group.passages,
@@ -310,10 +325,7 @@ class QuestionChecker:
             return None
         return (
             QuestionRejection.NOT_RECOVERABLE,
-            (
-                f"the total {target!r} does not follow from the figures in the "
-                f"cited passages"
-            ),
+            (f"{target!r} does not follow from what the cited passages state"),
         )
 
     def _backed(self, candidate: Candidate, target: str) -> bool:
@@ -427,6 +439,7 @@ class QuestionChecker:
             embedding=embedding,
             thread_position=candidate.thread_position,
             question_type=candidate.spec.name,
+            cognitive_level=candidate.spec.level,
             # An unanswerable question has no answer, so it has no form: the
             # column says what shape the answer takes and there is none.
             answer_form=(form or candidate.spec.form) if candidate.answerable else None,

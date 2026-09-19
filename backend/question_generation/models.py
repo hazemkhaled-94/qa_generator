@@ -399,6 +399,9 @@ class CheckedQuestion:
     question_type: str | None = None
     answer_form: str | None = None
     planned_difficulty: str | None = None
+    #: What the question's type asks of whoever answers it. Carried from
+    #: the spec rather than judged, like the type itself.
+    cognitive_level: str | None = None
 
     @property
     def accepted(self) -> bool:

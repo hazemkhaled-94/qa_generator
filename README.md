@@ -654,6 +654,44 @@ Why, how, what-happens-if and which-things were not badly written. They were
 is refused for carrying *no* verb, which is the opposite failure; and each form
 has its own length bounds in `QUESTIONS_ANSWER_CHARS`.
 
+### What a question asks of a reader
+
+`difficulty` says how far an answer is spread — over two passages, two
+documents, two subjects — which is how hard it is to **find**. It says
+nothing about what has to be done once it is found, and a question spanning
+two documents can still be a bare lookup with both of them in hand.
+
+`cognitive_level` is the other axis, and it is derived from the question's
+type the way difficulty is derived from its scopes. Nobody judges a row.
+
+| level | types |
+|---|---|
+| `recall` | factoid, entity |
+| `understand` | definition, enumeration |
+| `apply` | condition, procedure, **application** |
+| `analyse` | reason, consequence, comparison, aggregation, temporal, **implication** |
+
+The two in bold are what make the column a measurement rather than a label.
+Every other type's answer is *stated* in the passages — the recoverability
+gate refuses one whose answer is not — so the level of a retrieval question
+describes the shape of a lookup. These two are **derived**: the premises are
+in the material and the conclusion is not, so answering means reasoning.
+
+An `implication` puts two statements together and asks what they come to. An
+`application` puts a rule the material gives to a case it does not mention.
+Both need the conclusion to be absent — if the material already says it, that
+is a `consequence`, and the gate refuses it.
+
+Because their answers are absent by construction, recoverability asks them
+the wrong question, so they face one of their own — the same bargain
+`aggregation` already had. Which one depends on how the type derives:
+`arithmetic` asks whether the figures come to the total, `entailment` asks
+whether the conclusion follows from the premises. They are not
+interchangeable: *do the arithmetic* is the wrong instruction for a
+conclusion drawn from two rules, and *does this follow* is the wrong one for
+a total, which follows from anything if the reader is generous about
+addition.
+
 ### The three criteria, and the band they feed
 
 Each is read off the facts the question reported citing. Each says something

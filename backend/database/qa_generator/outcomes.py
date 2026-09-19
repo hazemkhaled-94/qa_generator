@@ -88,6 +88,49 @@ class QuestionType(StrEnum):
     COMPARISON = "comparison"
     AGGREGATION = "aggregation"
     TEMPORAL = "temporal"
+    IMPLICATION = "implication"
+    APPLICATION = "application"
+
+
+class CognitiveLevel(StrEnum):
+    """How much a question asks of whoever answers it.
+
+    Derived from the question's type rather than judged, the way
+    `difficulty` is derived from its scopes: a type declares what it asks
+    for, and what it asks for decides this. Nobody holds an opinion about
+    an individual row.
+
+    It is a different axis from `difficulty`, and the two are deliberately
+    not merged. Difficulty says how much of the corpus an answer is spread
+    over - how hard it is to FIND - and a question spanning two documents
+    can be a bare lookup once both are in hand. This says how much has to
+    be done with what was found.
+
+    RECALL     the answer is a value stated in one place
+    UNDERSTAND the answer restates what the material means
+    APPLY      the answer maps a rule the material gives onto a case
+    ANALYSE    the answer is not stated anywhere and has to be worked out
+    """
+
+    RECALL = "recall"
+    UNDERSTAND = "understand"
+    APPLY = "apply"
+    ANALYSE = "analyse"
+
+
+class Derivation(StrEnum):
+    """How an answer that is not stated is got out of the material.
+
+    Which gate a question faces. Recoverability asks whether the passages
+    STATE the answer, and for these types that question is the wrong one -
+    their whole point is that the answer is not there to be found.
+
+    ARITHMETIC the figures are stated and the total is not
+    ENTAILMENT the premises are stated and the conclusion is not
+    """
+
+    ARITHMETIC = "arithmetic"
+    ENTAILMENT = "entailment"
 
 
 class AnswerForm(StrEnum):
