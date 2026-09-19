@@ -26,12 +26,13 @@ def fact(
     kind: str = FactKind.ATOMIC,
     units: tuple[str, ...] = (),
     validated: bool = True,
+    method: str = "llm",
 ) -> CheckedFact:
     """One checked fact, as the cap reads it."""
     return CheckedFact(
         statement=statement,
         evidence_text=statement,
-        extraction_method="llm",
+        extraction_method=method,
         validated=validated,
         rejection_code=None if validated else Rejection.ASSERTS_NOTHING,
         validation_error=None if validated else "nothing",
@@ -133,6 +134,33 @@ def test_only_the_atomic_facts_compete_for_the_budget() -> None:
     # Only positions 2, 3 and 4 are atomic, so a cap of 2 takes one of them
     # and never touches the digests.
     assert over_cap(facts, 2) == {4}
+
+
+def test_a_statement_composed_from_a_grid_does_not_compete() -> None:
+    """The cap leaves room for the digests, and a table yields none.
+
+    A table's rendered rows carry no finite verb, so `_DIGESTIBLE` is never
+    met and there is no other kind for the share to be. Applying the cap
+    there is arithmetic about a quantity that is zero - it kept four cells
+    of a sixty-cell grid, chosen by position in the table.
+    """
+    cells = [
+        fact(f"Device - Mass: {n} kg", units=(str(n),), method="deterministic")
+        for n in range(60)
+    ]
+
+    assert over_cap(cells, 4) == set()
+
+
+def test_the_model_s_own_facts_are_still_capped_beside_a_grid() -> None:
+    """A passage merging a table with prose is read by both readers."""
+    facts = [
+        *(fact(f"Device - Mass: {n} kg", method="deterministic") for n in range(3)),
+        *(fact(f"Claim {n}.") for n in range(5)),
+    ]
+
+    # Only positions 3 to 7 compete, so a cap of 2 refuses the last three.
+    assert over_cap(facts, 2) == {5, 6, 7}
 
 
 def test_a_fact_a_check_already_refused_is_not_refused_again() -> None:

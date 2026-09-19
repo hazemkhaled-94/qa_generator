@@ -18,7 +18,7 @@ from extraction.extractors import (
 )
 from extraction.models import CheckedFact, PassageToExtract
 from extraction.repository import FactCatalog, PassageQueue
-from extraction.validation import FactChecker
+from extraction.validation import WRITTEN, FactChecker
 from nlp.analysis import normalised
 from stages import StageService
 from telemetry import tracer, working
@@ -354,13 +354,25 @@ def over_cap(facts: Sequence[CheckedFact], cap: int | None) -> set[int]:
     a name is what a checkable question is written from. Ties go to the
     order the model wrote them in, so one passage read twice keeps the same
     facts.
+
+    A statement a deterministic reader composed does not compete. The cap is
+    EXTRACTION_MIN_OTHER_SHARE read the other way round - the share of a
+    passage's facts that may be something other than atomic - and what makes
+    a floor on the others a cap on these is that a passage yields a FIXED
+    number of digests beside them. A table yields none: its rendered rows
+    carry no finite verb, so `_DIGESTIBLE` is never met and there is no
+    other kind for the share to be. Applying the cap there is arithmetic
+    about a quantity that is zero, and it threw away 56 of a 60-cell grid -
+    the cheapest and most checkable facts in the corpus - by grid position.
     """
     if cap is None:
         return set()
     competing = [
         (position, fact)
         for position, fact in enumerate(facts)
-        if fact.kind == FactKind.ATOMIC and fact.validated
+        if fact.kind == FactKind.ATOMIC
+        and fact.validated
+        and fact.extraction_method == WRITTEN
     ]
     if len(competing) <= cap:
         return set()

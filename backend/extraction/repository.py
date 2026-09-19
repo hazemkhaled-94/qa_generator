@@ -32,6 +32,7 @@ from database.qa_generator import (
 from database.qa_generator.passage_topics import DOMINANT
 from database.qa_generator.repository import Repository, matching
 from extraction.models import (
+    WRITTEN,
     CandidateFact,
     CheckedFact,
     Cited,
@@ -431,8 +432,9 @@ class FactCatalog(Repository):
         than re-read over hours.
 
         Ranked exactly as `over_cap` ranks a passage in flight - the facts
-        asserting a number, a date or a name first, ties by id - so a
-        passage re-extracted later keeps the same facts this leaves.
+        a model wrote, asserting a number, a date or a name first, ties by
+        id - so a passage re-extracted later keeps the same facts this
+        leaves.
 
         Args:
             cap: The most validated atomic facts one passage may keep.
@@ -460,7 +462,14 @@ class FactCatalog(Repository):
                 FactPassage,
                 (FactPassage.fact_id == Fact.id) & (FactPassage.position == 0),
             )
-            .where(Fact.kind == FactKind.ATOMIC, Fact.validated)
+            .where(
+                Fact.kind == FactKind.ATOMIC,
+                Fact.validated,
+                # As `over_cap` ranks one in flight: a statement composed
+                # from a grid does not compete. The cap exists to leave room
+                # for the digests, and a table yields none.
+                Fact.extraction_method == WRITTEN,
+            )
         )
         if within is not None:
             ranked = ranked.where(_resting(within))

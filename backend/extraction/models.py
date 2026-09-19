@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 from database.qa_generator import FactKind
 from nlp.models import Sentence
 
+#: The method whose statements a model writes, as `extraction_method`
+#: records it. A deterministic reader composes its statement from the grid,
+#: so it is neither a sentence nor expected to read like one.
+#:
+#: Here rather than beside the checks that read it: the repository asks the
+#: same question in SQL, and the api holds a repository. A catalogue must
+#: not import the module that loads a pipeline.
+WRITTEN = "llm"
+
 #: What each line of a stored outline opens with.
 BULLET = "- "
 

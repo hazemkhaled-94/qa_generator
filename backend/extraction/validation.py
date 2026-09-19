@@ -14,6 +14,7 @@ from database.qa_generator import FactKind, Rejection
 from extraction.models import (
     BULLET,
     MIN_POINTS,
+    WRITTEN,
     CandidateFact,
     CheckedFact,
     Citation,
@@ -25,11 +26,6 @@ from nlp.analysis import VERSION, claim, normalised, vocabulary
 from nlp.models import Claim, Sentence
 from nlp.pipelines import name as pipeline_name
 from settings import decimal
-
-#: The method whose statements a model writes. A deterministic reader
-#: composes its statement from the grid, so it is neither a sentence nor
-#: expected to read like one.
-_WRITTEN = "llm"
 
 #: What joins the cited spans into the evidence stored on the fact. Two
 #: passages' spans do not run on, so they are not joined with a space. Nor
@@ -327,7 +323,7 @@ class FactChecker:
             seen.add(resolved[0].id)
             rested.append(resolved)
         if not rested:
-            return _absent(offered, candidate, _WRITTEN, provenance)
+            return _absent(offered, candidate, WRITTEN, provenance)
 
         anchor = rested[0][0]
         statement = candidate.statement.strip()
@@ -358,7 +354,7 @@ class FactChecker:
             ),
             citations=tuple(one for _, one in rested),
         )
-        return self._verdict(anchor, candidate, judged, _WRITTEN, provenance)
+        return self._verdict(anchor, candidate, judged, WRITTEN, provenance)
 
     def _verdict(
         self,
@@ -369,7 +365,7 @@ class FactChecker:
         provenance: Provenance | None,
     ) -> CheckedFact:
         """Runs the checks this kind and method call for, first failure wins."""
-        checks = self._by_kind[candidate.kind] if method == _WRITTEN else _COMPOSED
+        checks = self._by_kind[candidate.kind] if method == WRITTEN else _COMPOSED
         for check in checks:
             failed = check(judged)
             if failed:
