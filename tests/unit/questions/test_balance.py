@@ -18,6 +18,7 @@ import pytest
 
 from database.qa_generator import Difficulty, QuestionType
 from question_generation.balance import (
+    Release,
     Row,
     choose,
     close_enough,
@@ -261,3 +262,40 @@ def test_what_it_could_not_fill_is_still_reported() -> None:
     release = choose(pool(counted), quota_of(30, BANDS, TYPES, 0.0))
 
     assert release.short.get(Difficulty.HARD) == 10
+
+
+def test_the_tolerance_is_set_above_the_endgame_not_below_it() -> None:
+    """A tolerance under the shortfall buys almost no release at all.
+
+    The last places of a draw cannot be filled - three marginals over
+    eleven kinds do not reach zero together - and that endgame is about 5%
+    of each band at every size. Held to 3%, a pool of 2,259 questions gave
+    a largest release of 58; at 8% the same questions gave 1,145, with the
+    bands closer to even. So this is a floor as much as a ceiling.
+    """
+    counted = {
+        (band, kind, True): 60
+        for band in (Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)
+        for kind in (QuestionType.FACTOID, QuestionType.REASON)
+    }
+    held = pool(counted)
+
+    release = largest(held, BANDS, TYPES, 0.0)
+
+    assert release.size > len(held) * 0.9
+
+
+def test_a_bucket_the_pool_genuinely_cannot_supply_is_still_refused() -> None:
+    """Loosening the tolerance must not turn the check off.
+
+    The draw it exists to refuse was six aggregations short of fourteen -
+    43% of that bucket - which is what an unbalanced set looks like beside
+    an endgame of 5%.
+    """
+    short = Release(
+        ids=[1],
+        quota=quota_of(140, BANDS, {**TYPES, QuestionType.AGGREGATION: 1}, 0.0),
+        short={QuestionType.AGGREGATION: 6},
+    )
+
+    assert not close_enough(short)

@@ -181,7 +181,20 @@ def choose(pool: Sequence[Row], quota: Quota) -> Release:
 #: a third: three marginals over eleven kinds cannot all land on zero
 #: together out of a finite pool, and the last few places are where it
 #: always fails.
-TOLERANCE = 0.03
+#:
+#: The size of that endgame is what this has to be set against, and it does
+#: not shrink as the pool grows - the draw runs about 5% short on the bands
+#: at every size measured, 2 of 33 at one hundred and 17 of 333 at a
+#: thousand. Calibrated at 3% against a pool of 235, it then refused a pool
+#: of 2,259: the largest release it would take was 58, where 8% took 1,145
+#: of the same questions with the bands closer to even and the kinds inside
+#: 0.6 of a point. A tolerance below the endgame does not buy a tighter
+#: release, it buys almost no release.
+#:
+#: Still far below what a real skew looks like. The draw this exists to
+#: refuse was six aggregations short of fourteen - 43% of that bucket, and
+#: that kind at 5.6% where an even mix wanted 9.1%.
+TOLERANCE = 0.10
 
 
 def close_enough(release: Release, tolerance: float = TOLERANCE) -> bool:
