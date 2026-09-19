@@ -8,11 +8,12 @@ checks read off it is derived, and is replaced.
 from __future__ import annotations
 
 import pytest
-from drivers import Catalogue, group, passage
+from drivers import DIGEST_SHARE, Catalogue, group, passage
 
 from database.qa_generator import FactKind, Rejection
 from extraction.models import CandidateFact, Cited
 from extraction.service import _REJUDGE_BATCH, revalidate
+from extraction.validation import FactChecker
 
 pytestmark = pytest.mark.nlp
 
@@ -31,7 +32,7 @@ def test_nothing_stored_is_nothing_to_judge() -> None:
     """An empty corpus writes no batch at all."""
     catalog = Catalogue()
 
-    assert revalidate(catalog) == 0  # type: ignore[arg-type]
+    assert revalidate(catalog, FactChecker(DIGEST_SHARE)) == 0  # type: ignore[arg-type]
     assert catalog.verdicts == []
 
 
@@ -42,7 +43,7 @@ def test_every_stored_fact_comes_back_judged() -> None:
         stored(2, "The device weighs 7 kg."),
     )
 
-    assert revalidate(catalog) == 2  # type: ignore[arg-type]
+    assert revalidate(catalog, FactChecker(DIGEST_SHARE)) == 2  # type: ignore[arg-type]
     assert [fact_id for fact_id, _ in catalog.verdicts] == [1, 2]
 
 
@@ -52,7 +53,7 @@ def test_the_verdict_is_what_today_checks_read() -> None:
         stored(1, "The device weighs 4 kg."),
         stored(2, "The device weighs 7 kg."),
     )
-    revalidate(catalog)  # type: ignore[arg-type]
+    revalidate(catalog, FactChecker(DIGEST_SHARE))  # type: ignore[arg-type]
 
     passed, refused = (checked for _, checked in catalog.verdicts)
     assert passed.validated, passed.validation_error
@@ -81,7 +82,7 @@ def test_a_bridge_is_judged_against_its_whole_group() -> None:
             "llm",
         )
     )
-    revalidate(catalog)  # type: ignore[arg-type]
+    revalidate(catalog, FactChecker(DIGEST_SHARE))  # type: ignore[arg-type]
 
     ((_, checked),) = catalog.verdicts
     assert checked.kind == FactKind.BRIDGE
@@ -105,7 +106,7 @@ def test_a_bridge_left_with_one_passage_is_refused_on_the_second_reading() -> No
             "llm",
         )
     )
-    revalidate(catalog)  # type: ignore[arg-type]
+    revalidate(catalog, FactChecker(DIGEST_SHARE))  # type: ignore[arg-type]
 
     ((_, checked),) = catalog.verdicts
     assert checked.rejection_code == Rejection.NOT_BRIDGING
@@ -117,13 +118,49 @@ def test_the_verdicts_are_written_in_batches() -> None:
         *(stored(at, "The device weighs 4 kg.") for at in range(_REJUDGE_BATCH + 3))
     )
 
-    assert revalidate(catalog) == _REJUDGE_BATCH + 3  # type: ignore[arg-type]
+    assert revalidate(catalog, FactChecker(DIGEST_SHARE)) == _REJUDGE_BATCH + 3  # type: ignore[arg-type]
     assert [len(batch) for batch in catalog.rejudged] == [_REJUDGE_BATCH, 3]
 
 
 def test_a_narrowing_reaches_the_read() -> None:
     """`--only` re-judges one document rather than the corpus."""
     catalog = Catalogue()
-    revalidate(catalog, "a-condition")  # type: ignore[arg-type]
+    revalidate(catalog, FactChecker(DIGEST_SHARE), "a-condition")  # type: ignore[arg-type]
 
     assert catalog.narrowed == ["a-condition"]
+
+
+def test_a_fact_whose_citation_resolved_nothing_is_left_alone() -> None:
+    """Re-judging it would overwrite the only record of what it cited.
+
+    The numbers survive nowhere but its own message: the link rows carry
+    NULL, which is what says they resolved to nothing.
+    """
+    catalog = Catalogue().holding(stored(1, "Anything.", cited=()))
+
+    assert revalidate(catalog, FactChecker(DIGEST_SHARE)) == 0  # type: ignore[arg-type]
+    assert catalog.verdicts == []
+
+
+def test_the_share_that_judges_a_digest_is_the_caller_s() -> None:
+    """Not the process environment's.
+
+    A deployment changing EXTRACTION_DIGEST_MAX_SHARE through /settings
+    stores the value rather than exporting it, so a checker built in here
+    would judge against the file while the fact was stamped with the stored
+    configuration's version.
+    """
+    digest = CandidateFact(
+        "The device weighs 4 kg. It arrives in March 2026.",
+        (0, 1),
+        kind=FactKind.SUMMARY,
+    )
+    holding = (7, [passage()], digest, "llm")
+
+    generous = Catalogue().holding(holding)
+    strict = Catalogue().holding(holding)
+    revalidate(generous, FactChecker(0.9))  # type: ignore[arg-type]
+    revalidate(strict, FactChecker(0.2))  # type: ignore[arg-type]
+
+    assert generous.verdicts[0][1].validated
+    assert strict.verdicts[0][1].rejection_code == Rejection.NOT_CONDENSED

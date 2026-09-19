@@ -33,18 +33,24 @@ _REJUDGE_BATCH = 500
 _DIGESTIBLE = 2
 
 
-def revalidate(catalog: FactCatalog, within=None) -> int:
+def revalidate(catalog: FactCatalog, checker: FactChecker, within=None) -> int:
     """Judges every stored fact again, without calling the model.
 
     Args:
         catalog: Where the facts are read from and written back to.
+        checker: What judges them, holding the shares this configuration
+            sets. Passed rather than built here, as the bridge pass already
+            does: built here it would read the process environment, and a
+            deployment that changed EXTRACTION_DIGEST_MAX_SHARE through
+            /settings stores the new value rather than exporting it - so a
+            digest would be re-judged against the file while the fact was
+            stamped with the stored configuration's version.
         within: A condition narrowing which facts are re-judged, or None for
             all of them.
 
     Returns:
         How many facts were written back.
     """
-    checker = FactChecker()
     verdicts: list[tuple[int, CheckedFact]] = []
     written = 0
 
@@ -66,9 +72,11 @@ def revalidate(catalog: FactCatalog, within=None) -> int:
     log.info("re-judged %d fact(s)", written)
     if skipped:
         log.warning(
-            "left %d bridge(s) alone: they were drawn before the prompt recorded "
-            "which sentences they rest on, so there is nothing to judge them "
-            "against. Run --bridge to replace them.",
+            "left %d fact(s) alone: their citation resolved to no sentence, so "
+            "there is nothing to judge them against and re-judging would "
+            "overwrite the only record of what they cited. A bridge among them "
+            "was drawn before the prompt recorded its sentences; run --bridge "
+            "to replace those.",
             skipped,
         )
     return written
@@ -101,16 +109,29 @@ def recap(catalog: FactCatalog, cap: int | None, within=None) -> int:
 
 
 def _uncitable(candidate) -> bool:
-    """Whether a stored bridge recorded no sentence to judge it against.
+    """Whether a stored fact recorded no sentence to judge it against.
+
+    Two kinds of row look like this and neither is worth re-reading.
 
     A bridge drawn before prompt version 2 named its passages and not the
     sentences in them. Judging one would resolve nothing and refuse it as
     evidence_absent, which would throw away a fact that was correct under the
     prompt that wrote it.
+
+    A fact already refused as evidence_absent is the other. The numbers its
+    citation named survive nowhere but its own `validation_error`: the link
+    rows carry NULL, which is what says they resolved to nothing. Re-judging
+    one rebuilds the candidate from those NULLs, reaches the same verdict,
+    and rewrites the message as `names (none)` - so the only record of what
+    the model actually cited is lost to a pass that learned nothing.
+
+    Read off the field `_rejudge` will read, which is not the same one for
+    both kinds: a bridge is judged against the sentences named per passage
+    and everything else against the candidate's own.
     """
-    return candidate.kind == FactKind.BRIDGE and not any(
-        one.sentences for one in candidate.passages
-    )
+    if candidate.kind == FactKind.BRIDGE:
+        return not any(one.sentences for one in candidate.passages)
+    return not candidate.sentences
 
 
 def _rejudge(
