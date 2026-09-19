@@ -1,30 +1,24 @@
 # Q&A Reference Dataset Generator
 
-Generates a verified question-and-answer dataset from a corpus of documents, so
-that a retrieval-augmented chatbot can be measured against a fixed benchmark
-rather than assessed by impression.
+Generates a verified question-and-answer dataset from a corpus of documents,
+so that a retrieval-augmented chatbot can be measured against a fixed
+benchmark rather than assessed by impression.
 
 Documents are uploaded, parsed into passages, broken down into atomic facts
 that each cite one sentence of their source, and turned into questions with
 known answers. Questions that deliberately have no answer in the corpus are
 included, to test whether a chatbot recognises the limits of its knowledge.
 
-The pipeline runs entirely on local infrastructure. No document content leaves
-the deployment.
-
-**Status:** ingestion, parsing, chunking, fact extraction, topic modelling and
-question generation are implemented, and a balanced release is drawn from what
-they produce. Quality assurance and the evaluation harness are not yet built.
+The pipeline runs entirely on local infrastructure. **No document content
+leaves the deployment.**
 
 Nothing here is bound to a subject or an industry. The parser, the chunker and
 the topic model work over whatever the documents say; the extraction prompt's
 worked example is deliberately about nothing in particular, because an example
-drawn from the corpus at hand teaches the model to expect it. German and English are the two languages
-configured, in `NLP_MODELS` — one list, naming both the pipeline each
-language is read with and the languages the detector may answer with.
-
-Scanned documents are refused rather than parsed: OCR is not enabled. See the
-placeholder in `backend/preprocessing/parsing/pipelines/pdf.py`.
+drawn from the corpus at hand teaches the model to expect it. German and
+English are the two languages configured, in `NLP_MODELS` — one list, naming
+both the pipeline each language is read with and the languages the detector
+may answer with.
 
 ## Prerequisites
 
@@ -34,8 +28,9 @@ placeholder in `backend/preprocessing/parsing/pipelines/pdf.py`.
 | [Poetry](https://python-poetry.org/docs/#installation) | 2.0 or later |
 | [Podman](https://podman.io/docs/installation) or Docker | with Compose |
 
-The Makefile invokes `podman compose`. For Docker, set `COMPOSE=docker compose`
-in the environment or edit the variable at the top of the Makefile.
+The Makefile invokes `podman compose`. For Docker, set
+`COMPOSE=docker compose` in the environment or edit the variable at the top of
+the Makefile.
 
 ## Install
 
@@ -49,8 +44,8 @@ in `configs/env/`, which comes with the clone and needs no copying.
 
 Edit `.env` and replace every `change_me_*` value. Two have constraints:
 `PHOENIX_ADMIN_SECRET` needs at least 32 characters including a digit and a
-lower-case letter, and `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is applied only
-when Phoenix first creates its admin user — changing it afterwards means
+lower-case letter, and `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is applied
+only when Phoenix first creates its admin user — changing it afterwards means
 dropping the `phoenix` database.
 
 ```bash
@@ -61,11 +56,9 @@ This installs the dependencies and downloads the spaCy pipelines named in
 `NLP_MODELS`. They are also baked into the backend image, because the runtime
 has no network.
 
-`EMBEDDING_MODEL` is not baked in. One image serves the api and all five
-workers, and its weights are 2.2 GB that four of those processes never load —
-and that every CI build of the image would carry. It is fetched on first use
-instead, into the `models` volume: chunking wants its tokenizer and question
-generation wants its weights, so whichever starts first pays for it once.
+`EMBEDDING_MODEL` is not baked in. One image serves the API and all five
+workers, and its weights are 2.2 GB that four of those processes never load.
+It is fetched on first use instead, into the `models` volume.
 
 ## Run
 
@@ -74,1212 +67,113 @@ make dev
 ```
 
 This generates TLS certificates, starts every service, waits for PostgreSQL,
-and creates the database schema. First run pulls several images and takes a few
-minutes.
+and creates the database schema. First run pulls several images and takes a
+few minutes.
 
-Once it reports ready:
+Once it reports ready, the frontend is at <http://localhost:8501> and the API
+docs at <http://localhost:8000/docs>. The other six services — Phoenix,
+Grafana, Argilla, Adminer, Dagster and the object store — are listed in
+[docs/operations.md](docs/operations.md).
 
-| Service | URL | Purpose |
-|---|---|---|
-| Frontend | http://localhost:8501 | Run each stage, browse what it produced, view system status |
-| API | http://localhost:8000/docs | OpenAPI documentation |
-| Phoenix | http://localhost:6006 | Traces, and the golden-set experiments — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
-| Grafana | http://localhost:3001 | Logs and pipeline dashboards — sign in with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` |
-| Argilla | http://localhost:6900 | Review what the models decided — sign in with `ARGILLA_USERNAME` and `ARGILLA_PASSWORD` |
-| Adminer | http://localhost:9001 | Database browser |
-| Dagster | http://localhost:3000 | The asset graph and run history — see [Orchestration](#orchestration) |
+## Example 1 — a corpus, through the pipeline
 
 Upload a PDF on the Upload page, then go to Documents and press **Start
-all**: nothing runs until it is asked to. Each page runs exactly one stage —
-Documents parses, Passages chunks, Facts extracts, Topics fits, Questions
-writes — so the corpus moves one page at a time, in that order. Pick a row
-in any table to see everything held about it and to run that stage over that
-row alone, so one document can be re-run or deleted while the rest of a
-corpus is mid-flight. The System health page reports the state of every
-component.
+all**. **Nothing runs until it is asked to.**
 
-## Common commands
+Each page runs exactly one stage — Documents parses, Passages chunks, Facts
+extracts, Topics fits, Questions writes — so the corpus moves one page at a
+time, in that order. Pick a row in any table to see everything held about it
+and to run that stage over that row alone, so one document can be re-run or
+deleted while the rest of a corpus is mid-flight.
 
-```bash
-make up              # start services
-make down            # stop services, keep data
-make down-volumes    # stop services and delete all data
-make logs            # follow all logs
-make logs-api        # follow the API log
-make logs-frontend   # follow the frontend log
-make logs-shipper    # follow the log shipper, when Grafana shows nothing
-make logs-retention  # set how long a day's logs are kept; run once
-make logs-orchestration  # follow the Dagster webserver and daemon
-make review-push-facts   # send a sample of facts to Argilla for review
-make review-pull-facts   # bring the submitted verdicts back
-make eval-upload     # put the golden cases in Phoenix
-make eval-score      # score the served model against them, and record it
-make test            # everything that gates; starts containers of its own
-make test-fast       # only the fast layers: no spaCy, no pyright, no containers
-make test-smoke      # build both images and look inside them
-make test-eval       # score the served model against the golden passages
-make test-coverage   # the gating layers, with a coverage report
-make lint            # ruff check and format check
-make typecheck       # pyright over backend, frontend and telemetry
-make audit           # known advisories against the two locks
-make format          # apply every fix ruff can make
-make lock            # rewrite backend/api/requirements.lock
-make certs           # generate the TLS certificates Elasticsearch needs
-```
-
-Every stage answers the same five verbs, and each is the same operation as the
-route beside it. Run any of them with `--help` for the flags.
+The same thing from a terminal, one stage at a time, then drawing a balanced
+release out of everything that was accepted:
 
 ```bash
-make parse-start     # queue every document parsing has not been asked to do
-make parse           # drain the parsing queue here, in the foreground
-make parse-status    # show documents by parse state
-make parse-stop      # take back whatever has not begun
-make parse-retry     # return every failed document to the queue
-make parse-rerun     # queue every document again, finished ones included
-make chunk-start     # the same five, over documents chunking has not read
-make chunk           #   ... and `chunk-status`, `chunk-stop`, `chunk-retry`,
-                     #       `chunk-rerun`
-make extract-start   # the same five, over passages
-make extract         #   ... and `extract-status`, `extract-stop`,
-                     #       `extract-retry`, `extract-rerun`
-make extract-revalidate  # judge stored facts again; the model is not called
-make extract-bridge  # read each topic's passage groups for shared claims
-make chunk-revocabulary  # read stored passages' language and vocabulary again
-make topics-discover # ask for a fit over the whole corpus, and run it
-make topics          # run any queued fit here, in the foreground
-make topics-status   # show the topics held, and any queued fit
-make topics-visualise # write each language's pyLDAvis page to ./topics/
-make topics-stop     # withdraw a queued fit
-make topics-retry    # return a failed fit to the queue
-make topics-delete   # delete every topic and membership
-make questions-start # the same five, over topics
-make questions       #   ... and `questions-status`, `questions-stop`,
-                     #       `questions-retry`, `questions-rerun`
-make questions-reverify  # check stored questions again; no model is called
-make questions-balance   # draw the balanced release out of what was accepted
-make extract-recap       # apply the atomic cap to stored facts; no model call
+make parse-start     && make parse     # queue every new document, then drain
+make chunk-start     && make chunk
+make extract-start   && make extract
+make topics-discover                   # a fit is asked for, not started
+make questions-start && make questions
+make questions-balance
 ```
 
-Any of those five verbs narrows to a single item with `SHA`, `PASSAGE` or
-`TOPIC`, which is the same operation against fewer rows:
+## Example 2 — applying a change without re-reading the corpus
+
+A setting that changes what a fact *is* does not mean calling the model again.
+`extract-rerun` would do that over the whole corpus — hours — and return the
+same statements when only a check changed. Re-derive instead:
 
 ```bash
-make parse-start SHA=<sha256>     # queue one document for parsing
-make chunk-rerun SHA=<sha256>     # rebuild one document's passages
-make extract-start SHA=<sha256>   # queue every passage of one document
-make extract-retry PASSAGE=<id>   # return one failed passage to the queue
-make extract-status SHA=<sha256>  # that document's passages by extract state
-make questions-start TOPIC=<id>   # write the questions for one topic
+make settings-set SERVICE=extraction SET="EXTRACTION_MIN_OTHER_SHARE=0.4"
+make extract-recap SHA=<sha256>       # re-apply the cap. No model call
+make extract-revalidate SHA=<sha256>  # judge the stored facts again
+make questions-reverify               # carry it through to the questions
 ```
 
-Parsing and chunking narrow to a document, extraction to a document or a
-passage, question generation to a topic, topic modelling to nothing — a fit is
-all-or-nothing over one vocabulary, so there is no single topic to start, stop
-or refit.
+Every stage has a replay that skips the expensive part. They are listed in
+[docs/make.md](docs/make.md#replaying-a-stage-without-redoing-it).
 
-### Replaying a stage without redoing it
+## Documentation
 
-Three operations re-derive what a stage computed, over rows already stored,
-without the expensive part:
+Each service documents itself, beside its code.
+
+**The pipeline, in the order a document moves:**
 
 | | |
 |---|---|
-| `make extract-revalidate` | Judges every stored fact again. The model is not called and no statement changes — only what the checks read off one. |
-| `make chunk-revocabulary` | Reads every stored passage's language and vocabulary again. Only `passages.language` and `passages.lemmas` change. |
-| `make questions-reverify` | Puts every stored question through the gates that need no model: its facts still pass their own checks, its evidence is still spread the way its difficulty says, it is still well formed, and no earlier question already asks it. |
-| `make extract-recap` | Refuses the atomic facts a passage yielded above the cap `EXTRACTION_MIN_OTHER_SHARE` works out to, keeping the ones that assert a number, a date or a name. A corpus extracted before the cap existed is re-balanced in seconds rather than re-read over hours. |
+| [`backend/ingestion/`](backend/ingestion/README.md) | Upload validation, hashing and storage |
+| [`backend/preprocessing/parsing/`](backend/preprocessing/parsing/README.md) | A stored file becomes a structured document |
+| [`backend/preprocessing/chunking/`](backend/preprocessing/chunking/README.md) | That document becomes passages, with their sentences and lemmas |
+| [`backend/extraction/`](backend/extraction/README.md) | Those passages become facts citing a sentence |
+| [`backend/topic_modelling/`](backend/topic_modelling/README.md) | Each language becomes topics over its own vocabulary |
+| [`backend/question_generation/`](backend/question_generation/README.md) | Each topic's facts become questions with known answers |
 
-The first two take `SHA`, `extract-revalidate` and `extract-recap` take
-`PASSAGE`, and `questions-reverify` takes `TOPIC`, like the five queue verbs.
-
-`questions-reverify` only ever rejects. Accepting is a person's decision, and
-a re-check that un-rejected would overturn one on its next run. It is what
-carries a change made further up the pipeline through to the questions resting
-on it: `extract-revalidate` can turn a fact that passed into one that does not,
-and re-extracting a single document can take a cross-document question's second
-citation away without taking the question. Neither leaves any sign on the
-question itself, which is what this finds.
-
-These exist because the obvious way to apply a change is the destructive one.
-`extract-rerun` calls the model again over the whole corpus, which costs hours
-and returns the same statements when only a check changed. `chunk-rerun`
-deletes every passage of a document, and the facts drawn from them go with it.
-When what changed is a fact check or how vocabulary is read, neither is needed.
-
-What each leaves alone is the point. A re-judgement keeps the statement, the
-method and the model's provenance — the record of one extraction — and
-replaces only the verdict, the resolved span and the counts the checks read. A
-re-read keeps the passages and their sentence offsets, so every citation still
-resolves to the text it was checked against. Fit the topics afterwards for a
-re-read to show.
-
-Two kinds of fact `extract-revalidate` steps over rather than re-judging, and
-both for the same reason — there is nothing for the checks to read. One is a
-fact the cap refused: `over_cap` is the only verdict here no check reaches, so
-they would make nothing of it and hand the row back validated, quietly undoing
-`EXTRACTION_MIN_OTHER_SHARE` across the corpus. `make extract-recap` is what
-re-applies that. The other is a fact whose citation resolved to no sentence —
-a refusal for `evidence_absent`, or a bridge drawn before prompt version 2.
-What such a fact cited survives nowhere but its own `validation_error`, because
-the link rows carry NULL to say the numbers resolved to nothing; re-judging it
-would reach the same verdict and overwrite the only record of what the model
-named.
-
-A narrowed bridge run reads whole topics, not the passages `--only` selects.
-`clear_bridges` deletes any bridge resting on a selected passage and a bridge
-rests on two, so reading back one document would leave half of each
-cross-document bridge in hand and no way to write it again. It costs more and
-it finishes what it starts.
-
-Documents are ingestion's, not a stage's:
-
-```bash
-make documents                    # list every document with its parse state
-make delete SHA=<sha256>          # delete a document and everything from it
-make delete-derived SHA=<sha256>  # delete only its passages and facts
-make wipe                         # empty the corpus: every document, then the topics
-```
-
-All of these are irreversible, and the first two have a route:
-`DELETE /documents/{sha}` and `DELETE /documents/{sha}/derived`.
-
-Deleting a document takes **everything derived from it**: its passages, their
-topic memberships, the facts on them, and — through the orphan trigger on
-`question_facts` — the questions resting on those facts.
-
-What it does **not** take is `topics`. A topic has no foreign key to a
-document because a fit is over the corpus rather than over a file, so deleting
-every document leaves the topics standing: their labels, their coverage flags
-and their question-generation queue state, all describing passages that are
-gone. Nothing is broken by that — the next fit replaces every row — but
-somebody who has deleted every document has not emptied the corpus, which is
-why `make wipe` is one command that runs both in order. It also drops the
-upload history, which a single deletion deliberately keeps.
-
-## Pipeline stages
-
-Every stage is a queue in the database, a worker that drains it, and a way to
-put rows on or off it:
-
-| Stage | Queue depth | Start | Stop | Retry failures | Do it all again |
-|---|---|---|---|---|---|
-| Parsing | `GET /parsing/status` | `POST /parsing/start` | `POST /parsing/stop` | `POST /parsing/retry` | `POST /parsing/rerun` |
-| Chunking | `GET /chunking/status` | `POST /chunking/start` | `POST /chunking/stop` | `POST /chunking/retry` | `POST /chunking/rerun` |
-| Extraction | `GET /extraction/status` | `POST /extraction/start` | `POST /extraction/stop` | `POST /extraction/retry` | `POST /extraction/rerun` |
-| Topic modelling | `GET /topics/status` | `POST /topics/discover` | `POST /topics/stop` | `POST /topics/retry` | — |
-| Question generation | `GET /questions/status` | `POST /questions/start` | `POST /questions/stop` | `POST /questions/retry` | `POST /questions/rerun` |
-
-Each verb comes twice. The routes above act on the whole queue; the same
-verb under `/{scope}/{value}` acts on one item, which is what the frontend's
-per-item controls call:
-
-| Stage | Narrows to | Example |
-|---|---|---|
-| Parsing | `document` | `POST /parsing/document/{sha256}/start` |
-| Chunking | `document` | `POST /chunking/document/{sha256}/rerun` |
-| Extraction | `document`, `passage` | `POST /extraction/passage/{id}/retry` |
-| Question generation | `topic` | `POST /questions/topic/{id}/rerun` |
-| Topic modelling | — | a fit is all-or-nothing |
-
-`GET /{stage}/{scope}/{value}/status` reports that item's queue the same way
-`/{stage}/status` reports the whole one. A scope a stage does not accept is a
-404 `unknown_scope`; a value its column cannot hold is a 400 `invalid_value`.
-Narrowing is a `WHERE` on the stage's own table and nothing more, so a
-narrowed verb and a whole-queue one cannot disagree about what they do.
-
-**Nothing starts by itself.** A row arrives `new`, which no worker looks at.
-`start` moves it to `pending`, which is the only status a worker claims, and
-`stop` moves it back. A stage never sets another stage going: the previous
-stage finishing leaves a row `new`, and somebody — the Start button, the route,
-the `make` target, the [orchestrator](#orchestration) — decides it should run.
-
-The API only ever reads and writes the queue; the work happens in the stage's
-worker container. There is no `run` route, and that is not an omission — a
-conversion running inside the process that serves JSON held it for sixteen
-minutes at a stretch.
-
-The `make` targets run one drain on the host instead, in the foreground,
-against the same database. That is what you want while developing a stage.
-
-Topic modelling differs in one way: it has no `new` rows and so no `start`.
-Every topic is estimated jointly over one vocabulary, so no topic can be
-rediscovered on its own and a new document does not make one topic stale — it
-makes all of them stale. One model is fitted per language, over that language's passages
-only; a run fits every language and replaces the lot in one transaction. Asking is what creates the work, by the Start button on the Topics
-page, `POST /topics/discover` or `make topics-discover`. That request is a row
-in `topics` with a NULL `topic_index`: the table is both the queue and the
-result. A fit that succeeds replaces every row; a fit that fails leaves the
-working topics in place with the reason beside them. `DELETE /topics` removes
-them entirely.
-
-Every failure is recoverable. A row a worker died holding is failed by the next
-run of that stage, with the reason recorded, rather than being left claimed and
-invisible; `retry` then returns it to the queue. There is no state a row can
-reach that nothing can move it out of.
-
-## Orchestration
-
-Dagster is the somebody the section above reserved a slot for. It decides when
-a stage should run and never runs one: it posts to the stage routes and polls
-`/status` until nothing claimable is left, which is the same surface the Start
-button and the `make` targets use.
-
-`make up` starts the webserver and the daemon with everything else, and the
-UI is at http://localhost:3000. Starting them costs nothing on its own: both
-triggers below ship stopped, so the webserver serves an asset graph and the
-daemon ticks nothing until one is switched on.
-
-```bash
-make logs-orchestration   # follow both
-```
-
-One asset per stage, chained in the order a document moves:
-
-```
-parsed_documents → passages → facts → topics → questions
-```
-
-Materialising one starts that stage and waits for the workers to drain it.
-Failed rows are an asset check rather than an exception, because a failed row
-is not a failed run — the rest of the corpus went through, the reason is
-recorded against the row, and `retry` is what moves it. Raising would stop
-every later stage because one document of four hundred was a scanned image.
-
-Three ways to set it going, and all three are off until asked:
+**The surfaces:**
 
 | | |
 |---|---|
-| The `corpus` job | Every stage, end to end. Run it by hand from the UI. |
-| The `nightly_corpus` schedule | 02:00 UTC. A refit is corpus-wide and goes stale on every new document, which is the one thing worth a clock. |
-| The `arrivals` sensor | Polls parsing every minute and requests a run when documents are sitting `new`. This is what makes the pipeline unattended. |
-
-The schedule and the sensor both ship **stopped**, and are switched on in the
-UI. A stack that starts running the pipeline the moment it comes up is one
-nobody chose.
-
-Dagster does not replace the workers, and that is deliberate. The watch loop,
-the lease sweep and `FOR UPDATE SKIP LOCKED` are the execution model and they
-work; moving the stages into Dagster ops would have thrown all three away in
-exchange for putting a 473-second model call inside an op. So `orchestration/`
-is additive: delete it and the pipeline runs exactly as before, with nobody
-deciding for it.
-
-It runs in an image of its own — 372 MB against the backend image's 3.02 GB,
-because it makes HTTP calls and needs neither torch nor spaCy nor a model. It
-is given no `DATABASE_URL` and no object store credentials, and a smoke test
-pins that: a process that cannot reach the application tables cannot grow a
-second way of moving a row that disagrees with the other three.
-
-`make dagster-dev` runs the same code location on the host instead, against
-the containerised PostgreSQL and API.
-
-## Scaling
-
-`parse-worker`, `chunk-worker` and `extract-worker` all scale horizontally:
-each claims one row at a time with `FOR UPDATE SKIP LOCKED`, so two workers
-never take the same row. `topic-worker` can be scaled too, though there is no
-point: a fit is one request row, and only one worker can claim it.
-
-`question-worker` scales the same way and has far less to divide. Its queue is
-one row per topic, so twelve topics per language is two dozen rows for the
-whole corpus, and a worker past that has nothing to claim.
-
-Its first start is slow and looks like nothing happening: it downloads
-`EMBEDDING_MODEL` before it claims anything, which is 2.2 GB into the `models`
-volume. The topics sit `pending` until that finishes, and `make logs` is where
-it says so. Later starts read the volume and claim immediately.
-
-A stage added since a stack came up has no container until `make up` creates
-one. The queue fills, `/questions/status` reports it, and nothing drains it —
-which reads exactly like a broken worker rather than an absent one.
-
-```bash
-podman compose up -d --scale extract-worker=4
-```
-
-Every claim is timestamped, and a stage's lease says how long one may go
-unfinished before another run sweeps it. Extraction derives its lease from
-`LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`, so raising either
-one never makes a healthy worker look abandoned.
-
-The model is the bottleneck, not the pipeline: a median passage measured at
-473 s on a 31B model. A passage whose sentences carry no finite verb — a
-heading, a caption, a navigation line — is skipped before the call rather than
-sent and rejected afterwards.
-
-A topic's lease is derived from what a topic actually costs, not from what one
-model call costs: `QUESTIONS_PER_TOPIC` candidates, each of them a writer call
-and a verifier call. Sized any smaller and a run would fail workers that are
-only halfway through their first topic.
-
-Each process opens its own connection pool, sized by `DATABASE_POOL_SIZE` and
-`DATABASE_POOL_OVERFLOW`; the total across every worker has to stay under
-PostgreSQL's `max_connections`.
-
-## Reading what the pipeline produced
-
-| Route | Shows |
-|---|---|
-| `POST /documents` | Upload one document |
-| `GET /documents` | Documents with the state of each stage, one page at a time |
-| `GET /documents/names` | Every document by name, for a picker |
-| `GET /documents/{sha256}/file` | The file itself, as uploaded |
-| `DELETE /documents/{sha256}` | The document, its file, its converted form and everything derived |
-| `DELETE /documents/{sha256}/derived` | Only its passages and facts; chunking returns to `new` |
-| `GET /passages` | Passages, with their heading trail, pages and tables |
-| `GET /passages/types` | The block types the corpus actually holds |
-| `GET /passages/{id}` | One passage in full, its numbered sentences and cell grids |
-| `GET /facts` | Facts, accepted and rejected alike, with what they cite |
-| `GET /facts/quality` | How many facts hold up, how far the passages were decomposed, and why the rest were rejected |
-| `GET /topics` | Topics, their terms, and how much of the corpus each holds |
-| `PATCH /topics/{id}` | Name a topic, or take it out of coverage reporting |
-| `GET /topics/fit` | When the topics were fitted, over what, and whether they still describe the corpus |
-| `GET /topics/visualisation/{language}` | One language's model as a self-contained pyLDAvis page |
-| `DELETE /topics` | Every topic and membership |
-| `GET /questions` | Questions, accepted and rejected alike, with what each cites |
-| `GET /questions/{id}` | One question with the facts it was written from |
-| `GET /questions/quality` | How many questions hold up, which gate stopped the rest, and how much of the corpus's subject matter is covered |
-| `PATCH /questions/{id}` | Accept or reject one question |
-| `GET /settings/{service}` | What one service is configured to do: each setting's value, what the files say it would be, its type, its bounds and whether somebody changed it |
-| `PATCH /settings/{service}` | Change it. A null value returns one setting to what the files say; the whole request is refused if any one value is |
-| `GET /health` | That the process is up, for the container healthcheck |
-| `GET /status` | Every component behind the API, and what each service holds |
-
-`/documents`, `/passages`, `/facts` and `/questions` take `q` for a
-case-insensitive substring and `limit`/`offset` to page; the last three also
-take `document` to narrow to one digest, and `/questions` takes `topic` as
-well. Each also takes the filters its page offers — `parse_status` on
-`/documents`, `block_type` on `/passages`, `kind` and `method` on `/facts`,
-and the six on `/questions`. The frontend renders each as a page of its own
-and filters nothing itself, apart from `/topics`, which returns every topic
-at once because one fit produces a list a person can read.
-
-`/questions` is the one path that is both a stage and its output. Every other
-stage is a verb with its product under a noun — `/extraction` and `/facts` —
-but a question is what generation produces and what it is called, so the queue
-routes and the read routes share the router. The queue routes are declared
-first, which is what keeps `/questions/status` from being read as a question
-with the id `status`.
-
-A document moves through the stages by its status columns, one request at a
-time: ingestion leaves `parse_status = 'new'`, starting parsing moves it to
-`'pending'`, parsing sets it to `'parsed'`, and chunking selects on its own
-`chunk_status` — never on `parse_status`, because a stage knows of no other
-stage. Extraction does the same over the passage's `extract_status`. Nothing
-schedules the stages; a person or the orchestrator does. Topic modelling stands
-outside that chain: it reads every passage whatever stage its document has
-reached, and runs when a request row in `topics` asks it to. Question
-generation is back inside it, over a row of its own in the same table: a
-fitted topic arrives `question_status = 'new'` and waits to be asked, like
-everything else.
-
-`topics` therefore carries two queues. A row with a NULL `topic_index` is a
-request to refit and is topic modelling's; a row that is a topic is question
-generation's. Every operation on the second carries `topic_index IS NOT NULL`,
-because without it `start` would queue the asking as though it were a subject
-and the two workers would fight over one row.
-
-A fact or a question reaches its topics by joining through its passages —
-`fact_passages` to `passage_topics` — rather than holding a topic of its
-own, so no two rows can disagree about which topic a passage is in.
-
-## The pages
-
-One page per stage, and a page runs that stage and no other:
-
-| Page | Lists | Runs | Over | Configures |
-|---|---|---|---|---|
-| Upload | — | ingestion | the files you choose | ingestion |
-| Documents | documents | parsing | a document | parsing |
-| Passages | passages | chunking | a document | chunking |
-| Facts | facts | extraction | a passage | extraction |
-| Topics | topics | topic modelling | the whole corpus | topics |
-| Questions | questions | question generation | a topic | questions |
-| System health | components | nothing | — | the platform all six share |
-
-A page lists what its stage produces and runs the stage that produced it.
-The queue's unit is not always the row: chunking replaces all of a
-document's passages at once, and extraction reads a passage and writes all
-of its facts together, so a row picked on those pages is run through the
-thing its stage actually queues over. The page says so where it offers the
-control.
-
-Every page is the same sequence of panels: the few figures worth seeing on
-arrival, an `Analysis` fold nobody has to open, the stage's controls with a
-`Configuration` fold beside them, the search box, the filters, the table,
-and — only once a row is picked — everything held about that row, as one
-table of every field it has.
-
-The configuration is where it is because the remedy for changing it is
-directly above it: a setting that stales what the stage already produced is
-rebuilt by the Redo button in the same panel. Its controls are drawn from
-what the API says each setting is, so the page holds no list of settings and
-adding one to `settings/catalog.py` adds it to the page. Two
-pages carry a delete box, because two things can be deleted: a document
-with or without what was derived from it, and the topics, all at once. A
-passage, a fact and a question have no delete: a passage belongs to its
-document, and a rejected question is kept because the share that was thrown
-away is the evidence behind the coverage report.
-
-Each stage can be run over everything it owns or over the one row picked.
-Nothing on a page can reach another page's stage, and no verb does the work:
-they move rows between statuses and a worker picks up what became
-claimable. While a stage has anything queued or in hand its panel carries a
-spinner and its counts, and redraws every few seconds until the queue is
-empty; the page stays usable throughout, and Stop stays live.
-
-## What a fact is
-
-A fact is one claim drawn out of a passage, not the passage said differently.
-
-Chunking splits every passage into numbered sentences and stores them. A fact
-**cites one of those numbers** rather than quoting text, so its source span is
-exact by construction: there is no quote to search for, nothing to match
-character for character, and no near miss. A citation is either a sentence the
-passage has or one it does not.
-
-What the model writes is the statement, and spaCy is what judges it. Extraction
-needs a served model; the checks need only the pipelines in the image. A fact
-that fails a check is stored with the reason rather than dropped: the rate at
-which that happens is how the model is judged, so it belongs in the data and
-not in a log.
-
-| Check | Rejects a statement that |
-|---|---|
-| `evidence_absent` | cites a sentence the passage does not have |
-| `copied` | is its cited sentence repeated rather than a claim drawn out of it |
-| `not_atomic` | has more or fewer than one finite verb, so it carries several claims or none |
-| `unsupported_addition` | asserts a number, name, date or predicate the cited sentence does not contain |
-| `unresolved_reference` | leaves a pronoun a reader who cannot see the passage is unable to resolve |
-
-The last two are the ones no lexical measure could make. `unsupported_addition`
-is a hallucination check: every accepted fact a model wrote has an empty
-`units_added`, which is what says nothing was invented. `unresolved_reference`
-is what decides whether a question written from the fact can be answered on its
-own. Both are CHECK constraints as well as checks, so a bug in the checker
-cannot store a fact that contradicts them.
-
-`unresolved_reference` is applied to a claim and not to a digest, and the
-constraint says so: a summary or an outline stands in for a whole passage
-rather than asserting something about it, so it is held to length and to
-inventing nothing and may open with a pronoun. That is why
-`QUESTIONS_FACT_KINDS` names `atomic` — adding `summary` to it offers the
-writer facts nothing has checked for standing alone.
-
-A statement faces these gates against **the sentences it cited and no
-others**. A claim citing 0 and 2 of a three-sentence passage is judged on
-those two; the span stored in `fact_passages` still covers all three, because
-that is what a reader sees highlighted, and `sentence_ids` is the record the
-checks work from.
-
-`not_atomic` replaced a similarity threshold. Counting finite verbs is what
-"one claim" actually means; measuring how many words a statement shares with
-its source rejected genuine narrowings — a statement that drops a qualifier and
-keeps the subject's wording scored as a reword — and let a paraphrase through
-for swapping a noun.
-
-`GET /facts/quality` reports the rejections by code, and the two numbers that
-say whether the model is decomposing or summarising: claims per statement,
-which should be 1, and claims per statement against claims per cited sentence,
-which should sit well above 1. A sentence usually carries several claims; if a
-statement keeps all of them, the passage was restated rather than broken up.
-The Facts page shows all of it in its Analysis fold, and says plainly
-when a number is wrong.
-
-The counts there are over every fact the filter selects and the means over the
-accepted ones alone. The first is the rate at which the model fails; the second
-is what it does when it does not. Averaging them together made the ratio partly
-a statement about the refusals — a fact refused for `evidence_absent` cites
-nothing and entered both evidence means as a zero.
-
-A table is read by a deterministic cell reader, not by the model. It cites the
-numbered rendered row its own value sits in, so a table citation is an index
-like any other and the checks need no rule of their own. Only the checks that
-apply to a written sentence are applied to a composed one, and a composed one
-does not compete for the atomic cap: that cap exists to leave room for the
-digests, and a table yields none.
-
-The chunker labels a passage `table` if **any** item in it is one, and
-`CHUNKING_MERGE_PEERS` puts a table together with the prose around it — so a
-passage can be both. One carrying lines that no cell claims and that do carry a
-finite verb is read twice: the cell reader for the grid, the model for the
-rest. Measured over this corpus, 161 of 188 table passages carry text outside
-their grids, about 145,000 characters of it, and before this none of that was
-read by anything.
-
-## What a question is
-
-A question is written from one or more **facts**, and the writer is shown the
-**passages** they came from as well. The facts are what the answer must rest
-on; the passage is what the question can be phrased from.
-
-Both halves are load-bearing, and the first version of this stage had only
-one. Shown a single atomic statement and nothing else, a model has one triple
-to work with, so the only question available is that statement with one part
-replaced by a question word — `Geopolitische Konflikte schüren Unsicherheit`
-asked as `Was schüren geopolitische Konflikte?`. Nobody searching a corpus of
-thousands of pages types that. The passage and its heading trail are where the
-institution, the document and the period come from, which is what a question
-has to name to be one somebody could have asked.
-
-The unit of work is a **topic**, because a question's subject is one. The facts
-a topic may be asked about are the facts of the passages that topic is
-strongest in; a passage belongs a little to many topics, and writing a question
-for every one of them asks the same thing under a dozen subjects. A topic with
-`include_in_coverage = false` is skipped, which is the neutral switch for "this
-is not a subject" — nothing in the code decides that.
-
-### The plan comes first
-
-Before anything is written, a topic gets a **plan**: one slot per question,
-each carrying the kind of question to write, the difficulty band to aim for,
-and whether it is meant to have an answer at all. Two settings decide it, and
-both are proportions rather than counts:
-
-```
-QUESTIONS_TYPE_MIX=factoid:3,reason:2,procedure:2,...
-QUESTIONS_DIFFICULTY_MIX=easy:2,medium:2,hard:1
-```
-
-The weights are spread over the slots by **highest averages**, so the counts
-are exact over a whole run and interleaved along it rather than run in blocks.
-That second property matters: the unanswerable share and the follow-up share
-are both taken by position, so a mix run in blocks would always perturb the
-same kind of question.
-
-A weight of `0`, or a name left out, is never written. That is the switch for
-choosing what a run produces.
-
-### The thirteen kinds
-
-Every one of them is a question **form**, never a subject, so the same list
-applies to a manual, a contract, a policy or a report. Nothing in any prompt
-names a domain.
-
-`Level` is `cognitive_level`, declared by the kind and stored on every
-question it writes — see below for why it is a different axis from the band.
-
-| Kind | Asks for | Answer | Passages | Level |
-|---|---|---|---|---|
-| `factoid` | one checkable value — how many, how much, by when | value | 1 | recall |
-| `definition` | what a named thing or status is, as the material defines it | explanation | 1 | understand |
-| `entity` | who does, decides, owns or must be told something | value | 1 | recall |
-| `enumeration` | which things belong to a named set | list | 1 | understand |
-| `condition` | when, or under what circumstances, something applies | list | 1 | apply |
-| `reason` | why something is required, done, or the way it is | explanation | 1 | analyse |
-| `procedure` | how something is done, or in what order | explanation | 1 | apply |
-| `consequence` | what happens when something is or is not done | explanation | 1 | analyse |
-| `comparison` | how two named things differ | list | 2 | analyse |
-| `aggregation` | a total no single fact states on its own | value | 2 | analyse |
-| `temporal` | what changed between two periods | list | 2 | analyse |
-| `implication` | what must be true when two stated things both hold | explanation | 2 | analyse |
-| `application` | which stated rule governs a case the material omits | explanation | 1 | apply |
-
-A band is a request for the **shape of a sample**, so a kind needing two
-passages is never planned `easy` — `easy` offers one passage, and a
-comparison drawn from one is a question about one thing. Needing two is not
-the only reason to decline the band: `application` needs one passage,
-because the rule it applies sits in one, and is still never `easy`, because
-the case it puts that rule to is not in the material. Each kind declares the
-lowest band it may be planned at.
-
-One shared rule block holds what is true of every question — do not name the
-source, name the subject, one question, the language of the facts — and each
-kind adds what it asks for, what its answer looks like, and one worked example.
-Two prompts for one rule is how the two come to disagree.
-
-### The answer form, and why it is a column
-
-`answer_form` is `value`, `list` or `explanation`, declared by the kind. Every
-gate that reads an answer reads it against that form.
-
-This is the column the old set did not have, and not having it is why every
-question in it was a lookup. One prompt demanded *"a short noun phrase, a few
-words at most … never anything with a verb in it"*, and one structural gate
-enforced it on every answer. Measured against six realistic answers, five were
-refused as malformed:
-
-```
-'weil die Risiken im Bankensektor gestiegen sind'                   -> malformed
-'because risks in the banking sector increased'                     -> malformed
-'by notifying the authority within four hours through the portal'   -> malformed
-'submit the application, provide the business plan, and pay the fee' -> malformed
-'EUR 15,000'                                                        -> accepted
-```
-
-Why, how, what-happens-if and which-things were not badly written. They were
-**unwritable**. The verb rule now applies to a `value` alone; an `explanation`
-is refused for carrying *no* verb, which is the opposite failure; and each form
-has its own length bounds in `QUESTIONS_ANSWER_CHARS`.
-
-### What a question asks of a reader
-
-`difficulty` says how far an answer is spread — over two passages, two
-documents, two subjects — which is how hard it is to **find**. It says
-nothing about what has to be done once it is found, and a question spanning
-two documents can still be a bare lookup with both of them in hand.
-
-`cognitive_level` is the other axis, and it is derived from the question's
-type the way difficulty is derived from its scopes. Nobody judges a row.
-
-| level | types |
-|---|---|
-| `recall` | factoid, entity |
-| `understand` | definition, enumeration |
-| `apply` | condition, procedure, **application** |
-| `analyse` | reason, consequence, comparison, aggregation, temporal, **implication** |
-
-The two in bold are what make the column a measurement rather than a label.
-Every other type's answer is *stated* in the passages — the recoverability
-gate refuses one whose answer is not — so the level of a retrieval question
-describes the shape of a lookup. These two are **derived**: the premises are
-in the material and the conclusion is not, so answering means reasoning.
-
-An `implication` puts two statements together and asks what they come to. An
-`application` puts a rule the material gives to a case it does not mention.
-Both need the conclusion to be absent — if the material already says it, that
-is a `consequence`, and the gate refuses it.
-
-Because their answers are absent by construction, recoverability asks them
-the wrong question, so they face one of their own — the same bargain
-`aggregation` already had. Which one depends on how the type derives:
-`arithmetic` asks whether the figures come to the total, `entailment` asks
-whether the conclusion follows from the premises. They are not
-interchangeable: *do the arithmetic* is the wrong instruction for a
-conclusion drawn from two rules, and *does this follow* is the wrong one for
-a total, which follows from anything if the reader is generous about
-addition.
-
-### The three criteria, and the band they feed
-
-Each is read off the facts the question reported citing. Each says something
-different about what a chatbot has to do, so they are three columns rather
-than one:
+| [`backend/api/`](backend/api/README.md) | The HTTP surface the frontend and the orchestrator call |
+| [`backend/stages/`](backend/stages/README.md) | The queue, the worker and the command line every stage shares |
+| [`frontend/`](frontend/README.md) | The Streamlit application |
+| [`docs/make.md`](docs/make.md) | Every `make` target |
+
+**What they all stand on:**
 
 | | |
 |---|---|
-| `passage_scope` | `single_passage` or `multi_passage` — how many passages hold the answer |
-| `document_scope` | `single_document` or `cross_document` — the one a retriever cannot fake: no single chunk holds the answer |
-| `topic_scope` | `single_topic` or `multi_topic` — whether the question bridges two subjects |
+| [`backend/database/`](backend/database/README.md) | The schema, the migrations and the one trigger |
+| [`backend/blob_store/`](backend/blob_store/README.md) | The three buckets |
+| [`backend/nlp/`](backend/nlp/README.md) | Sentences, claims, vocabulary and language |
+| [`backend/llm/`](backend/llm/README.md) | The served model |
+| [`backend/settings/`](backend/settings/README.md) | Configuration, and what a change stales |
+| [`telemetry/`](telemetry/README.md) | Logging and tracing |
 
-`difficulty` is then **derived** rather than judged. Five things each count
-one point — the three scopes above, an answer past
-`QUESTIONS_LONG_ANSWER_CHARS`, and following another question — and the band is
-the total: 0–1 `easy`, 2 `medium`, 3+ `hard`.
-
-Three and not four, because `cross_document` implies `multi_passage`: two
-documents are two passages, so the three scopes total at most three. A
-threshold of four would have made a question spanning two documents and two
-subjects — the hardest thing a retriever faces — only medium. Nothing is
-weighted, because a weighting is an opinion and the point of deriving
-difficulty rather than judging it is that nobody has to hold one.
-
-### The other axis: what it asks of a reader
-
-`difficulty` measures how far an answer is **spread** — over two passages, two
-documents, two subjects — which is how hard it is to *find*. It says nothing
-about what has to be done once it is found, and a question reaching two
-documents can be a bare lookup with both of them in hand.
-
-`cognitive_level` is that second axis: `recall`, `understand`, `apply`,
-`analyse`. Like difficulty it is **derived, not judged** — declared once per
-kind rather than decided per question, so nobody holds an opinion about a row.
-`GET /questions` filters on it and `GET /questions/quality` reports the spread,
-which is the number that says whether a set is a retrieval benchmark or a
-reasoning one: a set that is all `recall` is a lookup benchmark however many of
-its questions reach two documents.
-
-Eleven of the thirteen kinds are answered by a sentence in the corpus — the
-recoverability gate refuses one whose answer is not — so a level on them
-describes the reading, not the reasoning. `implication` and `application` are
-what make the column worth having: the premises are in the material and the
-conclusion is not. They face a gate of their own for that reason, as
-`aggregation` already did, because recoverability asks them the wrong
-question.
-
-The column is NULL on every question written before it existed, and
-deliberately not backfilled from `question_type`: a kind's level can change,
-and a column filled in afterwards would say a row was judged when nothing had
-judged it.
-
-### How a band is asked for without being judged
-
-`QUESTIONS_DIFFICULTY_MIX` asks for a band. Nothing judges one. What the plan
-actually chooses is the **shape of the sample** the writer is offered, and the
-shape is what makes a band reachable at all — a question drawn from one passage
-cannot be cross-document however it is phrased:
-
-| Band | Shape | What the deal offers | Worth |
-|---|---|---|---|
-| `easy` | `single` | one passage | 0 |
-| `medium` | `cross` | a passage in another document, ranked by shared vocabulary | 2 |
-| `hard` | `bridge` | a bridging passage in another document — another file *and* another subject | 3 |
-
-The band the plan asked for is stored as `planned_difficulty` beside the
-`difficulty` the question turned out to be. The two disagree when the writer
-cited fewer facts than it was offered, and the share that agree is in the
-Questions page's Analysis fold: it is a measurement of the plan, not a fault
-in the row.
-
-A topic sitting in one document has no cross-document question in it. The deal
-falls back to the widest sample it can give — the nearest passage of the same
-document, by ordinal — rather than writing nothing about that subject.
-
-### What the deal offers, and what it used to
-
-Within a topic the writer is offered a **sample** of facts. `QUESTIONS_FACT_SAMPLE`
-caps how many, **divided between the passages the sample holds**, so a wide
-sample offers both sides of what it is asking about.
-
-That cap is the second defect the old set had, and it is worth recording
-because nothing about it looked broken. The cap used to *flush* a group and
-then add the next passage **whole**. On a corpus whose median passage carries
-ten validated facts and whose cap was six, that meant every sample was exactly
-one passage. Measured over the 24 topics of this corpus, 214 samples:
-
-| | before | after |
-|---|---|---|
-| multi-passage | 5 (2%) | 183 (50%) |
-| cross-document | 3 (1%) | 122 (33%) |
-| multi-topic | 2 (1%) | 52 (14%) |
-| facts per sample | 1–54 | 1–6 |
-
-`QUESTIONS_BRIDGE_SHARE` asked for a bridge on 35% of samples and landed two,
-for the same reason: a bridge was refused when it would take the sample over
-the cap, and the sample was already over it. The multi-topic scope existed and
-was unreachable. There is no bridge share now — the `hard` shape reaches for
-one directly.
-
-Passages are dealt **strided over the whole topic** rather than from its start,
-and each is offered once. Ten questions used to mean the first ten passages in
-document order, so two thirds of a large topic was never asked about at all.
-
-Which facts a question actually cites is the **writer's** answer, not the
-sample's. That distinction was missing at first and produced a measurable lie:
-facts paired only because they came from different documents had nothing to do
-with each other, the writer answered one and ignored the rest as its prompt
-told it to, and the row was stored with a `cross_document` label earned by a
-fact the question never used — 91 of the first 140 rows. A sample wider than
-one passage now also carries an instruction to use both halves.
-
-### Follow-up threads
-
-A share of accepted questions get a **thread**: the question somebody would
-ask next, up to `QUESTIONS_MAX_FOLLOWUPS` deep. `follows_id` and
-`thread_position` carry it.
-
-Each turn takes the next kind in `QUESTIONS_FOLLOWUP_TYPES`, cycled, so a
-conversation moves from a value to the circumstances it applies in to the
-reason behind it rather than asking the same kind of thing three times.
-
-A follow-up **may lean on the conversation** — *"And for an urgent one?"* — and
-that is the point: a chatbot answering one has to carry the thread, which is a
-real capability and one no single-turn question tests. Two consequences follow
-from it. The phrasing gate is **not** applied to a follow-up, because not
-standing alone is what it is for; and the verifier is shown the conversation
-when it judges recoverability, because read alone *"And for an urgent one?"*
-has no answer in any passage.
-
-Only an accepted, **answerable** root is followed. A thread whose first turn
-has no answer has nothing to follow on from — the chatbot was supposed to say
-it did not know — and one whose root a gate refused would be a conversation
-starting with a question nobody would ask. A thread stops at the first
-follow-up a gate refuses: the refused one is stored as drop-rate evidence like
-any other, but a third turn after a discarded second is a conversation with a
-hole in it.
-
-Each follow-up is another writer call and another verifier call, so a thread
-multiplies what a topic costs. At the defaults a topic of twenty questions
-costs about thirty-two.
-
-Some questions are written to have **no answer in the corpus**, by perturbing a
-verified fact just out of reach. These test whether a chatbot says it does not
-know instead of inventing something, which is half of what this dataset is for.
-`QUESTIONS_UNANSWERABLE_SHARE` sets how many are attempted, spread by position
-rather than drawn at random, so a share of 0.25 is exactly one in four and is
-the same one in four on a re-run. An unanswerable question is always planned
-`easy` and from one passage: it is written by moving one fact out of reach, so
-a second passage has nothing to do with it.
-
-### The gates
-
-Applied cheapest first, because each one that fires saves the cost of those
-behind it. A question that fails one is stored with the gate's name rather than
-dropped: the rate at which that happens is how the writer is judged, so it
-belongs in the data and not in a log.
-
-| Gate | Rejects a question that | Costs |
-|---|---|---|
-| `malformed` | is not a question, asks two things, carries no target answer when it claims one, is in the wrong language, or is one of its own facts handed back | nothing |
-| `answer_too_short` | is scored against an answer below its form's floor | nothing |
-| `answer_too_long` | answers past its form's ceiling — a value answered with a paragraph | nothing |
-| `wrong_form` | answers in the wrong shape: a value describing an action, an explanation explaining nothing | nothing |
-| `leaks_source` | quotes the title of the document its answer is in | nothing, or the round trip |
-| `duplicate` | is a near twin of one already accepted | one index probe |
-| `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
-| `unanchored` | nobody could have asked without the passage in front of them | the round trip |
-| `wrong_type` | is not the kind of question it was asked to be | the round trip |
-| `not_recoverable` | cites evidence its own answer is not in | the round trip |
-
-The length bounds are per form and measured rather than guessed: a floor of 15
-on values refused 41% of the answers this corpus had accepted — `70%`, `2025`
-and `Bafin` among them, which are the most unambiguously scoreable answers
-there are. One line in `backend.env` changes any of them, and the share each
-refuses is in the Questions page's Analysis fold either way.
-
-There is **no gate for "the question is its own fact rearranged"**, and that is
-a finding rather than an omission. One was written, in two formulations, and
-measured against 61 real rows: both refused questions like *"Wie hoch war die
-Arbeitslosenquote im August 2025?"* → `6,4 Prozent`, which is as good as a
-benchmark question gets. For a single atomic fact, a good question *is* the
-fact minus its answer — that is what asking about a fact means. What separates
-a good one from a bad one is whether the answer is determinate, and that is not
-lexical either. `not_recoverable` already carries the judgement where it can be
-made.
-
-`not_recoverable` is the one no similarity measure makes. A second model is
-shown **only the cited passages** and asked to answer; the question survives if
-what comes back carries every number, name and date the target answer asserts,
-and enough of what it is about. How much is enough depends on the form: a
-`value` is compared whole, because every word of one is the answer, while a
-`list` or an `explanation` is compared by overlap — `QUESTIONS_ANSWER_OVERLAP`
-— because demanding that every lemma of prose survive a paraphrase refuses
-answers the verifier plainly found. Numbers are always exact whatever the form,
-so `4 hours` never passes for `48 hours`.
-
-`unanchored`, `leaks_source` and `wrong_type` ride on that same call, for
-nothing extra. Each is a judgement rather than a measurement, and no structural
-check makes any of them — but a model already looking at the question and the
-material can.
-
-They are also the only gates here that are **opinions**, and an opinion needs
-an independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks
-its own work, and one measured run rejected *"According to the ECB and NCAs,
-who can conduct the due diligence check for an outsourcing arrangement?"* for
-naming nothing — three of four rejections in that topic were false positives.
-So the factory turns those three off when no second model is named, and logs
-the verdict instead. Recoverability stays on regardless, because that one is
-checkable against the passage rather than a matter of taste.
-
-Three things about the round trip are load-bearing. The verifier is a
-**different** model, because a model marking its own work recovers what it just
-wrote and the gate then passes everything. The escape hatch is explicit — the
-verifier answers whether the passage states it at all, not just what it says —
-or the model confabulates rather than declining. And it sees only the cited
-passages, never the corpus: what is being measured is the dataset, not a
-retriever.
-
-It catches what nothing else did. *"Ein Liquiditätsmanagementtool ist eine
-einjährige Rückgabefrist"* survived an NLI model, an LLM judge and a structural
-check, because it reads exactly like its passage. It does not survive being
-asked, because recoverability is not similarity — and a paraphrase, a
-decomposition and a resolved pronoun all survive it, which a similarity
-threshold does not let them do.
-
-### The balanced release
-
-Accepting a question says it is sound. It says nothing about what the SET
-looks like, and the two are different problems: every gate can do its job and
-still leave a set that is 45% unanswerable and 96.5% easy, because what
-survives a filter is whatever the material happened to offer. That is what
-one measured run came out as.
-
-So the run overgenerates and the composition is chosen afterwards.
-`make questions-balance` fills a quota out of everything accepted and writes
-`questions.release_id` on what it drew. Three shares are held at once:
+**Around the edges:**
 
 | | |
 |---|---|
-| `QUESTIONS_RELEASE_UNANSWERABLE` | The most of the release that may be questions with no answer. A ceiling, not a target. |
-| `QUESTIONS_RELEASE_DIFFICULTY` | How it spreads over the bands, over the whole set rather than over the answerable part of it. |
-| `QUESTIONS_TYPE_MIX` | Reused, so a type a deployment turned off gets no quota it cannot fill. |
+| [`orchestration/`](orchestration/README.md) | Dagster: one asset per stage. Delete it and the pipeline is unchanged |
+| [`review/`](review/README.md) | Argilla: where a person overrules a model |
+| [`evaluation/`](evaluation/README.md) | Phoenix: scoring a served model against the golden cases |
+| [`tests/`](tests/README.md) | Ten layers, and what each needs |
+| [`configs/`](configs/README.md) | Service configuration and init scripts |
+| [`docs/configuration.md`](docs/configuration.md) | Every setting worth changing |
+| [`docs/operations.md`](docs/operations.md) | Scaling, dashboards, and the things that go wrong |
 
-They are **marginals, not a joint distribution**, and that is deliberate. An
-even spread of kinds *within* each band is not reachable: a `factoid` answers
-with a value, a value is short, and a short answer cannot earn the length
-point a `hard` question generally needs. Asking for both marginals is
-achievable; asking for their product is asking the corpus to be something it
-is not.
-
-`QUESTIONS_RELEASE_SIZE=0` draws the largest release the pool can fill
-without missing a quota, which is usually what is wanted: the size a balanced
-set can reach is fixed by whichever bucket is furthest from supplying its
-share, and that is a property of the run rather than a number to pick. The
-command reports what it drew, the yield — how much of the accepted pool made
-it in — and names any quota the pool came up short on.
-
-Nothing is deleted and nothing is rewritten. A release is a column on the
-rows already there, so the questions left out stay queryable and available to
-the next draw, and running it again with different shares replaces the first.
-
-The number to read is that yield, not the share of rows that were accepted.
-Every draft the writer produced is stored, refused ones included — including
-the first attempt where `QUESTIONS_RETRIES` asked for a second — because they
-are the drop-rate evidence, and hiding them would make the writer look better
-than it is.
-
-### What a refit and a re-extraction do to them
-
-Questions belong to their facts, not to a topic. A fit replaces every row in
-`topics`, so refitting returns every topic to `new` and the questions are
-written again — but the questions themselves survive, and selection skips the
-facts an accepted question already rests on, so the second run writes only about
-what the first did not reach. Without that skip the writer would be paid for
-once per duplicate before the dedup gate could throw the duplicate away.
-
-Re-extracting is the destructive one. `question_facts` cascades from `facts`
-and a trigger deletes a question once its last citation is gone, so
-`extract-rerun` over the corpus takes the questions with it. Re-extracting a
-*single* document is quieter and worse: a cross-document question that loses one
-of its two citations is not deleted, and its stored difficulty stops being true.
-That is what `questions-reverify` exists to find — it re-reads the stored form
-and bounds, so a question is never re-judged under a kind it was not written
-as.
-
-## The embedding model
-
-`EMBEDDING_MODEL` is the one pretrained model in this pipeline, and the one
-thing in it that does **not** move when you change providers. It runs locally,
-in the worker, whatever `LLM_MODEL` names — a hosted provider serves the
-writer and the verifier and has nothing to do with this.
-
-It does two jobs, and they are one setting because they must agree:
-
-| | |
-|---|---|
-| Chunking | Counts a passage's tokens. `EMBEDDING_MAX_TOKENS` is the model's window and so the longest passage the chunker emits. |
-| The `duplicate` gate | Embeds each question into `questions.embedding`, which the HNSW index serves. `answerable_after_all` reads the same probe. |
-
-A passage sized by one tokenizer and embedded by another is silently truncated
-at embed time, and a benchmark built on truncated passages misreports its own
-coverage. One name is what makes that impossible.
-
-**Changing it is a migration, not a setting.** `questions.embedding` is
-`vector(1024)`, and the worker refuses a model of another width at start-up
-rather than letting the database refuse it one row at a time with nothing
-saying why. A different model means altering that column, re-embedding every
-stored question, and re-chunking if its window differs — so the passages are
-sized in the unit they are embedded in. The default,
-`intfloat/multilingual-e5-large`, is 1024 wide with a 512-token window and
-covers German and English.
-
-It stays local deliberately. The gate runs once per candidate question, which
-is tens of thousands of vectors over a corpus, and a hosted embedding API
-would bill for every one of them to answer a question — "have I already asked
-this?" — that a 560M-parameter model answers well. It is also what keeps a
-question measured in the same space the corpus was put in.
-
-The cost is the first start: 2.2 GB of weights into the `models` volume before
-`question-worker` claims anything, which is why the topics sit `pending` and
-`make logs` is where it says so. Later starts read the volume. `question-worker`
-is given 6 GB because of it, and that is the number to remember when deciding
-between more worker containers and more lanes inside one — the weights are
-per container, not per lane.
-
-## Topic modelling
-
-This stage has its own full description in
-[`backend/topic_modelling/README.md`](backend/topic_modelling/README.md): the
-eleven steps a fit takes, every setting and how each default was measured, the
-tools and where each is used, and what the tests cover.
-`tests/static/test_topics_pinned.py` pins the surface. What follows is the
-summary.
-
-One model per language, fitted over the lemmas chunking stored for that
-language's passages. A gensim *document* is one passage; the *corpus* is an
-object that re-walks the database, because the fit reads it once per pass and
-a generator would be spent after the first. Vectorisation is
-`dictionary.doc2bow(lemmas)` weighted by tf-idf — a sparse vector over the
-vocabulary the corpus itself defines. Nothing is pretrained and nothing is
-embedded, which is what keeps the result industry-agnostic.
-
-The model is non-negative matrix factorisation, not LDA. LDA is defined over
-counts — words drawn from a multinomial — so a tf-idf weighted input
-contradicts its own likelihood, and measured on this corpus feeding it one was
-worse than counts (c_v 0.514 against 0.522). Factorisation carries no such
-assumption, and weighting the input is what stops one dominant vocabulary
-spreading across every topic. Measured at twelve topics, German: term overlap
-between topics fell from 32% to 11%, coherence rose from 0.52 to 0.66. The
-weights it returns are normalised, so a membership still reads as a share.
-
-The corpus is streamed throughout: the vocabulary is built in batches of 500,
-the tf-idf weighting is read off the vocabulary's own document frequencies and
-applied lazily, each pass re-reads the rows, and scoring reads them once more.
-Memory follows the batch and the vocabulary, not the corpus.
-
-A passage is the document rather than a sentence, which was measured too: a
-sentence averages 5.7 content tokens, too few to express the mixture of topics
-the model is about, and 6% of them hold none of the vocabulary at all. German,
-twelve topics: c_v 0.522 per passage against 0.396 per sentence.
-
-### Seeing the model
-
-Each fit also draws every language it fitted as a
-[pyLDAvis](https://github.com/bmabey/pyLDAvis) figure and stores it in the
-`export` bucket under `topics/<language>.html`. Read it in the Topics page's
-Analysis fold, at `GET /topics/visualisation/{language}`, or as a file with
-`make topics-visualise`.
-
-The figure is drawn during the fit rather than on demand, because it needs the
-weight of every term in every topic and the database keeps only a topic's top
-terms. A language modelled before a fit that draws has no figure until the next
-one; the route answers 404 and the page says so.
-
-The pages are self-contained: d3 and the LDAvis script are inlined, so nothing
-is fetched when one is opened. Topics are numbered as `topics.topic_index`
-numbers them, so topic 3 in the figure is topic 3 in the table beside it.
-
-A fit is always every language and always the whole corpus. Gensim's `update()`
-would allow incremental training, and incremental training is deliberately not
-used: the vocabulary is fixed at construction, so a new document's novel terms
-would be silently dropped, and the result would come to depend on ingestion
-order — which is exactly what `TOPIC_RANDOM_STATE` exists to prevent.
-
-## What is kept where
-
-Parsing writes the converter's complete output to the `parsed` bucket, so
-nothing it produced is ever lost. The database holds what a later stage reads
-or a person queries:
-
-| In Postgres | Why it is not left in the bucket |
-|---|---|
-| `passages.text` | The unit facts are drawn from and scored against |
-| `passages.sentences` | What a fact cites, and what resolves the citation to a span |
-| `passages.lemmas` | The vocabulary the topic model is fitted over |
-| `passages.language` | Which spaCy pipeline reads it, and which topic model covers it |
-| `passages.table_cells` | A serialised table loses its header flags, row and column positions and spans, and the cell reader has nothing to walk |
-| `passages.bbox` | Highlighting a citation must not mean fetching and parsing a multi-megabyte document |
-| `passages.doc_item_refs` | The only non-fuzzy way back to the converted document |
-| `passages.section_path`, `block_type`, `page_from`, `page_to` | Read on every query that places or routes a passage |
-| `documents.oversized` | Passages stored above the token budget, which the embedder would truncate. Expected to be 0 |
-
-`language`, `sentences` and `lemmas` are written by chunking rather than by the
-stages that read them, so one segmentation serves both and a topic fit reads a
-column instead of re-tokenising the corpus.
-
-The language is detected on the **passage**, not inherited from its document:
-45 of this corpus's passages are German inside an English-labelled file, and a
-document-wide label read every one of them with the wrong pipeline.
-
-Everything else — figures, formulas as LaTeX, code blocks, per-line geometry,
-the heading tree — stays in the bucket and is reachable through
-`doc_item_refs`. Formulas, code and list items do reach the database as
-`block_type`, because that is what routes them to an extractor.
-
-Two deliberate gaps: figures become no passage of their own, which needs a
-vision model to be worth anything, and key-value form regions are not modelled,
-because no document in the corpus has any.
-
-## Tests
-
-Seven layers, each a directory and a marker. `make test` runs everything that
-gates a merge; the two that do not are excluded from it.
-
-| Directory | What it covers | Needs |
-|---|---|---|
-| `tests/static/` | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, and pyright at zero | nothing |
-| `tests/unit/` | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
-| `tests/property/` | Invariants over generated input, with hypothesis | spaCy, for some |
-| `tests/contract/` | The OpenAPI surface, the paths the frontend builds, and the refusals each route declares | a container |
-| `tests/integration/` | The database, the object store and the HTTP surface, against the images compose runs | a container |
-| `tests/e2e/` | One document through every stage in this process, with the converter and the model stood in for | a container |
-| `tests/frontend/` | Each Streamlit page against a scripted backend | nothing |
-| `tests/smoke/` | Both images built and looked inside, and the compose file resolved: no service behind a profile, and the orchestrator holding no database credential | a container engine |
-| `tests/eval/` | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions. The cases are in `evaluation/cases.py`, read by this and by `make eval-score` | a served model |
-
-The integration layers start a PostgreSQL and a SeaweedFS of their own through
-testcontainers and skip, with a reason, where no container engine answers.
-Nothing they do touches a running stack.
-
-`tests/eval/` never gates: a model's answers move between versions and between
-runs at the same temperature, so a threshold there would fail on somebody
-else's Tuesday rather than on a regression. It prints its numbers. The one
-thing it does assert is that the round-trip gate splits its golden questions
-the right way round, which is not a measurement of the model's taste — it is
-whether the gate is wired up at all, and a gate that accepts everything cannot
-be told from no gate.
-
-Two tests would need a 2.2 GB download to run and skip instead of taking one:
-`tests/unit/questions/test_embedding.py` skips unless `EMBEDDING_MODEL` is
-already in the Hugging Face cache, and the end-to-end pipeline stands the
-embedder in for with a digest.
-
-### Continuous integration
-
-`.github/workflows/ci.yml` runs on every pull request and on every push to
-`main`, as four jobs that together are the whole suite: `static`, `unit`,
-`integration`, and `smoke`. A fifth, `gate`, waits for the rest and is the one
-thing a branch protection rule needs to require.
-
-`smoke` builds both images, so it is the slow one: it is also the only layer
-that can see what an image contains, and a lock that does not install is not
-worth finding out about after the merge.
-
-`.github/workflows/nightly.yml` runs what is worth knowing but not worth
-blocking on: advisories against both locks, every layer including the images,
-and the model evaluation, which skips itself unless `LLM_MODEL` and
-`LLM_BASE_URL` are set as repository variables.
-
-The first run of any job installs the dependencies and caches the virtualenv
-against `poetry.lock` and the Makefile. Later runs restore it.
-
-torch arrives through docling and nothing here uses a GPU, so `pyproject.toml`
-declares PyTorch's CPU index as an explicit source and names torch and
-torchvision against it for Linux. Without that, the wheel PyPI serves on Linux
-brings the whole CUDA runtime with it — eighteen packages and some three
-gigabytes, downloaded on every cache miss and shipped in nothing. macOS keeps
-PyPI's build, which has no CUDA variant to avoid.
-
-## Layout
-
-| Path | Contents |
-|---|---|
-| `backend/database/` | SQLAlchemy models, one module per table, plus the engine |
-| `backend/database/migrations/` | Alembic: one revision per schema change |
-| `backend/blob_store/` | Object storage clients, one module per bucket |
-| `backend/nlp/` | The spaCy pipelines, and reading sentences, claims and vocabulary out of text |
-| `backend/api/` | The HTTP surface the frontend and the orchestrator call |
-| `backend/ingestion/` | Upload validation, hashing and storage — see its own [README](backend/ingestion/README.md) |
-| `backend/preprocessing/parsing/` | A stored file becomes a structured document — see its own [README](backend/preprocessing/parsing/README.md) |
-| `backend/preprocessing/chunking/` | That document becomes passages, with their sentences and lemmas — see its own [README](backend/preprocessing/chunking/README.md) |
-| `backend/extraction/` | Those passages become facts citing a sentence — see its own [README](backend/extraction/README.md) |
-| `backend/topic_modelling/` | Each language becomes topics over its own vocabulary — see its own [README](backend/topic_modelling/README.md) |
-| `backend/question_generation/` | Each topic's facts become questions with known answers |
-| `backend/stages/` | The queue, drain loop, command line and watch loop every stage shares |
-| `backend/settings/` | Reading configuration: the environment, the overrides stored over it, what may be configured and what a change stales |
-| `tests/` | The test suite, one directory per layer; see Tests below |
-| `.github/workflows/` | What CI runs, and when |
-| `telemetry/` | Logging and OpenTelemetry configuration |
-| `orchestration/` | The Dagster code location: one asset per stage, a schedule and a sensor. Calls the API and nothing else |
-| `review/` | Pushing facts, topic labels and questions to Argilla, and bringing the verdicts back |
-| `evaluation/` | The golden cases, and scoring a served model against them in Phoenix |
-| `configs/filebeat/` | What the log shipper reads and where it puts it |
-| `configs/grafana/` | The datasources and the three dashboards, provisioned |
-| `configs/dagster/` | The Dagster instance and its one code location |
-| `frontend/` | Streamlit application |
-| `configs/env/` | The settings that are decisions rather than credentials, and so live in git. `provider.env` is the exception, and is not in git |
-| `configs/` | Service configuration and init scripts |
-
-The frontend holds one address, `BACKEND_URL`, and no knowledge of the
-database, the object store or the services behind the API.
+## How it is put together
 
 No backend service imports another. Each owns a repository over the shared
 models and passes plain dataclasses across its own boundaries; `database/`,
 `blob_store/` and `nlp/` are the only packages that build a connection or load
-a model, so a service can neither configure the infrastructure nor reach around
-another service to it. Stages hand work to each other through their own status
-column, and share only what is in `backend/stages/`.
+a model, so a service can neither configure the infrastructure nor reach
+around another service to it. Stages hand work to each other through their own
+status column, and share only what is in `backend/stages/`.
 
-A service package re-exports nothing. A caller names the submodule it wants —
-`from extraction.repository import PassageQueue` — so it pays for that
+A service package **re-exports nothing**. A caller names the submodule it
+wants — `from extraction.repository import PassageQueue` — so it pays for that
 submodule and no more. That is what keeps litellm, Docling, gensim and spaCy
 out of the API process, which loads none of them.
-
-Each stage splits its database access in two: a queue, which claims rows and
-records outcomes, and a catalogue, which reads back what the stage produced.
-The API imports only the catalogue for a read route, and only the queue for a
-queue route.
 
 They are independent modules, not independent services. They share one
 PostgreSQL schema, one `Status` enum and one container image, and two stages
@@ -1287,388 +181,19 @@ own different columns of the same `documents` row. That is the right shape at
 this size; splitting them further would mean a schema and a migration history
 each, and a contract between them that is not a table.
 
-## Logs
-
-One configuration, in `telemetry/`, and every process calls it before it does
-anything else. Each record is rendered twice: as a line of text on stdout,
-which is what `make logs` shows, and as one JSON object per line in a file,
-which is what reaches Elasticsearch. Same record, same fields; the JSON
-carries the ones a text line has no room for.
-
-    api, 5 workers, streamlit  ──▶  logs volume  ──▶  filebeat  ──▶  elasticsearch  ──▶  grafana
-
-Nothing is aggregated and nothing is dropped on the way. Every level from
-`LOG_LEVEL` upwards is shipped, `DEBUG` included when it is set that low. An
-exception is written whole: `error.type`, `error.message` and the entire
-traceback in `error.stack_trace`, so a failure is readable in Grafana without
-going back to the container. Every stage that records a failure against a row
-also logs it with its traceback — the row's error column is one line for a
-person reading the Documents page, not the whole story.
-
-The field names are [ECS](https://www.elastic.co/guide/en/ecs/current/index.html).
-`log.level`, `service.name`, `log.logger` and `error.type` are names
-Elasticsearch's own template already maps as keywords, so Grafana can group on
-them out of the box. `trace.id` is on every line too, which is what ties a log
-line to its span in Phoenix.
-
-### What a line says it was working on
-
-A line also carries what the pipeline was doing when it was written, not just
-what happened. Each stage binds its unit of work where it claims it, and every
-line beneath carries it — including the ones a library logs, which is the
-point:
-
-```python
-with working(span, "extract", {"stage": self.name, "passage.id": passage.id}):
-    log.info("passage %d: %d fact(s)", passage.id, stored,
-             extra={"facts.stored": stored})
-```
-
-One call, because the span and the log line are one fact said twice. A stage
-annotating its trace with `document.sha256` and its lines with something
-spelled differently is a trace that cannot be joined to the logs explaining
-it, and two calls drift into exactly that.
-
-So `stage`, `document.sha256`, `passage.id`, `topic.id`, `llm.duration_ms`,
-`facts.stored` and the rest are fields rather than prose inside `message`.
-That is what makes "how many passages failed extraction today" and "show me
-everything about this document" answerable at all — a document crosses five
-processes over hours, and without the binding nothing in Elasticsearch says
-two lines are about the same one.
-
-These are not ECS, so they are declared in `setup.template.append_fields` in
-`configs/filebeat/filebeat.yml`. Left to dynamic mapping a string arrives as
-`text`, which is analysed and has no doc values, and a panel grouping by
-`stage` finds nothing to group on.
-
-### Retention
-
-```bash
-make logs-retention                        # 30 days
-make logs-retention LOGS_RETENTION_DAYS=90
-```
-
-Run once against a running stack, after the shipper has written something.
-Elasticsearch remembers it, and every backing index the stream rolls over to
-afterwards inherits it. Until it has run nothing is deleted, which is the
-state the stack ships in.
-
-The retention belongs to the data stream, not to an ILM policy. This version
-of Filebeat writes to a data stream, which rolls its own backing indices over
-by age and size — so the index is named `qa-logs` and not `qa-logs-<date>`: a
-date in the name creates a second data stream every midnight, each of which
-then has to be found and aged separately. Naming an ILM policy in
-`filebeat.yml` does not work either, because Filebeat strips
-`index.lifecycle` out of the template it installs when `setup.ilm.enabled` is
-false.
-
-`setup.template.overwrite: true` is what makes an edit to `filebeat.yml`
-take effect at all. Without it Filebeat sees a template of that name already
-there and leaves it alone, and a changed pattern silently stops matching the
-index being written — which drops the whole thing to dynamic mapping, where
-`stage` arrives as `text` and the panels grouping on it go quiet.
-
-Only this project's processes are shipped. Postgres, SeaweedFS, Redis and
-Elasticsearch itself keep the `json-file` driver and are read with `make logs`.
-Collecting those too would mean reading the engine's own log store, which is in
-a different place under Docker and Podman and, on macOS, inside a virtual
-machine a bind mount cannot see; one more input in
-`configs/filebeat/filebeat.yml` is all it takes once that path is known for a
-given machine.
-
-A worker writes to `{stage}-{container}.log` on a shared volume rather than to
-one file per stage, because a scaled stage runs several containers over one
-volume and two processes rotating one file take each other's lines with them.
-Files rotate at 50 MB, three kept; the shipper has read a line long before it
-is deleted. `LOG_DIR` is what turns the file on — it is set for the containers
-and unset for every `make` target, so a host command logs to the terminal and
-nowhere else.
-
-Elasticsearch is the one Argilla already uses. That is a deliberate reuse
-rather than a second node, and it is a shared heap: `ES_JAVA_OPTS` in
-`configs/env/elasticsearch.env` is where to raise it if a long run makes either
-slow.
-
-```bash
-make logs-shipper    # why nothing is arriving, when nothing is arriving
-```
-
-## Dashboards
-
-Three, provisioned into Grafana from `configs/grafana/`, over two datasources.
-
-| Dashboard | Reads | Shows |
-|---|---|---|
-| Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact acceptance by rejection code, question acceptance by gate, topics and their coverage |
-| Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused, and which queue verb was asked for over HTTP |
-| Pipeline logs | Elasticsearch | Lines per level, what failed and where, every line |
-
-The split is the point. Logs say what happened once; the tables say what is
-true now. A row a worker died holding logged nothing and is still counted in
-Pipeline state, which is the difference that matters when a stage has gone
-quiet.
-
-Grafana reads the application database as `grafana_reader`, which holds
-`SELECT` and nothing else — a dashboard is a place people paste SQL into, and
-the application role can `DROP`. The role is created by
-`configs/postgres/init.sh`, which only runs on the first boot of an empty
-volume; on a stack that already has one, re-run it by hand:
-
-```bash
-podman compose exec postgres bash /docker-entrypoint-initdb.d/init.sh
-```
-
-The panel worth watching during a long run is the model latency p99. The
-extraction lease is derived from `LLM_TIMEOUT_SECONDS` and
-`LLM_MAX_ATTEMPTS`, so a p99 climbing towards the timeout is healthy workers
-about to start looking abandoned.
-
-## Review
-
-Three things in this pipeline are a model's judgement, and each has somewhere
-for a person to disagree. Argilla is where a hundred of those decisions get
-made in a row instead of one at a time through a table.
-
-| Dataset | The decision | Lands in |
-|---|---|---|
-| `facts` | Does the statement follow from the evidence, and stand on its own? | `facts.reviewed_verdict` |
-| `topic-labels` | Is this a good name for these terms, and is it a subject worth asking about? | `topics.label`, `topics.include_in_coverage` |
-| `questions` | Would somebody ask this, and is the answer right? | `questions.status` |
-
-```bash
-make review-push-questions   # a sample, spread over the gates
-make review-pull-questions   # write the submitted verdicts back
-```
-
-`facts` and `topics` have the same pair. Push, review in the UI at
-`ARGILLA_API_URL`, then pull. `make review-status` says how much has been
-looked at.
-
-The database decides. Argilla holds a copy of the rows put in front of
-somebody and the answers they gave; a pull brings the answers home and the
-copy is disposable — delete the Argilla dataset and the pipeline has lost
-nothing.
-
-Two of the three write through routes that already existed: a verdict given
-here and one given on the Questions or Topics page are the same write, which
-is what keeps `labelled_by` honest about who named a topic. Facts had nowhere,
-because `validated` and `rejection_code` are the checker's and
-`extract-revalidate` rewrites both from scratch — so `reviewed_verdict` is its
-own column, the way `questions.status` is its own beside `rejected_reason`.
-
-The samples are stratified over the verdicts, not taken in id order. A review
-answers "is the checker right", and a sample of only what it accepted cannot
-answer that — nor can a sample in id order, which for a corpus is a sample of
-whichever document was extracted first. At least one from each group, because
-a rejection code that fired twice in a whole corpus is the interesting one.
-
-A pull takes only **submitted** answers. Argilla saves a draft the moment a
-record is touched, and writing one back records an opinion nobody has finished
-having.
-
-It runs on the host, like `make schema`. Nothing in the pipeline calls it, so
-no container carries the client.
-
-## Golden-set experiments
-
-`make test-eval` scores a served model against the cases in
-`evaluation/cases.py` and prints the numbers. Printing is the problem: a
-prompt change, a model change or a quantisation change moves precision and
-recall, and the question anybody has is whether it moved them up.
-
-```bash
-make eval-upload     # the cases become a Phoenix dataset
-make eval-score      # the model is scored against them, and it is recorded
-make eval-score EVAL_RUN_NAME=extraction-prompt-v7
-```
-
-Phoenix versions the dataset, so a case added today does not invalidate
-yesterday's experiments — they stay attached to the version they scored. Each
-run records the model, the temperature and the structured mode as metadata, so
-two runs are comparable by more than their timestamps.
-
-Scored by the pipeline's own checker rather than an LLM judge. The checker is
-what decides whether a fact is kept in production, so a golden set scored by
-anything else measures something this pipeline does not use.
-
-Only the extraction set is scored, and that is a decision rather than a gap.
-Its numbers are pure measurement, asserted against nothing, which is what is
-worth comparing between two prompts. The questions set already asserts — the
-recoverable cases must pass and the rest must be stopped — so it is a gate
-that fails a pull request rather than a trend that draws a line. It is
-uploaded anyway, so the cases are browsable and an experiment can be run
-against them from the Phoenix UI.
-
-Never a gate, for the same reason `test-eval` is not: a model's answers move
-between versions, between quantisations and between two runs at the same
-temperature.
-
-## Configuration
-
-Every setting has two places it can come from. The files below supply all of
-them, and a deployment can override one through the UI, the API or the command
-line without restarting anything.
-
-The files are the default and stay required: a variable missing from both of
-them stops the service at start-up naming itself, as it always did. An
-override is a row in `service_settings`, and deleting that row is what returns
-a setting to whatever the file says — there is no stored copy of a default,
-because the file is the copy.
-
-A worker picks a change up on the row it claims next. Nothing is requeued: if
-the change means what a stage already produced was made under the old value,
-whichever surface you used says so and names the stage, and that stage's own
-`-rerun` is what rebuilds it. Every fact, topic and question records the
-configuration it was produced under, so a corpus built across a change can
-still be read.
-
-Three ways to change one, all going through the same validation — the stage's
-own `Settings.load`, so what you are refused with is the message the worker
-would have failed at start-up with:
-
-```bash
-# On the page that runs the service, under Configuration in its service panel.
-
-# Or the API, one service per request:
-curl -s localhost:8000/settings/topics
-curl -s -X PATCH localhost:8000/settings/topics \
-  -H 'content-type: application/json' \
-  -d '{"values": {"TOPIC_PASSES": "20"}}'
-
-# Or a terminal:
-make settings SERVICE=topics
-make settings-set SERVICE=topics SET="TOPIC_PASSES=20"
-make settings-unset SERVICE=topics UNSET="TOPIC_PASSES"
-```
-
-The seven services each configure their own settings and no others:
-`ingestion` on Upload, `parsing` on Documents, `chunking` on Passages,
-`extraction` on Facts, `topics` on Topics, `questions` on Questions, and
-`platform` — the model, the tokenizer and the language pipelines the six of
-them share — on System health. A stage that wants a different model from the
-rest names one of its own: `EXTRACTION_MODEL`, `TOPIC_MODEL`,
-`QUESTIONS_MODEL`, each absent by default and each meaning `LLM_MODEL`.
-
-`settings/catalog.py` is the list of what may be configured, what type each
-setting is, what it may hold and which stages' output it stales. A setting the
-code reads and the catalogue does not describe cannot be configured at all,
-and one the catalogue describes and nothing reads is a control that does
-nothing; `tests/static` refuses both.
-
-The pool sizes and the addresses are not configurable. They are read before a
-service could ask a database for anything, so they are served read-only and
-marked as the deployment's.
-
-The files, split by what the value is rather than by which service reads it:
-
-| File | In git | Holds |
-|---|---|---|
-| `configs/env/backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction, topic and question settings the api and the five workers read |
-| `configs/env/elasticsearch.env` | yes | The Elasticsearch node's certificate paths, security flags and heap. One node serves both Argilla and the logs |
-| `configs/env/seaweedfs-filer.env` | yes | Which metadata store the filer uses |
-| `configs/env/orchestration.env` | yes | How patiently Dagster watches a stage it started |
-| `configs/env/review.env` | yes | How a review sample is drawn |
-| `configs/env/evaluation.env` | yes | What a golden-set run is called in Phoenix |
-| `configs/env/provider.env` | no | Whatever env vars the configured model provider needs, credentials included. Optional, and absent for a plain Ollama; read by the three services that call a model, and by nothing else |
-| `.env` | no | Credentials, ports, and the addresses a host reaches a service at. `.env.example` lists it |
-
-compose hands each file to the services that need it with `env_file`, and the
-Makefile sources `backend.env` and `.env` for the host commands, so one value
-reaches both. A tool with a tuning file of its own gets that too, through
-`$(call WITH,...)`. A variable given on the command line beats all of them:
-
-```bash
-make topics-discover TOPIC_PASSES=20
-```
-
-The values most likely to need changing:
-
-| Variable | Where | Default | Purpose |
-|---|---|---|---|
-| `MAX_FILE_SIZE_MB` | `backend.env` | 100 | Largest upload accepted |
-| `ALLOWED_MIME_TYPES` | `backend.env` | `application/pdf` | Types with a parser behind them |
-| `EMBEDDING_MODEL` | `backend.env` | `intfloat/multilingual-e5-large` | The one embedding model, and the only tokenizer in the project |
-| `EMBEDDING_MAX_TOKENS` | `backend.env` | 512 | That model's context window, and so the longest passage |
-| `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. Medium, not small: the small German model does not tag a modal as a finite verb |
-| `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
-| `LLM_BASE_URL` | `.env` | — | Where that model is served |
-| `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Naming the writer's own model, or none at all, turns off the two gates only an independent model may apply; the worker warns on every start |
-| `EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model from the rest. Each replaces the model only — where it is served and how patient to be stay `LLM_*`, because a stage that could set its own timeout would be a stage whose lease nobody could derive. Unset means `LLM_MODEL` |
-| `QUESTIONS_PER_TOPIC` | `backend.env` | 20 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
-| `QUESTIONS_FACT_SAMPLE` | `backend.env` | 6 | How many of a topic's facts are offered per call, divided between the passages the sample holds. The writer picks which of them one question needs |
-| `QUESTIONS_TYPE_MIX` | `backend.env` | thirteen kinds | Which kinds of question are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
-| `QUESTIONS_DIFFICULTY_MIX` | `backend.env` | `easy:2,medium:2,hard:1` | Which bands the plan aims for, as `band:weight`. A request for a shape of sample; the band itself stays derived |
-| `QUESTIONS_ANSWER_CHARS` | `backend.env` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form, as `form:min:max` |
-| `QUESTIONS_ANSWER_OVERLAP` | `backend.env` | 0.6 | How much of a list or an explanation has to come back for the verifier to have recovered it. Numbers are always exact |
-| `QUESTIONS_UNANSWERABLE_SHARE` | `backend.env` | 0.25 | What share of questions are written to have no answer in the corpus |
-| `QUESTIONS_FOLLOWUP_SHARE` | `backend.env` | 0.3 | What share of accepted questions get a follow-up thread |
-| `QUESTIONS_MAX_FOLLOWUPS` | `backend.env` | 2 | How far a thread may run past its root |
-| `QUESTIONS_FOLLOWUP_TYPES` | `backend.env` | `condition,reason,comparison` | The kinds the turns of a thread take, cycled |
-| `QUESTIONS_LONG_ANSWER_CHARS` | `backend.env` | 60 | Where an answer starts counting towards the difficulty band. Not a gate |
-| `QUESTIONS_DUPLICATE_COSINE` | `backend.env` | 0.93 | How alike two questions must be before the later one is thrown away |
-| `LOG_LEVEL` | `.env` | `INFO` | Log level for every service, the frontend included. Everything at or above it reaches Grafana |
-| `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
-| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets and experiments go. The same service the line above sends spans to, read the other way |
-| `GRAFANA_DB_USER` | `.env` | `grafana_reader` | The role Grafana reads the application database as. `SELECT` and nothing else |
-| `ARGILLA_API_URL` | `.env` | `http://localhost:6900` | Where the review tool reaches Argilla. The host's address: it is a `make` target, not a container |
-| `ARGILLA_API_KEY` | `.env` | — | Argilla shows it under "My settings". Not `ARGILLA_PASSWORD` |
-| `ARGILLA_WORKSPACE` | `.env` | `qa_generator` | One per deployment, so two people reviewing two corpora do not annotate each other's rows |
-| `REVIEW_SAMPLE_SIZE` | `review.env` | 200 | How many records a push puts in front of a reviewer, split across the verdicts |
-| `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | `orchestration.env` | 28800 | How long a Dagster asset waits for a stage to drain. Giving up is not failing the rows |
-| `ORCHESTRATION_POLL_SECONDS` | `orchestration.env` | 15 | How often it asks |
-| `LOGS_RETENTION_DAYS` | `make` | 30 | How long a day's log index is kept, applied by `make logs-retention` |
-
-`MAX_FILE_SIZE_MB` must be kept in step with `server.maxUploadSize` in
-`frontend/.streamlit/config.toml`, or Streamlit rejects the file before the API
-sees it.
-
-The frontend comes in light and dark. That file gives Streamlit a palette
-under `[theme.light]` and another under `[theme.dark]`; it starts from the
-browser's `prefers-color-scheme` and the toolbar menu, top right, switches
-between them per page. Put a colour in `[theme]` itself, or set `theme.base`,
-and it applies to both themes — which is what pinned the app to light before.
-
-`frontend/styles.css` reads its own palette off `light-dark()`, which resolves
-against the `color-scheme` Streamlit sets on the app container from the theme
-it actually settled on. So the custom styling follows the chrome whichever way
-the chrome was decided — a `prefers-color-scheme` media query would have got
-the menu wrong, staying light while everything around it went dark. Two hues
-are written twice, the brand purple and the red that only deletion uses; the
-neutrals are mixed from `currentColor`, so they need no second value.
-
-Colour carries one meaning. Purple fills the one control that commits
-something in a group — Start, Fit, Save, Accept — and red is spent only on
-deletion. Everything else is an outlined button, and a control that would do
-nothing right now is greyed rather than hidden, so a row keeps its shape.
-
-The topic map stays on white in either theme. It is a pyLDAvis document inside
-an iframe, so nothing outside it can restyle it; it is framed and given a
-background of its own so it reads as a figure printed on white.
-
-Changing `NLP_MODELS` changes what a fact is, in the same way changing the
-prompt does. Both are recorded on every fact — `spacy_model`, `spacy_version`,
-`extraction_model`, `prompt_version` — so two generations of the dataset can be
-told apart.
-
-## Schema changes
-
-Alembic owns the schema. The models say what the tables should be; a revision
-under `backend/database/migrations/versions/` says how to get an existing
-database there.
-
-```bash
-make migration m="add the dropped counts"  # write a revision from the models
-make schema                                # apply everything outstanding
-make schema-status                         # where the database is
-make schema-down                           # take the newest revision back off
-make schema-reset                          # drop every table and rebuild from
-                                           #   the revisions. Irreversible
-make schema-stamp                          # adopt a database that already
-                                           #   holds the tables
-```
-
-Read the generated revision before applying it. Autogenerate compares tables,
-columns, indexes and constraints; it does not see a trigger, a data backfill or
-anything that has to happen in a particular order. Both such cases in this
-history are written out by hand: the one trigger, in the initial revision, and
-the deletion of every fact in the revision that changed what a citation is.
+## Limitations
+
+- **Scanned documents are refused rather than parsed.** OCR is not enabled;
+  see the placeholder in `backend/preprocessing/parsing/pipelines/pdf.py`.
+- **Figures become no passage of their own**, which would need a vision model
+  to be worth anything, and key-value form regions are not modelled, because
+  no document in the corpus has any.
+- **`EMBEDDING_MODEL` cannot be changed without a migration.**
+  `questions.embedding` is `vector(1024)`, and the worker refuses a model of
+  another width at start-up.
+- **The model is the bottleneck, not the pipeline.** A median passage measured
+  at 473 s on a 31B model.
+
+## Licence
+
+[Apache 2.0](LICENSE).

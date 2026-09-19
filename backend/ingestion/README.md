@@ -151,7 +151,7 @@ flat directory becomes a write hotspot.
 | `DELETE /documents/{sha256}/derived` | Remove the passages and what cascades, keep both objects |
 
 **Command line:** `make documents`, `make delete SHA=…`,
-`make delete-derived SHA=…`, `make delete-all`.
+`make delete-derived SHA=…`, `make wipe`.
 
 **Read by:** [parsing](../preprocessing/parsing/README.md), which claims the
 row and fetches the object it names.

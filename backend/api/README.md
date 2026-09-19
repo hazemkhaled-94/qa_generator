@@ -157,7 +157,18 @@ case-insensitive substring and `limit`/`offset` to page. The last three also
 take `document` to narrow to one digest, and `/questions` takes `topic` as
 well. Each takes the filters its page offers — `parse_status` on
 `/documents`, `block_type` on `/passages`, `kind` and `method` on `/facts`,
-and six on `/questions`.
+and every column a question is classified by on `/questions`: its status,
+whether it is answerable, the three scopes, the band and the band it was
+planned at, its type, its cognitive level, its answer form, and whether it
+follows another question.
+
+Each of those is spelled as a `Literal` so the OpenAPI document lists its
+values and the frontend's pickers cannot drift from what the backend will
+accept. That is two copies of one vocabulary, and
+`tests/static/test_api_vocabularies.py` is what keeps them equal — a column
+that can hold a value no filter offers is a column nothing can be read by,
+which is how `implication` and `application` were written, stored and
+constrained for a day before the route's list knew about them.
 
 `/topics` takes none and returns every topic at once, because one fit produces
 a list a person can read.

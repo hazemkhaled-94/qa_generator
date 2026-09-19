@@ -11,6 +11,12 @@ CONTAINER ?= podman
 LOCK_TMP := backend/api/requirements.lock.new
 AUDIT_TMP := backend/api/requirements.lock.audit
 
+# Every directory ruff reads, so `lint` and `format` cannot cover different
+# ones. orchestration, review and evaluation are here and not in pyright's
+# `include`: they are checked by both, but pyright is configured in
+# pyproject.toml rather than on this command line.
+SOURCES := backend frontend telemetry orchestration review evaluation tests
+
 # What every host command reads, and in the same order the containers do: the
 # tuning values from configs/env/backend.env, then .env for the credentials,
 # the ports and the addresses a host reaches services at.
@@ -671,12 +677,12 @@ audit:
 
 # Configuration lives in [tool.ruff] in pyproject.toml.
 lint:
-	poetry run ruff check backend frontend telemetry tests
-	poetry run ruff format --check backend frontend telemetry tests
+	poetry run ruff check $(SOURCES)
+	poetry run ruff format --check $(SOURCES)
 
 format:
-	poetry run ruff check --fix backend frontend telemetry tests
-	poetry run ruff format backend frontend telemetry tests
+	poetry run ruff check --fix $(SOURCES)
+	poetry run ruff format $(SOURCES)
 
 # ── Dependency locks ───────────────────────────────────────────────────────
 

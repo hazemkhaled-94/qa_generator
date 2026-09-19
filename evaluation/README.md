@@ -1,0 +1,141 @@
+# Evaluation
+
+The golden cases, and scoring a served model against them in Phoenix.
+
+`make test-eval` scores a model against the cases in [`cases.py`](cases.py)
+and **prints** the numbers. Printing is the problem: a prompt change, a model
+change or a quantisation change moves precision and recall, and the question
+anybody has is whether it moved them *up*.
+
+This package is the answer to that question. Phoenix records each run so two
+can be compared by more than their scrollback.
+
+## Using it
+
+```bash
+make eval-upload                                 # the cases become a Phoenix dataset
+make eval-score                                  # score the model, and record it
+make eval-score EVAL_RUN_NAME=extraction-prompt-v7
+```
+
+Underneath:
+
+```bash
+python -m evaluation.run --upload extraction
+python -m evaluation.run --score extraction
+```
+
+The two are mutually exclusive and one is required. Results are at
+<http://localhost:6006>, signed in as `admin@localhost` with
+`PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD`.
+
+## What makes two runs comparable
+
+**Phoenix versions the dataset**, so a case added today does not invalidate
+yesterday's experiments — they stay attached to the version they scored.
+
+Each run records the model, the temperature and the structured mode as
+metadata, so two runs are comparable by more than their timestamps.
+
+`EVAL_RUN_NAME` is optional, and its absence means something: unset, the
+runner names the experiment after the **model** it scored, which is what makes
+two runs of two models comparable without anybody typing anything. Set it when
+the model is the same and something else changed — a prompt, a temperature, a
+quantisation — because then the model name is not what tells them apart.
+
+## Scored by the pipeline's own checker
+
+Not by an LLM judge. The checker is what decides whether a fact is kept in
+production, so a golden set scored by anything else measures something this
+pipeline does not use.
+
+## Only the extraction set is scored
+
+That is a decision rather than a gap.
+
+| Set | Why |
+|---|---|
+| `extraction` | Its numbers are **pure measurement**, asserted against nothing, which is what is worth comparing between two prompts |
+| `questions` | Already **asserts** — the recoverable cases must pass and the rest must be stopped — so it is a gate that fails a pull request rather than a trend that draws a line |
+
+The questions set is uploaded anyway, so the cases are browsable and an
+experiment can be run against them from the Phoenix UI.
+
+## Never a gate
+
+For the same reason `make test-eval` is not: a model's answers move between
+versions, between quantisations, and between two runs at the same temperature.
+A threshold here would fail on somebody else's Tuesday rather than on a
+regression.
+
+The one thing `tests/eval/` does assert is that the round-trip gate splits its
+golden questions the right way round — which is not a measurement of the
+model's taste. It is whether the gate is wired up at all, and **a gate that
+accepts everything cannot be told from no gate**.
+
+## Layout
+
+| File | Holds |
+|---|---|
+| [`cases.py`](cases.py) | The golden cases, and nothing that runs them. Read by this package **and** by `tests/eval/` |
+| [`experiments.py`](experiments.py) | Scoring the cases into Phoenix |
+| [`config.py`](config.py) | Where Phoenix is |
+| [`run.py`](run.py) | The command line |
+
+`cases.py` holding no runner is what lets one set of cases serve both the
+pytest layer and the Phoenix layer without either importing the other.
+
+## Tools, and where each is used
+
+| Tool | Where | Why this one |
+|---|---|---|
+| **arize-phoenix** | [`experiments.py`](experiments.py) | Versioned datasets and experiment history, in the same service that already collects the traces |
+| The pipeline's own checker | [`experiments.py`](experiments.py) | The evaluator. Anything else would measure something production does not use |
+
+Phoenix is the same service `OTEL_CONTAINER_ENDPOINT` sends spans to, read the
+other way round.
+
+## Configuration
+
+| Setting | Where | Default | What it does |
+|---|---|---|---|
+| `EVAL_RUN_NAME` | [`configs/env/evaluation.env`](../configs/env/evaluation.env) | unset | What a run is called. Unset names it after the model |
+| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, as the host reaches it |
+| `PHOENIX_ADMIN_SECRET` | `.env` | — | At least 32 characters, including a digit and a lower-case letter |
+| `LLM_MODEL`, `LLM_BASE_URL` | `.env` | — | The model being scored |
+
+`PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is applied only when Phoenix first
+creates its admin user — changing it afterwards means dropping the `phoenix`
+database.
+
+## Tests
+
+```sh
+poetry run pytest tests/unit/evaluation   # no network
+poetry run pytest tests/eval              # needs a served model
+```
+
+| File | Covers |
+|---|---|
+| [`tests/unit/evaluation/test_experiments.py`](../tests/unit/evaluation/test_experiments.py) | The scores an experiment records, and the shape it records them in |
+| [`tests/eval/test_extraction_quality.py`](../tests/eval/test_extraction_quality.py) | How well a real served model reads facts out of a passage |
+| [`tests/eval/test_question_quality.py`](../tests/eval/test_question_quality.py) | How a real served model writes and checks questions |
+
+`tests/eval/` is excluded from `make test`. The nightly workflow runs it, and
+skips itself unless `LLM_MODEL` and `LLM_BASE_URL` are set as repository
+variables.
+
+## Known edges
+
+Things that are true, are not bugs, and have surprised somebody.
+
+- **Nothing here gates a merge, ever.** By design. A model's answers move
+  between two runs at the same temperature.
+- **`--score` needs the set uploaded first.** `--upload` is not implied.
+- **A case added today does not invalidate yesterday's numbers.** Phoenix
+  versions the dataset and the old experiments stay attached to the old
+  version.
+- **`EVAL_RUN_NAME` unset is the useful default.** Setting it to something
+  static makes two runs of two models look like one experiment.
+- **Changing `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` after first boot does
+  nothing.** It is applied once, when Phoenix creates the admin user.

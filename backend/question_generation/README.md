@@ -121,24 +121,47 @@ Every one of them is a question **form**, never a subject, so the same list
 applies to a manual, a contract, a policy or a report. Nothing in any prompt
 names a domain.
 
-| Kind | Asks for | Answer | Passages |
-|---|---|---|---|
-| `factoid` | one checkable value — how many, how much, by when | value | 1 |
-| `definition` | what a named thing or status is, as the material defines it | explanation | 1 |
-| `entity` | who does, decides, owns or must be told something | value | 1 |
-| `enumeration` | which things belong to a named set | list | 1 |
-| `condition` | when, or under what circumstances, something applies | list | 1 |
-| `reason` | why something is required, done, or the way it is | explanation | 1 |
-| `procedure` | how something is done, or in what order | explanation | 1 |
-| `consequence` | what happens when something is or is not done | explanation | 1 |
-| `comparison` | how two named things differ | list | 2 |
-| `aggregation` | a total no single fact states on its own | value | 2 |
-| `temporal` | what changed between two periods | list | 2 |
-| `implication` | what must be true when two stated things both hold | explanation | 2 |
-| `application` | which stated rule governs a case the material omits | explanation | 2 |
+`Level` is `cognitive_level`, declared by the kind and stored on every
+question it writes — see [the other axis](#what-a-question-asks-of-a-reader)
+for why it is not the band.
 
-The last five need facts from two passages and are never planned `easy`: a
-comparison drawn from one passage is a question about one thing.
+| Kind | Asks for | Answer | Passages | Level |
+|---|---|---|---|---|
+| `factoid` | one checkable value — how many, how much, by when | value | 1 | recall |
+| `definition` | what a named thing or status is, as the material defines it | explanation | 1 | understand |
+| `entity` | who does, decides, owns or must be told something | value | 1 | recall |
+| `enumeration` | which things belong to a named set | list | 1 | understand |
+| `condition` | when, or under what circumstances, something applies | list | 1 | apply |
+| `reason` | why something is required, done, or the way it is | explanation | 1 | analyse |
+| `procedure` | how something is done, or in what order | explanation | 1 | apply |
+| `consequence` | what happens when something is or is not done | explanation | 1 | analyse |
+| `comparison` | how two named things differ | list | 2 | analyse |
+| `aggregation` | a total no single fact states on its own | value | 2 | analyse |
+| `temporal` | what changed between two periods | list | 2 | analyse |
+| `implication` | what must be true when two stated things both hold | explanation | 2 | analyse |
+| `application` | which stated rule governs a case the material omits | explanation | 1 | apply |
+
+### Which bands a type may be planned at
+
+A band asks for the **shape of a sample**, so a type needing two passages
+cannot be `easy` — `easy` offers one. That is the default, and for four of
+the five two-passage types it is the only rule needed: a comparison drawn
+from one passage is a question about one thing.
+
+`application` is the exception, and it is why a type may also declare a
+**floor** of its own. It needs one passage, because the rule it applies sits
+in one — but it is still not a lookup, because the case it puts that rule to
+is not in the material. Read only through the passage count it was planned
+`easy`, which is the wrong shape for it.
+
+So a type declares its floor and the passage count supplies the default. For
+`application` that costs nothing and buys it the third of its slots it should
+never have had: over ten slots, medium 8 and hard 2 where it was easy 4,
+medium 4, hard 2.
+
+It is the same distinction `cognitive_level` draws against `difficulty`,
+applied a second time — how far an answer is spread is not what has to be
+done with it once found.
 
 ### The answer form, and why it is a column
 
@@ -191,6 +214,16 @@ An `implication` puts two statements together and asks what they come to. An
 `application` puts a rule the material gives to a case it does not mention.
 Both need the conclusion to be absent — if the material already says it, that
 is a `consequence`, and the gate refuses it.
+
+`GET /questions` filters on the level and `GET /questions/quality` reports the
+spread, which is the number that says whether a set is a retrieval benchmark
+or a reasoning one: a set that is all `recall` is a lookup benchmark however
+many of its questions reach two documents.
+
+The column is NULL on every question written before it existed, and
+**deliberately not backfilled** from `question_type`: a kind's level can
+change, and a column filled in afterwards would say a row was judged when
+nothing had judged it.
 
 Because their answers are absent by construction, recoverability asks them the
 wrong question, so they face one of their own — the same bargain `aggregation`
