@@ -601,9 +601,17 @@ services:
 
   # What actually ticks the schedule and the sensor. Without it the UI
   # shows both and neither ever fires.
+  #
+  # The workspace is named here as it is for the webserver, and for the
+  # same reason: WORKDIR is /opt/dagster/app and the file is mounted into
+  # DAGSTER_HOME, so a daemon left to find its own looks in the wrong
+  # directory, finds no `[tool.dagster]` in a pyproject.toml that is not
+  # in the image either, prints its usage and exits 0. With
+  # `restart: unless-stopped` above that is not a crash but a spin: this
+  # container had restarted 68,028 times.
   dagster-daemon:
     <<: *dagster
-    command: dagster-daemon run
+    command: dagster-daemon run -w /opt/dagster/dagster_home/workspace.yaml
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 512M }
