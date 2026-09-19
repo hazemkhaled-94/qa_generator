@@ -79,9 +79,13 @@ class Citation:
     Attributes:
         passage_id: The passage.
         sentence_ids: Which of its sentences, in order, or None when the
-            claim named no sentence this passage has.
+            claim named no sentence this passage has. The record of what the
+            claim rests on; the offsets below are the range covering them.
         start: Offset of the span in that passage's text, or None with the
-            sentences.
+            sentences. The range from the first cited sentence to the last,
+            which is what a reader sees highlighted - so it covers a
+            sentence between two cited ones that was not itself cited. The
+            checks read `sentence_ids`, never this.
         end: Offset one past its last character, or None with the sentences.
     """
 

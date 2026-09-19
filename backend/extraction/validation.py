@@ -22,7 +22,7 @@ from extraction.models import (
     Provenance,
 )
 from nlp.analysis import VERSION, claim, normalised, vocabulary
-from nlp.models import Claim
+from nlp.models import Claim, Sentence
 from nlp.pipelines import name as pipeline_name
 from settings import decimal
 
@@ -32,8 +32,29 @@ from settings import decimal
 _WRITTEN = "llm"
 
 #: What joins the cited spans into the evidence stored on the fact. Two
-#: passages' spans do not run on, so they are not joined with a space.
+#: passages' spans do not run on, so they are not joined with a space. Nor
+#: do two sentences of one passage with a sentence between them that the
+#: claim did not cite.
 _JOIN = "\n"
+
+
+def _cited_text(passage: PassageToExtract, cited: Sequence[Sentence]) -> str:
+    """The text a citation rests on: those sentences and nothing else.
+
+    A run of adjacent sentences is taken whole, which keeps the passage's
+    own spacing between them and is what a reader sees highlighted.
+
+    Sentences with a gap between them are joined instead. The covering range
+    would hand the checks every sentence in between as well, so a claim
+    citing 0 and 5 of a six-sentence passage would be judged against all six
+    - and `unsupported_addition`, which is the gate that says nothing was
+    invented, would accept a number from a sentence the claim never named.
+    """
+    span = range(cited[0].index, cited[-1].index + 1)
+    if [one.index for one in cited] == list(span):
+        return passage.text[cited[0].start : cited[-1].end]
+    return _JOIN.join(one.text for one in cited)
+
 
 #: A failed check, as its code and the measurement behind it.
 Failure = tuple[str, str]
@@ -310,11 +331,17 @@ class FactChecker:
 
         anchor = rested[0][0]
         statement = candidate.statement.strip()
+        # Each passage's cited sentences, in the order it named them. Read
+        # once: the evidence and the vocabulary are the same text.
+        texts = [
+            _cited_text(
+                passage, [passage.sentences[at] for at in one.sentence_ids or ()]
+            )
+            for passage, one in rested
+        ]
         judged = Judged(
             statement=statement,
-            evidence=_JOIN.join(
-                passage.text[one.start : one.end] for passage, one in rested
-            ),
+            evidence=_JOIN.join(texts),
             # Over the cited sentences of every passage, not over every
             # sentence of them: what the claim rests on is what it named.
             evidence_predicates=sum(
@@ -325,8 +352,8 @@ class FactChecker:
             claim=claim(statement, anchor.language),
             evidence_vocabulary=frozenset().union(
                 *(
-                    vocabulary(passage.text[one.start : one.end], passage.language)
-                    for passage, one in rested
+                    vocabulary(text, passage.language)
+                    for (passage, _), text in zip(rested, texts, strict=True)
                 )
             ),
             citations=tuple(one for _, one in rested),
@@ -363,7 +390,7 @@ class FactChecker:
     ) -> Judged:
         """Reads what the statement and its cited sentences each assert."""
         start, end = cited[0].start, cited[-1].end
-        evidence = passage.text[start:end]
+        evidence = _cited_text(passage, cited)
         return Judged(
             statement=candidate.statement.strip(),
             evidence=evidence,
