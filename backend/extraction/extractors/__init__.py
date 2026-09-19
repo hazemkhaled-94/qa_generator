@@ -59,6 +59,15 @@ class ExtractorRegistry:
         return self._by_block_type.get(block_type or "", self._default)
 
     @property
+    def default(self) -> Extractor:
+        """The reader everything unclaimed falls to.
+
+        Named, because a passage that merged a table with prose needs both
+        this and the reader its block type routed it to.
+        """
+        return self._default
+
+    @property
     def block_types(self) -> tuple[str, ...]:
         """Every block type claimed by name."""
         return tuple(sorted(self._by_block_type))

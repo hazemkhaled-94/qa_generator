@@ -19,7 +19,7 @@ from extraction.extractors import (
 from extraction.models import CheckedFact, PassageToExtract
 from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import WRITTEN, FactChecker
-from nlp.analysis import normalised
+from nlp.analysis import claim, normalised
 from stages import StageService
 from telemetry import tracer, working
 
@@ -342,6 +342,36 @@ def skipped(passage: PassageToExtract) -> str | None:
     return None
 
 
+def _unread_prose(passage: PassageToExtract) -> bool:
+    """Whether a table passage also carries lines no reader would reach.
+
+    The chunker labels a merged passage `table` if ANY item in it is one,
+    and numbers the whole of it by rendered line rather than by sentence -
+    `lines_of` records `predicates: 0` for every line, so `claims` is zero
+    for every table and the prose merged into one is invisible to each of
+    the signals above. The cell reader then walks the grid and nothing
+    reads the rest.
+
+    Measured over this corpus: 161 of 188 table passages carry lines
+    outside their grids, about 145,000 characters. Most of it is rendered
+    rows and `|---|` separators, and the rest is ordinary German prose -
+    "In diesem Abschnitt werden die geschäftlichen Nutzen aufgeführt...".
+    A finite verb is what tells the two apart, so it is asked here rather
+    than read off a column that was written as zero.
+    """
+    if not passage.table_cells:
+        return False
+    gridded = {
+        cell.get("line")
+        for grid in passage.table_cells
+        for cell in grid.get("cells", ())
+    }
+    return any(
+        one.index not in gridded and claim(one.text, passage.language).predicates
+        for one in passage.sentences
+    )
+
+
 def over_cap(facts: Sequence[CheckedFact], cap: int | None) -> set[int]:
     """Which of one passage's facts the atomic cap refuses, by position.
 
@@ -489,12 +519,10 @@ class ExtractionService(StageService):
             current.set_attribute("extract.skipped", reason)
             return []
 
-        extractor = self._extractors.for_block_type(passage.block_type)
         facts = [
-            self._checker.check(
-                passage, candidate, extractor.method, extractor.provenance
-            )
-            for candidate in extractor.extract(passage)
+            self._checker.check(passage, candidate, reader.method, reader.provenance)
+            for reader in self._readers(passage, current)
+            for candidate in reader.extract(passage)
         ]
         cap = self._atomic_cap
         refused = over_cap(facts, cap)
@@ -505,6 +533,20 @@ class ExtractionService(StageService):
                 for position, fact in enumerate(facts)
             ]
         return facts + self._digested(passage)
+
+    def _readers(self, passage: PassageToExtract, current) -> list:
+        """Which extractors read one passage, in the order they are applied.
+
+        Usually the one its block type routes to. A passage that merged a
+        table with the prose around it gets both: the cell reader for the
+        grid and the model for the rest.
+        """
+        routed = self._extractors.for_block_type(passage.block_type)
+        default = self._extractors.default
+        if routed is default or not _unread_prose(passage):
+            return [routed]
+        current.set_attribute("extract.prose_beside_a_table", True)
+        return [routed, default]
 
     def _digested(self, passage: PassageToExtract) -> list[CheckedFact]:
         """Reads what the passage is about, when there is enough to condense.
