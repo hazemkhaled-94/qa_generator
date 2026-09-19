@@ -762,6 +762,15 @@ class FactCatalog(Repository):
         Rejections are grouped on the code rather than the message: a message
         carrying a measurement gives one bucket per measurement.
 
+        The counts are over everything the filter selects, refused facts
+        included - that rate is the measurement. The means are over the
+        accepted ones only. They are there to answer whether the model is
+        decomposing a passage or restating it, and a fact refused as
+        `evidence_absent` carries no evidence at all: it enters both
+        evidence means as a zero and pulls the ratio the README reads as
+        "claims per statement against claims per cited sentence" towards a
+        number describing the failures rather than the work.
+
         Args:
             document: Only facts resting on a passage of this document.
             search: Text to match, in the columns `field` names.
@@ -778,18 +787,22 @@ class FactCatalog(Repository):
                     func.count().label("total"),
                     func.count().filter(Fact.validated).label("validated"),
                     func.count(func.distinct(_OPENS.passage_id)).label("passages"),
-                    func.coalesce(func.avg(func.length(Fact.statement)), 0.0).label(
-                        "statement_chars"
-                    ),
-                    func.coalesce(func.avg(func.length(Fact.evidence_text)), 0.0).label(
-                        "evidence_chars"
-                    ),
-                    func.coalesce(func.avg(Fact.statement_predicates), 0.0).label(
-                        "statement_predicates"
-                    ),
-                    func.coalesce(func.avg(Fact.evidence_predicates), 0.0).label(
-                        "evidence_predicates"
-                    ),
+                    func.coalesce(
+                        func.avg(func.length(Fact.statement)).filter(Fact.validated),
+                        0.0,
+                    ).label("statement_chars"),
+                    func.coalesce(
+                        func.avg(func.length(Fact.evidence_text)).filter(
+                            Fact.validated
+                        ),
+                        0.0,
+                    ).label("evidence_chars"),
+                    func.coalesce(
+                        func.avg(Fact.statement_predicates).filter(Fact.validated), 0.0
+                    ).label("statement_predicates"),
+                    func.coalesce(
+                        func.avg(Fact.evidence_predicates).filter(Fact.validated), 0.0
+                    ).label("evidence_predicates"),
                 )
             ),
             document,

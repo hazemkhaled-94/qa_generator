@@ -650,6 +650,40 @@ class TestQuality:
         assert quality.mean_evidence_predicates == 2.0
         assert quality.facts_per_passage == 2.0
 
+    def test_the_means_leave_out_the_facts_that_failed(self, store, corpus) -> None:
+        """They say what the model does, not how often it fails.
+
+        The counts above are the failure rate. A fact refused as
+        `evidence_absent` cites nothing, so it enters the evidence means as
+        a zero and drags the ratio towards a number about the refusals.
+        """
+        first = corpus["a"][0]
+        store.store(
+            first,
+            checked(
+                first,
+                "A claim.",
+                evidence_text="A claim and another.",
+                statement_predicates=1,
+                evidence_predicates=2,
+            ),
+            checked(
+                first,
+                "Cites nothing.",
+                evidence_text="",
+                validated=False,
+                rejection_code=Rejection.EVIDENCE_ABSENT,
+                statement_predicates=0,
+                evidence_predicates=0,
+            ),
+        )
+        quality = store.catalog.quality()
+
+        assert quality.total == 2, "the refusal is still counted"
+        assert quality.validated == 1
+        assert quality.mean_evidence_predicates == 2.0, "not 1.0"
+        assert quality.mean_evidence_chars == 20.0, "not 10.0"
+
     def test_an_empty_corpus_reports_zeroes_rather_than_dividing_by_one(
         self, store
     ) -> None:

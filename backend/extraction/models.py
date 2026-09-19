@@ -229,10 +229,14 @@ class StoredFact:
 class FactQuality:
     """How well extraction did, over whatever the caller filtered to.
 
+    The counts are over everything the filter selects and the means over
+    the accepted facts alone: the first is the rate at which the model
+    fails, and the second is what it does when it does not.
+
     Attributes:
         total: Facts matching the filter, refused ones included.
         validated: How many of them passed.
-        mean_statement_chars: Mean length of a statement.
+        mean_statement_chars: Mean length of an accepted statement.
         mean_evidence_chars: Mean length of the text one cites.
         mean_statement_predicates: Mean finite verbs in a statement.
         mean_evidence_predicates: Mean finite verbs in the text one cites.

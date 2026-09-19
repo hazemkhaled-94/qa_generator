@@ -374,7 +374,17 @@ class FactChecker:
 
     @staticmethod
     def _cited(passage: PassageToExtract, candidate: CandidateFact) -> list | None:
-        """Resolves the cited sentence indices, or None if any is not one."""
+        """Resolves the cited sentence indices, or None if any is not one.
+
+        Stricter than `_resolve`, which drops the indices a passage does not
+        have and keeps the rest, and the difference is deliberate. Here the
+        citation is the whole of what the claim rests on, so one number the
+        passage does not have means the model was not reading the excerpt it
+        was shown and the fact is refused entire. There the citation is one
+        of several the bridge names, `_bridging` already requires two
+        passages to resolve, and refusing the lot for one bad number in one
+        of them would throw away a claim that does rest on the others.
+        """
         ids = sorted(set(candidate.sentences))
         if not ids or any(i < 0 or i >= len(passage.sentences) for i in ids):
             return None
