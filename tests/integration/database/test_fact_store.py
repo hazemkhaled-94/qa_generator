@@ -40,7 +40,7 @@ class TestClaiming:
         assert store.queue.claim() is None
 
     def test_a_queued_passage_comes_back_whole(self, store, corpus) -> None:
-        """Its text, its sentences and the language of its document."""
+        """Its text, its sentences and its language."""
         first = corpus["a"][0]
         store.queued(first)
 
@@ -49,8 +49,35 @@ class TestClaiming:
         assert claimed.id == first
         assert claimed.text.startswith("Standard requests")
         assert [one.index for one in claimed.sentences] == [0]
-        assert claimed.language == "en", "read off the document, not the passage"
+        assert claimed.language == "en"
         assert claimed.doc_sha256
+
+    def test_a_passage_is_read_in_its_own_language(self, store, corpus) -> None:
+        """One file carries a German report and its English summary.
+
+        Chunking detects the language per passage and segments it under
+        that one, so a document-wide label would judge the statement with
+        one pipeline against sentence counts another produced.
+        """
+        first = corpus["a"][0]
+        store.language_of(first, "de")
+        store.queued(first)
+
+        claimed = store.queue.claim()
+        assert claimed is not None
+        assert claimed.language == "de", "the passage's, not its document's"
+
+    def test_a_passage_too_short_to_tell_falls_back_to_its_document(
+        self, store, corpus
+    ) -> None:
+        """Which is what NULL in that column means."""
+        first = corpus["a"][0]
+        store.language_of(first, None)
+        store.queued(first)
+
+        claimed = store.queue.claim()
+        assert claimed is not None
+        assert claimed.language == "en"
 
     def test_claiming_marks_the_row_in_progress(self, store, corpus) -> None:
         """So a second worker takes the following row instead."""

@@ -86,8 +86,9 @@ class Document(Base):
     )
     language: Mapped[str | None] = mapped_column(
         CHAR(2),
-        comment="ISO 639-1, NULL until parsing detects it. Selects the spaCy "
-        "pipeline chunking and extraction read this document with.",
+        comment="ISO 639-1, NULL until parsing detects it. The fallback "
+        "pipeline for a passage of this document too short to tell its own "
+        "language; `passages.language` is what selects one where it has it.",
     )
     title: Mapped[str | None] = mapped_column(
         Text, comment="Document title, written by parsing."

@@ -80,6 +80,7 @@ _PASSAGE_COLUMNS = (
     Passage.text,
     Passage.section_path,
     Passage.block_type,
+    Passage.language,
     Passage.sentences,
     Passage.table_cells,
     Passage.doc_sha256,
@@ -101,13 +102,25 @@ def _sentences(text: str, stored: list[dict] | None) -> list[Sentence]:
 
 
 def _passage(row, language: str | None) -> PassageToExtract:
-    """Reads one row of `_PASSAGE_COLUMNS` as a passage to extract from."""
+    """Reads one row of `_PASSAGE_COLUMNS` as a passage to extract from.
+
+    Args:
+        row: The selected columns.
+        language: The document's language, which is the fallback.
+
+    Returns:
+        The passage, reading in its own language where it has one. Chunking
+        detects the language per passage and segmented this one under it, so
+        the document's label would judge a statement with one pipeline
+        against sentence counts another produced. One file carries a German
+        report and its English summary, which is what the column is for.
+    """
     return PassageToExtract(
         id=row.id,
         text=row.text,
         section_path=row.section_path,
         block_type=row.block_type,
-        language=language,
+        language=row.language or language,
         sentences=_sentences(row.text, row.sentences),
         table_cells=row.table_cells or [],
         doc_sha256=row.doc_sha256,
@@ -227,6 +240,10 @@ class PassageQueue(RowQueue):
         claimed = self._claim(*_PASSAGE_COLUMNS)
         if claimed is None:
             return None
+        if claimed.language:
+            return _passage(claimed, None)
+        # Only for a passage too short to tell its own language. Asked here
+        # rather than joined into the claim, which is an UPDATE.
         with self._session() as session:
             language = session.scalar(
                 select(Document.language).where(Document.sha256 == claimed.doc_sha256)
@@ -362,7 +379,14 @@ class FactCatalog(Repository):
             One topic's id and its passages.
         """
         query = (
-            select(*_PASSAGE_COLUMNS, Document.language, DOMINANT.c.topic_id)
+            select(
+                *_PASSAGE_COLUMNS,
+                # Labelled, because `_PASSAGE_COLUMNS` now carries the
+                # passage's own and two `language` keys in one row is one
+                # key too few.
+                Document.language.label("document_language"),
+                DOMINANT.c.topic_id,
+            )
             .select_from(Passage)
             .join(Document, Document.sha256 == Passage.doc_sha256)
             .join(DOMINANT, DOMINANT.c.passage_id == Passage.id)
@@ -380,7 +404,7 @@ class FactCatalog(Repository):
                     if held:
                         yield cast("int", current), held
                     current, held = row.topic_id, []
-                held.append(_passage(row, row.language))
+                held.append(_passage(row, row.document_language))
             if held:
                 yield cast("int", current), held
 
@@ -490,7 +514,7 @@ class FactCatalog(Repository):
                 Fact.extraction_method,
                 FactPassage.sentence_ids,
                 *_PASSAGE_COLUMNS,
-                Document.language,
+                Document.language.label("document_language"),
             )
             .select_from(Fact)
             .join(FactPassage, FactPassage.fact_id == Fact.id)
@@ -519,7 +543,7 @@ class FactCatalog(Repository):
                 rows = list(found)
                 yield (
                     fact_id,
-                    [_passage(row, row.language) for row in rows],
+                    [_passage(row, row.document_language) for row in rows],
                     CandidateFact(
                         statement=rows[0].statement,
                         sentences=tuple(rows[0].sentence_ids or ()),
