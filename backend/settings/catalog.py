@@ -535,8 +535,38 @@ SETTINGS: tuple[Setting, ...] = (
         "all, turns off the two gates only an independent model may apply.",
     ),
     Setting(
-        name="QUESTIONS_ENTAILMENT_MODEL",
-        service="questions",
+        name="QA_MODEL",
+        service="platform",
+        kind="text",
+        optional=True,
+        invalidates=("questions",),
+        help="A local extractive QA encoder asked for the answer span before "
+        "the verifier is. Absent asks the verifier for every question. Runs "
+        "in the worker, like the embedding model, and is not an LLM_MODEL.",
+    ),
+    Setting(
+        name="QA_ANSWER_CONFIDENCE",
+        service="platform",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How sure the extractive reader must be before its span is "
+        "taken and the verifier is not called. Lower saves more calls and "
+        "trusts a reader that cannot compose an answer across two sentences.",
+    ),
+    Setting(
+        name="ENCODER_MAX_TOKENS",
+        service="platform",
+        kind="integer",
+        low=1,
+        help="The longest pair an encoder reads, in tokens. A premise is a "
+        "passage already sized to EMBEDDING_MAX_TOKENS, so a smaller window "
+        "truncates the text a judgement rests on. Raise it with the model.",
+    ),
+    Setting(
+        name="NLI_MODEL",
+        service="platform",
         kind="text",
         optional=True,
         invalidates=("questions",),
@@ -545,8 +575,8 @@ SETTINGS: tuple[Setting, ...] = (
         "in the worker, like the embedding model, and is not an LLM_MODEL.",
     ),
     Setting(
-        name="QUESTIONS_ENTAILMENT_THRESHOLD",
-        service="questions",
+        name="NLI_ENTAILMENT_THRESHOLD",
+        service="platform",
         kind="decimal",
         low=0,
         high=1,

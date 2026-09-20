@@ -64,7 +64,7 @@ from question_generation.models import (
     CheckedQuestion,
     Neighbour,
 )
-from question_generation.verifier import Verifier
+from question_generation.verifier import Reading, Verifier
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,8 @@ class QuestionChecker:
         entailment=None,
         entailment_threshold: float = 0.5,
         about_overlap: float = ENTAILMENT_OVERLAP,
+        extractive=None,
+        extractive_confidence: float = 0.9,
     ) -> None:
         """Initialises the checker with its collaborators.
 
@@ -129,6 +131,8 @@ class QuestionChecker:
         self._entailment = entailment
         self._entailment_threshold = entailment_threshold
         self._about_overlap = about_overlap
+        self._extractive = extractive
+        self._extractive_confidence = extractive_confidence
 
     def check(
         self, candidate: Candidate, seen: Sequence[CheckedQuestion] = ()
@@ -303,15 +307,47 @@ class QuestionChecker:
             log.info("keeping %r: %s, but the writer judged itself", question, reason)
         return None
 
+    def _recovered(self, candidate: Candidate) -> str | None:
+        """The answer the cited passages give back, from whichever reader.
+
+        The extractive model first, where one is configured and the question
+        was asked cold. SQuAD 2.0 is this task exactly - a question, a
+        context, and a span or no answer - and a model trained on it answers
+        in milliseconds with a span in the passage's own words, which is
+        what the verifier's prompt asks for in a paragraph.
+
+        It cannot replace the served model, and is not asked to. Every span
+        it gives is contiguous and inside one passage, where the verifier is
+        allowed to put an answer together from two sentences or two
+        statements; and a follow-up is answered in a conversation, which an
+        extractive model has nowhere to put. So a confident span is taken,
+        and everything else falls through to something that can read.
+        """
+        if self._extractive is not None and not candidate.thread:
+            found = self._extractive.answer(
+                candidate.question_text,
+                candidate.group.passages,
+                self._extractive_confidence,
+            )
+            if found is not None:
+                log.debug(
+                    "extracted %r at %.2f for %r",
+                    found.text,
+                    found.score,
+                    candidate.question_text,
+                )
+                return found.text
+        return self._verifier.read(
+            candidate.question_text,
+            candidate.group.passages,
+            candidate.thread,
+        ).recovered
+
     def _round_trip(
         self, candidate: Candidate, form: str, embedding: list[float]
     ) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back."""
-        read = self._verifier.read(
-            candidate.question_text,
-            candidate.group.passages,
-            candidate.thread,
-        )
+        read = Reading(recovered=self._recovered(candidate))
 
         if candidate.answerable:
             target = candidate.target_answer or ""

@@ -1604,6 +1604,81 @@ def test_an_answer_to_a_different_question_is_not_rescued() -> None:
     assert recording.supported == 0, "the judgement is never reached"
 
 
+class Reader:
+    """An extractive reader answering with one span, or with none."""
+
+    def __init__(self, text: str | None) -> None:
+        self.text = text
+        self.asked = 0
+
+    def answer(self, question: str, passages, confidence: float):
+        from nlp.qa import Span
+
+        self.asked += 1
+        return None if self.text is None else Span(self.text, 0.95, 0)
+
+
+def _with_reader(recording: Recording, reader: Reader) -> QuestionChecker:
+    """A checker whose recall half asks the encoder first."""
+    return QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        phrasing=recording,
+        extractive=reader,
+    )
+
+
+def test_a_confident_span_answers_recall_without_a_call() -> None:
+    """The easy majority, answered locally in milliseconds."""
+    recording = Recording(recovers="4 kg")
+    reader = Reader("4 kg")
+
+    result = _with_reader(recording, reader).check(candidate(target_answer="4 kg"))
+
+    assert result.accepted
+    assert reader.asked == 1
+    assert recording.verified == 0, "the served model was not needed"
+
+
+def test_no_span_falls_through_to_something_that_can_read() -> None:
+    """Every span it gives is contiguous and inside one passage.
+
+    The verifier is allowed to put an answer together from two sentences,
+    so a reader that found nothing must not be read as a refusal.
+    """
+    recording = Recording(recovers="4 kg")
+    reader = Reader(None)
+
+    result = _with_reader(recording, reader).check(candidate(target_answer="4 kg"))
+
+    assert result.accepted
+    assert reader.asked == 1
+    assert recording.verified == 1, "the served model answered instead"
+
+
+def test_a_follow_up_never_reaches_the_extractive_reader() -> None:
+    """`And for an urgent one?` is answered in a conversation.
+
+    An extractive model has nowhere to put one, so it would answer the
+    question as if it had been asked cold.
+    """
+    recording = Recording(recovers="4 hours")
+    reader = Reader("4 kg")
+
+    _with_reader(recording, reader).check(
+        candidate(
+            question_text="How long is allowed for answering an urgent request?",
+            target_answer="4 hours",
+            thread=(("How long for a standard support request?", "48 hours"),),
+        )
+    )
+
+    assert reader.asked == 0
+    assert recording.verified == 1
+
+
 def test_an_encoder_answers_the_pass_where_one_is_configured() -> None:
     """The served model is not asked when an NLI model is to hand."""
 

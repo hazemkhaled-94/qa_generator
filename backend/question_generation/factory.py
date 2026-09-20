@@ -8,6 +8,7 @@ from llm.client import Client
 from llm.config import Settings as ModelSettings
 from nlp.embedding import Embedder
 from nlp.entailment import Entailment
+from nlp.qa import Extractive
 from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
@@ -103,12 +104,18 @@ def build_service(
             # Nothing is loaded until the pass first runs, so a worker whose
             # questions all pass recall never pays for the weights.
             entailment=(
-                Entailment(settings.entailment_model)
+                Entailment(settings.entailment_model, settings.encoder_max_tokens)
                 if settings.entailment_model
                 else None
             ),
             entailment_threshold=settings.entailment_threshold,
             about_overlap=settings.entailment_overlap,
+            extractive=(
+                Extractive(settings.answer_model, settings.encoder_max_tokens)
+                if settings.answer_model
+                else None
+            ),
+            extractive_confidence=settings.answer_confidence,
         ),
         settings=settings,
     )

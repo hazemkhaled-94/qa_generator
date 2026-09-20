@@ -149,6 +149,12 @@ class Settings:
     entailment_model: str | None = None
     entailment_threshold: float = 0.5
     entailment_overlap: float = 0.3
+    #: A local extractive QA encoder for the recall half, or None to ask the
+    #: verifier for every question. Not an LLM_MODEL either.
+    answer_model: str | None = None
+    answer_confidence: float = 0.9
+    #: The longest pair either encoder reads, in tokens.
+    encoder_max_tokens: int = 512
 
     def lease(self, call_seconds: float) -> timedelta:
         """How long one topic may go unfinished before a run sweeps it.
@@ -249,7 +255,10 @@ class Settings:
             # warns rather than failing.
             verifier_model=optional("QUESTIONS_VERIFIER_MODEL", source),
             phrasing_model=optional("QUESTIONS_PHRASING_MODEL", source),
-            entailment_model=optional("QUESTIONS_ENTAILMENT_MODEL", source),
-            entailment_threshold=decimal("QUESTIONS_ENTAILMENT_THRESHOLD", source),
+            entailment_model=optional("NLI_MODEL", source),
+            entailment_threshold=decimal("NLI_ENTAILMENT_THRESHOLD", source),
             entailment_overlap=decimal("QUESTIONS_ENTAILMENT_OVERLAP", source),
+            encoder_max_tokens=integer("ENCODER_MAX_TOKENS", source),
+            answer_model=optional("QA_MODEL", source),
+            answer_confidence=decimal("QA_ANSWER_CONFIDENCE", source),
         )
