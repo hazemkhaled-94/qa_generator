@@ -273,13 +273,26 @@ only route from a fact to a passage, and so to a document and to a topic.
 **Out:** rows in `facts` of kind `bridge`, plus one `fact_passages` row per
 passage each rests on.
 
-Passages are grouped by **the topic they carry most strongly**. That is the
-corpus's own statement that two passages are about the same thing, and it is
-a far better reason to put them together than that they happen to be
-adjacent. Within a topic the documents are taken in turn, so a group spans as
-many files as the topic does; the groups are then strided over the whole
-topic rather than taken from its start, so a large topic is sampled across
-rather than at its head.
+Passages are grouped by **the topic they carry most strongly**, and then
+**paired on their vectors**. The topic is the corpus's own statement that two
+passages are about the same thing and it is a weak one — a topic holds eighty
+passages and a subject is narrower than that — so the topic narrows and
+`passages.embedding` pairs. Each head takes whichever unused passage it most
+nearly meets rather than whichever the interleave put next to it.
+
+That matters because a bridge is a claim no single passage states, and two
+passages with nothing between them have no such claim: the prompt says
+returning none is correct, so a group of strangers is a call spent being told
+so. It is the same two-stage shape question generation uses to pair passages
+for a wide sample — a cheap measure narrows, and what the two texts actually
+share decides.
+
+Within a topic the documents are taken in turn, so a group spans as many
+files as the topic does; the groups are then strided over the whole topic
+rather than taken from its start, so a large topic is sampled across rather
+than at its head. A corpus with no vectors — one extracted before the column
+existed — falls back to the adjacency this replaced, and `make extract-embed`
+is what gives it some.
 
 The model is shown the group as `[P0]`, `[P1]`, … with the sentences numbered
 inside each one, and answers with a claim plus, per passage, the *numbers* of

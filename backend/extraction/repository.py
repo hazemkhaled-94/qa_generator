@@ -89,6 +89,7 @@ _PASSAGE_COLUMNS = (
     Passage.sentences,
     Passage.table_cells,
     Passage.doc_sha256,
+    Passage.embedding,
 )
 
 
@@ -129,6 +130,7 @@ def _passage(row, language: str | None) -> PassageToExtract:
         sentences=_sentences(row.text, row.sentences),
         table_cells=row.table_cells or [],
         doc_sha256=row.doc_sha256,
+        embedding=tuple(row.embedding) if row.embedding is not None else None,
     )
 
 

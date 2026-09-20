@@ -183,13 +183,74 @@ def _rejudge(
     return checker.check(passages[0], candidate, method)
 
 
+def _partner(
+    head: PassageToExtract, offered: Sequence[PassageToExtract]
+) -> PassageToExtract | None:
+    """Whichever unused passage the head most nearly meets, or None.
+
+    Cosine over `passages.embedding`, and the one preferring another
+    document loses nothing: the interleave has already put the documents in
+    turn, so a head's neighbours are mostly from elsewhere anyway.
+
+    Falls back to the first offered where nothing carries a vector, which is
+    the adjacency this replaced and is what a corpus extracted before the
+    column existed still gets.
+    """
+    if not offered:
+        return None
+    if head.embedding is None:
+        return offered[0]
+    scored = [
+        (cosine(list(head.embedding), list(one.embedding)), -one.id, one)
+        for one in offered
+        if one.embedding is not None
+    ]
+    if not scored:
+        return offered[0]
+    return max(scored)[2]
+
+
+def _paired(
+    interleaved: list[PassageToExtract], size: int
+) -> list[list[PassageToExtract]]:
+    """Groups each passage with the ones it most nearly meets.
+
+    What a bridge is asked for is a claim no single passage states, and two
+    passages with nothing between them have no such claim: the prompt says
+    returning none is correct, and a group of strangers is a call spent
+    being told so. Sharing a topic is the corpus's own statement that two
+    passages are related, and it is a weak one - a topic holds eighty
+    passages and a subject is narrower than that.
+
+    So the topic narrows and the vectors pair, which is the same two-stage
+    shape question generation uses to pair passages for a wide sample.
+
+    Deterministic: the head order is the interleave's, and a tie between two
+    equally near passages goes to the lower id.
+    """
+    remaining = list(interleaved)
+    groups: list[list[PassageToExtract]] = []
+    while len(remaining) >= size:
+        group = [remaining.pop(0)]
+        while len(group) < size:
+            found = _partner(group[-1], remaining)
+            if found is None:
+                break
+            remaining.remove(found)
+            group.append(found)
+        if len(group) == size:
+            groups.append(group)
+    return groups
+
+
 def grouped(
     passages: list[PassageToExtract], wanted: int, size: int
 ) -> list[list[PassageToExtract]]:
     """Splits one topic's passages into the groups a bridge is read from.
 
-    Documents are taken in turn, and the groups are strided over the whole
-    topic rather than taken from its start.
+    Documents are taken in turn, each passage is paired with the one it most
+    nearly meets, and the groups are strided over the whole topic rather
+    than taken from its start.
 
     Args:
         passages: The topic's passages, in document and reading order.
@@ -213,10 +274,7 @@ def grouped(
         for passage in taken
         if passage is not None
     ]
-    whole = [
-        interleaved[at : at + size]
-        for at in range(0, len(interleaved) - size + 1, size)
-    ]
+    whole = _paired(interleaved, size)
     # Evenly spaced from the first group to the last, rather than a stride.
     # A stride of len(whole) // wanted floors to 1 for any topic holding
     # fewer than twice as many groups as were asked for, which is the

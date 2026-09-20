@@ -75,6 +75,7 @@ SHAPES = {
         "sentences",
         "table_cells",
         "doc_sha256",
+        "embedding",
     },
     "CandidateFact": {"statement", "sentences", "kind", "passages"},
     "Citation": {"passage_id", "sentence_ids", "start", "end"},

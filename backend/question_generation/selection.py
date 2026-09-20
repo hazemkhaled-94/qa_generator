@@ -63,6 +63,17 @@ def spread(index: int, share: float) -> bool:
     return int((index + 1) * share) > int(index * share)
 
 
+#: What the reranker is asked when it reorders a shortlist of passages.
+#: Not relevance in the search sense: two passages can both be about testing
+#: and still hold no single question between them, which is the pair the
+#: sampler must not offer.
+_MEETS = (
+    "Given a passage from a document, judge whether the candidate passage is "
+    "about the same specific subject, so that one question could honestly be "
+    "answered from both together."
+)
+
+
 def overlap(left: Sequence[SourceFact], right: Sequence[SourceFact]) -> float:
     """How alike two passages are, in [0, 1].
 
@@ -262,6 +273,8 @@ class Deal:
         wanted: int,
         size: int,
         rounds: int = 1,
+        reranker=None,
+        rerank_depth: int = 8,
     ) -> None:
         """Deals one topic's facts, strided over the whole of it."""
         self._order = strided(interleaved(by_passage(facts)), wanted)
@@ -270,6 +283,8 @@ class Deal:
         self._rounds = max(rounds, 1)
         self._offered: dict[int, int] = {}
         self._spent: set[int] = set()
+        self._reranker = reranker
+        self._rerank_depth = max(rerank_depth, 2)
 
     @property
     def passages(self) -> int:
@@ -368,18 +383,37 @@ class Deal:
             and (not elsewhere or passage[0].doc_sha256 != head[0].doc_sha256)
         ]
 
-    @staticmethod
     def _best(
-        head: list[SourceFact], candidates: list[list[SourceFact]]
+        self, head: list[SourceFact], candidates: list[list[SourceFact]]
     ) -> list[SourceFact] | None:
-        """Whichever candidate shares most vocabulary with the head, or None.
+        """Whichever candidate meets the head best, or None.
 
         Ties go to the lower passage id, so the same corpus deals the same
         pair twice.
+
+        A cross-encoder reorders the shortlist where one is configured. The
+        measure below embeds the two passages apart and compares directions,
+        which is what an index can serve and is what narrows thousands of
+        passages to a handful; reading the pair together is a better
+        judgement of whether two passages have a question between them, and
+        that is the judgement this makes. 38 of 120 cross-document pairs
+        still had nothing in common after the vectors replaced the lemmas,
+        and a forced pair is a question welding a date to a category.
         """
         if not candidates:
             return None
-        return max(candidates, key=lambda one: (overlap(head, one), -one[0].passage_id))
+        ranked = sorted(
+            candidates, key=lambda one: (-overlap(head, one), one[0].passage_id)
+        )
+        if self._reranker is None or len(ranked) < 2:
+            return ranked[0]
+        shortlist = ranked[: self._rerank_depth]
+        ordered = self._reranker.ordered(
+            head[0].anchor.text,
+            [one[0].anchor.text for one in shortlist],
+            _MEETS,
+        )
+        return shortlist[ordered[0][0]]
 
     def _neighbour(self, head: list[SourceFact]) -> list[SourceFact] | None:
         """The closest unused passage of the same document, by ordinal."""

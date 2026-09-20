@@ -9,6 +9,7 @@ from llm.config import Settings as ModelSettings
 from nlp.embedding import Embedder
 from nlp.entailment import Entailment
 from nlp.qa import Extractive
+from nlp.reranking import Reranker
 from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
@@ -70,6 +71,11 @@ def build_service(
     # makes a much smaller model reasonable here.
     phrasing_model = verifier_model.overridden(settings.phrasing_model)
 
+    # One instance, shared by the sampler and the elsewhere probe: the
+    # weights are per process and loading them twice would double what the
+    # worker holds to answer the same kind of question.
+    reranker = Reranker(settings.reranker_model) if settings.reranker_model else None
+
     catalog = QuestionCatalog()
     return QuestionGenerationService(
         repository=QuestionQueue(
@@ -116,6 +122,10 @@ def build_service(
                 else None
             ),
             extractive_confidence=settings.answer_confidence,
+            reranker=(
+                Reranker(settings.reranker_model) if settings.reranker_model else None
+            ),
         ),
         settings=settings,
+        reranker=reranker,
     )

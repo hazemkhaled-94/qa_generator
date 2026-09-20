@@ -556,6 +556,15 @@ SETTINGS: tuple[Setting, ...] = (
         "trusts a reader that cannot compose an answer across two sentences.",
     ),
     Setting(
+        name="RERANKER_MODEL",
+        service="platform",
+        kind="text",
+        optional=True,
+        help="A local cross-encoder that reorders what a vector probe "
+        "narrowed to. Never retrieves: it reads a query and a candidate "
+        "together, which cannot be indexed. Absent keeps the probe's order.",
+    ),
+    Setting(
         name="ENCODER_MAX_TOKENS",
         service="platform",
         kind="integer",

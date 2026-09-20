@@ -370,6 +370,7 @@ class QuestionGenerationService(StageService):
         writer: QuestionWriter,
         checker: QuestionChecker,
         settings: Settings,
+        reranker=None,
     ) -> None:
         """Initialises the service with its collaborators."""
         super().__init__(repository)
@@ -377,6 +378,7 @@ class QuestionGenerationService(StageService):
         self._writer = writer
         self._checker = checker
         self._settings = settings
+        self._reranker = reranker
 
     def process_next(self) -> int | None:
         """Writes the questions for one queued topic and stores them."""
@@ -453,6 +455,7 @@ class QuestionGenerationService(StageService):
             wanted=self._settings.per_topic,
             size=self._settings.sample_size,
             rounds=self._settings.samples_per_passage,
+            reranker=self._reranker,
         )
         planned = plans(
             wanted=self._settings.per_topic,

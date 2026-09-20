@@ -616,3 +616,50 @@ class TestPairingByCosine:
 
         assert overlap(left, right) == pytest.approx(1.0)
         assert overlap(left, other) == pytest.approx(0.0)
+
+
+class Ordering:
+    """A reranker that prefers whichever passage says a given word."""
+
+    def __init__(self, wanted: str) -> None:
+        """Initialises with the word that wins, and nothing asked yet."""
+        self.wanted = wanted
+        self.asked: list[list[str]] = []
+
+    def ordered(self, query: str, documents, instruction: str = ""):
+        """Scores 1 for a document carrying the word and 0 for the rest."""
+        self.asked.append(list(documents))
+        scored = [
+            (position, 1.0 if self.wanted in document else 0.0)
+            for position, document in enumerate(documents)
+        ]
+        return sorted(scored, key=lambda one: (-one[1], one[0]))
+
+
+def test_a_reranker_reorders_the_shortlist_the_measure_narrowed() -> None:
+    """The measure compares directions; the cross-encoder reads the pair.
+
+    Both passages are candidates and the vectors cannot tell them apart -
+    neither carries one here, so the lemma fallback scores both 0 and the
+    lower passage id would win. The reranker is what picks the one that
+    actually meets the head.
+    """
+    head = facts_of(1, "a", count=1)
+    reranker = Ordering(wanted="Rückgabefrist")
+    deal = Deal(
+        head + facts_of(2, "b", count=1) + facts_of(3, "b", count=1),
+        wanted=3,
+        size=2,
+        reranker=reranker,
+    )
+
+    deal.sample(Shape.CROSS)
+
+    assert reranker.asked, "the reranker was never consulted"
+
+
+def test_no_reranker_leaves_the_measure_in_charge() -> None:
+    """A deployment that has named none gets exactly what it got before."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4)
+
+    assert deal.sample(Shape.CROSS) is not None

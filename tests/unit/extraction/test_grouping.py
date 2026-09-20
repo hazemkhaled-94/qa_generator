@@ -143,3 +143,51 @@ def test_a_group_holds_as_many_passages_as_asked(size) -> None:
 
     assert groups
     assert all(len(one) == size for one in groups)
+
+
+def _vector(*first: float) -> tuple[float, ...]:
+    """A unit-ish vector of the width the column holds."""
+    rest = (0.0,) * (1024 - len(first))
+    return (*first, *rest)
+
+
+def test_a_head_is_paired_with_the_passage_it_most_nearly_meets() -> None:
+    """Sharing a topic is a weak statement that two passages are related.
+
+    A topic holds eighty passages and a subject is narrower than that, so
+    the topic narrows and the vectors pair. Without them the head takes
+    whichever passage the interleave put next to it.
+    """
+    near, far = _vector(1.0), _vector(0.0, 1.0)
+    passages = [
+        replace(passage(), id=1, doc_sha256="a", embedding=near),
+        replace(passage(), id=2, doc_sha256="b", embedding=far),
+        replace(passage(), id=3, doc_sha256="b", embedding=near),
+    ]
+
+    groups = grouped(passages, wanted=1, size=2)
+
+    assert [one.id for one in groups[0]] == [1, 3], (
+        "the head took its neighbour rather than the passage it meets"
+    )
+
+
+def test_a_corpus_with_no_vectors_groups_as_it_always_did() -> None:
+    """`make extract-embed` is what gives an older corpus some."""
+    groups = grouped(topic("a", "b", "a", "b"), wanted=2, size=2)
+
+    assert [[one.id for one in group] for group in groups] == [[1, 2], [3, 4]]
+
+
+def test_a_tie_between_two_equally_near_passages_goes_to_the_lower_id() -> None:
+    """The same corpus has to deal the same groups twice."""
+    same = _vector(1.0)
+    passages = [
+        replace(passage(), id=1, doc_sha256="a", embedding=same),
+        replace(passage(), id=3, doc_sha256="b", embedding=same),
+        replace(passage(), id=2, doc_sha256="b", embedding=same),
+    ]
+
+    groups = grouped(passages, wanted=1, size=2)
+
+    assert [one.id for one in groups[0]] == [1, 2]

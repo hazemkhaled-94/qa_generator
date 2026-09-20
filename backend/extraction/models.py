@@ -51,6 +51,7 @@ class PassageToExtract:
         sentences: Its sentences, numbered. What a citation names.
         table_cells: The cell grids behind a table passage.
         doc_sha256: The document it was cut from, or None.
+        embedding: Its vector, or None where nothing has embedded it.
     """
 
     id: int
@@ -61,6 +62,10 @@ class PassageToExtract:
     sentences: list[Sentence] = field(default_factory=list)
     table_cells: list[dict] = field(default_factory=list)
     doc_sha256: str | None = None
+    #: Its vector, where the corpus has been embedded. Read by the bridge
+    #: pass to pair a passage with the one it most nearly meets, and None
+    #: for a corpus extracted before the column existed.
+    embedding: tuple[float, ...] | None = None
 
     @property
     def claims(self) -> int:
