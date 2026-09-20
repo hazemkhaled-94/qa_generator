@@ -229,11 +229,20 @@ make eval-score EVAL_RUN_NAME=extraction-prompt-v7
 make spend                    # totals from the workers' logs
 make spend SINCE=2026-09-19   # one day
 make spend LOG=/path/to.log   # one file
+make spend-by-shape           # the same, split by model and judgement
 ```
 
 Reads the priced model calls out of the logs and reports the call count, the
 token counts and the cost. Reads `/var/log/qa/*.log` unless `LOG` says
 otherwise, so it is run against a machine that has the logs volume mounted.
+
+`spend-by-shape` splits the same numbers by the model that answered and the
+**shape** it was asked for, which is the Pydantic class the call had to
+return — `_Facts` and `_Digest` read a passage, `_Answered` writes a
+question, `_Recovered` gets its answer back out, `_NamesItsSource` and
+`_SelfContained` judge the wording. That is what each judgement costs, which
+the total cannot say, and it is the number to read after moving one of them
+to another model.
 
 ## Orchestration
 

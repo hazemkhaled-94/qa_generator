@@ -57,7 +57,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
 
 .PHONY: dev install up down down-volumes logs logs-frontend logs-api \
         logs-shipper logs-retention logs-orchestration \
-        prune spend \
+        prune spend spend-by-shape \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
         chunk chunk-status chunk-start chunk-stop chunk-retry chunk-rerun \
@@ -536,6 +536,40 @@ questions-balance:
 #
 #   make spend                 everything the log holds
 #   make spend SINCE=2026-09-18  from a date
+# The same log, split by which model answered and what it was asked for.
+#
+# The shape is the Pydantic class the call had to return, and every stage
+# has its own: _Facts and _Digest read a passage, _Answered writes a
+# question, _Recovered gets its answer back out, _NamesItsSource and
+# _SelfContained judge the wording. So this is what each JUDGEMENT costs,
+# which `make spend` cannot say and which is the number to look at after
+# moving one of them to another model.
+#
+#   make spend-by-shape LOG=run.log
+#   make spend-by-shape SINCE=2026-09-21
+#
+# Ordered by call count, because the shape at the top is the one worth
+# moving somewhere cheaper.
+spend-by-shape:
+	@printf '%-24s %-18s %8s %12s %12s %10s\n' \
+	   MODEL SHAPE CALLS 'TOKENS IN' 'TOKENS OUT' COST
+	@cat $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	 | $(if $(SINCE),grep "$(SINCE)",cat) \
+	 | grep -hoE '[^ ]+ answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
+	 | sed -E 's/^([^ ]+) answered (_[A-Za-z]+) in [0-9.]+s \(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3 \4 \5/' \
+	 | tr -d ',' \
+	 | awk '{k=$$1" "$$2; n[k]++; i[k]+=$$3; o[k]+=$$4; c[k]+=$$5} \
+	     END {for (k in n) {split(k,p," "); \
+	       printf "%-24s %-18s %8d %12d %12d %9.2f\n", p[1],p[2],n[k],i[k],o[k],c[k]}}' \
+	 | sort -k3 -rn
+	@cat $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	 | $(if $(SINCE),grep "$(SINCE)",cat) \
+	 | grep -hoE 'answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
+	 | sed -E 's/.*\(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3/' \
+	 | tr -d ',' \
+	 | awk '{i+=$$1; o+=$$2; c+=$$3; n++} END {if (n==0) {print "\nno priced calls in the log"; exit} \
+	     printf "%-24s %-18s %8d %12d %12d %9.2f\n", "", "TOTAL", n, i, o, c}'
+
 spend:
 	@grep -hoE '^[0-9T:-]+ .*answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
 	   $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
