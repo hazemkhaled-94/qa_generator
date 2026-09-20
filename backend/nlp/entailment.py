@@ -35,6 +35,12 @@ ENTAILMENT = "entailment"
 NEUTRAL = "neutral"
 CONTRADICTION = "contradiction"
 
+#: What a two-way head calls everything that is not entailment. A model
+#: trained this way cannot tell "says something different" from "does not
+#: address it", and both are refusals here, so the distinction costs this
+#: caller nothing - see `Verdict.contradiction`.
+NOT_ENTAILMENT = "not_entailment"
+
 
 @dataclass(frozen=True)
 class Verdict:
@@ -43,7 +49,11 @@ class Verdict:
     Attributes:
         entailment: Probability the premise supports the hypothesis.
         neutral: Probability it neither supports nor contradicts it.
-        contradiction: Probability it says the opposite.
+        contradiction: Probability it says the opposite. Always 0.0 from a
+            two-way head, which cannot tell this from neutral. Nothing here
+            reads it - `supports` is the whole of what a gate asks - and it
+            is kept because a three-way model knows it and a reader
+            debugging a refusal wants to see it.
     """
 
     entailment: float
@@ -101,14 +111,26 @@ class Entailment:
             index: str(label).lower()
             for index, label in getattr(model.config, "id2label", {}).items()
         }
-        missing = {ENTAILMENT, NEUTRAL, CONTRADICTION} - set(names.values())
-        if missing:
+        at = {label: index for index, label in names.items()}
+        # Two heads are in use and both are wanted. A three-way NLI model
+        # names all of entailment/neutral/contradiction; a zero-shot head -
+        # bge-m3-zeroshot-v2.0, whose 8,194-token window is the reason to
+        # want it, since a premise here is several passages joined - names
+        # entailment and not_entailment only.
+        #
+        # Either is enough, because the only thing a gate asks is how sure
+        # the model is of entailment. What is refused is a head naming
+        # neither, which is not an NLI model at all and would otherwise be
+        # read by position and silently inverted.
+        if ENTAILMENT not in at or not ({NEUTRAL, NOT_ENTAILMENT} & set(at)):
             raise ValueError(
                 f"{self._model_name!r} labels its outputs {sorted(names.values())}, "
-                f"which does not name {sorted(missing)}. It is not a three-way NLI "
-                f"model, and this asks one for a premise and a hypothesis."
+                f"which names neither a three-way NLI head "
+                f"({ENTAILMENT}/{NEUTRAL}/{CONTRADICTION}) nor a two-way one "
+                f"({ENTAILMENT}/{NOT_ENTAILMENT}). This asks one about a premise "
+                f"and a hypothesis."
             )
-        return tokenizer, model, {label: index for index, label in names.items()}
+        return tokenizer, model, at
 
     @property
     def model(self) -> str:
@@ -149,11 +171,22 @@ class Entailment:
         )
         with torch.no_grad():
             scores = torch.softmax(model(**tokens).logits, dim=-1)
-        return [
-            Verdict(
-                entailment=float(row[at[ENTAILMENT]]),
+        return [self._verdict(row, at) for row in scores]
+
+    @staticmethod
+    def _verdict(row, at: dict[str, int]) -> Verdict:
+        """One row of probabilities, under whichever head produced it."""
+        entailment = float(row[at[ENTAILMENT]])
+        if NEUTRAL in at:
+            return Verdict(
+                entailment=entailment,
                 neutral=float(row[at[NEUTRAL]]),
                 contradiction=float(row[at[CONTRADICTION]]),
             )
-            for row in scores
-        ]
+        # A two-way head. Everything that is not entailment is reported as
+        # neutral rather than split, because the model did not split it.
+        return Verdict(
+            entailment=entailment,
+            neutral=float(row[at[NOT_ENTAILMENT]]),
+            contradiction=0.0,
+        )

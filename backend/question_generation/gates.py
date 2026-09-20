@@ -650,6 +650,48 @@ def asserted(target: str, passages: Sequence[str], language: str | None) -> bool
     return all(_folded(unit) in found for unit in units)
 
 
+#: How much of what a question asks ABOUT has to occur in the passages
+#: before the entailment pass may rescue an answer recall did not find.
+#: QUESTIONS_ENTAILMENT_OVERLAP is where it is set.
+ENTAILMENT_OVERLAP = 0.3
+
+
+def about(
+    question: str,
+    passages: Sequence[str],
+    language: str | None,
+    floor: float = ENTAILMENT_OVERLAP,
+) -> bool:
+    """Whether the passages are about what the question asks about.
+
+    The guard the entailment pass was missing, and the LMT case is why it
+    exists. `Was ist ein Liquiditätsmanagementtool?` answered `eine
+    einjährige Rückgabefrist` is confirmed by any judge asked "do these
+    passages say what this answer says", because the passages do say there
+    is a one-year redemption period. What they never mention is a
+    Liquiditätsmanagementtool - so the answer is supported and answers a
+    different question, which is exactly the defect the golden set keeps
+    that case for.
+
+    Asking about the ANSWER cannot catch it. `asserted` already checks every
+    number and name the answer asserts, and this answer invents none: it is
+    lifted out of the passage. What is absent is the thing the QUESTION is
+    about, so that is what this reads.
+
+    Measured on content lemmas, which is the same reading `on_topic` uses
+    for the other direction. A question naming nothing is let through, for
+    the same reason a passage with no lemmas abstains there: a measurement
+    with nothing to measure is not evidence of anything.
+    """
+    asked = content(question, language)
+    if floor <= 0 or not asked:
+        return True
+    found = content("\n".join(passages), language)
+    if not found:
+        return True
+    return len(asked & found) / len(asked) >= floor
+
+
 def agrees(
     recovered: str,
     target: str,

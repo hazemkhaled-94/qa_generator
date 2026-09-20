@@ -143,6 +143,12 @@ class Settings:
     #: The model asked what a question's wording amounts to where a rule has
     #: not settled it, or None to ask the verifier's.
     phrasing_model: str | None = None
+    #: A local NLI encoder for the entailment pass, or None to ask the
+    #: verifier. Not an LLM_MODEL: it is loaded in the worker like the
+    #: embedding model is.
+    entailment_model: str | None = None
+    entailment_threshold: float = 0.5
+    entailment_overlap: float = 0.3
 
     def lease(self, call_seconds: float) -> timedelta:
         """How long one topic may go unfinished before a run sweeps it.
@@ -243,4 +249,7 @@ class Settings:
             # warns rather than failing.
             verifier_model=optional("QUESTIONS_VERIFIER_MODEL", source),
             phrasing_model=optional("QUESTIONS_PHRASING_MODEL", source),
+            entailment_model=optional("QUESTIONS_ENTAILMENT_MODEL", source),
+            entailment_threshold=decimal("QUESTIONS_ENTAILMENT_THRESHOLD", source),
+            entailment_overlap=decimal("QUESTIONS_ENTAILMENT_OVERLAP", source),
         )

@@ -1569,6 +1569,112 @@ def test_the_entailment_pass_can_only_accept() -> None:
     assert recording.supported == 1
 
 
+def test_an_answer_to_a_different_question_is_not_rescued() -> None:
+    """The LMT case, which the rescue pass used to wave through.
+
+    `Was ist ein Liquiditätsmanagementtool?` answered `eine einjährige
+    Rückgabefrist` clears the numbers guard, because that phrase is lifted
+    straight out of the passage, and any judge asked "do these passages say
+    what this answer says" agrees - they do say it. What they never mention
+    is a Liquiditätsmanagementtool, so the answer is supported and answers
+    something else.
+    """
+    recording = Recording(recovers=None, backs=True)
+
+    result = build(recording).check(
+        candidate(
+            question_text="Was ist ein Liquiditätsmanagementtool?",
+            target_answer="eine einjährige Rückgabefrist",
+            facts=group(
+                source(
+                    1,
+                    statement="Für den Fonds gilt eine einjährige Rückgabefrist.",
+                    language="de",
+                    passage_text=(
+                        "Für den Fonds gilt eine einjährige Rückgabefrist. Die "
+                        "Verwaltungsgesellschaft veröffentlicht die Frist im "
+                        "Verkaufsprospekt."
+                    ),
+                )
+            ),
+        )
+    )
+
+    assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+    assert recording.supported == 0, "the judgement is never reached"
+
+
+def test_an_encoder_answers_the_pass_where_one_is_configured() -> None:
+    """The served model is not asked when an NLI model is to hand."""
+
+    class Encoder:
+        """One verdict, and a count of the pairs it was handed."""
+
+        def __init__(self, entailment: float) -> None:
+            self.entailment = entailment
+            self.pairs: list[tuple[str, str]] = []
+
+        def judge_all(self, pairs):
+            from nlp.entailment import Verdict
+
+            self.pairs.extend(pairs)
+            return [Verdict(self.entailment, 1 - self.entailment, 0.0) for _ in pairs]
+
+    recording = Recording(recovers=None, backs=False)
+    encoder = Encoder(entailment=0.9)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        phrasing=recording,
+        entailment=encoder,
+        entailment_threshold=0.5,
+    )
+
+    result = checker.check(candidate(target_answer="4 kg"))
+
+    assert result.accepted, "the encoder said the passages entail it"
+    assert recording.supported == 0, "no served model was asked"
+    assert encoder.pairs, "the encoder was handed a premise and a hypothesis"
+
+
+def test_the_encoder_is_asked_one_passage_at_a_time() -> None:
+    """One premise, one hypothesis, which is what an NLI model was trained on.
+
+    A premise of several passages joined is both a worse question than the
+    one being asked and longer than some heads accept.
+    """
+
+    class Encoder:
+        """Refuses everything, and remembers what it was shown."""
+
+        def __init__(self) -> None:
+            self.pairs: list[tuple[str, str]] = []
+
+        def judge_all(self, pairs):
+            from nlp.entailment import Verdict
+
+            self.pairs.extend(pairs)
+            return [Verdict(0.0, 1.0, 0.0) for _ in pairs]
+
+    recording = Recording(recovers=None, backs=False)
+    encoder = Encoder()
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        phrasing=recording,
+        entailment=encoder,
+    )
+
+    checker.check(candidate(target_answer="4 kg"))
+
+    assert len(encoder.pairs) == 1, "one pair per passage, and there is one"
+    assert "\n\n" not in encoder.pairs[0][0], "the passages were joined"
+
+
 def test_a_number_the_passages_never_gave_is_not_rescued() -> None:
     """The one error that must not get through, whatever the model says.
 

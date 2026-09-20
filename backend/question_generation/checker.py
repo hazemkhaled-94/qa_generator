@@ -43,9 +43,11 @@ from nlp.analysis import content, pointing
 from nlp.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
+    ENTAILMENT_OVERLAP,
     NAMES_SOMETHING,
     OFF_TOPIC_OVERLAP,
     OVERLAP,
+    about,
     adds_up,
     agrees,
     anchored,
@@ -86,6 +88,9 @@ class QuestionChecker:
         off_topic_overlap: float = OFF_TOPIC_OVERLAP,
         entail: bool = True,
         phrasing=None,
+        entailment=None,
+        entailment_threshold: float = 0.5,
+        about_overlap: float = ENTAILMENT_OVERLAP,
     ) -> None:
         """Initialises the checker with its collaborators.
 
@@ -121,6 +126,9 @@ class QuestionChecker:
         self._off_topic_overlap = off_topic_overlap
         self._entail = entail
         self._phrasing_judge = phrasing
+        self._entailment = entailment
+        self._entailment_threshold = entailment_threshold
+        self._about_overlap = about_overlap
 
     def check(
         self, candidate: Candidate, seen: Sequence[CheckedQuestion] = ()
@@ -408,24 +416,38 @@ class QuestionChecker:
     def _backed(self, candidate: Candidate, target: str) -> bool:
         """Whether the entailment pass rescues an answer recall did not find.
 
-        Two guards, both of which have to hold. Every number, date and name
-        the target asserts must occur in the passages, which no opinion can
-        overrule: that is what keeps `4 hours` from being confirmed against
-        a passage that says 48. Then the verifier is shown the answer and
-        asked the narrower question.
+        Three guards, all of which have to hold, and the third is what the
+        LMT case cost. Every number, date and name the target asserts must
+        occur in the passages, which no opinion can overrule: that is what
+        keeps `4 hours` from being confirmed against a passage that says 48.
+        The passages must be ABOUT what the question asks about, which is
+        `gates.about` - `Was ist ein Liquiditätsmanagementtool?` answered
+        `eine einjährige Rückgabefrist` passes the first guard, because that
+        phrase is lifted straight out of the passage, and the passages never
+        mention a Liquiditätsmanagementtool at all. Only then is the
+        judgement asked.
 
         It can only ever accept. A question reaching here was already being
         rejected, so a pass that says nothing leaves the verdict where it
-        was and costs one call on the failures alone.
+        was and costs one judgement on the failures alone.
         """
         if not self._entail or not target:
             return False
         passages = candidate.group.passages
-        if not asserted(target, passages, candidate.group.language):
+        language = candidate.group.language
+        if not asserted(target, passages, language):
             return False
-        backed = self._verifier.supports(
-            candidate.question_text, target, passages, candidate.thread
-        )
+        if not about(candidate.question_text, passages, language, self._about_overlap):
+            log.info(
+                "not rescuing %r: the passages are not about what it asks",
+                candidate.question_text,
+            )
+            return False
+        backed = self._entailed(target, passages)
+        if backed is None:
+            backed = self._verifier.supports(
+                candidate.question_text, target, passages, candidate.thread
+            )
         if backed:
             log.info(
                 "keeping %r: recall missed it but the passages support %r",
@@ -433,6 +455,26 @@ class QuestionChecker:
                 target,
             )
         return backed
+
+    def _entailed(self, target: str, passages: Sequence[str]) -> bool | None:
+        """Whether an encoder finds the answer entailed by any one passage.
+
+        None when no entailment model is configured, which leaves the
+        judgement to the served model exactly as before.
+
+        One passage at a time, and the best of them wins. Joining them is
+        what a served model is shown, because a served model reads a list;
+        an NLI model was trained on one premise and one hypothesis, and a
+        premise of several passages joined is both longer than some heads
+        accept and a worse question than the one being asked. An answer is
+        supported when SOME passage supports it.
+        """
+        if self._entailment is None:
+            return None
+        verdicts = self._entailment.judge_all(
+            [(passage, target) for passage in passages]
+        )
+        return any(one.supports(self._entailment_threshold) for one in verdicts)
 
     def _corpus(
         self, candidate: Candidate, embedding: list[float]

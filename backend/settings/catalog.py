@@ -535,6 +535,38 @@ SETTINGS: tuple[Setting, ...] = (
         "all, turns off the two gates only an independent model may apply.",
     ),
     Setting(
+        name="QUESTIONS_ENTAILMENT_MODEL",
+        service="questions",
+        kind="text",
+        optional=True,
+        invalidates=("questions",),
+        help="A local NLI encoder asked whether the cited passages entail an "
+        "answer recall did not find. Absent asks the verifier instead. Runs "
+        "in the worker, like the embedding model, and is not an LLM_MODEL.",
+    ),
+    Setting(
+        name="QUESTIONS_ENTAILMENT_THRESHOLD",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How sure the entailment encoder must be before it rescues an "
+        "answer. Higher keeps more good questions out; lower lets more "
+        "unsupported answers in, which is the costlier error.",
+    ),
+    Setting(
+        name="QUESTIONS_ENTAILMENT_OVERLAP",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How much of what a question asks ABOUT must occur in its "
+        "passages before the entailment pass may rescue its answer. 0 turns "
+        "the guard off.",
+    ),
+    Setting(
         name="QUESTIONS_PHRASING_MODEL",
         service="questions",
         kind="text",

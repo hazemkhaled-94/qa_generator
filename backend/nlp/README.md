@@ -8,10 +8,47 @@ One of the three packages that load something expensive; the others are
 [`blob_store/`](../blob_store/README.md). A caller asks for a sentence split;
 it never loads a pipeline.
 
-**No model is called here.** Everything in this package is spaCy and a
-language detector, both local and both deterministic. That is what lets the
-fact checks run without a served model, and it is why
-`make extract-revalidate` costs seconds rather than hours.
+**No model is SERVED from here.** Everything in this package is local and
+deterministic — spaCy, a language detector, and two encoders that run in the
+worker's own process. That is what lets the fact checks run without a served
+model, and it is why `make extract-revalidate` costs seconds rather than
+hours.
+
+Three of the files load weights, and nothing outside a worker may import
+them: [`embedding.py`](embedding.py), [`entailment.py`](entailment.py) and
+the spaCy pipelines. `tests/static/test_api_stays_light.py` pins that the API
+process loads none of them.
+
+| File | Loads | Asked |
+|---|---|---|
+| [`embedding.py`](embedding.py) | `EMBEDDING_MODEL` | one text's vector, for every column that holds one |
+| [`entailment.py`](entailment.py) | `QUESTIONS_ENTAILMENT_MODEL` | whether one premise entails one hypothesis |
+
+## One call, one judgement
+
+[`entailment.py`](entailment.py) answers **one** question about **one**
+premise and **one** hypothesis, and a caller wanting two makes two calls. The
+thing it replaces is a prompt that asked a served model for four judgements
+at once and confused them — see
+[question generation](../question_generation/README.md#what-that-one-call-was-carrying-and-where-those-judgements-went).
+
+Two kinds of head are accepted and the label order is read off the
+checkpoint's own `id2label`, never assumed: a three-way NLI model naming
+entailment/neutral/contradiction, and a two-way zero-shot head naming
+entailment/not_entailment. Assuming an order silently inverts every verdict
+on half the models anybody would configure.
+
+The two-way heads are wanted rather than tolerated. `bge-m3-zeroshot-v2.0`
+reads **8,194 tokens** where `mDeBERTa-v3-base-xnli` reads 512, and a premise
+here is a passage this pipeline already sized to 512 of its own — so the
+three-way model would truncate exactly the text the judgement rests on. What
+a two-way head cannot do is tell "says something different" from "does not
+address it", and both are refusals here, so it costs this caller nothing.
+
+What the encoder returns is a **probability**, which is the other reason to
+prefer it to a served model answering true or false: a boolean carries no
+confidence, so a deployment cannot decide how sure it wants a gate to be.
+`QUESTIONS_ENTAILMENT_THRESHOLD` is that decision.
 
 ## What it does
 
