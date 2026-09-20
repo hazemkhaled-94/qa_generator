@@ -172,6 +172,78 @@ the LMT pair correctly and drops a plainly good English case to 0.486, which
 is under the threshold. The fragment stays, because the pass can only ever
 accept and a guard that refuses good rescues costs more than it saves.
 
+## What the encoders do to real questions, 2026-09-20
+
+Measured against **120 accepted answerable questions drawn from this
+corpus**, not against a golden set — the question is what would happen to
+the run, so the input is the run's own output.
+
+### The QA encoder is the wrong comparison, and it is off
+
+`timpal0l/mdeberta-v3-base-squad2`, 0.19 s a question:
+
+| Answer form | n | span at ≥0.9 | agrees with the target | net usable |
+|---|---|---|---|---|
+| `value` | 37 | 70% | 54% | **38%** |
+| `explanation` | 53 | 72% | 21% | **15%** |
+| `list` | 30 | 57% | 6% | **3%** |
+
+It finds a confident span most of the time and **the span is not the
+answer**: `750 Minuten` comes back as `mindestens 22,75 Unterrichtsstunden`,
+`36 K2-LOs` as `36`. Both are in the passage; neither passes `agrees`.
+
+The cause is structural, not a bad checkpoint. A target answer was *written*
+by the question writer — normalised, in prose, in the form its type asked
+for — and an extractive span is a literal substring. Comparing the two on
+content lemmas fails by construction. **Turning this on would flip roughly
+half the accepted set to `not_recoverable`**, so `QA_MODEL` is empty.
+
+Worth recording separately: `deepset/xlm-roberta-large-squad2`, the obvious
+choice and a company's, **cannot be loaded under transformers 5** — it ships
+no `tokenizer.json` and its sentencepiece model is mis-read as a tiktoken
+file. `transformers` 5 also removed the `question-answering` pipeline
+entirely, so [`nlp/qa.py`](../backend/nlp/qa.py) does the span decode itself.
+
+### The NLI encoder separates, and it is on
+
+`bge-m3-zeroshot-v2.0`, 1.72 s a question. Each target answer against its
+own passages, and — as a negative control — against another question's:
+
+| Threshold | Backs its own answer | Backs a stranger's |
+|---|---|---|
+| 0.5 | 67% | 6% |
+| 0.7 | **59%** | **3%** |
+| 0.9 | 40% | 1% |
+
+That is a usable separation, and the failure direction is the safe one. The
+pass can only ever *accept*, so the number to keep low is the 3%; the 41% of
+genuine answers it does not back are questions that were already refused and
+stay refused. `NLI_ENTAILMENT_THRESHOLD=0.7`.
+
+What this does **not** say is whether gpt-4.1 rescued more of the genuine
+ones. Replacing it is a saving of ~250 calls and possibly a loss of some
+rescues, and nothing here has measured that side.
+
+### The phrasing judgements run well locally
+
+The residue each judgement actually asks, against models already on the
+host, scored on the labelled cases:
+
+| Model | `names_its_source` | `self_contained` | Per call |
+|---|---|---|---|
+| `granite4.2:3b` | 19/20 | **2/9** | 0.3 s |
+| `granite4.2:8b` | 19/20 | 6/9 | 0.9 s |
+| `gemma4:12b` | 19/20 | **9/9** | 3.2 s |
+| `gemma4:31b` | 19/20 | **9/9** | 7.8 s |
+
+Two findings. **The 31B buys nothing over the 12B here** and costs 2.4× the
+time. And the two judgements are not the same difficulty: naming a source is
+easy enough for a 3B, while deciding whether a pointing word lands needs 12B
+— which is the kind of thing that stays hidden while both ride in one call.
+
+For reference, gpt-4.1 scored 15/19 and 16/19 on these when they shared the
+reading call.
+
 ## Layout
 
 | File | Holds |

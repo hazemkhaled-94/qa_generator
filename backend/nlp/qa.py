@@ -17,6 +17,13 @@ one contiguous span of one passage. So a confident span is taken and the
 served model is not called, and everything else falls through to it. What that
 buys is the easy majority answered locally in milliseconds, with the hard
 minority still answered by something that can read.
+
+The span decode is written out here rather than left to
+`pipeline("question-answering")`, which **transformers 5 removed**: the task
+is not in `SUPPORTED_TASKS` any more and asking for it raises. What the
+pipeline did is below - the null score against the best start/end pair, the
+offsets back to characters, a window that slides so a passage longer than the
+encoder is not silently cut off at its first 512 tokens.
 """
 
 from __future__ import annotations
@@ -25,9 +32,26 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any
+
+import torch
+from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+
+from nlp.windows import window
 
 log = logging.getLogger(__name__)
+
+#: How many tokens of one window the next one repeats. A span sitting on a
+#: window boundary is whole in one of the two.
+_STRIDE = 128
+
+#: The longest answer worth returning, in tokens. A SQuAD-style head scores
+#: every start against every end, and without a cap the best pair is often
+#: most of the passage - which is not an answer to anything.
+_MAX_ANSWER_TOKENS = 40
+
+#: How many starts and ends are paired. The decode is O(k^2) per window and
+#: the logits past the twentieth are not the answer.
+_TOP_K = 20
 
 
 @dataclass(frozen=True)
@@ -36,7 +60,7 @@ class Span:
 
     Attributes:
         text: The span, exactly as the passage writes it.
-        score: How sure the model is, in [0, 1].
+        score: How sure the model is against answering nothing, in [0, 1].
         passage: Which passage it was found in, by position.
     """
 
@@ -58,34 +82,14 @@ class Extractive:
         self._max_tokens = max_tokens
 
     @cached_property
-    def _pipeline(self) -> Any:
-        """The transformers pipeline, built once.
-
-        Any, because `pipeline` is overloaded per task and a checker cannot
-        narrow a task named by a string literal to the class that serves it.
-
-        The pipeline rather than `AutoModelForQuestionAnswering` directly, as
-        `nlp.embedding` and `nlp.entailment` both use their model classes.
-        The difference is what the extra code would be: pooling and a dot
-        product for those two, and for this one the whole span decode - the
-        null score against the best start/end pair, the offsets back to
-        characters, the maximum answer length. That is the pipeline's job and
-        it is where a hand-rolled version would get SQuAD 2.0's no-answer
-        case subtly wrong.
-        """
-        from transformers import pipeline
-
-        from nlp.windows import window
-
+    def _loaded(self):
+        """The tokenizer and the model, held to the window the model has."""
         log.info("loading %s", self._model_name)
-        # The overloads this version ships do not list the QA task, so the
-        # checker narrows `task` to the last literal it saw.
-        task: Any = "question-answering"
-        built = pipeline(task, model=self._model_name)
-        # Held to its own window, because ENCODER_MAX_TOKENS is one setting
-        # over two encoders that do not agree about what is possible.
-        self._max_tokens = window(built.tokenizer, self._max_tokens)
-        return built
+        tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+        model = AutoModelForQuestionAnswering.from_pretrained(self._model_name)
+        model.eval()
+        self._max_tokens = window(tokenizer, self._max_tokens)
+        return tokenizer, model
 
     @property
     def model(self) -> str:
@@ -115,19 +119,92 @@ class Extractive:
         for position, passage in enumerate(passages):
             if not passage.strip():
                 continue
-            found = self._pipeline(
-                question=question,
-                context=passage,
-                # What makes None reachable. Without it a SQuAD 2.0 model is
-                # forced to name its least-bad span, and a gate reading that
-                # would find an answer in every passage ever shown to it.
-                handle_impossible_answer=True,
-                max_seq_len=self._max_tokens,
-            )
-            text = (found.get("answer") or "").strip()
-            score = float(found.get("score") or 0.0)
-            if not text or score < confidence:
+            found = self._span(question, passage)
+            if found is None:
+                continue
+            text, score = found
+            if score < confidence:
                 continue
             if best is None or score > best.score:
                 best = Span(text=text, score=score, passage=position)
         return best
+
+    def _span(self, question: str, context: str) -> tuple[str, float] | None:
+        """The best answer in one passage, and how sure the model is of it.
+
+        Returns None when the model would rather answer nothing, which is
+        what the null span at position 0 means and what a SQuAD 2.0 head was
+        trained to say.
+
+        The score is a softmax over exactly two numbers - the best span and
+        the null - so it reads as "how sure against saying nothing" rather
+        than as a share of the whole vocabulary of spans.
+        """
+        tokenizer, model = self._loaded
+        encoded = tokenizer(
+            question,
+            context,
+            max_length=self._max_tokens,
+            # The question is kept whole and the passage is what slides. A
+            # question truncated to fit is a different question.
+            truncation="only_second",
+            stride=_STRIDE,
+            return_overflowing_tokens=True,
+            return_offsets_mapping=True,
+            padding=True,
+            return_tensors="pt",
+        )
+        offsets = encoded.pop("offset_mapping")
+        encoded.pop("overflow_to_sample_mapping", None)
+        with torch.no_grad():
+            answered = model(**encoded)
+
+        null = float("inf")
+        best: tuple[float, str] | None = None
+        for index in range(answered.start_logits.shape[0]):
+            # Where the passage sits in this window. `None` is a special
+            # token and `0` is the question; a span may only come from `1`.
+            inside = [
+                at for at, side in enumerate(encoded.sequence_ids(index)) if side == 1
+            ]
+            if not inside:
+                continue
+            starts = answered.start_logits[index]
+            ends = answered.end_logits[index]
+            null = min(null, float(starts[0]) + float(ends[0]))
+            found = self._pair(starts, ends, inside, offsets[index], context)
+            if found is not None and (best is None or found[0] > best[0]):
+                best = found
+
+        if best is None or null == float("inf"):
+            return None
+        score, text = best
+        if score <= null or not text.strip():
+            return None
+        against = torch.softmax(torch.tensor([null, score]), dim=0)
+        return text.strip(), float(against[1])
+
+    @staticmethod
+    def _pair(starts, ends, inside: list[int], offsets, context: str):
+        """The best start/end pair inside one window, and the text it covers."""
+        top_starts = [at for at in _best_of(starts, inside)]
+        top_ends = [at for at in _best_of(ends, inside)]
+        best: tuple[float, str] | None = None
+        for start in top_starts:
+            for end in top_ends:
+                if end < start or end - start + 1 > _MAX_ANSWER_TOKENS:
+                    continue
+                score = float(starts[start]) + float(ends[end])
+                if best is not None and score <= best[0]:
+                    continue
+                first, last = int(offsets[start][0]), int(offsets[end][1])
+                if last <= first:
+                    continue
+                best = (score, context[first:last])
+        return best
+
+
+def _best_of(logits, inside: list[int]) -> list[int]:
+    """The `_TOP_K` highest-scoring positions that sit in the passage."""
+    scored = sorted(inside, key=lambda at: float(logits[at]), reverse=True)
+    return scored[:_TOP_K]
