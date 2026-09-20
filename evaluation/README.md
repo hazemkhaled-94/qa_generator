@@ -414,6 +414,41 @@ encoder at the same threshold backed 3% of answers against passages that had
 nothing to do with them. And a third of these never reach it: the `about`
 guard stopped 10 of 30.
 
+## The phrasing swap, A against B on one topic
+
+Same topic, same fact pool — the first run's questions were deleted so the
+second was offered exactly what the first saw. The only differences are the
+phrasing model and the `genannt` fix.
+
+| | A: `azure/gpt-4.1` | B: `ollama_chat/gemma4:12b` |
+|---|---|---|
+| questions written | 67 | 59 |
+| **accepted** | **40%** | **39%** |
+| `duplicate` | 25% | 27% |
+| **`leaks_source`** | **10%** | **17%** |
+| `not_recoverable` | 10% | 10% |
+| `compound` | 10% | 5% |
+| `unanchored` | 1 | 0 |
+| **phrasing calls to Azure** | **~50** | **0** |
+| phrasing calls to Ollama | 0 | 39 |
+
+**Acceptance is unchanged** — 40% against 39% — which is the result that
+matters: moving a third of the run's calls to a local model did not cost
+questions.
+
+`leaks_source` rising from 10% to 17% is **not a clean win**, and the
+rejections say why. Four came from the rules, which are the same rules in
+both runs. Of the six gemma4:12b refused: `in dem Foundation Level
+Lehrplan`, `des Lehrplans` and `ISO 26262` are right, and `Welche K3-Themen
+…` twice and `in den Angaben zur Testdurchführung` are a taxonomy code and a
+vague back-reference rather than a source. So the local model catches more
+true positives **and** over-fires where gpt-4.1 did not. The labelled set
+scored it 19/20 and contains nothing of that shape, which is the gap to
+close before trusting the number.
+
+`unanchored` going 1 → 0 is the `genannt` fix removing the false positive
+the pilot found, not the model.
+
 ## Layout
 
 | File | Holds |
