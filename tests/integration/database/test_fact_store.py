@@ -824,3 +824,76 @@ def test_a_re_judgement_never_reaches_a_fact_the_cap_refused(engine, database) -
     offered = list(FactCatalog().judged())
 
     assert len(offered) == 1, "the capped fact was offered for re-judgement"
+
+
+class TestTheEmbeddingBackfill:
+    """`make extract-embed`, against the database it writes to.
+
+    Here rather than only in a unit test because the failure this exists to
+    catch was not in the logic: the bulk update named the mapped class, which
+    SQLAlchemy reads as an ORM update by primary key and refuses a WHERE of
+    its own. Nothing without a real session could have seen it, and the first
+    run against the corpus is where it surfaced.
+    """
+
+    @pytest.fixture
+    def embedder(self):
+        """One axis per text, so a vector needs no weights to produce."""
+
+        class Axes:
+            def __init__(self) -> None:
+                self.seen: list[str] = []
+
+            def embed_all(self, texts: list[str]) -> list[list[float]]:
+                for text in texts:
+                    if text not in self.seen:
+                        self.seen.append(text)
+                return [
+                    [1.0 if i == self.seen.index(one) else 0.0 for i in range(1024)]
+                    for one in texts
+                ]
+
+        return Axes()
+
+    def test_every_passage_and_fact_is_given_a_vector(
+        self, store, corpus, embedder
+    ) -> None:
+        """Both tables, in one pass, with no model called."""
+        from extraction.service import embed
+
+        for passage_id in corpus["a"]:
+            store.store(passage_id, checked(passage_id, "A claim about it."))
+
+        done = embed(store.catalog, embedder)
+
+        assert done == 4 + 2, "four passages and the two facts written"
+        assert store.rows("id", where="embedding IS NULL") == []
+
+    def test_a_row_that_already_carries_one_is_left_alone(
+        self, store, corpus, embedder
+    ) -> None:
+        """The backfill is resumable: it reads only what is still NULL."""
+        from extraction.service import embed
+
+        store.store(corpus["a"][0], checked(corpus["a"][0], "A claim about it."))
+        embed(store.catalog, embedder)
+        first = len(embedder.seen)
+
+        again = embed(store.catalog, embedder)
+
+        assert again == 0
+        assert len(embedder.seen) == first, "nothing was embedded twice"
+
+    def test_the_vectors_are_what_a_probe_reads_back(
+        self, store, corpus, embedder
+    ) -> None:
+        """Written as vectors rather than as text, so pgvector can order by them."""
+        from extraction.service import embed
+
+        store.store(corpus["a"][0], checked(corpus["a"][0], "A claim about it."))
+        embed(store.catalog, embedder)
+
+        twin = store.queue.nearest_fact([1.0] + [0.0] * 1023)
+
+        assert twin is not None
+        assert twin.statement == "A claim about it."

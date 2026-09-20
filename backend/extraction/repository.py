@@ -75,6 +75,9 @@ _FACTS = cast("Table", Fact.__table__)
 #: The link table itself, for the same reason.
 _LINKS = cast("Table", FactPassage.__table__)
 
+#: The passages table itself, for the bulk update the backfill writes.
+_PASSAGES = cast("Table", Passage.__table__)
+
 #: What one passage of a bridge group is read as. The same columns `claim`
 #: reads, so a group and a queued passage are the same object.
 _PASSAGE_COLUMNS = (
@@ -561,8 +564,11 @@ class FactCatalog(Repository):
         if not vectors:
             return 0
         with self._session.begin() as session:
+            # The table rather than the entity, as `rejudge` does: an
+            # executemany against the mapped class is read as an ORM bulk
+            # update by primary key, which refuses a WHERE of its own.
             return session.execute(
-                update(Fact).where(Fact.id == bindparam("row")),
+                update(_FACTS).where(_FACTS.c.id == bindparam("row")),
                 [{"row": fact_id, "embedding": one} for fact_id, one in vectors],
             ).rowcount
 
@@ -583,7 +589,7 @@ class FactCatalog(Repository):
             return 0
         with self._session.begin() as session:
             return session.execute(
-                update(Passage).where(Passage.id == bindparam("row")),
+                update(_PASSAGES).where(_PASSAGES.c.id == bindparam("row")),
                 [{"row": passage_id, "embedding": one} for passage_id, one in vectors],
             ).rowcount
 
