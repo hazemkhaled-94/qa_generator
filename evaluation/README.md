@@ -120,6 +120,58 @@ kind:
   failing to answer one of those is the point rather than a fault. The case
   asserts the opposite. That one is the harness being wrong.
 
+## What moved, same day
+
+The same command after the judgements were split out of the reading call.
+The set is **larger and harder** than the baseline's — 25 cases against 19,
+with six added for the phrasing the old measurement could not see — so these
+are not the same nineteen scored again:
+
+| Judgement | Baseline | After | Answered by |
+|---|---|---|---|
+| `names_its_source` | 15/19 — 78.9% | **25/25** | `gates.cites_source`, a model for the residue |
+| `self_contained` | 16/19 — 84.2% | **25/25** | `nlp.pointing`, then a model on what it found |
+| `subject` | 16/19 — 84.2% | **25/25** | `gates.subject`, no model |
+
+| | Baseline | After |
+|---|---|---|
+| English | 7/7 — 100% | 9/9 — 100% |
+| German | 6/12 — **50%** | **16/16 — 100%** |
+
+Both golden question cases pass: the LMT rescue is refused again, and the
+mislabelled unanswerable case now carries the answer somebody would wrongly
+give it.
+
+**Where to distrust this.** Six of the 25 cases were written in the same
+change as the rules and the widened measurement, and a rule written against
+a case it is then scored on has not been tested by it. The four the baseline
+got wrong — `Kapitel 5`, `[R22]`, `Beck 2003`, `in diesem Lehrplan` — are
+the honest evidence here, because those were labelled before anything was
+built to catch them. Treat the pointing cases as a regression test rather
+than as a measurement until a run produces some of its own.
+
+### What the entailment encoder actually does with a fragment
+
+Measured against the cached `mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`,
+because it decides how `_backed` passes its hypothesis:
+
+| Premise | Hypothesis | Entailment |
+|---|---|---|
+| the LMT passage | `Ein Liquiditätsmanagementtool ist eine einjährige Rückgabefrist.` | 0.262 |
+| the LMT passage | `eine einjährige Rückgabefrist` | **0.970** |
+| `…within 48 hours…` | `48 hours` | 0.957 |
+| `…within 48 hours…` | `4 hours` | 0.076 (0.896 contradiction) |
+
+The encoder refuses the LMT claim when it is put as a **proposition** and
+accepts it as a **fragment** — and a fragment is what a target answer is. So
+the encoder does not catch that case and was never going to; `gates.about`
+is what does, by reading the question instead of the answer.
+
+Prefixing the question to the answer was tried and is worse: it separates
+the LMT pair correctly and drops a plainly good English case to 0.486, which
+is under the threshold. The fragment stays, because the pass can only ever
+accept and a guard that refuses good rescues costs more than it saves.
+
 ## Layout
 
 | File | Holds |
