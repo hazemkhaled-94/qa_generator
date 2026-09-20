@@ -73,6 +73,9 @@ x-model-env: &model-env
   LLM_MODEL: ${LLM_MODEL}
   # Container's view of the model, not the host's.
   LLM_BASE_URL: ${LLM_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
+  # Where a stage overriding the model with a self-hosted one should send
+  # it. The container's view again, not the host's.
+  OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL-}
   # The second model, which checks what the first wrote. Optional, and its
   # absence means something: the writer then marks its own work.
   QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_MODEL:-}

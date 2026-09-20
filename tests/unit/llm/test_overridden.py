@@ -83,3 +83,41 @@ def test_keeping_the_shared_model_returns_the_same_settings() -> None:
     before = shared()
 
     assert before.overridden(None) is before
+
+
+def test_a_self_hosted_override_is_sent_where_it_is_served() -> None:
+    """Litellm picks the provider off the prefix, so the address follows it.
+
+    A stage naming `ollama_chat/...` while LLM_BASE_URL points at Azure
+    sends an Ollama request to Azure, which answers 404. That happened: a
+    whole topic's phrasing judgements abstained because every one of them
+    was posted to the wrong host.
+    """
+    settings = shared(
+        base_url="https://example.openai.azure.com",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    moved = settings.overridden("ollama_chat/gemma4:12b")
+
+    assert moved.model == "ollama_chat/gemma4:12b"
+    assert moved.base_url == "http://localhost:11434"
+
+
+def test_a_hosted_override_keeps_the_shared_address() -> None:
+    """Only a self-hosted prefix moves; everything else is one provider."""
+    settings = shared(
+        base_url="https://example.openai.azure.com",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    assert settings.overridden("azure/gpt-4.1").base_url == (
+        "https://example.openai.azure.com"
+    )
+
+
+def test_a_self_hosted_override_with_nowhere_to_send_it_is_left_alone() -> None:
+    """A deployment that never named a runtime gets the old behaviour."""
+    settings = shared(base_url="http://one-place", ollama_base_url=None)
+
+    assert settings.overridden("ollama_chat/other").base_url == "http://one-place"

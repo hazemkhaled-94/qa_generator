@@ -36,6 +36,9 @@ class Settings:
     #: it to the model. `low`, `medium` and `high` let it think; anything else
     #: turns thinking off, which is what a structured answer wants.
     reasoning_effort: str | None
+    #: Where a self-hosted runtime is, for a stage that overrides the model
+    #: with one served there. None leaves every override on `base_url`.
+    ollama_base_url: str | None = None
 
     @property
     def lease(self) -> timedelta:
@@ -52,10 +55,27 @@ class Settings:
 
         Returns self when nothing is named, so a caller needs no branch.
 
+        **The address follows the provider.** litellm reads a model id's
+        prefix to pick the provider, so a stage naming `ollama_chat/...`
+        while `LLM_BASE_URL` points at Azure sends an Ollama request to
+        Azure and is answered with a 404 - which is what happened the first
+        time a phrasing model was pointed at a local runtime. The one thing
+        a stage may override is the model, and an address that contradicts
+        it is not a second override; it is the first one not working.
+
+        Only for a self-hosted prefix, and only where `OLLAMA_BASE_URL`
+        says where. Everything else keeps the shared address, because a
+        hosted provider's own default is what `base_url` being absent
+        means.
+
         Args:
             model: The model to call, or None to keep the shared one.
         """
-        return self if not model else replace(self, model=model)
+        if not model:
+            return self
+        if model.startswith("ollama") and self.ollama_base_url:
+            return replace(self, model=model, base_url=self.ollama_base_url)
+        return replace(self, model=model)
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:
@@ -75,4 +95,5 @@ class Settings:
             if (window := optional("LLM_NUM_CTX", source))
             else None,
             reasoning_effort=optional("LLM_REASONING_EFFORT", source),
+            ollama_base_url=optional("OLLAMA_BASE_URL", source),
         )

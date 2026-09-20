@@ -633,6 +633,16 @@ SETTINGS: tuple[Setting, ...] = (
         "provider's own default is.",
     ),
     Setting(
+        name="OLLAMA_BASE_URL",
+        service="platform",
+        kind="text",
+        optional=True,
+        fixed=True,
+        help="Where a self-hosted runtime is. Read only when a stage "
+        "overrides the model with one served there, because litellm picks "
+        "the provider off the id's prefix and the address has to follow it.",
+    ),
+    Setting(
         name="LLM_STRUCTURED_MODE",
         service="platform",
         kind="text",
