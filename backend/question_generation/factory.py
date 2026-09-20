@@ -11,6 +11,7 @@ from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
 from question_generation.generation import QuestionWriter
+from question_generation.phrasing import PhrasingJudge
 from question_generation.queue import QuestionQueue
 from question_generation.service import QuestionGenerationService
 from question_generation.verifier import Verifier
@@ -61,6 +62,12 @@ def build_service(
             writer_model.model,
         )
 
+    # Its own dial, defaulting to the verifier's model rather than to the
+    # writer's: what it judges is still the writer's work, so the same
+    # independence argument applies. It never sees a passage, which is what
+    # makes a much smaller model reasonable here.
+    phrasing_model = verifier_model.overridden(settings.phrasing_model)
+
     catalog = QuestionCatalog()
     return QuestionGenerationService(
         repository=QuestionQueue(
@@ -91,6 +98,7 @@ def build_service(
             elsewhere=catalog.elsewhere,
             elsewhere_passages=settings.elsewhere_passages,
             off_topic_overlap=settings.off_topic_overlap,
+            phrasing=PhrasingJudge(Client(phrasing_model)),
         ),
         settings=settings,
     )

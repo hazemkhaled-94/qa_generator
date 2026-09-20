@@ -140,6 +140,9 @@ class Settings:
     #: The model that writes a question, or None for the shared one.
     model: str | None
     verifier_model: str | None
+    #: The model asked what a question's wording amounts to where a rule has
+    #: not settled it, or None to ask the verifier's.
+    phrasing_model: str | None = None
 
     def lease(self, call_seconds: float) -> timedelta:
         """How long one topic may go unfinished before a run sweeps it.
@@ -239,4 +242,5 @@ class Settings:
             # worth knowing about rather than guessing at, so the service
             # warns rather than failing.
             verifier_model=optional("QUESTIONS_VERIFIER_MODEL", source),
+            phrasing_model=optional("QUESTIONS_PHRASING_MODEL", source),
         )

@@ -109,7 +109,19 @@ class Recording:
     def read(self, question, passages, thread=()):
         """Recall, which a derived question must never reach."""
         self.asked.append("read")
-        return Reading(recovered=None, stands_alone=True)
+        return Reading(recovered=None)
+
+    def names_its_source(self, question: str) -> bool:
+        """The phrasing residue, which none of these questions trips."""
+        return False
+
+    def names_something(self, question: str) -> bool:
+        """These questions all name something, thin though some read."""
+        return True
+
+    def self_contained(self, question: str, pointers) -> bool:
+        """The other phrasing residue, asked only where a pointer was found."""
+        return True
 
     def computes(self, question, answer, passages, thread=()) -> bool:
         """The arithmetic gate."""
@@ -137,6 +149,7 @@ def build(recording: Recording):
         nearest=lambda embedding: None,
         threshold=0.93,
         bounds={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+        phrasing=recording,
     )
 
 

@@ -311,8 +311,12 @@ class Recording:
         self.vector = vector or [1.0] + [0.0] * 1023
         self.recovers = recovers
         self.stands_alone = stands_alone
-        self.names_its_source = names_its_source
-        self.self_contained = self_contained
+        #: What the phrasing judge answers, for the residue a rule leaves.
+        #: Named apart from the methods that serve them, which the checker
+        #: calls and which count the ask.
+        self.names_source = names_its_source
+        self.contained = self_contained
+        self.phrased = 0
         #: What the entailment pass answers. False by default, so a test
         #: about recall measures recall: the pass can only ever rescue, and
         #: one that always said yes would hide every rejection below it.
@@ -332,12 +336,22 @@ class Recording:
         """Answers with the scripted reading, and counts the ask."""
         self.verified += 1
         self.threaded = tuple(thread)
-        return Reading(
-            recovered=self.recovers,
-            stands_alone=self.stands_alone,
-            names_its_source=self.names_its_source,
-            self_contained=self.self_contained,
-        )
+        return Reading(recovered=self.recovers)
+
+    def names_its_source(self, question: str) -> bool:
+        """The residue judgement, for a question no rule settled."""
+        self.phrased += 1
+        return self.names_source
+
+    def names_something(self, question: str) -> bool:
+        """Whether a question the parse called thin names anything."""
+        self.phrased += 1
+        return self.stands_alone
+
+    def self_contained(self, question: str, pointers) -> bool:
+        """Whether the pointers a parse found land inside the question."""
+        self.phrased += 1
+        return self.contained
 
     def supports(self, question: str, answer: str, passages, thread=()) -> bool:
         """Answers the entailment pass, and counts the ask."""
@@ -357,6 +371,7 @@ def build(recording: Recording, near: Neighbour | None = None) -> QuestionChecke
         verifier=recording,
         nearest=lambda embedding: near,
         threshold=0.93,
+        phrasing=recording,
     )
 
 
@@ -632,11 +647,11 @@ def test_two_sentences_each_ending_in_a_question_mark_are_malformed() -> None:
 
 
 def test_a_question_nobody_could_have_asked_cold_is_refused() -> None:
-    """The verifier's judgement, on the call it was already making.
+    """Two holders agreeing: the parse calls it thin and the judge agrees.
 
     A question can be perfectly answerable by the passages it cites and
-    still be one nobody would type. The structural half only says the
-    question is thin enough for the judgement to be worth holding.
+    still be one nobody would type. The parse only says the question is thin
+    enough for the judgement to be worth asking for.
     """
     recording = Recording(recovers="4 kg", stands_alone=False)
 
@@ -645,7 +660,7 @@ def test_a_question_nobody_could_have_asked_cold_is_refused() -> None:
     )
 
     assert result.rejected_reason == QuestionRejection.UNANCHORED
-    assert recording.verified == 1, "it must not cost a second call"
+    assert recording.verified == 0, "the passages are never read for this"
 
 
 def test_an_unanchored_unanswerable_question_is_refused_too() -> None:
@@ -929,14 +944,14 @@ def test_the_verifier_catches_a_source_it_named_without_quoting() -> None:
     """`Laut dem Jahresbericht 2025` is not `Druckversion - Jahresbericht 2025`.
 
     The free half matches a title verbatim, so a paraphrase gets past it.
-    The model half is what the paraphrase is for.
+    `cites_source` catches the patterns, and the model is the residue.
     """
     recording = Recording(recovers="4 kg", names_its_source=True)
 
     result = build(recording).check(candidate())
 
     assert result.rejected_reason == QuestionRejection.LEAKS_SOURCE
-    assert recording.verified == 1, "it must not cost a second call"
+    assert recording.verified == 0, "the passages are never read for this"
 
 
 def test_a_follow_up_may_not_name_its_source_either() -> None:

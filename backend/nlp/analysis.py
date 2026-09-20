@@ -219,30 +219,126 @@ def _references(span: Doc | Span) -> tuple[str, ...]:
     return tuple(sorted({t.text.casefold() for t in span if _refers(t)}))
 
 
-def demonstratives(text: str, language: str | None) -> tuple[str, ...]:
+#: Lemmas that point at an earlier mention without any morphology saying so.
+#: Every tagset reads these as ordinary adjectives - `aforementioned` and
+#: `latter` are `ADJ/JJ`, `genannt` and `besagt` likewise - so unlike the two
+#: readings below them there is no feature to test and a list is the only
+#: thing available. Kept short and kept here rather than in a setting: it can
+#: only ever ADD a pointer for the verdict below to rule on, so a language
+#: whose triggers are missing loses recall on one measurement and nothing
+#: else.
+_ANAPHORIC = frozenset(
+    {
+        "aforementioned",
+        "forementioned",
+        "former",
+        "latter",
+        "said",
+        "besagt",
+        "genannt",
+        "obig",
+        "vorgenannt",
+        "letzterer",
+        "ersterer",
+    }
+)
+
+
+def _counted(token):
+    """The quantifier on a noun that is both made definite and counted.
+
+    `den beiden Lehrplänen` and `the two editions` name a set of a known size
+    that the text never introduced, which is pointing outward as surely as
+    `diesen beiden` is - and neither language says so in a way `PronType=Dem`
+    catches. German tags `den` `PronType=Art` and `beiden` `PronType=Ind`;
+    English tags `the` a definite article and `two` `NumType=Card`.
+
+    What they share is structural rather than lexical, so this needs no word
+    list: one noun carrying BOTH a definite determiner and a quantifier.
+    `die drei Wege` is caught too and is a perfectly good question - which is
+    allowed, because this measurement may only ever offer a pointer for the
+    verdict to rule on.
+    """
+    definite = False
+    quantified = None
+    for child in token.children:
+        morph = child.morph
+        if "Def" in morph.get("Definite", []) or "Art" in morph.get("PronType", []):
+            definite = True
+        if "Card" in morph.get("NumType", []) or (
+            child.pos_ == "DET" and "Ind" in morph.get("PronType", [])
+        ):
+            quantified = child
+    return quantified if definite else None
+
+
+def pointing(text: str, language: str | None) -> tuple[str, ...]:
     """The words in a text that point at something outside it.
 
-    `PronType=Dem` off the morphology, which every Universal Dependencies
-    tagset marks and so no word list per language is needed. Determiners as
-    well as pronouns: `diesen beiden Lehrplänen` and `these two syllabi`
-    point outward through the determiner, and the noun beside it is what
-    makes the pointing look harmless.
+    Three readings, because no one of them covers the ways a question reaches
+    for something the asker cannot see:
+
+    - `PronType=Dem` off the morphology, which every Universal Dependencies
+      tagset marks. Determiners as well as pronouns: `diesen beiden
+      Lehrplänen` and `these two syllabi` point outward through the
+      determiner, and the noun beside it is what makes the pointing look
+      harmless.
+    - a noun made definite AND counted - `den beiden Lehrplänen`, `the two
+      editions` - which names a set of a known size the text never
+      introduced. This is the reading the first one misses, and missing it is
+      why the gate this feeds fired zero times over 3,131 questions: the
+      question that prompted the gate was `zwischen den beiden Lehrplänen`,
+      where `den` is an article and `beiden` is `PronType=Ind`.
+    - the anaphoric adjectives, which carry no feature at all.
 
     A measurement and not a verdict. Pointing is only a fault when there is
     nothing in the text to point AT, and half the questions carrying one set
     a case up first and then refer back to it - `Wenn ein KI-System ...,
     wie wird dieses Problem eingeordnet?` is self-contained. Deciding which
     is which is a reading, so this only says a pointer is present and the
-    verifier says whether it lands.
+    verdict says whether it lands.
     """
+    found: set[str] = set()
+    for token in pipeline(language)(text):
+        if (
+            "Dem" in token.morph.get("PronType", [])
+            or token.lemma_.casefold() in _ANAPHORIC
+        ):
+            found.add(token.text.casefold())
+        elif token.pos_ in _NOMINAL and (counted := _counted(token)):
+            found.add(counted.text.casefold())
+    return tuple(sorted(found))
+
+
+def phrases(text: str, language: str | None) -> tuple[str, ...]:
+    """The noun phrases a text is about, longest first.
+
+    spaCy's own `noun_chunks`, carrying content and with the asking stripped
+    off the front. A question word inside a chunk is dropped rather than
+    taking the chunk with it - `How many faults` is asked about faults, and
+    `Welche spezifischen Komponenten` is asked about nothing, and what
+    separates those two is not in either chunk. Whether a question names
+    anything is the caller's to decide; this reports what it named.
+
+    A chunk with no content word is left out, which is what the German
+    parser offers for the reflexive in `unterscheiden sich`.
+
+    Ordered by how much a chunk carries rather than by where it sits, because
+    the caller wants the one that says what the question is about and a
+    question opens with the word asking rather than with its subject.
+    """
+    document = pipeline(language)(text)
+    kept = []
+    for chunk in document.noun_chunks:
+        content_words = [token for token in chunk if token.pos_ in _CONTENT]
+        if not content_words:
+            continue
+        words = [token for token in chunk if not _interrogative(token)]
+        written = "".join(token.text_with_ws for token in words).strip()
+        if written:
+            kept.append((len(content_words), chunk.start, written))
     return tuple(
-        sorted(
-            {
-                token.text.casefold()
-                for token in pipeline(language)(text)
-                if "Dem" in token.morph.get("PronType", [])
-            }
-        )
+        written for _, _, written in sorted(kept, key=lambda one: (-one[0], one[1]))
     )
 
 

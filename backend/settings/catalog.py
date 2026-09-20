@@ -534,6 +534,16 @@ SETTINGS: tuple[Setting, ...] = (
         "the passages it cites. Naming the writer's own model, or none at "
         "all, turns off the two gates only an independent model may apply.",
     ),
+    Setting(
+        name="QUESTIONS_PHRASING_MODEL",
+        service="questions",
+        kind="text",
+        optional=True,
+        help="The model asked what a question's own wording amounts to, "
+        "where a rule has not already settled it. Sees the question and "
+        "never a passage, so it can be far smaller than the verifier. "
+        "Absent calls QUESTIONS_VERIFIER_MODEL.",
+    ),
     # ── The platform the stages share ─────────────────────────────────────
     Setting(
         name="LLM_MODEL",

@@ -28,8 +28,16 @@ from collections.abc import Mapping, Sequence
 from itertools import combinations
 
 from database.qa_generator import AnswerForm, QuestionRejection
-from nlp.analysis import claim, content, interrogatives, normalised, vocabulary
+from nlp.analysis import (
+    claim,
+    content,
+    interrogatives,
+    normalised,
+    phrases,
+    vocabulary,
+)
 from nlp.language import detect
+from nlp.pipelines import pipeline
 from question_generation.models import Neighbour
 
 #: Length bounds per answer form, as QUESTIONS_ANSWER_CHARS sets them. This is
@@ -350,6 +358,186 @@ def structural(
 #:
 #: Public because the reason the checker logs beside the verdict names it.
 NAMES_SOMETHING = 3
+
+
+def subject(question: str, language: str | None) -> str:
+    """What a question names, as the spans it names it in.
+
+    The reading that used to be a field on the verifier's answer, where it
+    was asked for as "copy the thing the question is about, word for word".
+    Copying a span out of a question is a parse, and asking a model to do it
+    inside a call about the passages cost it three of nineteen labelled
+    cases - twice by naming something for a question that names nothing, and
+    once by finding nothing in a question that does.
+
+    Every content-bearing noun phrase rather than the best one: a question is
+    allowed to be about more than one thing, `Wie unterscheiden sich in
+    Abschnitt 2.2 die Themen zur Testschätzung und zur Fehlerbehebung?` is
+    about two, and choosing between them is a judgement nothing here needs.
+
+    The numbers and proper nouns go on the end, because a chunker does not
+    always keep one: `die Norm ISO/IEC 20246` chunks as `die Norm ISO IEC`
+    and the identifier is the whole of what that question names.
+
+    Empty when the question names nothing, and `anchored` is what decides
+    that rather than anything about the chunks: `What specific components are
+    included?` and `Für welche Kriterien gelten die Anforderungen?` both
+    chunk to something and neither names a thing.
+
+    Nothing gates on this. `anchored` is the verdict; this is what a person
+    reading the rejection needs in order to disagree with it.
+    """
+    if not anchored(question, language):
+        return ""
+    named = list(phrases(question, language))
+    written = normalised(" ".join(named))
+    named.extend(
+        unit for unit in claim(question, language).units if unit not in written
+    )
+    return " ".join(named)
+
+
+#: Words that name a part of a document rather than a thing in the world, and
+#: so say WHERE an answer is once one is numbered. `Abschnitt 2.2` is a
+#: citation; `Abschnitt` alone is not, which is why every one of these is
+#: read with an identifier beside it.
+_DIVISIONS = frozenset(
+    {
+        "abschnitt",
+        "kapitel",
+        "anhang",
+        "artikel",
+        "ziffer",
+        "absatz",
+        "paragraf",
+        "paragraph",
+        "section",
+        "chapter",
+        "appendix",
+        "annex",
+        "clause",
+        "article",
+    }
+)
+
+#: Words naming a document itself. Read by lemma and never as a substring,
+#: because German compounds: `Risikobericht` is a thing the corpus is about
+#: and `Bericht` is a thing the corpus IS, and a substring test cannot tell
+#: them apart.
+_DOCUMENTS = frozenset(
+    {
+        "lehrplan",
+        "norm",
+        "bericht",
+        "dokument",
+        "handbuch",
+        "richtlinie",
+        "verordnung",
+        "rundschreiben",
+        "leitfaden",
+        "vereinbarung",
+        "syllabus",
+        "report",
+        "document",
+        "circular",
+        "regulation",
+        "standard",
+        "guideline",
+        "manual",
+        "agreement",
+        "specification",
+    }
+)
+
+#: Lemmas that attribute what follows them to a source. `laut dem
+#: Jahresbericht` says where the answer is whatever the noun turns out to be,
+#: so this one needs nothing beside it.
+_ATTRIBUTIONS = frozenset({"laut", "gemäß", "ausweislich", "according", "per"})
+
+#: A bracketed reference as a bibliography writes one: `[R22]`, `[12]`.
+_BRACKETED = re.compile(r"\[[A-Za-z]{0,3}\s?\d{1,4}[a-z]?\]")
+
+#: A year, which is what turns a proper noun into a citation when it sits
+#: directly after one: `Beck 2003`.
+_CITED_YEAR = re.compile(r"^(1[89]|20)\d{2}$")
+
+
+def _identifier(token) -> bool:
+    """Whether a token numbers the division or document before it."""
+    return token.like_num or bool(any(char.isdigit() for char in token.text))
+
+
+#: How far past an attribution to look for the thing being attributed to.
+#: One short noun phrase, which is what `laut dem Jahresbericht 2025` is.
+_ATTRIBUTED_WITHIN = 4
+
+
+def _names_something(following: Sequence) -> bool:
+    """Whether what an attribution points at is named rather than pointed at."""
+    for token in following[:_ATTRIBUTED_WITHIN]:
+        if token.pos_ == "PROPN" or _identifier(token):
+            return True
+        if token.lemma_.casefold() in _DOCUMENTS:
+            return True
+    return False
+
+
+def cites_source(question: str, language: str | None) -> bool | None:
+    """Whether a question says WHERE its answer is, read off its parse.
+
+    True when a pattern settles it, and **None when nothing here does** -
+    never False. Absence of a pattern is not evidence a question names no
+    source: `Welche Reviewverfahren beschreibt die Norm ISO/IEC 20246?` names
+    one and `Warum wird ISO/IEC/IEEE 29119-4 erwähnt?` does not, and the two
+    differ by which of the standard and the answer the question is about.
+    That is a reading, so it is left to whatever holds an opinion.
+
+    What the patterns settle is the half a model was measurably bad at. Over
+    the nineteen labelled cases gpt-4.1 missed four, and three of them are
+    `Kapitel 5`, `[R22]` and `Beck 2003` - a numbered division, a bracketed
+    reference and an author with a year. None of those needs a reading.
+    """
+    document = pipeline(language)(question)
+    if _BRACKETED.search(question):
+        return True
+
+    tokens = list(document)
+    for position, token in enumerate(tokens):
+        lemma = token.lemma_.casefold()
+        following = tokens[position + 1] if position + 1 < len(tokens) else None
+
+        # `laut`, `gemäß`, `according to` - but only where what is attributed
+        # to is NAMED. `laut diesen Angaben` attributes to something the
+        # question points at and never names, which is a question failing to
+        # stand on its own rather than one citing a source, and the two are
+        # different gates.
+        if lemma in _ATTRIBUTIONS and _names_something(tokens[position + 1 :]):
+            return True
+        # `Abschnitt 2.2`, `Kapitel 5`, `section 4`.
+        if lemma in _DIVISIONS and following is not None and _identifier(following):
+            return True
+        # `Beck 2003`: a proper noun with a bare year against it. Adjacency
+        # is load-bearing - `reported to the site manager in 2025` names a
+        # party and a period and no source, and the preposition is what
+        # says so.
+        if (
+            token.pos_ == "PROPN"
+            and following is not None
+            and _CITED_YEAR.match(following.text.strip())
+        ):
+            return True
+        if lemma in _DOCUMENTS:
+            # `die Norm ISO/IEC 20246`: the document named and numbered.
+            if following is not None and _identifier(following):
+                return True
+            # `in diesem Lehrplan`: the question pointing at the corpus it
+            # is asked of. Only for a word that names a document - `in
+            # diesem Zusammenhang` points at the discussion, not at a file.
+            if any(
+                "Dem" in child.morph.get("PronType", []) for child in token.children
+            ):
+                return True
+    return None
 
 
 def anchored(question: str, language: str | None) -> bool:

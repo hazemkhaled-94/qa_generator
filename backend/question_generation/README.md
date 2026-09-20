@@ -311,12 +311,12 @@ behind it. Thirteen codes, and `questions.rejected_reason` holds exactly these.
 | `answer_too_short` | is scored against an answer below its form's floor | nothing |
 | `answer_too_long` | answers past its form's ceiling — a value answered with a paragraph | nothing |
 | `wrong_form` | answers in the wrong shape: a value describing an action, an explanation explaining nothing | nothing |
-| `leaks_source` | quotes the title of the document its answer is in | nothing, or the round trip |
+| `leaks_source` | names the material its answer is in: a quoted title, a numbered division, a bracketed reference, an author with a year, or what the residue call finds | nothing, or one question-only call |
 | `off_topic` | was written to have no answer and is about nothing the material mentions, which any chatbot declines | nothing |
 | `duplicate` | is a near twin of one already accepted | one index probe |
 | `answerable_after_all` | was written to have no answer and turns out to have one | the same probe, or the round trip |
 | `compound` | asks two things, so half an answer is neither right nor wrong | nothing |
-| `unanchored` | nobody could have asked without the passage in front of them: it names too little, or it points at something only the passage holds | the round trip |
+| `unanchored` | nobody could have asked without the passage in front of them: it names too little, or it points at something only the passage holds | nothing, or one question-only call |
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
 | `answerable_elsewhere` | was written to have no answer and a passage it does not cite answers it | a lemma probe and a second call |
 | `source_changed` | rests on a fact that no longer passes its own checks | nothing |
@@ -402,19 +402,76 @@ So the factory turns those gates off when no second model is named, and logs
 the verdict instead. Recoverability stays on regardless, because that one is
 checkable against the passage rather than a matter of taste.
 
-### What that one call is now carrying
+### What that one call was carrying, and where those judgements went
 
-`read()` asks for five things at once: whether the answer is in the passages,
-what it is, whether the question names its source, what its subject is, and
-whether it stands alone. The prompt already has to warn that two of those are
+`read()` used to ask for five things at once: whether the answer is in the
+passages, what it is, whether the question names its source, what its subject
+is, and whether it stands alone. The prompt had to warn that two of those were
 "easy to confuse, so read both" — which is the shape of a call doing too much.
 
-The run bears it out. `leaks_source` fired 9 times in 3,131 questions and
+The run said so. `leaks_source` fired 9 times in 3,131 questions and
 `self_contained` never fired at all, while `not_recoverable` — the judgement
-this call exists for — fired 147 times. The judgements that share the call are
-the ones that starve, and the newest one starved completely. Splitting the
-phrasing verdicts into their own call is the obvious next move; they need a far
-smaller model than recoverability does, so it need not cost more.
+the call exists for — fired 147 times. Then the harness measured it directly,
+and the split by language is what settled it:
+
+| | Both phrasing judgements right |
+|---|---|
+| English | 7/7 — 100% |
+| German | 6/12 — **50%** |
+
+Every miss was German, in a call whose recall half is good in both languages.
+A judgement sharing a call with a harder task is answered in the language the
+harder task is thinking in — and this corpus is German.
+
+So `read()` now asks one thing, and the three phrasing judgements are answered
+where each of them belongs:
+
+| Judgement | Answered by | Measured |
+|---|---|---|
+| `subject` | `gates.subject` — spaCy noun chunks | **19/19**, against 16/19 for the model |
+| `names_its_source` | `gates.cites_source`, a model for the residue | rules settle 5 cases with **0 errors**, including all four the model got wrong |
+| `self_contained` | `phrasing.py`, asked only where a pointer was found | see below |
+
+`cites_source` matches what a pattern can settle — a numbered division
+(`Abschnitt 2.2`, `Kapitel 5`), a bracketed reference (`[R22]`), an author
+with a year (`Beck 2003`), a named and numbered document — and returns
+**None, never False**, because the absence of a pattern is not evidence.
+`Welche Reviewverfahren beschreibt die Norm ISO/IEC 20246?` names a source and
+`Warum wird ISO/IEC/IEEE 29119-4 erwähnt?` does not; they have the same shape
+and differ by which of the standard and the answer the question is about. That
+is a reading, so the residue goes to a model.
+
+Two consequences worth knowing:
+
+- **The phrasing gates now run before the round trip**, because none of them
+  reads a passage. A question naming its own source is refused without ever
+  paying for the call that would have answered it.
+- **`QUESTIONS_PHRASING_MODEL`** is the dial. Unset it falls back to
+  `QUESTIONS_VERIFIER_MODEL`, because what it judges is still the writer's
+  work. It never sees a passage, so it can be far smaller than the verifier.
+
+### `self_contained`, and why it fired zero times
+
+Two permissive judgements had to agree, and **both halves were broken**.
+
+The verifier answered `self_contained: true` for *"…zwischen den beiden
+Lehrplänen"*. And the measurement would have missed it anyway: `den beiden` is
+an article plus `PronType=Ind`, where only `diesen beiden` is `PronType=Dem`.
+So the gate could not fire even when the verdict came.
+
+The measurement now reads three things rather than one, and the middle one is
+the case above:
+
+| Reading | Catches | Why it is needed |
+|---|---|---|
+| `PronType=Dem` | `diesen beiden`, `this version` | every UD tagset marks it |
+| a noun made **definite and counted** | `den beiden Lehrplänen`, `the two editions` | German tags `den` an article and `beiden` `PronType=Ind`; English tags `the two` article plus `NumType=Card`. Neither is a demonstrative, and both name a set of a known size the question never introduced |
+| the anaphoric adjectives | `aforementioned`, `latter`, `besagt` | these carry no feature at all, so a short lemma list is the only thing available |
+
+It still **over-fires on purpose** — `die drei Wege` is caught and is a
+perfectly good question — so it may only ever offer a pointer, and the verdict
+is the model's. What it may no longer do is stay silent about the phrasing the
+gate was written for.
 
 Three things about the round trip are load-bearing. The verifier is a
 **different** model, because a model marking its own work recovers what it just
@@ -641,6 +698,7 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_RELEASE_DIFFICULTY` | `easy:1,medium:1,hard:1` | How a release spreads over the bands |
 | `QUESTIONS_MODEL` | unset | A different writer from the rest of the pipeline. Unset means `LLM_MODEL` |
 | `QUESTIONS_VERIFIER_MODEL` | unset | The second model. Naming the writer's own, or none, turns off the gates only an independent model may apply; the worker warns on every start |
+| `QUESTIONS_PHRASING_MODEL` | unset | The model asked what a question's wording amounts to, where a rule has not settled it. Never sees a passage, so it can be far smaller than the verifier. Unset calls `QUESTIONS_VERIFIER_MODEL` |
 
 The length bounds are per form and measured rather than guessed: a floor of 15
 on values refused 41% of the answers this corpus had accepted — `70%`, `2025`

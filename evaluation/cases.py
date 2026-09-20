@@ -95,13 +95,23 @@ QUESTIONS = (
         "recoverable": False,
     },
     {
+        # `target: None` makes this UNANSWERABLE, and a passage failing to
+        # answer an unanswerable question is the point of writing one rather
+        # than a fault in it - so the checker accepts it and is right to.
+        # The case asserted the opposite and was measuring the gate for
+        # answerable questions against a question that is not one.
+        #
+        # What it is here to catch is the answerable version: the same
+        # plausible-but-absent question, carrying the answer somebody would
+        # wrongly give it. That one must be refused, and by recoverability
+        # rather than by anything structural.
         "name": "a plausible question the passage does not cover",
         "question": (
             "Within how many hours is a standard support request answered "
             "on a public holiday?"
         ),
         "passage": "Standard requests are answered within 48 hours on working days.",
-        "target": None,
+        "target": "48 hours",
         "language": "en",
         "recoverable": False,
     },
@@ -367,5 +377,77 @@ PHRASING = (
         "names_its_source": False,
         "self_contained": True,
         "holds": "Grenzwertanalyse",
+    },
+    # ── The pointing a demonstrative does not carry ───────────────────────
+    # The case the gate was written for and could not see. `diesen beiden`
+    # is PronType=Dem and was caught; `den beiden` is an article plus
+    # PronType=Ind and was not, so the measurement abstained and the verdict
+    # never came. Both are here now, because a measurement that catches one
+    # phrasing of a failure and not the other is the failure.
+    # Both name plenty - which is the point. A question can name four things
+    # and still be unanswerable because nothing says WHICH two it means, and
+    # keeping these anchored is what stops them passing for naming cases.
+    {
+        "name": "points at two syllabi through a demonstrative, in German",
+        "question": (
+            "Wie groß ist der inhaltliche Unterschied zwischen diesen "
+            "beiden Lehrplänen für Testanalysten?"
+        ),
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "Lehrplänen",
+    },
+    {
+        "name": "points at two syllabi through a bare count, in German",
+        "question": (
+            "Wie groß ist der inhaltliche Unterschied zwischen den beiden "
+            "Lehrplänen für Testanalysten?"
+        ),
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "Lehrplänen",
+    },
+    {
+        "name": "counts two things it did name, in German",
+        "question": (
+            "Wie groß ist der Abstand zwischen der Fassung von 2022 und "
+            "der Fassung von 2024?"
+        ),
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "2022",
+    },
+    {
+        "name": "points through an anaphoric adjective, in English",
+        "question": (
+            "How do the aforementioned parties differ in their reporting duties?"
+        ),
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "parties",
+    },
+    # ── The two a rule must not guess at ──────────────────────────────────
+    # One standard named as what states the answer, one named as the thing
+    # being asked about. Same shape, opposite verdicts, so `cites_source`
+    # abstains on both and whatever holds an opinion decides.
+    {
+        "name": "a standard cited as the source, in German",
+        "question": "Welche Anforderungen stellt die Norm ISO/IEC 25010 an Wartbarkeit?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "25010",
+    },
+    {
+        "name": "an author named as the subject, in English",
+        "question": "Which testing practice is Beck credited with introducing?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "Beck",
     },
 )

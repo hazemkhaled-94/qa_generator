@@ -73,6 +73,53 @@ golden questions the right way round — which is not a measurement of the
 model's taste. It is whether the gate is wired up at all, and **a gate that
 accepts everything cannot be told from no gate**.
 
+## The baseline, 2026-09-20
+
+What the models named in `.env` scored before anything was moved off them —
+`azure/gpt-5.4` writing and `azure/gpt-4.1` judging. Recorded because every
+swap below it is measured against these numbers and not against an opinion.
+
+The three phrasing judgements, each scored on its own over the nineteen
+labelled cases, against the floor a judge that ignores its input would reach:
+
+| Judgement | Score | Answering the same way every time |
+|---|---|---|
+| `names_its_source` | 15/19 — 78.9% | 63.2% |
+| `self_contained` | 16/19 — 84.2% | **78.9%** |
+| `subject` | 16/19 — 84.2% | — |
+
+**`self_contained` beats a constant answer by one case.** That is the measured
+version of the README's observation that it fired zero times in 3,131
+questions: it is not reading the question.
+
+The split that says what is actually wrong is by language:
+
+| | Both judgements right |
+|---|---|
+| English | 7/7 — 100% |
+| German | 6/12 — **50%** |
+
+Every one of the seven misses is German. gpt-4.1 answers these perfectly in
+English and at chance in German, in a call whose other half — recovering the
+answer — it does well in both. A judgement sharing a call with a harder task
+is answered in the language the harder task is thinking in.
+
+Four of the misses are `names_its_source` on `Kapitel 5`, `[R22]` and
+`Beck 2003` — the three a pattern matches without a model at all.
+
+Two golden question cases fail at this baseline, and they are different in
+kind:
+
+- **the LMT case** — `Was ist ein Liquiditätsmanagementtool?` answered
+  `eine einjährige Rückgabefrist` is accepted, because the entailment rescue
+  in `_backed` says the passages support it. The case is in the set precisely
+  because recoverability used to catch what an NLI model and an LLM judge
+  both missed, so this is a regression and not a mislabelling.
+- **`a plausible question the passage does not cover`** — its `target` is
+  `None`, so the checker reads it as an unanswerable question, and a passage
+  failing to answer one of those is the point rather than a fault. The case
+  asserts the opposite. That one is the harness being wrong.
+
 ## Layout
 
 | File | Holds |

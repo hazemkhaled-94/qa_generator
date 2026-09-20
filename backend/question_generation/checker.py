@@ -39,7 +39,7 @@ from database.qa_generator import (
     QuestionRejection,
     QuestionStatus,
 )
-from nlp.analysis import content, demonstratives
+from nlp.analysis import content, pointing
 from nlp.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
@@ -50,9 +50,11 @@ from question_generation.gates import (
     agrees,
     anchored,
     asserted,
+    cites_source,
     near_verdict,
     on_topic,
     structural,
+    subject,
 )
 from question_generation.models import (
     LONG_ANSWER_CHARS,
@@ -83,6 +85,7 @@ class QuestionChecker:
         elsewhere_passages: int = 0,
         off_topic_overlap: float = OFF_TOPIC_OVERLAP,
         entail: bool = True,
+        phrasing=None,
     ) -> None:
         """Initialises the checker with its collaborators.
 
@@ -117,6 +120,7 @@ class QuestionChecker:
         self._elsewhere_passages = elsewhere_passages
         self._off_topic_overlap = off_topic_overlap
         self._entail = entail
+        self._phrasing_judge = phrasing
 
     def check(
         self, candidate: Candidate, seen: Sequence[CheckedQuestion] = ()
@@ -179,6 +183,15 @@ class QuestionChecker:
                 candidate, failed, embedding, self._long_answer_chars, form
             )
 
+        # Before the round trip, because none of it reads a passage: a
+        # question naming its own source is refused without ever paying for
+        # the call that would have answered it.
+        failed = self._phrasing(candidate)
+        if failed:
+            return self._verdict(
+                candidate, failed, embedding, self._long_answer_chars, form
+            )
+
         return self._verdict(
             candidate,
             self._round_trip(candidate, form, embedding),
@@ -187,94 +200,110 @@ class QuestionChecker:
             form,
         )
 
+    def _phrasing(self, candidate: Candidate) -> tuple[str, str] | None:
+        """What the question's own wording says, before any passage is read.
+
+        Ahead of the round trip because none of it needs the passages, so a
+        question that carries its own source no longer pays for a call that
+        reads them. The three judgements here were one field each on that
+        call until the harness measured what sharing it cost: 7/7 in English
+        against 6/12 in German. See `phrasing.py`.
+
+        Two of the three now need no model. `cites_source` settles the
+        patterns and only the residue is asked; `anchored` is the whole of
+        the naming verdict, where it used to be a veto on a model's opinion
+        that was wrong about `According to the ECB and NCAs, who conducts the
+        due diligence check?`.
+
+        A rule is not an opinion, so `judge_phrasing` does not gate one. It
+        gates what a model said, which is what needs an independent holder.
+        """
+        question = candidate.question_text
+        language = candidate.group.language
+
+        # A question carrying its own source has already done the work it
+        # was meant to test. Judged for a follow-up too - leaning on the
+        # conversation is allowed, naming the file is not.
+        cited = cites_source(question, language)
+        ruled = cited is not None
+        if cited is None and self._phrasing_judge is not None:
+            cited = self._phrasing_judge.names_its_source(question)
+        if cited:
+            reason = (
+                "it names the material the answer is in, so it asks a question "
+                "and answers half of it" + ("" if ruled else ", the verifier says")
+            )
+            if ruled or self._judge_phrasing:
+                return QuestionRejection.LEAKS_SOURCE, reason
+            log.info("keeping %r: %s, but the writer judged itself", question, reason)
+
+        # Never for a follow-up. `And for an urgent one?` names nothing and
+        # is exactly the question a person asks second; leaning on the thread
+        # is what a follow-up is for, so judging it as though it had been
+        # asked cold would reject every one of them.
+        if candidate.follows:
+            return None
+
+        # Still two holders, and the reason is measured in both directions.
+        # The opinion alone rejected `According to the ECB and NCAs, who
+        # conducts the due diligence check?` for naming nothing. The
+        # measurement alone rejects `Why must a request be confirmed in
+        # writing?`, because NAMES_SOMETHING was calibrated as a veto on
+        # German questions, where one compound carries what two English
+        # words do. Neither is a verdict on its own.
+        #
+        # What changed is which measurement: the parse reads what a question
+        # names, where the model used to be asked to copy it out inside a
+        # call about the passages. Over the labelled cases the parse is
+        # right 19 times out of 19 and that field managed 16.
+        if not anchored(question, language):
+            named = (
+                None
+                if self._phrasing_judge is None
+                else self._phrasing_judge.names_something(question)
+            )
+            if named is False:
+                reason = (
+                    f"it names nothing a person searching would know - the "
+                    f"parse finds {subject(question, language)!r} - and it "
+                    f"names no name, no number and fewer than "
+                    f"{NAMES_SOMETHING} things, so it could not have been "
+                    f"asked without the passage"
+                )
+                if self._judge_phrasing:
+                    return QuestionRejection.UNANCHORED, reason
+                log.info(
+                    "keeping %r: %s, but the writer judged itself", question, reason
+                )
+
+        # The other way a question fails to stand on its own: not naming too
+        # little, but pointing at something the asker cannot see. The
+        # measurement over-fires by design - a question that sets a case up
+        # and refers back to it carries a pointer and is fine - so it only
+        # ever asks the question, and the verdict is the model's.
+        pointers = pointing(question, language)
+        if not pointers or self._phrasing_judge is None:
+            return None
+        if self._phrasing_judge.self_contained(question, pointers) is False:
+            reason = (
+                f"it points outward with {', '.join(repr(one) for one in pointers)} "
+                f"and there is nothing in the question to point at, so only "
+                f"somebody holding the passage could have asked it"
+            )
+            if self._judge_phrasing:
+                return QuestionRejection.UNANCHORED, reason
+            log.info("keeping %r: %s, but the writer judged itself", question, reason)
+        return None
+
     def _round_trip(
         self, candidate: Candidate, form: str, embedding: list[float]
     ) -> tuple[str, str] | None:
-        """Asks whether the passages give the answer back, and how it reads."""
+        """Asks whether the passages give the answer back."""
         read = self._verifier.read(
             candidate.question_text,
             candidate.group.passages,
             candidate.thread,
         )
-
-        # Judged before the answer is, and for both kinds of question: an
-        # unanswerable question nobody would ask is as useless as an
-        # answerable one, and a chatbot declining it proves nothing.
-        #
-        # Never for a follow-up. `And for an urgent one?` names nothing and
-        # is exactly the question a person asks second; leaning on the thread
-        # is what a follow-up is for, so judging it as though it had been
-        # asked cold would reject every one of them.
-        # The opposite failure to the one below, and the one that matters
-        # more: a question carrying its own source has already done the work
-        # it was meant to test. Judged for a follow-up too - leaning on the
-        # conversation is allowed, naming the file is not.
-        if read.names_its_source:
-            leak = (
-                QuestionRejection.LEAKS_SOURCE,
-                (
-                    "the verifier says it names the material the answer is in, so "
-                    "it asks a question and answers half of it"
-                ),
-            )
-            if self._judge_phrasing:
-                return leak
-            log.info(
-                "keeping %r: %s, but the writer judged itself",
-                candidate.question_text,
-                leak[1],
-            )
-
-        # The verifier's opinion, and only where the question is thin enough
-        # for it to be worth holding. A question naming a name, a number or
-        # three things was asked about something, whatever the verifier made
-        # of it.
-        if (
-            not read.stands_alone
-            and not candidate.follows
-            and not anchored(candidate.question_text, candidate.group.language)
-        ):
-            reason = (
-                "the verifier says it names nothing a person searching would "
-                "know, and it names no name, no number and fewer than "
-                f"{NAMES_SOMETHING} things, so it could not have been asked "
-                "without the passage"
-            )
-            if self._judge_phrasing:
-                return QuestionRejection.UNANCHORED, reason
-            # Logged and kept. An opinion needs an independent holder, and
-            # there is none when the writer is marking its own work.
-            log.info(
-                "keeping %r: %s, but the writer judged itself",
-                candidate.question_text,
-                reason,
-            )
-
-        # The same bargain as above, over the other way a question can fail
-        # to stand on its own: not naming too little, but pointing at
-        # something the asker cannot see. The measurement is cheap and
-        # over-fires - a question that sets a case up and refers back to it
-        # carries a pointer and is fine - so the verdict is the verifier's
-        # and this may only veto it. Never for a follow-up, which leans on
-        # the thread by design.
-        pointers = (
-            ()
-            if read.self_contained or candidate.follows
-            else demonstratives(candidate.question_text, candidate.group.language)
-        )
-        if pointers:
-            reason = (
-                f"it points outward with {', '.join(repr(one) for one in pointers)} "
-                "and the verifier finds nothing in the question to point at, so "
-                "only somebody holding the passage could have asked it"
-            )
-            if self._judge_phrasing:
-                return QuestionRejection.UNANCHORED, reason
-            log.info(
-                "keeping %r: %s, but the writer judged itself",
-                candidate.question_text,
-                reason,
-            )
 
         if candidate.answerable:
             target = candidate.target_answer or ""

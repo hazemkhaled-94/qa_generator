@@ -24,10 +24,8 @@ from llm.client import Client
 
 _VERIFY = """You check one test question for a document-search chatbot.
 
-You are given some PASSAGES and a QUESTION. Do two separate things.
-
-FIRST, answer the question using ONLY those passages. You have no other
-knowledge.
+You are given some PASSAGES and a QUESTION. Answer the question using ONLY
+those passages. You have no other knowledge.
 
 - `in_passage` is true when the passages give the answer. READING IS ALLOWED:
   the answer may be spread over two sentences, worded differently from the
@@ -45,69 +43,11 @@ Saying it is not in the passages is a correct answer whenever it is true, and
 inventing one is the failure. But so is refusing an answer that IS there
 because it took two sentences to find: look before you decline.
 
-SECOND, two narrow readings of the question itself. They are about different
-things and are easy to confuse, so read both.
-
-- `names_its_source`: does the question say WHERE the answer is - naming or
-  quoting a document, a report, a circular, a regulation by name, a section or
-  a heading?
-
-  TRUE:  "According to the service agreement, how long may a reply take?"
-  TRUE:  "Under 'Support > Response times', what is the urgent reply time?"
-  TRUE:  "What does section 4 say about weekend cover?"
-  FALSE: "How long is allowed for answering an urgent support request?"
-  FALSE: "Who approves a change to the shift plan?"
-  FALSE: "How many faults were reported to the site manager in 2025?"
-              (the site manager is who they were reported TO, not a source)
-
-  Naming a party, a duty, a period or a thing being governed is NOT naming a
-  source. Only saying which material holds the answer is.
-
-  The question may be in any language. Judge what it does, not what it is
-  written in.
-
-- `subject`: COPY the thing the question is about, word for word out of the
-  question. Not what it asks for - what it asks ABOUT.
-
-  "How quickly is an urgent support request answered?" -> "urgent support
-                                                           request"
-  "How many faults were reported in 2025?"             -> "faults reported
-                                                           in 2025"
-  "What specific components are included?"             -> ""
-  "For which items do the requirements apply?"         -> ""
-
-  Leave it EMPTY only when the question names nothing at all - when every
-  noun in it is a bare word like "components", "requirements" or "criteria"
-  with nothing saying whose or which. If you can copy anything more specific
-  than that out of the question, copy it.
-
-  A question you could not answer still has a subject. Not finding the answer
-  in the passages says nothing about this, and the two are constantly
-  confused: answer this one by reading the QUESTION, not the passages.
-
-- `self_contained`: does every POINTING WORD in the question - "this",
-  "these", "that one", "the said", "the two above" - have something inside
-  the question itself to point at?
-
-  The asker has not seen the material. A pointing word that reaches outside
-  the question reaches nothing they could know.
-
-  TRUE:  "If a system meets its target by editing the stored score instead of
-          doing the task, how is this behaviour classified?"
-                          ("this behaviour" is the case the question just set
-                           out, so it points at something present)
-  TRUE:  "How do the reply times for standard and urgent requests differ?"
-                          (nothing points anywhere)
-  FALSE: "What changed in this version?"
-                          (no version is named anywhere in the question)
-  FALSE: "How long is the gap between these two editions?"
-                          (which two? the asker cannot know)
-
-  Judge the question alone. A question whose pointing word is answered by the
-  PASSAGES but not by the question is exactly the failure this catches.
-
-All the judgements are independent. A question can be answerable by the
-passages, name no source, and still name no subject either.
+This call asks for nothing else. Three judgements about the question's own
+phrasing used to share it, and what that cost is measured in
+`evaluation/README.md`: answered here they were right 7 times out of 7 in
+English and 6 out of 12 in German, in a call whose recall half is good in
+both. They are `gates.subject`, `gates.cites_source` and `phrasing.py` now.
 """
 
 
@@ -220,52 +160,18 @@ class _Recovered(BaseModel):
         description="The answer, taken from the passages and in their "
         "language. Empty when in_passage is false.",
     )
-    names_its_source: bool = Field(
-        default=False,
-        description="True if the question says WHERE the answer is: naming or "
-        "quoting a document, report, circular, named regulation, section or "
-        "heading. Naming a party, duty, period or regulated thing is not "
-        "naming a source.",
-    )
-    subject: str = Field(
-        default="",
-        description="The thing the question is ABOUT, copied word for word "
-        "out of the question. Empty only when it names nothing at all. Read "
-        "the question, not the passages: a question you could not answer "
-        "still has a subject.",
-    )
-    self_contained: bool = Field(
-        default=True,
-        description="True when every pointing word in the question - this, "
-        "these, that one, the said, the two above - has something inside the "
-        "question itself to point at. False when one points outside it, so "
-        "the asker would have to have seen the material to know what is "
-        "meant. Read the question, not the passages.",
-    )
 
 
 @dataclass(frozen=True)
 class Reading:
-    """What the verifier made of one question and its passages.
+    """What the verifier got back out of one question's passages.
 
-    `recovered` is the answer it got back out of them, or None for NOT IN
-    PASSAGE. `stands_alone` is whether the question names a subject at all.
-    `names_its_source` is whether it says which material holds the answer,
-    which is the opposite failure and was for a while mistaken for a virtue.
+    `recovered` is the answer, or None for NOT IN PASSAGE. One field,
+    because one call now asks one thing: what a question's own phrasing
+    amounts to is read off its parse in `gates` and asked in `phrasing`.
     """
 
     recovered: str | None
-    stands_alone: bool
-    names_its_source: bool = False
-    #: Whether every pointing word in the question has an antecedent inside
-    #: it. False is a question only somebody holding the passage could ask.
-    self_contained: bool = True
-    #: The span the subject was read off, kept rather than reduced to the
-    #: boolean beside it. Nothing gates on it: it is what says WHY a question
-    #: was found to name nothing, and it is what the phrasing harness scores
-    #: containment against, since two correct readings disagree about a
-    #: span's edges but not about the word inside it.
-    subject: str = ""
 
 
 class Verifier:
@@ -415,16 +321,5 @@ class Verifier:
         return Reading(
             recovered=(
                 got.answer.strip() if got.in_passage and got.answer.strip() else None
-            ),
-            # Whether it names a subject, read off the subject it named. Asked
-            # as a yes or no it was answered `no` for questions naming a party,
-            # a period and a duty apiece - six of ten rejections in one topic,
-            # four of them on unanswerable questions, where a model that could
-            # not find the answer says the question named nothing. Copying a
-            # span out of the question is a task a small model does not
-            # confuse with reading the passages.
-            stands_alone=bool(got.subject.strip()),
-            names_its_source=got.names_its_source,
-            self_contained=got.self_contained,
-            subject=got.subject.strip(),
+            )
         )

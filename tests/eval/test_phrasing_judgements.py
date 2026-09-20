@@ -40,11 +40,6 @@ from evaluation.cases import PHRASING
 
 pytestmark = [pytest.mark.eval, pytest.mark.nlp]
 
-#: A passage for the reading half of the call, which these cases are not
-#: about. The judgements are made on the question; something has to be in
-#: front of the model for it to answer at all.
-_NOTHING = "Dieser Abschnitt behandelt nichts, was die Frage beantwortet."
-
 
 @dataclass
 class Score:
@@ -90,48 +85,76 @@ def majority(judgement: str) -> float:
 
 @pytest.fixture(scope="module")
 def verifier():
-    """The real verifier against the served model, or a skip."""
+    """The real phrasing judge against the served model, or a skip.
+
+    `QUESTIONS_PHRASING_MODEL` when one is named, the verifier's otherwise,
+    because that is the fallback the factory applies and this has to measure
+    what a run would actually ask.
+    """
     if not os.environ.get("LLM_MODEL"):
         pytest.skip("LLM_MODEL is unset; no model to measure")
-
-    from dataclasses import replace
 
     from llm.client import Client, ModelUnavailable
     from llm.config import Settings
     from question_generation.config import Settings as QuestionSettings
-    from question_generation.verifier import Verifier
+    from question_generation.phrasing import PhrasingJudge
 
     settings = Settings.load()
     questions = QuestionSettings.load()
-    built = Verifier(
+    built = PhrasingJudge(
         Client(
-            replace(settings, model=questions.verifier_model)
-            if questions.verifier_model
-            else settings
+            settings.overridden(questions.phrasing_model or questions.verifier_model)
         )
     )
     try:
-        built.read("Is this on?", ["This is on."])
+        if built.names_its_source("Is this on?") is None:
+            raise ModelUnavailable("it abstained on the warm-up")
     except ModelUnavailable as exc:
-        pytest.skip(f"the verifier is not answering: {exc}")
+        pytest.skip(f"the phrasing judge is not answering: {exc}")
     return built
 
 
 @pytest.fixture(scope="module")
 def scored(verifier):
-    """Every case put to the verifier once, scored per judgement."""
+    """Every case put to the pipeline as it now answers these.
+
+    Not to one call any more. `subject` is read off the parse,
+    `names_its_source` is a rule wherever a rule settles it and the model
+    only for the residue, and `self_contained` is asked only where the parse
+    found a pointing word. Scoring what the pipeline does is the point: a
+    number for a call nothing makes measures nothing.
+    """
+    from nlp.analysis import pointing
+    from question_generation.gates import cites_source
+    from question_generation.gates import subject as read_subject
+
     source = Score("names_its_source")
     contained = Score("self_contained")
     subject = Score("subject")
 
     for case in PHRASING:
-        reading = verifier.read(case["question"], [_NOTHING])
-        source.record(case["name"], case["names_its_source"], reading.names_its_source)
-        contained.record(case["name"], case["self_contained"], reading.self_contained)
+        question, language = case["question"], case["language"]
+
+        ruled = cites_source(question, language)
+        source.record(
+            case["name"],
+            case["names_its_source"],
+            ruled if ruled is not None else verifier.names_its_source(question),
+        )
+
+        # Nothing to point at means nothing to rule on, and the gate reads
+        # that as self-contained rather than asking.
+        pointers = pointing(question, language)
+        contained.record(
+            case["name"],
+            case["self_contained"],
+            True if not pointers else bool(verifier.self_contained(question, pointers)),
+        )
+
         # Containment, not equality: `holds` is a word the copied span must
         # carry, and "" is a question that names nothing.
         wanted = case["holds"]
-        got = reading.subject
+        got = read_subject(question, language)
         subject.record(
             case["name"],
             bool(wanted),
@@ -165,19 +188,30 @@ def test_every_judgement_is_scored_on_its_own(scored) -> None:
     )
 
 
-def test_the_german_cases_are_judged_as_well_as_the_english(scored, verifier) -> None:
-    """A model that reads German worse is the risk a swap carries.
+def test_the_german_cases_are_judged_as_well_as_the_english(scored) -> None:
+    """A judge that reads German worse is the risk a swap carries.
 
     Printed rather than asserted: twelve cases against seven is not a
     difference anybody should gate on. It is here because the corpus is
-    German and an English-first judge would pass every test above.
+    German and an English-first judge would pass every test above - which
+    is not hypothetical. Asked inside the verifier's reading call these
+    judgements scored 7/7 in English and 6/12 in German, and that gap is
+    why they are asked on their own now.
+
+    Read off `scored` rather than asked again, so the split is over the same
+    answers the table above reports.
     """
+    wrong = {
+        (one.name, case)
+        for one in scored
+        if one.name != "subject"
+        for case, _, _ in one.missed or ()
+    }
     by_language: dict[str, list[bool]] = {"de": [], "en": []}
     for case in PHRASING:
-        reading = verifier.read(case["question"], [_NOTHING])
         by_language[case["language"]].append(
-            reading.names_its_source == case["names_its_source"]
-            and reading.self_contained == case["self_contained"]
+            ("names_its_source", case["name"]) not in wrong
+            and ("self_contained", case["name"]) not in wrong
         )
 
     for language, results in by_language.items():
