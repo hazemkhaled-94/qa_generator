@@ -49,6 +49,20 @@ DEFAULT_FIELD = "both"
 #: How many questions to hold at once while re-checking them.
 _BATCH = 500
 
+#: Only passages the corpus makes a checkable claim from. Without it a probe
+#: comes back with tables of contents and indexes, which carry every term in
+#: the material and sit near every question in the embedding space, and
+#: answer none of them: they are the same passages extraction skips as
+#: navigation. Shared by both `elsewhere` probes, so the lemma one and the
+#: vector one cannot come to disagree about what a passage is.
+_ASSERTS = (
+    select(FactPassage.passage_id)
+    .join(Fact, Fact.id == FactPassage.fact_id)
+    .where(Fact.validated)
+    .where(FactPassage.passage_id == Passage.id)
+    .exists()
+)
+
 
 def _joined(query: Select) -> Select:
     """Joins everything a question is filtered by, placed by and named by.
@@ -279,7 +293,12 @@ class QuestionCatalog(Repository):
             ).rowcount
 
     def elsewhere(
-        self, lemmas: Sequence[str], language: str, skip: Sequence[int], limit: int
+        self,
+        lemmas: Sequence[str],
+        language: str,
+        skip: Sequence[int],
+        limit: int,
+        embedding: Sequence[float] | None = None,
     ) -> list[str]:
         """The passages outside this question's own that talk about it most.
 
@@ -290,11 +309,20 @@ class QuestionCatalog(Repository):
         question labelled unanswerable that the material does answer marks a
         correct chatbot wrong, which is the failure the gates exist for.
 
-        Ranked by how many content lemmas a passage shares with the
-        question, over the array chunking already wrote - the same
-        vocabulary the topics were fitted over. It is a retrieval and not a
-        proof: it finds where to look, and the model still reads the
-        passages and decides.
+        Ranked by cosine over `passages.embedding` when the question carries
+        a vector and the corpus has been embedded, and by shared content
+        lemmas otherwise.
+
+        The vectors matter more here than anywhere else this pair of
+        measures is used. A lemma probe finds the passages that REPEAT the
+        question's words, and an unanswerable question is written by moving
+        a fact just out of reach - so the passage that would answer it is
+        the one phrased differently, which is the one a lemma probe ranks
+        last. This gate exists to catch a question the corpus answers after
+        all, and it was retrieving on the signal least likely to find one.
+
+        Either way it is a retrieval and not a proof: it finds where to
+        look, and the model still reads the passages and decides.
 
         Args:
             lemmas: The question's content lemmas.
@@ -302,11 +330,16 @@ class QuestionCatalog(Repository):
             skip: Passages the question already cites, which the first
                 verifier pass has read.
             limit: The most passages to hand back.
+            embedding: The question's vector, when one was computed.
 
         Returns:
-            Their text, most-shared first. Empty when the question names
-            nothing the corpus does.
+            Their text, nearest first. Empty when the question names nothing
+            the corpus does.
         """
+        if embedding is not None:
+            found = self._nearest_passages(language, skip, limit, list(embedding))
+            if found:
+                return found
         if not lemmas:
             return []
         wanted = cast(list(lemmas), ARRAY(Text))
@@ -320,25 +353,42 @@ class QuestionCatalog(Repository):
                 .scalar_subquery()
             )
         )
-        # Only passages the corpus makes a checkable claim from. Without it
-        # the probe comes back with tables of contents and indexes, which
-        # carry every term in the material and answer nothing: they are the
-        # same passages extraction skips as navigation.
-        asserts = (
-            select(FactPassage.passage_id)
-            .join(Fact, Fact.id == FactPassage.fact_id)
-            .where(Fact.validated)
-            .where(FactPassage.passage_id == Passage.id)
-            .exists()
-        )
         query = (
             select(Passage.text)
             .where(
                 Passage.language == language,
                 Passage.lemmas.op("&&")(wanted),
-                asserts,
+                _ASSERTS,
             )
             .order_by(overlap.desc(), Passage.id)
+            .limit(limit)
+        )
+        if skip:
+            query = query.where(Passage.id.notin_(skip))
+        with self._session() as session:
+            return [row.text for row in session.execute(query)]
+
+    def _nearest_passages(
+        self, language: str, skip: Sequence[int], limit: int, embedding: list[float]
+    ) -> list[str]:
+        """The embedded passages of one language nearest this vector.
+
+        Empty when the corpus carries no vectors, which is what sends
+        `elsewhere` back to its lemma probe rather than to nothing.
+        """
+        distance = Passage.embedding.cosine_distance(embedding)
+        query = (
+            select(Passage.text)
+            .where(
+                Passage.language == language,
+                Passage.embedding.is_not(None),
+                # The same filter the lemma probe applies, and for the same
+                # reason: a contents page carries every term in the material
+                # and sits near every question in the space, and answers
+                # none of them.
+                _ASSERTS,
+            )
+            .order_by(distance)
             .limit(limit)
         )
         if skip:

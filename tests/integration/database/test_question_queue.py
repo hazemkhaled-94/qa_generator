@@ -955,3 +955,104 @@ def test_a_bridge_backed_question_is_found_by_either_of_its_documents(
     # listing has always read.
     _, listed = catalog.page()
     assert sorted(listed[0].documents) == sorted([digest("a"), digest("b")])
+
+
+# ── The corpus-wide probe ─────────────────────────────────────────────────
+
+
+class TestFindingThePassageThatAnswersItAnyway:
+    """What the `answerable_elsewhere` gate retrieves with.
+
+    An unanswerable question is written by taking a fact and moving it just
+    out of reach, so the passage that would answer it after all is the one
+    phrased DIFFERENTLY - which is the one a lemma probe ranks last. The gate
+    was retrieving on the signal least likely to find what it was looking
+    for.
+    """
+
+    def corpus(self, engine, *, axes: dict[str, int | None]) -> None:
+        """One passage per text, each on the axis named, each carrying a fact."""
+        with Session(engine) as session:
+            sha = digest("a")
+            session.add(document(sha))
+            session.flush()
+            for ordinal, (body, axis) in enumerate(axes.items(), 1):
+                at = passage(sha, ordinal=ordinal, text=body, language="en")
+                if axis is not None:
+                    at.embedding = [1.0 if i == axis else 0.0 for i in range(1024)]
+                session.add(at)
+                session.flush()
+                drawn = fact(at.id, statement=f"Claim about {body[:20]}.")
+                drawn.validated = True
+                session.add(drawn)
+            session.commit()
+
+    def test_the_nearest_passage_comes_back_first(self, engine, database) -> None:
+        """Ranked by cosine, not by how many words it repeats."""
+        self.corpus(
+            engine,
+            axes={"A defect is present in the build.": 3, "Refunds take a week.": 9},
+        )
+        asked = [1.0 if i == 3 else 0.0 for i in range(1024)]
+
+        found = QuestionCatalog().elsewhere([], "en", [], 2, asked)
+
+        assert found[0] == "A defect is present in the build."
+
+    def test_a_passage_sharing_no_word_is_still_found(self, engine, database) -> None:
+        """The whole point: Jaccard scores this pair 0 and cosine finds it."""
+        self.corpus(engine, axes={"Ein Fehlerzustand liegt vor.": 3})
+        asked = [1.0 if i == 3 else 0.0 for i in range(1024)]
+
+        found = QuestionCatalog().elsewhere(["defect", "present"], "en", [], 2, asked)
+
+        assert found == ["Ein Fehlerzustand liegt vor."]
+
+    def test_the_passages_it_already_cites_are_skipped(self, engine, database) -> None:
+        """The first verifier pass has read those."""
+        self.corpus(engine, axes={"A defect is present.": 3, "Another defect.": 3})
+        asked = [1.0 if i == 3 else 0.0 for i in range(1024)]
+        with engine.connect() as connection:
+            first = connection.execute(
+                text("SELECT id FROM passages ORDER BY id LIMIT 1")
+            ).scalar_one()
+
+        found = QuestionCatalog().elsewhere([], "en", [first], 2, asked)
+
+        assert found == ["Another defect."]
+
+    def test_an_unembedded_corpus_falls_back_to_the_lemmas(
+        self, engine, database
+    ) -> None:
+        """A corpus extracted before the column existed still runs this gate."""
+        self.corpus(engine, axes={"A defect is present in the build.": None})
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE passages SET lemmas = ARRAY['defect','build']")
+            )
+            connection.commit()
+        asked = [1.0 if i == 3 else 0.0 for i in range(1024)]
+
+        found = QuestionCatalog().elsewhere(["defect"], "en", [], 2, asked)
+
+        assert found == ["A defect is present in the build."]
+
+    def test_a_passage_carrying_no_fact_is_never_offered(
+        self, engine, database
+    ) -> None:
+        """A contents page sits near every question and answers none.
+
+        The same filter the lemma probe applies, so the two cannot come to
+        disagree about what a passage is.
+        """
+        self.corpus(engine, axes={"A defect is present.": 3})
+        with Session(engine) as session:
+            bare = passage(digest("a"), ordinal=99, text="Contents", language="en")
+            bare.embedding = [1.0 if i == 3 else 0.0 for i in range(1024)]
+            session.add(bare)
+            session.commit()
+        asked = [1.0 if i == 3 else 0.0 for i in range(1024)]
+
+        found = QuestionCatalog().elsewhere([], "en", [], 5, asked)
+
+        assert "Contents" not in found

@@ -107,6 +107,7 @@ _SOURCE = (
         Fact.statement,
         Fact.kind,
         Fact.units_statement,
+        Fact.embedding,
     )
     .select_from(Fact)
     .join(FactPassage, (FactPassage.fact_id == Fact.id) & (FactPassage.position == 0))
@@ -134,6 +135,7 @@ _RESTING = (
         Passage.section_path,
         Passage.ordinal,
         Passage.lemmas,
+        Passage.embedding,
         DOMINANT.c.topic_id,
         Document.title,
     )
@@ -143,6 +145,15 @@ _RESTING = (
     .join(DOMINANT, DOMINANT.c.passage_id == Passage.id, isouter=True)
     .order_by(FactPassage.fact_id, FactPassage.position)
 )
+
+
+def _vector(stored: Any) -> tuple[float, ...] | None:
+    """One embedding column as a tuple, or None where nothing wrote it.
+
+    A tuple rather than the list pgvector hands back, because a SourceFact is
+    frozen and hashed by the sampler.
+    """
+    return None if stored is None else tuple(float(one) for one in stored)
 
 
 def _passage(row: Any) -> SourcePassage:
@@ -157,6 +168,7 @@ def _passage(row: Any) -> SourcePassage:
         document_title=row.title,
         ordinal=row.ordinal,
         lemmas=tuple(row.lemmas or ()),
+        embedding=_vector(row.embedding),
     )
 
 
@@ -176,6 +188,7 @@ def _fact(row: Any, resting: tuple[SourcePassage, ...]) -> SourceFact:
         kind=row.kind,
         passages=resting,
         units=tuple(row.units_statement or ()),
+        embedding=_vector(row.embedding),
     )
 
 

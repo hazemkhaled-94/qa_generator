@@ -57,6 +57,8 @@ def source(
     units: tuple[str, ...] = (),
     kind: str = FactKind.ATOMIC,
     rests_on: tuple[SourcePassage, ...] = (),
+    axis: int | None = None,
+    passage_axis: int | None = None,
 ) -> SourceFact:
     """One validated fact, as question generation reads it off a topic.
 
@@ -81,11 +83,20 @@ def source(
                 document_title=document_title,
                 ordinal=ordinal or passage_id,
                 lemmas=lemmas,
+                embedding=_axis(passage_axis),
             ),
             *rests_on,
         ),
         units=units,
+        embedding=_axis(axis),
     )
+
+
+def _axis(at: int | None) -> tuple[float, ...] | None:
+    """A unit vector pointing down one axis, or None for no vector."""
+    if at is None:
+        return None
+    return tuple(1.0 if i == at else 0.0 for i in range(1024))
 
 
 def resting(

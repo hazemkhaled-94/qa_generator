@@ -200,6 +200,15 @@ SETTINGS: tuple[Setting, ...] = (
         "keeps. 0 turns the cap off.",
     ),
     Setting(
+        name="EXTRACTION_DIGEST_MODEL",
+        service="extraction",
+        kind="text",
+        optional=True,
+        help="The model that condenses a passage into a summary and an "
+        "outline. Unset uses whichever model reads it. Condensing is the one "
+        "thing extraction asks for that a small model is trained to do.",
+    ),
+    Setting(
         name="EXTRACTION_DUPLICATE_COSINE",
         service="extraction",
         kind="decimal",

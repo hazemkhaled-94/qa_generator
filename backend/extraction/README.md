@@ -145,6 +145,20 @@ why naming both kinds in `EXTRACTION_KINDS` costs no more than naming one.
 A passage carrying fewer than two claims is not digested at all: it is
 already as short as its own summary.
 
+**It may call a model of its own.** `EXTRACTION_DIGEST_MODEL` names one;
+unset, it uses whichever model reads the passage, which is what it did before
+that setting existed. It is the one call this stage makes that is worth
+moving somewhere cheaper. Reading a passage for its claims needs the model to
+decide what a claim *is* and to write each one to a rule about finite verbs;
+condensing is summarisation, which is the task every small instruct model is
+distilled on. It is also the cheapest to be wrong about — a bad digest is
+refused as `not_condensed` and costs one call.
+
+The digest still has to answer in the shape, one typed object carrying both
+the summary and the outline, so `LLM_STRUCTURED_MODE` applies to it and a
+model too small to hold a schema fails validation rather than answering
+badly. Whichever model wrote a fact is recorded on that fact either way.
+
 ### Step 5 — Check everything
 
 **In:** a candidate and the passage or passages it came from.

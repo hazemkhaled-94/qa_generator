@@ -88,7 +88,7 @@ A topic sitting in one document has no cross-document question in it. The deal
 falls back to the widest sample it can give — the nearest passage of the same
 document, by ordinal — rather than writing nothing about that subject.
 
-Shared vocabulary pairs the **passages**, and then it picks the **facts**. The
+Likeness pairs the **passages**, and then it picks the **facts**. The
 second passage's share of the sample is the facts closest to what the first
 offered, not its own best: its own best is what it would have given a question
 of its own, and two passages the corpus calls related still hold facts with
@@ -98,6 +98,25 @@ hinsichtlich Einordnung und erstmaliger Nennung?"* — which no honest question
 spans. Measured over 120 real cross-document pairs, choosing the second side
 for what it meets rather than for its own rank halved the pairs offered with
 nothing in common, from 73 to 38.
+
+**Cosine where the corpus is embedded, shared lemmas where it is not.** Both
+measures are the same shape — a share in [0, 1], one over `passages.embedding`
+and one over the lemma arrays — and the vectors are preferred because a lemma
+overlap cannot see a synonym. Two passages about one subject in different
+words share a direction and no vocabulary; Jaccard scores that pair 0, so the
+sampler passed over the genuinely related pair and took an unrelated one
+instead. `Testfall` against `Prüffall` and `Fehlerzustand` against `Defekt`
+are both in this corpus.
+
+A fact is weighed against the **nearest** of the facts already offered rather
+than against their mean. A mean of several vectors points somewhere none of
+them is, so a third fact would be measured against a subject the offer does
+not hold; what the writer needs is a fact meeting one of the others, because
+that is what a question spans.
+
+The fallback is not a transition. A corpus extracted before the embedding
+columns existed carries no vectors at all, and `make extract-embed` is what
+gives it some.
 
 Where nothing in the second passage meets the first, the sample is still
 offered and the writer is told to narrow: the span rules end by saying that if

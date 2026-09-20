@@ -26,6 +26,7 @@ from itertools import zip_longest
 
 from database.qa_generator import FactKind
 from nlp.analysis import content
+from nlp.embedding import cosine
 from question_generation.models import FactGroup, SourceFact
 
 
@@ -63,18 +64,45 @@ def spread(index: int, share: float) -> bool:
 
 
 def overlap(left: Sequence[SourceFact], right: Sequence[SourceFact]) -> float:
-    """How much vocabulary two passages share, in [0, 1].
+    """How alike two passages are, in [0, 1].
 
-    Jaccard over the content lemmas chunking stored, which is the same
-    vocabulary the topics were fitted over. It is what makes a pair of
+    Cosine over `passages.embedding` where both carry one, and Jaccard over
+    the content lemmas where either does not. It is what makes a pair of
     passages related rather than merely distant: pairing two passages because
     they came from different files produced questions about the first that
     carried a spread earned by the second.
+
+    Cosine first because a lemma overlap cannot see a synonym. Two passages
+    about one subject in different words share a direction and no vocabulary,
+    and this corpus is full of that pair - `Testfall` against `Prüffall`,
+    `Fehlerzustand` against `Defekt`. Jaccard scores those 0 and the sampler
+    then pairs each of them with something genuinely unrelated instead.
+
+    The fallback is not a transition: a corpus extracted before the column
+    existed has no vectors at all, and `make extract-embed` is what gives it
+    some.
     """
+    near = _cosine(left[0].anchor.embedding, right[0].anchor.embedding)
+    if near is not None:
+        return near
     first, second = set(left[0].lemmas), set(right[0].lemmas)
     if not first or not second:
         return 0.0
     return len(first & second) / len(first | second)
+
+
+def _cosine(
+    left: tuple[float, ...] | None, right: tuple[float, ...] | None
+) -> float | None:
+    """How alike two unit vectors are, clamped to [0, 1], or None for neither.
+
+    Clamped because every caller here reads a share: the vectors are
+    normalised, so a dot product is already a cosine, and the negative half
+    of its range means the same thing to a sampler as zero does.
+    """
+    if not left or not right:
+        return None
+    return max(0.0, cosine(list(left), list(right)))
 
 
 @lru_cache(maxsize=8192)
@@ -91,14 +119,30 @@ def _words(statement: str, language: str | None) -> frozenset[str]:
 def meets(chosen: Sequence[SourceFact], candidate: SourceFact) -> float:
     """How much one fact has in common with the facts already offered, in [0, 1].
 
-    Jaccard over content lemmas, the same measure `overlap` pairs passages
-    with, one level down. Two passages the corpus says are about related
-    things still hold facts that are about nothing in common, and pairing
-    the top-ranked fact of each produced questions welding a date to a
-    category: `Wodurch unterscheiden sich MT und modellbasiertes Testen
+    The same measure `overlap` pairs passages with, one level down: cosine
+    over `facts.embedding` where the statements carry one, Jaccard over their
+    content lemmas where they do not. Two passages the corpus says are about
+    related things still hold facts that are about nothing in common, and
+    pairing the top-ranked fact of each produced questions welding a date to
+    a category: `Wodurch unterscheiden sich MT und modellbasiertes Testen
     hinsichtlich Einordnung und erstmaliger Nennung?` is two facts in a
     trenchcoat, and no honest question spans them.
+
+    Against the closest of the chosen rather than their mean. A mean of
+    several vectors points somewhere none of them is, so a third fact is
+    weighed against a subject the offer does not hold; what the writer needs
+    is a fact that meets ONE of the others, which is what a question spans.
     """
+    near = max(
+        (
+            found
+            for one in chosen
+            if (found := _cosine(one.embedding, candidate.embedding)) is not None
+        ),
+        default=None,
+    )
+    if near is not None:
+        return near
     subject = frozenset().union(
         *(_words(one.statement, one.language) for one in chosen)
     )

@@ -1505,7 +1505,9 @@ def test_an_unanswerable_question_another_passage_answers_is_refused() -> None:
         nearest=lambda embedding: None,
         threshold=0.93,
         bounds=BOUNDS,
-        elsewhere=lambda lemmas, language, skip, limit: ["It is 48 hours."],
+        elsewhere=lambda lemmas, language, skip, limit, embedding=None: [
+            "It is 48 hours."
+        ],
         elsewhere_passages=4,
     )
 

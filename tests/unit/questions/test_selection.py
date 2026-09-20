@@ -12,6 +12,7 @@ question was single-passage, and `hard` was unreachable.
 
 from __future__ import annotations
 
+import pytest
 from factories import bridge, resting, source
 
 from database.qa_generator import (
@@ -25,6 +26,8 @@ from question_generation.selection import (
     Deal,
     Shape,
     by_passage,
+    meets,
+    overlap,
     ranked,
     spread,
     strided,
@@ -548,3 +551,68 @@ def test_the_first_passage_is_still_offered_in_rank_order() -> None:
 
     assert offered is not None
     assert [fact.id for fact in offered.facts] == [2, 1]
+
+
+class TestPairingByCosine:
+    """What pairs two passages, and two facts, once the corpus is embedded.
+
+    A lemma overlap cannot see a synonym. Two passages about one subject in
+    different words share a direction and no vocabulary, and Jaccard scores
+    that pair 0 - so the sampler passed over it and paired each of them with
+    something genuinely unrelated instead.
+    """
+
+    def test_two_facts_on_one_axis_meet(self) -> None:
+        """Cosine 1, whatever words they are written in."""
+        chosen = [
+            source(fact_id=1, statement="Ein Prüffall deckt eine Klasse ab.", axis=3)
+        ]
+        candidate = source(fact_id=2, statement="A test case covers a class.", axis=3)
+
+        assert meets(chosen, candidate) == pytest.approx(1.0)
+
+    def test_two_facts_on_different_axes_do_not(self) -> None:
+        """Orthogonal is as far apart as this space goes."""
+        chosen = [source(fact_id=1, axis=3)]
+        candidate = source(fact_id=2, axis=9)
+
+        assert meets(chosen, candidate) == pytest.approx(0.0)
+
+    def test_a_fact_sharing_no_word_still_meets_one_it_is_near(self) -> None:
+        """The pair Jaccard scores 0 and cosine scores 1."""
+        chosen = [source(fact_id=1, statement="Ein Fehlerzustand liegt vor.", axis=3)]
+        candidate = source(fact_id=2, statement="A defect is present.", axis=3)
+
+        assert meets(chosen, candidate) > 0.9
+        assert not set(chosen[0].statement.split()) & set(candidate.statement.split())
+
+    def test_a_candidate_is_weighed_against_the_nearest_chosen(self) -> None:
+        """Not their mean, which points somewhere none of them is."""
+        chosen = [source(fact_id=1, axis=3), source(fact_id=2, axis=9)]
+        candidate = source(fact_id=3, axis=9)
+
+        assert meets(chosen, candidate) == pytest.approx(1.0)
+
+    def test_facts_with_no_vector_fall_back_to_their_lemmas(self) -> None:
+        """A corpus extracted before the column existed still deals."""
+        chosen = [source(fact_id=1, statement="The device weighs 4 kg.")]
+        near = source(fact_id=2, statement="The device ships in March.")
+        far = source(fact_id=3, statement="Refunds are paid within a week.")
+
+        assert meets(chosen, near) > meets(chosen, far)
+
+    def test_two_passages_on_one_axis_overlap(self) -> None:
+        """The same measure, one level up."""
+        left = [source(fact_id=1, passage_id=1, passage_axis=4)]
+        right = [source(fact_id=2, passage_id=2, passage_axis=4)]
+
+        assert overlap(left, right) == pytest.approx(1.0)
+
+    def test_passages_with_no_vector_fall_back_to_their_lemmas(self) -> None:
+        """Jaccard over what chunking stored, as before."""
+        left = [source(fact_id=1, passage_id=1, lemmas=("test", "fall"))]
+        right = [source(fact_id=2, passage_id=2, lemmas=("test", "fall"))]
+        other = [source(fact_id=3, passage_id=3, lemmas=("rückgabe",))]
+
+        assert overlap(left, right) == pytest.approx(1.0)
+        assert overlap(left, other) == pytest.approx(0.0)

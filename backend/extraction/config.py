@@ -65,6 +65,8 @@ class Settings:
         bridges_per_topic: How many bridge calls one topic is worth.
         bridge_passages: How many passages one bridge call is shown.
         model: The model that reads a passage, or None for the shared one.
+        digest_model: The model that condenses one, or None to use the same
+            one that reads it.
         duplicate_cosine: How alike two statements may be before the second
             is refused. 0 runs no dedup gate and writes no vectors.
         embedding_model: The model the vectors come from.
@@ -78,6 +80,7 @@ class Settings:
     bridges_per_topic: int
     bridge_passages: int
     model: str | None
+    digest_model: str | None
     duplicate_cosine: float
     embedding_model: str
     embedding_max_tokens: int
@@ -121,6 +124,10 @@ class Settings:
             # Absent means the model LLM_MODEL names, which is what every
             # stage called before any of them could name its own.
             model=optional("EXTRACTION_MODEL", source),
+            # A digest is the one thing extraction asks for that a small
+            # model is actually trained to do, so it is the one worth
+            # pointing somewhere cheaper on its own.
+            digest_model=optional("EXTRACTION_DIGEST_MODEL", source),
             duplicate_cosine=decimal("EXTRACTION_DUPLICATE_COSINE", source),
             embedding_model=required("EMBEDDING_MODEL", source),
             embedding_max_tokens=integer("EMBEDDING_MAX_TOKENS", source),

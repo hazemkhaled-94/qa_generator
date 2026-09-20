@@ -49,6 +49,7 @@ def settings(
     share: float = 0.6,
     other: float = 0.0,
     model: str | None = None,
+    digest_model: str | None = None,
     min_chars: int = 0,
 ) -> Settings:
     """The extraction settings, built rather than read.
@@ -64,6 +65,7 @@ def settings(
         bridges_per_topic=5,
         bridge_passages=2,
         model=model,
+        digest_model=digest_model,
         # 0, so wiring a service here loads no embedding model: these tests
         # build the real thing and two gigabytes is not what they are about.
         duplicate_cosine=0.0,
@@ -166,3 +168,25 @@ class TestCommandLine:
         with pytest.raises(SystemExit):
             main(["--bridge", "--revalidate"])
         assert "not allowed with" in capsys.readouterr().err
+
+
+def test_the_digest_reader_shares_the_passage_reader_by_default() -> None:
+    """One model for both, which is what it was before it could be two."""
+    built = build_service(MODEL, settings(FactKind.ATOMIC, FactKind.SUMMARY))
+
+    assert built._digest is not None
+    assert built._digest.provenance.model == "ollama/test-model"
+
+
+def test_the_digest_reader_takes_its_own_model_when_one_is_named() -> None:
+    """Condensing is the one call here a small model is trained for."""
+    built = build_service(
+        MODEL,
+        settings(FactKind.ATOMIC, FactKind.SUMMARY, digest_model="ollama/small"),
+    )
+
+    assert built._digest is not None
+    assert built._digest.provenance.model == "ollama/small"
+    assert built._extractors.for_block_type("text").provenance.model == (
+        "ollama/test-model"
+    ), "the passage reader keeps the shared model"

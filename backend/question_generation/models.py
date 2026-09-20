@@ -163,6 +163,11 @@ class SourcePassage:
     #: related things. The same vocabulary the topics were fitted over, so
     #: nothing here re-reads any text.
     lemmas: tuple[str, ...] = ()
+    #: Where it sits in the embedding space, when extraction has written it.
+    #: What `overlap` prefers to the lemmas above, because two passages about
+    #: one subject in different words share a direction and no vocabulary.
+    #: None on a corpus extracted before the column existed.
+    embedding: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +189,10 @@ class SourceFact:
     #: The numbers, dates and amounts this fact asserts, as extraction read
     #: them. A fact carrying one is what a checkable question is written from.
     units: tuple[str, ...] = ()
+    #: Where this statement sits in the embedding space, when extraction has
+    #: written it. What `meets` prefers to a lemma overlap. None on a corpus
+    #: extracted before the column existed.
+    embedding: tuple[float, ...] | None = None
 
     @property
     def anchor(self) -> SourcePassage:

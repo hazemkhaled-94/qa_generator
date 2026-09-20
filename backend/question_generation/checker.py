@@ -17,8 +17,10 @@ it:
                   nor wrong
   unanchored      a question nobody could have asked without the passage
   recoverable     the answer is not in the evidence the question cites
-  answerable_elsewhere  a lemma probe and a second call, on the unanswerable
-                  share only: a passage it does not cite answers it
+  answerable_elsewhere  one corpus-wide passage probe and a second call, on
+                  the unanswerable share only: a passage it does not cite
+                  answers it. Cosine over passages.embedding where the corpus
+                  has been embedded, shared lemmas where it has not
 
 The free ones are in `gates`, which imports no client; the calls are the
 `verifier`'s. Recoverability is the one no similarity measure makes: it asks
@@ -179,13 +181,15 @@ class QuestionChecker:
 
         return self._verdict(
             candidate,
-            self._round_trip(candidate, form),
+            self._round_trip(candidate, form, embedding),
             embedding,
             self._long_answer_chars,
             form,
         )
 
-    def _round_trip(self, candidate: Candidate, form: str) -> tuple[str, str] | None:
+    def _round_trip(
+        self, candidate: Candidate, form: str, embedding: list[float]
+    ) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back, and how it reads."""
         read = self._verifier.read(
             candidate.question_text,
@@ -313,7 +317,7 @@ class QuestionChecker:
                 QuestionRejection.ANSWERABLE_AFTER_ALL,
                 f"the cited passages answer it after all, with {read.recovered!r}",
             )
-        return self._corpus(candidate)
+        return self._corpus(candidate, embedding)
 
     def _computable(self, candidate: Candidate, target: str) -> tuple[str, str] | None:
         """Whether a derived answer follows from what the passages do state.
@@ -401,7 +405,9 @@ class QuestionChecker:
             )
         return backed
 
-    def _corpus(self, candidate: Candidate) -> tuple[str, str] | None:
+    def _corpus(
+        self, candidate: Candidate, embedding: list[float]
+    ) -> tuple[str, str] | None:
         """Asks whether the rest of the corpus answers what its passages do not.
 
         The one claim in this dataset that is about the whole corpus rather
@@ -422,6 +428,7 @@ class QuestionChecker:
             language,
             [passage.id for passage in candidate.group.resting],
             self._elsewhere_passages,
+            embedding,
         )
         if not passages:
             return None

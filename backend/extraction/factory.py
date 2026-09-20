@@ -38,13 +38,22 @@ def build_service(
     client = Client(model.overridden(settings.model))
     digests = settings.digests
     cap = settings.atomic_cap
+    # Its own client when EXTRACTION_DIGEST_MODEL names one, and the reader's
+    # otherwise. Condensing a passage is the cheapest thing asked of a model
+    # here and the one a small model is trained for, so it is the first call
+    # worth moving; what produced a fact is recorded on the fact either way.
+    condensing = (
+        Client(model.overridden(settings.digest_model))
+        if settings.digest_model
+        else client
+    )
     return ExtractionService(
         repository=PassageQueue(lease=model.lease, version=version),
         extractors=ExtractorRegistry(
             extractors=(TableExtractor(),), default=LlmExtractor(client, cap)
         ),
         checker=FactChecker(settings.digest_share),
-        digest=DigestExtractor(client, digests) if digests else None,
+        digest=DigestExtractor(condensing, digests) if digests else None,
         # Asked for in the prompt and enforced again on what comes back: a
         # model told to write four still writes nine, and a cap nothing
         # checks is a suggestion.
