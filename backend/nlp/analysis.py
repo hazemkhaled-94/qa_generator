@@ -221,12 +221,18 @@ def _references(span: Doc | Span) -> tuple[str, ...]:
 
 #: Lemmas that point at an earlier mention without any morphology saying so.
 #: Every tagset reads these as ordinary adjectives - `aforementioned` and
-#: `latter` are `ADJ/JJ`, `genannt` and `besagt` likewise - so unlike the two
-#: readings below them there is no feature to test and a list is the only
+#: `latter` are `ADJ/JJ`, `besagt` and `vorgenannt` likewise - so unlike the
+#: two readings below them there is no feature to test and a list is the only
 #: thing available. Kept short and kept here rather than in a setting: it can
-#: only ever ADD a pointer for the verdict below to rule on, so a language
-#: whose triggers are missing loses recall on one measurement and nothing
-#: else.
+#: only ever ADD a pointer for the verdict to rule on, so a language whose
+#: triggers are missing loses recall on one measurement and nothing else.
+#:
+#: Bare `genannt` was here and is deliberately gone. It points at an earlier
+#: mention in `die genannten Anforderungen` and at nothing in `die im
+#: Korrekturverzeichnis genannten Abschnitte`, which says inside the question
+#: where to look - and that second shape is ordinary in this corpus. It cost
+#: a real question: over one topic the only `unanchored` rejection was that
+#: phrasing. The compounds that carry the pointing in the word itself stay.
 _ANAPHORIC = frozenset(
     {
         "aforementioned",
@@ -235,13 +241,18 @@ _ANAPHORIC = frozenset(
         "latter",
         "said",
         "besagt",
-        "genannt",
         "obig",
+        "obengenannt",
         "vorgenannt",
         "letzterer",
         "ersterer",
     }
 )
+
+#: What an anaphoric trigger has to be tagged as. `said` is the past tense of
+#: `say` far more often than it is `the said document`, and the tagger tells
+#: them apart: one is a VERB and the other a modifier.
+_ANAPHORIC_POS = frozenset({"ADJ", "DET", "PRON"})
 
 
 def _counted(token):
@@ -300,9 +311,8 @@ def pointing(text: str, language: str | None) -> tuple[str, ...]:
     """
     found: set[str] = set()
     for token in pipeline(language)(text):
-        if (
-            "Dem" in token.morph.get("PronType", [])
-            or token.lemma_.casefold() in _ANAPHORIC
+        if "Dem" in token.morph.get("PronType", []) or (
+            token.pos_ in _ANAPHORIC_POS and token.lemma_.casefold() in _ANAPHORIC
         ):
             found.add(token.text.casefold())
         elif token.pos_ in _NOMINAL and (counted := _counted(token)):

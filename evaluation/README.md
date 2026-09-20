@@ -244,6 +244,46 @@ easy enough for a 3B, while deciding whether a pointing word lands needs 12B
 For reference, gpt-4.1 scored 15/19 and 16/19 on these when they shared the
 reading call.
 
+## One topic run end to end, 2026-09-20
+
+`make questions-rerun TOPIC=439`, with `NLI_MODEL` on and `QA_MODEL` off.
+67 questions, 27 accepted, no errors.
+
+| Gate | This topic | Baseline run |
+|---|---|---|
+| accepted | 40% | 66% |
+| `duplicate` | 25% | 14% |
+| `compound` | 10% | 10% |
+| **`leaks_source`** | **10%** | **0.3%** |
+| `not_recoverable` | 10% | 5% |
+| **`unanchored`** | **1.5%** | **0%** |
+
+**Read the acceptance rate with care.** A rerun is offered the facts the
+first run did not reach, which are the leftovers rather than a sample, so
+`duplicate` is inflated by design and the rate is not comparable. What the
+fact selection cannot explain is `leaks_source` going from 9 in 3,131 to 7
+in 67 — a 35-fold rise — and `unanchored` firing at all.
+
+Four of the seven `leaks_source` rejections came from `cites_source` and
+**all four are right**: three name `Kapitel 3` and one says `in diesem
+Lehrplan`. The other three came from the model residue, and one of those is
+arguably wrong — *"Welche Unterlagen nennen eine Methodik …"* asks WHICH
+documents say something rather than citing one.
+
+The single `unanchored` rejection was **wrong, and it found a real defect**.
+*"…die im Korrekturverzeichnis genannten Abschnitte…"* says inside the
+question where to look, so `genannt` points at nothing outside it — but
+bare `genannt` was in the anaphoric trigger list, and the model agreed with
+the measurement, so both halves of the two-holder rule failed together. The
+trigger is now the unambiguous compounds only (`vorgenannt`, `obengenannt`,
+`besagt`), and a trigger must be tagged as a modifier, which keeps English
+`said` from matching the past tense of `say`.
+
+`not_recoverable` doubling is the one to watch on the next run. It is
+consistent with the NLI encoder rescuing less than gpt-4.1 did — measured
+above at 59% recall on genuine answers — but the leftover facts are a
+confound, so this is a hypothesis rather than a finding.
+
 ## Layout
 
 | File | Holds |

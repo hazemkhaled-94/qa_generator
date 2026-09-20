@@ -91,3 +91,35 @@ def test_a_question_word_is_found_under_either_naming(text: str, language: str) 
     of the two languages that ship.
     """
     assert interrogatives(text, language), "no question word was read"
+
+
+@pytest.mark.parametrize(
+    ("text", "language"),
+    [
+        # The only `unanchored` rejection one real topic produced, and it was
+        # wrong. `die im Korrekturverzeichnis genannten Abschnitte` says
+        # inside the question where to look, so `genannt` points at nothing
+        # outside it. Bare `genannt` is no longer a trigger; the compounds
+        # that carry the pointing in the word itself still are.
+        (
+            (
+                "Wie viele Abschnitte des Lehrplans wurden geändert, wenn man "
+                "die im Korrekturverzeichnis genannten Abschnitte zusammenzählt?"
+            ),
+            "de",
+        ),
+        # `said` is the past tense of `say` far more often than it is `the
+        # said document`, and the tagger is what tells them apart.
+        ("What did the manager say about the deadline?", "en"),
+    ],
+)
+def test_a_participle_specified_in_the_question_points_nowhere(
+    text: str, language: str
+) -> None:
+    """The measurement may over-fire, but not on an ordinary phrasing."""
+    assert pointing(text, language) == ()
+
+
+def test_an_unambiguous_compound_still_points() -> None:
+    """`vorgenannt` carries the pointing in the word, where `genannt` does not."""
+    assert pointing("Wie unterscheiden sich die vorgenannten Verfahren?", "de")
