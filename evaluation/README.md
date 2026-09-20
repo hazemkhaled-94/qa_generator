@@ -324,6 +324,96 @@ Over the stored corpus that keeps **270 of 454 duplicates, 59%** — about
 8.6% of the whole run — and sends them on to the gates that read their
 answers, which is where they should have been refused or kept on the merits.
 
+## Four things measured and decided, 2026-09-20
+
+### `compound` is right 89% of the time — and stays as it is
+
+All 309 compound rejections, read against the question words that refused
+them: 276 are also joined by `und`/`sowie`/`oder`, and **33 carry no
+conjunction at all**. Every one of those 33 is the same shape — a question
+word inside a subordinate clause:
+
+> *"Wovon hängt ab, **wie** der Teststatus am besten kommuniziert wird?"*
+
+That is one question. The fix looks obvious — count only question words
+outside a subordinate clause, as `_predicates` counts only independent
+finite verbs — and **it was tried and reverted**. Two parses defeat it.
+German labels `Wie` and `Warum` `mo`, the same label a subordinate clause
+carries, so testing the word discards every adverbial question; testing the
+nearest finite verb above it instead works on 8 of 9 cases and still lets
+*"Welche Änderung gab es bei den Reviews, **und wie** werden Testabläufe
+formuliert?"* through, because the comma makes spaCy read the coordinated
+clause as subordinate.
+
+Letting a compound question into the benchmark is the costly direction — a
+chatbot answering half of one is neither right nor wrong — so an 89%-correct
+gate keeps its 11% error rather than trading it for an unknown one.
+
+### The reranker moves no call and costs 7 seconds each
+
+Measured, not assumed, because the first version of this note assumed:
+`Qwen/Qwen3-Reranker-0.6B` on CPU takes **6.92 s per candidate**. It ranks
+correctly — 0.996 for the passage that answers, 0.014 and 0.002 for two that
+do not — and it is a 0.6B causal model scored on one token, so that is what
+it costs here.
+
+Selection reranks up to eight candidates per wide sample: ~2,300 samples ×
+8 × 6.92 s is **about 44 hours**. For `answerable_elsewhere` alone it is ~1.5
+hours, for a gate that fired 8 times in 3,131 questions. And it changes **no
+Azure call count at all** — reordering is its whole effect.
+
+`RERANKER_MODEL` stays empty.
+
+### Answer equivalence does not rescue the QA route
+
+The idea was that `agrees()` — lemma containment — is what rejected `750
+Minuten` against `mindestens 22,75 Unterrichtsstunden`, and that scoring
+answer *equivalence* instead would fix both the QA encoder and
+`not_recoverable`.
+
+Tested the cheapest version: mutual NLI entailment, each answer as premise
+for the other, over the 81 confident QA spans.
+
+| Threshold | Called equivalent | `agrees()` accepts |
+|---|---|---|
+| 0.5 | 18 — 22% | **23 — 28%** |
+| 0.7 | 14 — 17% | **23 — 28%** |
+| 0.9 | 11 — 14% | **23 — 28%** |
+
+**Worse than what it would replace, at every threshold.** Same root cause as
+before: NLI wants propositions and an answer is a fragment, so comparing two
+fragments bidirectionally is further outside what XNLI trained on, not
+closer.
+
+The purpose-built option is BEM — `kortukov/answer-equivalence-bem`, 1.4k
+downloads a month — and it is **BERT-base English**. Every answer-equivalence
+checkpoint on the hub is. For a German corpus there is nothing to use.
+
+### The NLI control: the encoder rescues MORE, not less
+
+The pilot's `not_recoverable` doubling suggested the encoder was rescuing
+less than gpt-4.1. Put to 30 real `not_recoverable` questions, with both
+judges asked the same pairs:
+
+| | |
+|---|---|
+| stopped by `asserted` and `about` before any judge | 10 |
+| reaching a judge | 20 |
+| both rescue | 1 |
+| **only gpt-4.1** | **3** |
+| **only the encoder** | **9** |
+| neither | 7 |
+
+So the hypothesis was **wrong**: the encoder rescues 10 where gpt-4.1
+rescues 4. The pilot's doubling is the leftover-fact confound, not the
+encoder.
+
+That is the permissive direction on a gate that can only accept, which is
+the one to watch — but it is bounded by the earlier control, where the same
+encoder at the same threshold backed 3% of answers against passages that had
+nothing to do with them. And a third of these never reach it: the `about`
+guard stopped 10 of 30.
+
 ## Layout
 
 | File | Holds |
