@@ -510,9 +510,22 @@ services:
   # topic, so a corpus with twelve topics per language has two dozen rows and
   # a thirteenth worker would have nothing to claim.
   #
-  # The memory limit is what EMBEDDING_MODEL needs. It is a 560M-parameter
-  # model held in float32, which is about 2.2 GB of weights before torch's
-  # own allocator; the other workers load no weights at all.
+  # The memory limit is what the ENCODERS need, and it is the sum of them
+  # rather than the largest: they are loaded lazily but a real run reaches
+  # every gate, so they end up resident together. Each is a ~560M-parameter
+  # model in float32, about 2.2 GB of weights before torch's own allocator:
+  #
+  #   EMBEDDING_MODEL   always            ~2.2 GB
+  #   NLI_MODEL         entailment pass   ~2.2 GB
+  #   QA_MODEL          the recall half   ~2.2 GB
+  #   RERANKER_MODEL    unset by default  ~1.2 GB
+  #
+  # So 6 GB was right for the embedder alone and is an OOM with two encoders
+  # beside it. Unsetting one in configs/env/backend.env gives that 2.2 GB
+  # back; the other workers load no weights at all.
+  #
+  # Per container, not per lane. That is the number to remember when
+  # deciding between another worker and more lanes inside this one.
   question-worker:
     <<: *worker
     command: ["python", "-m", "question_generation.run", "--watch"]
@@ -521,7 +534,7 @@ services:
       <<: [*service-env, *model-env]
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 6G }
+        limits: { cpus: "2.0", memory: 12G }
 
   streamlit:
     build:
