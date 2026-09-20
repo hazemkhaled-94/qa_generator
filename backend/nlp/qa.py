@@ -75,11 +75,17 @@ class Extractive:
         """
         from transformers import pipeline
 
+        from nlp.windows import window
+
         log.info("loading %s", self._model_name)
         # The overloads this version ships do not list the QA task, so the
         # checker narrows `task` to the last literal it saw.
         task: Any = "question-answering"
-        return pipeline(task, model=self._model_name)
+        built = pipeline(task, model=self._model_name)
+        # Held to its own window, because ENCODER_MAX_TOKENS is one setting
+        # over two encoders that do not agree about what is possible.
+        self._max_tokens = window(built.tokenizer, self._max_tokens)
+        return built
 
     @property
     def model(self) -> str:

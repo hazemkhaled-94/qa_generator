@@ -91,11 +91,19 @@ Rules, all of them mandatory:
   wrong. If the facts have no single honest question between them, ask about
   one of them and name only the facts you used.
 - ASK THE KIND OF QUESTION BELOW, and mean it. If the facts hold no answer of
-  that kind - no circumstance to give, no reason stated - ask what they do
-  hold rather than forcing the shape onto them. A question whose answer does
-  not fit what it asked is worse than a plainer one.
+  that kind - no circumstance to give, no reason stated, two things that are
+  not comparable - ask what they do hold rather than forcing the shape onto
+  them. A question whose answer does not fit what it asked is worse than a
+  plainer one, and the worst of all is one whose answer repeats it back:
+  "Why is X done by Y?" answered "Because X is done by Y" has asked nothing.
 - Write in the language of the facts.
 - `facts` is the NUMBERS of the facts your question needs.
+
+THE WORKED EXAMPLE BELOW IS WRITTEN FOR A QUESTION ASKED COLD, because the
+same one serves both. Take from it WHAT THE KIND ASKS FOR and WHAT ITS ANSWER
+LOOKS LIKE. Ignore anything in it about naming the subject or naming both
+sides: this question is the next turn of a conversation that has already
+named them, and repeating them is what makes a follow-up read like a form.
 """
 
 

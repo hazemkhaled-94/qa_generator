@@ -120,6 +120,20 @@ _SPAN = """
            (one fact gives a category, the other a date; there is no
             comparison here, only two unrelated facts forced into one shape)
 
+- TWO DOCUMENTS ARE TWO SOURCES. Where the passages are marked `Document A`
+  and `Document B`, they are different material and may simply disagree. A
+  claim from one is not a claim about the other, and the two do not average.
+
+    WRONG  "How many chapters with examinable content does the syllabus
+            have?" answered "once three, once eight"
+           (two documents answering differently is not one answer; the
+            question has no single truth and nobody can be marked on it)
+
+    RIGHT  "How do the two syllabi differ in the number of chapters with
+            examinable content?"
+           (asks about the difference, which IS one thing, and is true)
+    RIGHT  ask about one document and cite only its fact
+
 - IF THE FACTS HAVE NO SINGLE HONEST QUESTION BETWEEN THEM, ask about one of
   them alone and name only the facts you used. THIS IS THE EXPECTED ANSWER,
   not a failure: a narrower question somebody would actually type beats a

@@ -99,3 +99,45 @@ def test_nothing_to_judge_costs_no_forward_pass() -> None:
     alone downloads nothing.
     """
     assert Entailment("a/checkpoint-that-does-not-exist").judge_all([]) == []
+
+
+# ── The window one setting gives two encoders ─────────────────────────────
+
+
+@dataclass
+class Tokenizer:
+    """The one field `window` reads."""
+
+    model_max_length: int
+    name_or_path: str = "a/checkpoint"
+
+
+def test_a_model_is_held_to_its_own_window() -> None:
+    """ENCODER_MAX_TOKENS is one setting over encoders that disagree.
+
+    bge-m3-zeroshot-v2.0 reads 8,192 and xlm-roberta-large-squad2 reads
+    512, so a deployment raising the setting for the first would hand the
+    second a length its position embeddings do not have.
+    """
+    from nlp.windows import window
+
+    assert window(Tokenizer(512), 8192) == 512
+
+
+def test_a_window_the_model_allows_is_left_alone() -> None:
+    """The setting is a ceiling, not an instruction."""
+    from nlp.windows import window
+
+    assert window(Tokenizer(8192), 512) == 512
+    assert window(Tokenizer(8192), 8192) == 8192
+
+
+def test_a_tokenizer_declaring_nothing_is_not_believed() -> None:
+    """A checkpoint that declares no window is not taken at its word.
+
+    `model_max_length` comes back as a near-1e30 sentinel when the
+    checkpoint is silent, and truncating to that truncates nothing.
+    """
+    from nlp.windows import window
+
+    assert window(Tokenizer(1_000_000_000_000_000_019_884_624_838_656), 512) == 512

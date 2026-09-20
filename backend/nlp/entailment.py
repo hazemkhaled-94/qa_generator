@@ -26,6 +26,8 @@ from functools import cached_property
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from nlp.windows import window
+
 log = logging.getLogger(__name__)
 
 #: The three things an NLI model can say about a premise and a hypothesis.
@@ -164,6 +166,7 @@ class Entailment:
         tokenizer = AutoTokenizer.from_pretrained(self._model_name)
         model = AutoModelForSequenceClassification.from_pretrained(self._model_name)
         model.eval()
+        self._max_tokens = window(tokenizer, self._max_tokens)
 
         # Read off the checkpoint. mDeBERTa-xnli orders them
         # entailment/neutral/contradiction and bart-mnli the other way round;

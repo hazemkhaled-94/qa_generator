@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from database.qa_generator import (
@@ -327,14 +328,47 @@ class FactGroup:
         The heading is carried separately and labelled, rather than run
         together with the text, for the reason extraction fences one: a model
         shown the two as one block asks about the heading.
+
+        A sample drawn from more than one document says so, because a writer
+        that cannot tell two sources apart states one's claim as the other's:
+        two syllabi giving different chapter counts were asked as one
+        question and answered "once with three, once with eight". A letter
+        rather than the title, for two reasons. Titles do not distinguish -
+        six of eight documents in one corpus were called `Lehrplan` or a
+        spacing variant of `ISTQB ® Certified Tester` - and a title in the
+        prompt is a title the writer quotes, which is the one thing
+        `leaks_source` exists to refuse.
+
+        Only when there is something to tell apart. One document needs no
+        letter, and a label carrying no information is a label a model
+        reaches for anyway.
         """
+        documents: dict[str, str] = {}
+        for passage in self.resting:
+            if passage.doc_sha256 not in documents:
+                documents[passage.doc_sha256] = chr(ord("A") + len(documents))
         return tuple(
             (
-                f"Under: {passage.section_path}\n" if passage.section_path else "",
+                self._heading(passage, documents if len(documents) > 1 else {}),
                 passage.text,
             )
             for passage in self.resting
         )
+
+    @staticmethod
+    def _heading(passage: SourcePassage, documents: Mapping[str, str]) -> str:
+        """The labelled trail shown above one passage, blank when it has none.
+
+        The one-document form is unchanged, because most samples are one
+        document and a prompt that moves for no reason is a prompt nobody
+        can compare against the last run.
+        """
+        if not documents:
+            return f"Under: {passage.section_path}\n" if passage.section_path else ""
+        name = f"Document {documents[passage.doc_sha256]}"
+        if passage.section_path:
+            return f"{name}, under: {passage.section_path}\n"
+        return f"{name}\n"
 
     @property
     def statements(self) -> tuple[str, ...]:
