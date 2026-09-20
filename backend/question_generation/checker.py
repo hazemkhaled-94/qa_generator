@@ -544,6 +544,8 @@ class QuestionChecker:
         if not passages:
             return None
         passages = self._reranked(candidate.question_text, passages)
+        if not self._answered_elsewhere(candidate, passages):
+            return None
         read = self._verifier.read(candidate.question_text, passages, candidate.thread)
         if read.recovered is None:
             return None
@@ -554,6 +556,42 @@ class QuestionChecker:
                 f"{read.recovered!r}, so the corpus is not silent about this"
             ),
         )
+
+    def _answered_elsewhere(
+        self, candidate: Candidate, passages: Sequence[str]
+    ) -> bool:
+        """Whether any uncited passage looks like it answers this question.
+
+        This is where an extractive reader belongs, and the recall half is
+        not. There the span had to be compared against a target the writer
+        had composed, and a literal substring loses that comparison by
+        construction - 28% agreement, measured. Here **there is no target**:
+        the only question is whether some passage answers this at all, which
+        is SQuAD 2.0's own task, no-answer head and all.
+
+        It decides only the common answer. The gate fired 8 times in 3,131
+        questions, so nearly every call it makes is spent confirming that
+        nothing answers the question - and a confident nothing is what a
+        SQuAD 2.0 head was trained to say. A span found is not a rejection:
+        the verifier is still asked, because rejecting here marks a correct
+        chatbot wrong and that verdict is not one an extractor should make
+        alone.
+
+        True where no reader is configured, which leaves the gate exactly as
+        it was.
+        """
+        if self._extractive is None or candidate.thread:
+            return True
+        found = self._extractive.answer(
+            candidate.question_text, passages, self._extractive_confidence
+        )
+        if found is None:
+            log.debug(
+                "no uncited passage answers %r; not asking the verifier",
+                candidate.question_text,
+            )
+            return False
+        return True
 
     def _reranked(self, question: str, passages: Sequence[str]) -> list[str]:
         """The probe's candidates in the order a cross-encoder puts them.

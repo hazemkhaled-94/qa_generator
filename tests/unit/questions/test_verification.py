@@ -1605,10 +1605,15 @@ def test_an_answer_to_a_different_question_is_not_rescued() -> None:
 
 
 class Reader:
-    """An extractive reader answering with one span, or with none."""
+    """An extractive reader answering with one span, or with none.
 
-    def __init__(self, text: str | None) -> None:
+    `only_in` narrows it to passages carrying that text, which is how a
+    test tells the cited passages from the ones the corpus probe found.
+    """
+
+    def __init__(self, text: str | None, only_in: str | None = None) -> None:
         self.text = text
+        self.only_in = only_in
         self.asked = 0
 
     def answer(self, question: str, passages, confidence: float):
@@ -1616,7 +1621,13 @@ class Reader:
         from nlp.qa import Span
 
         self.asked += 1
-        return None if self.text is None else Span(self.text, 0.95, 0)
+        if self.text is None:
+            return None
+        if self.only_in is not None and not any(
+            self.only_in in passage for passage in passages
+        ):
+            return None
+        return Span(self.text, 0.95, 0)
 
 
 def _with_reader(recording: Recording, reader: Reader) -> QuestionChecker:
@@ -1901,3 +1912,70 @@ def test_the_elsewhere_probe_is_reordered_before_the_one_call_it_gets() -> None:
 
     assert reranker.asked == 1
     assert seen[-1][0] == "The device weighs 4 kg.", "the probe's order survived"
+
+
+def test_a_reader_finding_nothing_elsewhere_saves_the_call() -> None:
+    """The gate fired 8 times in 3,131, so nearly every call confirms nothing.
+
+    There is no target answer here, which is why an extractive reader
+    belongs in this gate and not in the recall half: the only question is
+    whether some passage answers this at all.
+    """
+    # The cited passages do not answer it, so the gate before this one
+    # passes and `_corpus` is reached.
+    recording = Recording(recovers=None)
+    reader = Reader(None)
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        phrasing=recording,
+        elsewhere=lambda *a, **k: ["Something else entirely."],
+        elsewhere_passages=2,
+        extractive=reader,
+    )
+
+    result = checker.check(candidate(target_answer=None, answerable=False))
+
+    assert result.accepted
+    # Twice: once for the recall half, which an unanswerable question still
+    # faces so `answerable_after_all` can fire, and once here.
+    assert reader.asked == 2
+    assert recording.verified == 1, "only the recall call, not the corpus one"
+
+
+def test_a_span_found_elsewhere_still_goes_to_the_verifier() -> None:
+    """Rejecting here marks a correct chatbot wrong.
+
+    That verdict is not one an extractor should make alone, so a span is
+    a reason to ask rather than an answer.
+    """
+    recording = Recording(recovers=None)
+    # Found only in the passage the corpus probe returns, never in the ones
+    # the question cites - which is what this gate is about. The verifier
+    # reads the same way, so the cited passages answer nothing and the
+    # uncited one answers.
+    reader = Reader("4 kg", only_in="uncited note")
+
+    def read(question, passages, thread=()):
+        recording.verified += 1
+        found = any("uncited note" in passage for passage in passages)
+        return Reading(recovered="4 kg" if found else None)
+
+    recording.read = read  # type: ignore[method-assign]
+    checker = QuestionChecker(
+        embedder=recording,
+        verifier=recording,
+        nearest=lambda embedding: None,
+        threshold=0.93,
+        phrasing=recording,
+        elsewhere=lambda *a, **k: ["An uncited note records 4 kg."],
+        elsewhere_passages=2,
+        extractive=reader,
+    )
+
+    result = checker.check(candidate(target_answer=None, answerable=False))
+
+    assert result.rejected_reason == QuestionRejection.ANSWERABLE_ELSEWHERE
+    assert recording.verified == 2, "the recall call, and the verifier confirming"

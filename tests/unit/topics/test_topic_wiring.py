@@ -122,6 +122,7 @@ def test_the_service_is_built_with_a_labeller_when_a_model_is_served(
 ) -> None:
     """The one collaborator a deployment can do without."""
     monkeypatch.setenv("LLM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.delenv("TOPIC_MODEL", raising=False)
 
     built = build_service(Settings.load())
 

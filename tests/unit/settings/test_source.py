@@ -177,7 +177,13 @@ def test_the_nested_model_settings_are_read_from_the_same_source() -> None:
     """
     from topic_modelling.config import Settings
 
-    loaded = Settings.load(_overridden(LLM_MODEL="ollama_chat/nested"))
+    # TOPIC_MODEL absent, because what is under test is the nested load
+    # reading the SOURCE rather than the environment - and an override the
+    # shipped configuration happens to name would answer for it either way.
+    source = _overridden(LLM_MODEL="ollama_chat/nested")
+    source.pop("TOPIC_MODEL", None)
+
+    loaded = Settings.load(source)
 
     assert loaded.model is not None
     assert loaded.model.model == "ollama_chat/nested"

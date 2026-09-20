@@ -112,6 +112,9 @@ def test_topic_modelling_reads_the_model_when_one_is_served(monkeypatch) -> None
     from topic_modelling.config import Settings
 
     monkeypatch.setenv("LLM_MODEL", "ollama/qwen3")
+    # The fallback is what is under test, so the override has to be absent
+    # whatever the shipped configuration happens to name.
+    monkeypatch.delenv("TOPIC_MODEL", raising=False)
 
     loaded = Settings.load()
 
