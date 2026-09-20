@@ -284,6 +284,46 @@ consistent with the NLI encoder rescuing less than gpt-4.1 did — measured
 above at 59% recall on genuine answers — but the leftover facts are a
 confound, so this is a hypothesis rather than a finding.
 
+## The duplicate gate, measured 2026-09-20
+
+`duplicate` is the largest single loss in the pipeline — 433 of 3,131 in the
+baseline run, 25% of one topic's rerun, more than every model-backed gate
+combined. It had never been looked at, because it costs nothing and fires
+quietly.
+
+Every one of the 454 duplicates was paired with the accepted question it was
+refused against, and the pairs read wrong:
+
+> *"Wofür ist der Lehrplan für Advanced Level Test Management gedacht?"*
+> refused against
+> *"Welche Stellen und Personengruppen dürfen den Lehrplan … verwenden?"*
+
+Those are a purpose and an audience. What they share is a subject, and **a
+sentence embedding encodes what a question is ABOUT** — two questions about
+one subject sit on top of each other whatever they ask for.
+
+Read off the question words, which `compound` already uses:
+
+| | |
+|---|---|
+| duplicates examined | 454 |
+| share a question word with their twin | 136 — 30% |
+| **share none** | **318 — 70%** |
+
+`warum` against `welche`, `wie` against `warum`. So `asks_the_same` is now a
+veto on the probe, in the shape the phrasing gates already use.
+
+**Graded rather than absolute**, because a different question word is
+evidence and not proof: *"How heavy is the device?"* and *"What is the
+weight?"* want the same answer. A question asking something else has to
+reach `threshold + (1 - threshold) / 2` — 0.965 at the shipped 0.93 —
+before it counts as a duplicate anyway. The measured false positives sit at
+0.937 to 0.948; a real paraphrase sits above.
+
+Over the stored corpus that keeps **270 of 454 duplicates, 59%** — about
+8.6% of the whole run — and sends them on to the gates that read their
+answers, which is where they should have been refused or kept on the merits.
+
 ## Layout
 
 | File | Holds |

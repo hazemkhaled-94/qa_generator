@@ -191,6 +191,8 @@ class QuestionChecker:
             self._near(embedding, seen),
             answerable=candidate.answerable,
             threshold=self._threshold,
+            question=candidate.question_text,
+            language=candidate.group.language,
         )
         if failed:
             return self._verdict(

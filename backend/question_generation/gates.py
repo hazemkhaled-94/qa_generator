@@ -604,8 +604,50 @@ def on_topic(
     return len(asked & lemmas) / len(asked) >= floor
 
 
+def asks_the_same(first: str, second: str, language: str | None) -> bool:
+    """Whether two questions ask the same KIND of thing about their subject.
+
+    Read off the question words, as `compound` reads them. Two questions
+    sharing none are not the same question however close their vectors are:
+    `Wofür ist der Lehrplan gedacht?` and `Welche Personengruppen dürfen
+    den Lehrplan verwenden?` are about one subject and want different
+    answers.
+
+    That is not a hypothetical. Over the 454 duplicates one corpus refused,
+    **318 - 70% - share no question word with the twin they were refused
+    against**: `warum` against `welche`, `wie` against `warum`. A sentence
+    embedding encodes what a question is ABOUT, and two questions about one
+    subject sit on top of each other whatever they ask for.
+
+    Abstains where either question uses no question word at all, which
+    leaves those to the threshold as before: a measurement with nothing to
+    measure is not evidence that they differ.
+    """
+    first_words = {word.casefold() for word in interrogatives(first, language)}
+    second_words = {word.casefold() for word in interrogatives(second, language)}
+    if not first_words or not second_words:
+        return True
+    return bool(first_words & second_words)
+
+
+def _unalike(threshold: float) -> float:
+    """How close two questions asking DIFFERENT things have to be.
+
+    Halfway from the threshold to identical, so it moves with the setting
+    rather than being a second number to keep in step with it: at the 0.93
+    QUESTIONS_DUPLICATE_COSINE ships with, a question asking something else
+    has to reach 0.965 before it is a duplicate anyway.
+    """
+    return threshold + (1.0 - threshold) / 2
+
+
 def near_verdict(
-    near: Neighbour | None, *, answerable: bool, threshold: float
+    near: Neighbour | None,
+    *,
+    answerable: bool,
+    threshold: float,
+    question: str = "",
+    language: str | None = None,
 ) -> tuple[str, str] | None:
     """What the nearest accepted question says about this one.
 
@@ -613,6 +655,11 @@ def near_verdict(
     duplicate and adds nothing to the benchmark; a near twin of an accepted
     *answerable* question, when this one is meant to be unanswerable, is a
     question the corpus demonstrably does answer.
+
+    The probe is a measurement and `asks_the_same` is the veto on it, which
+    is the shape the phrasing gates already use. Only the duplicate half is
+    vetoed: `answerable_after_all` says the corpus answers something this
+    close, and that holds whatever the two questions ask for.
     """
     if near is None or near.similarity < threshold:
         return None
@@ -624,6 +671,17 @@ def near_verdict(
                 f"accepted question {near.question_text!r}"
             ),
         )
+    # Asking something else is not refused outright, it is held to a higher
+    # bar. Two question words can want the same answer - `How heavy is the
+    # device?` against `What is the weight?` - so a different one is
+    # evidence and not proof. The false positives measured over one corpus
+    # sat at 0.937 to 0.948, and a real paraphrase sits above this.
+    if (
+        question
+        and near.similarity < _unalike(threshold)
+        and not asks_the_same(question, near.question_text, language)
+    ):
+        return None
     return (
         QuestionRejection.DUPLICATE,
         f"{near.similarity:.2f} from the accepted question {near.question_text!r}",
