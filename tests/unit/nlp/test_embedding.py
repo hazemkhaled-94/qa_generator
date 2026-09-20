@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from question_generation.embedding import WIDTH, Embedder, cosine
+from nlp.embedding import WIDTH, Embedder, cosine
 
 MODEL = "intfloat/multilingual-e5-large"
 

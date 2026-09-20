@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CHAR,
     BigInteger,
@@ -51,6 +52,15 @@ class Passage(Base):
         # corpus is silent about something, so that gate reads every passage
         # rather than the two the question cites.
         Index("ix_passages_lemmas_gin", "lemmas", postgresql_using="gin"),
+        # Serves the nearest-passage search: what a topic's bridge candidates
+        # are grouped by, and what a reviewer reads to find the passage a
+        # question should have cited.
+        Index(
+            "ix_passages_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
         # Partial: the queue is a shrinking fraction of the table, and this is
         # the only predicate a worker selects on.
         Index(
@@ -125,6 +135,16 @@ class Passage(Base):
         comment="Content lemmas, the vocabulary topic modelling is fitted over. "
         "Written here so one segmentation serves both stages and a fit reads a "
         "column instead of re-tokenising the corpus.",
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(1024),
+        comment="Passage embedding, in the same space as facts.embedding and "
+        "questions.embedding. What a nearest-passage search reads. Written by "
+        "extraction rather than by chunking, which owns every other column "
+        "here: the extraction worker loads the model anyway for the fact dedup "
+        "gate, and a second worker loading two gigabytes to write one column is "
+        "the cost this avoids. NULL until a passage has been through extraction "
+        "under a deployment that embeds.",
     )
     page_from: Mapped[int | None] = mapped_column(
         Integer, comment="Page the passage starts on."

@@ -26,7 +26,9 @@ SERVICE = ROOT / "backend/extraction"
 _NAMED = re.compile(r"EXTRACTION_[A-Z][A-Z0-9_]*")
 
 #: Every setting the service reads, and nothing else. Which model to call and
-#: how patiently is LLM_*, shared with every other stage that calls one.
+#: how patiently is LLM_*, shared with every other stage that calls one, and
+#: which model embeds is EMBEDDING_*, shared with every stage that does: one
+#: corpus is measured in one space, so neither is this service's to name.
 SETTINGS = frozenset(
     {
         "EXTRACTION_KINDS",
@@ -36,6 +38,7 @@ SETTINGS = frozenset(
         "EXTRACTION_BRIDGES_PER_TOPIC",
         "EXTRACTION_BRIDGE_PASSAGES",
         "EXTRACTION_MODEL",
+        "EXTRACTION_DUPLICATE_COSINE",
     }
 )
 
@@ -93,6 +96,7 @@ SHAPES = {
         "extraction_temperature",
         "spacy_model",
         "spacy_version",
+        "embedding",
     },
     "FactSource": {
         "passage_id",
@@ -168,6 +172,7 @@ REJECTIONS = frozenset(
         # the passage yielded more atomic facts than
         # EXTRACTION_MIN_OTHER_SHARE leaves room for.
         "over_cap",
+        "duplicate",
     }
 )
 
@@ -183,7 +188,7 @@ CHECKS = {
 #: The prompt version recorded on every fact each model-backed reader draws.
 #: Bumped whenever the prompt changes what counts as a fact: two prompts are
 #: two datasets, and a corpus read under both is neither.
-PROMPTS = {"llm": "6", "digest": "1", "bridge": "2"}
+PROMPTS = {"llm": "7", "digest": "1", "bridge": "2"}
 
 
 def test_the_service_reads_exactly_the_settings_named_here() -> None:

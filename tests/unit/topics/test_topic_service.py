@@ -218,14 +218,42 @@ def test_the_figure_is_a_self_contained_page(service) -> None:
 
 def test_topics_are_named_by_the_model_when_one_is_configured(service) -> None:
     """Every topic that holds no label is offered to the model."""
-    flow = service(labeller=LabellerDriver("Shipping", languages={"de": "German"}))
+    flow = service(
+        labeller=LabellerDriver("Shipping", "Storage", languages={"de": "German"})
+    )
 
     flow.request_and_run()
 
-    assert flow.labels_of("de") == ["Shipping", "Shipping"], flow.labels_of("de")
+    assert flow.labels_of("de") == ["Shipping", "Storage"], flow.labels_of("de")
     assert all(topic.labelled_by == "test-model" for topic in flow.topics_of("de")), (
         flow.topics_of("de")
     )
+
+
+def test_a_name_another_topic_already_took_is_refused(service) -> None:
+    """Two topics under one name read as one topic in the coverage report.
+
+    Asked for in the prompt, which is shown the names already given, and
+    enforced on the answer: a model told not to repeat one still does, and
+    an unnamed topic is the better failure of the two.
+    """
+    flow = service(
+        labeller=LabellerDriver("Shipping", "Shipping", languages={"de": "German"})
+    )
+
+    flow.request_and_run()
+
+    assert flow.labels_of("de") == ["Shipping", None], flow.labels_of("de")
+
+
+def test_the_names_already_taken_are_shown_to_the_model(service) -> None:
+    """It cannot avoid a repeat it was never told about."""
+    labeller = LabellerDriver("Shipping", "Storage", languages={"de": "German"})
+    flow = service(labeller=labeller)
+
+    flow.request_and_run()
+
+    assert "Shipping" in labeller.prompt, labeller.prompt
 
 
 def test_no_labeller_leaves_every_topic_with_its_terms_and_no_name(service) -> None:

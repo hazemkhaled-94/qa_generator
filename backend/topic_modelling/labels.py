@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,14 @@ Rules:
 - Use the terms and excerpts only. If they share no subject, say exactly
   "Mixed" and nothing else - a wrong name is worse than none, because a
   coverage report is read by its names.
+- ANSWER "Mixed" WHEN MORE THAN HALF THE TERMS NAME PARTS OF A DOCUMENT
+  rather than a subject: contents, foreword, acknowledgements, copyright
+  notice, revision history, release notes, appendix, index, glossary,
+  version. One subject word among them does not make the topic that subject.
+- DO NOT REUSE A NAME ALREADY TAKEN, listed below when there are any. Two
+  topics with one name cannot be told apart in the report they appear in. If
+  this topic is genuinely the one that name describes, name what separates
+  it from that one instead; if nothing does, answer "Mixed".
 - No quotation marks, no trailing punctuation."""
 
 
@@ -59,7 +68,11 @@ class TopicLabeller:
         return self._client.model
 
     def label(
-        self, topic: FittedTopic, language: str, excerpts: list[str]
+        self,
+        topic: FittedTopic,
+        language: str,
+        excerpts: list[str],
+        taken: Sequence[str] = (),
     ) -> str | None:
         """Names one topic.
 
@@ -67,15 +80,17 @@ class TopicLabeller:
             topic: The topic, read for its top terms.
             language: ISO 639-1 code of the language to answer in.
             excerpts: Text of the passages the topic holds most strongly.
+            taken: Names already given to other topics of this fit.
 
         Returns:
             The name, stripped of quotes and trailing punctuation, or None if
-            the model was unreachable or found no shared subject.
+            the model was unreachable, found no shared subject, or repeated a
+            name already taken.
         """
         try:
             answer = self._client.answer(
                 system=_SYSTEM,
-                user=self._prompt(topic, language, excerpts),
+                user=self._prompt(topic, language, excerpts, taken),
                 shape=_Label,
             )
         except ModelUnavailable as exc:
@@ -86,15 +101,28 @@ class TopicLabeller:
         name = answer.label.strip("\"'. \n\t")
         if not name or name.casefold() == "mixed":
             return None
+        # Asked for in the prompt and enforced here: an unnamed topic reads as
+        # unnamed, where two topics under one name read as one topic.
+        if any(name.casefold() == one.casefold() for one in taken):
+            log.info("topic %d repeated the name %r", topic.topic_index, name)
+            return None
         return name
 
-    def _prompt(self, topic: FittedTopic, language: str, excerpts: list[str]) -> str:
+    def _prompt(
+        self,
+        topic: FittedTopic,
+        language: str,
+        excerpts: list[str],
+        taken: Sequence[str] = (),
+    ) -> str:
         """Builds the user message for one topic."""
         shown = "\n".join(
             f"- {excerpt[:_EXCERPT_CHARS].strip()}" for excerpt in excerpts
         )
+        already = f"Names already taken:\n{', '.join(taken)}\n\n" if taken else ""
         return (
             f"Language: {self._languages.get(language, language)}\n\n"
+            f"{already}"
             f"Defining terms, strongest first:\n{', '.join(topic.top_terms)}\n\n"
             f"Excerpts this topic covers:\n{shown}"
         )

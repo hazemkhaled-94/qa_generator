@@ -295,12 +295,14 @@ def test_every_refusal_appears_in_this_table() -> None:
     pinned |= {expected for *_, expected in OUTLINES if expected}
     pinned |= {expected for *_, expected in BRIDGES if expected}
 
-    # `over_cap` is not a verdict any check reaches, so no statement here
-    # could pin it: it is the service refusing facts the checks passed,
-    # because the passage yielded more atomic ones than
-    # EXTRACTION_MIN_OTHER_SHARE leaves room for. Pinned in
-    # tests/unit/extraction/test_atomic_cap.py instead.
-    service_only = {Rejection.OVER_CAP}
+    # Two verdicts no check reaches, so no statement here could pin either:
+    # both are the service refusing facts the checks passed, on something no
+    # one statement can be read for. `over_cap` is the passage yielding more
+    # atomic facts than EXTRACTION_MIN_OTHER_SHARE leaves room for, pinned in
+    # tests/unit/extraction/test_atomic_cap.py; `duplicate` is the corpus
+    # already holding the statement, pinned in
+    # tests/unit/extraction/test_extraction_service.py.
+    service_only = {Rejection.OVER_CAP, Rejection.DUPLICATE}
     assert pinned == set(Rejection) - service_only, sorted(
         set(Rejection) - service_only - pinned
     )

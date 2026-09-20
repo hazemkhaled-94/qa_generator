@@ -43,9 +43,9 @@ def checker():
 
     from llm.client import Client, ModelUnavailable
     from llm.config import Settings
+    from nlp.embedding import Embedder
     from question_generation.checker import QuestionChecker
     from question_generation.config import Settings as QuestionSettings
-    from question_generation.embedding import Embedder
     from question_generation.verifier import Verifier
 
     settings = Settings.load()

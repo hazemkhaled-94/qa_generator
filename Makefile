@@ -64,6 +64,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         chunk-revocabulary \
         extract extract-status extract-start extract-stop extract-retry \
         extract-rerun extract-revalidate extract-bridge extract-recap \
+        extract-embed \
         topics topics-status topics-discover topics-stop topics-delete \
         topics-retry topics-visualise \
         settings settings-set settings-unset \
@@ -394,6 +395,17 @@ extract-bridge:
 # `over_cap` like any other refusal.
 extract-recap:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --recap $(ONLY)
+
+# Write the vectors onto passages and facts already stored. No model is
+# called - a vector is read off a statement that is already written - so a
+# corpus extracted before the embedding columns existed is filled in at the
+# speed of the embedding model rather than re-read over hours.
+#
+# It does not apply the dedup gate. A fact stored before the gate existed was
+# accepted, and refusing it now would rewrite a verdict the corpus was
+# measured under; re-extract to have it judged.
+extract-embed:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m extraction.run --embed $(ONLY)
 
 # ── Topic modelling ────────────────────────────────────────────────────────
 #

@@ -64,6 +64,11 @@ def settings(
         bridges_per_topic=5,
         bridge_passages=2,
         model=model,
+        # 0, so wiring a service here loads no embedding model: these tests
+        # build the real thing and two gigabytes is not what they are about.
+        duplicate_cosine=0.0,
+        embedding_model="intfloat/multilingual-e5-large",
+        embedding_max_tokens=512,
     )
 
 

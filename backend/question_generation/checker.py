@@ -38,7 +38,7 @@ from database.qa_generator import (
     QuestionStatus,
 )
 from nlp.analysis import content, demonstratives
-from question_generation.embedding import Embedder, cosine
+from nlp.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
     NAMES_SOMETHING,

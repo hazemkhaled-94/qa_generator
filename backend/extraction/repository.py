@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import timedelta
 from itertools import groupby
 from typing import ClassVar, cast
@@ -40,6 +40,7 @@ from extraction.models import (
     FactSource,
     PassageToExtract,
     StoredFact,
+    Twin,
 )
 from nlp.models import Sentence
 from stages import Columns, RowQueue
@@ -251,7 +252,12 @@ class PassageQueue(RowQueue):
             )
         return _passage(claimed, language)
 
-    def store(self, passage_id: int, facts: list[CheckedFact]) -> int:
+    def store(
+        self,
+        passage_id: int,
+        facts: list[CheckedFact],
+        embedding: list[float] | None = None,
+    ) -> int:
         """Replaces one passage's facts, in one transaction, and finishes it.
 
         Scoped to the passage, so two workers on two passages of the same
@@ -262,6 +268,9 @@ class PassageQueue(RowQueue):
         Args:
             passage_id: The passage that was read.
             facts: Everything it yielded, refused facts included.
+            embedding: The passage's own vector, or None to leave the column
+                as it is. Written here rather than by chunking because this
+                is the worker that has the model loaded.
 
         Returns:
             How many facts were written.
@@ -278,8 +287,50 @@ class PassageQueue(RowQueue):
                 )
             )
             _write(session, facts, self._version)
+            if embedding is not None:
+                session.execute(
+                    update(Passage)
+                    .where(Passage.id == passage_id)
+                    .values(embedding=embedding)
+                )
             self._finish(passage_id, session=session)
         return len(facts)
+
+    def nearest_fact(
+        self, embedding: list[float], within: Sequence[int] = ()
+    ) -> Twin | None:
+        """The validated fact closest to this vector, or None if there is none.
+
+        `within` narrows the search to a set of passages. Empty searches the
+        whole corpus, which is what dedup wants: a duplicate written from
+        another document is still a duplicate, and at this corpus's size the
+        HNSW index answers either in single-digit milliseconds.
+        """
+        distance = Fact.embedding.cosine_distance(embedding)
+        query = (
+            select(Fact.id, Fact.statement, distance.label("far"))
+            .where(Fact.validated, Fact.embedding.is_not(None))
+            .order_by(distance)
+            .limit(1)
+        )
+        if within:
+            query = query.where(
+                Fact.id.in_(
+                    select(FactPassage.fact_id).where(
+                        FactPassage.passage_id.in_(within)
+                    )
+                )
+            )
+        with self._session() as session:
+            found = session.execute(query).one_or_none()
+        if found is None:
+            return None
+        # pgvector answers in cosine distance; the gate reads likeness.
+        return Twin(
+            fact_id=found.id,
+            statement=found.statement,
+            similarity=1.0 - float(found.far),
+        )
 
     def counts(self) -> dict[str, int]:
         """Reports what this service owns, for the status panel."""
@@ -350,6 +401,7 @@ def _row(fact: CheckedFact, version: str | None = None) -> dict:
         "extraction_temperature": fact.extraction_temperature,
         "spacy_model": fact.spacy_model,
         "spacy_version": fact.spacy_version,
+        "embedding": fact.embedding,
     }
 
 
@@ -483,6 +535,56 @@ class FactCatalog(Repository):
                     rejection_code=Rejection.OVER_CAP,
                     validation_error=reason,
                 )
+            ).rowcount
+
+    def unembedded(self, limit: int, within=None) -> list[tuple[int, str]]:
+        """The next facts carrying no vector, as (id, statement).
+
+        Args:
+            limit: How many to read at once.
+            within: A condition on Passage narrowing which are read, or None.
+
+        Returns:
+            Up to `limit` of them, empty when every fact is embedded.
+        """
+        query = select(Fact.id, Fact.statement).where(Fact.embedding.is_(None))
+        if within is not None:
+            query = query.where(_resting(within))
+        with self._session() as session:
+            return [
+                (row.id, row.statement)
+                for row in session.execute(query.order_by(Fact.id).limit(limit))
+            ]
+
+    def embed_facts(self, vectors: list[tuple[int, list[float]]]) -> int:
+        """Writes a vector onto each of the given facts."""
+        if not vectors:
+            return 0
+        with self._session.begin() as session:
+            return session.execute(
+                update(Fact).where(Fact.id == bindparam("row")),
+                [{"row": fact_id, "embedding": one} for fact_id, one in vectors],
+            ).rowcount
+
+    def unembedded_passages(self, limit: int, within=None) -> list[tuple[int, str]]:
+        """The next passages carrying no vector, as (id, text)."""
+        query = select(Passage.id, Passage.text).where(Passage.embedding.is_(None))
+        if within is not None:
+            query = query.where(within)
+        with self._session() as session:
+            return [
+                (row.id, row.text)
+                for row in session.execute(query.order_by(Passage.id).limit(limit))
+            ]
+
+    def embed_passages(self, vectors: list[tuple[int, list[float]]]) -> int:
+        """Writes a vector onto each of the given passages."""
+        if not vectors:
+            return 0
+        with self._session.begin() as session:
+            return session.execute(
+                update(Passage).where(Passage.id == bindparam("row")),
+                [{"row": passage_id, "embedding": one} for passage_id, one in vectors],
             ).rowcount
 
     def clear_bridges(self, within=None) -> int:

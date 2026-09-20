@@ -200,6 +200,17 @@ SETTINGS: tuple[Setting, ...] = (
         "keeps. 0 turns the cap off.",
     ),
     Setting(
+        name="EXTRACTION_DUPLICATE_COSINE",
+        service="extraction",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("extraction",),
+        help="How alike two statements may be before the second is refused "
+        "as a duplicate. Cosine over the whole corpus and over the facts one "
+        "passage already kept. 0 turns the gate off and writes no vectors.",
+    ),
+    Setting(
         name="EXTRACTION_BRIDGES_PER_TOPIC",
         service="extraction",
         kind="integer",

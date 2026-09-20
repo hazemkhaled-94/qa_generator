@@ -16,10 +16,11 @@ from extraction.extractors import (
     ExtractionFailed,
     ExtractorRegistry,
 )
-from extraction.models import CheckedFact, PassageToExtract
+from extraction.models import CheckedFact, PassageToExtract, Twin
 from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import WRITTEN, FactChecker
 from nlp.analysis import claim, normalised
+from nlp.embedding import Embedder, cosine
 from stages import StageService
 from telemetry import tracer, working
 
@@ -80,6 +81,42 @@ def revalidate(catalog: FactCatalog, checker: FactChecker, within=None) -> int:
             skipped,
         )
     return written
+
+
+#: How many rows one backfill batch embeds. The forward pass is the cost and
+#: it is per batch, not per row.
+_EMBED_BATCH = 64
+
+
+def embed(catalog: FactCatalog, embedder: Embedder, within=None) -> int:
+    """Writes the vectors onto passages and facts already stored.
+
+    The replay for this gate, as `recap` is for the cap: it calls no served
+    model, because a vector is read off a statement that is already written.
+    What it does not do is apply the gate - a fact stored before the column
+    existed was accepted, and refusing it now would rewrite a verdict the
+    corpus was measured under. Re-extract to have it judged.
+
+    Args:
+        catalog: Where the rows are read and written.
+        embedder: The model the vectors come from.
+        within: A condition narrowing which rows are read, or None.
+
+    Returns:
+        How many rows were embedded, passages and facts together.
+    """
+    done = 0
+    for read, write in (
+        (catalog.unembedded_passages, catalog.embed_passages),
+        (catalog.unembedded, catalog.embed_facts),
+    ):
+        while batch := read(_EMBED_BATCH, within):
+            vectors = embedder.embed_all([normalised(text) for _, text in batch])
+            done += write(
+                [(row, vector) for (row, _), vector in zip(batch, vectors, strict=True)]
+            )
+            log.info("embedded %d row(s)", done)
+    return done
 
 
 def recap(catalog: FactCatalog, cap: int | None, within=None) -> int:
@@ -292,6 +329,46 @@ _COPYRIGHT = "\u00a9"
 
 _HAS_DIGIT = re.compile(r"\d")
 
+#: A cell holding an identifier rather than a statement: a learning-objective
+#: code, a level, a tick. Anchored, so a cell containing one of these among
+#: words is not one.
+_CODE_CELL = re.compile(
+    r"""^(?:
+        [^\W\d_]{0,6}[-. ]?\d+(?:\.\d+)*   # TM-2.2.1, Abschnitt 4, 1.7
+      | [A-Z]{1,5}-?[A-Z]*\d+              # TA-BO1, FL4
+      | [XxKk]\d?                          # K2, X
+      | [✓✗X-]                   # tick, cross, dash
+    )$""",
+    re.VERBOSE,
+)
+
+#: The share of a table's filled cells that may be identifiers before the grid
+#: stops being a statement of anything. A traceability matrix, a release-note
+#: table and an abbreviation list are all mostly codes; measured over this
+#: corpus, no table carrying prose reaches half.
+#:
+#:     content tables    0.155 mean, none above 0.5
+#:     matrices etc.     0.424 mean, 28 of 68 above it
+#:
+#: Set where nothing good is refused rather than where everything bad is
+#: caught: a table wrongly read yields a fact per cell, and a table wrongly
+#: skipped yields nothing, but the first is the one that reaches a question.
+_CODE_CELLS = 0.5
+
+
+def _code_grid(passage: PassageToExtract) -> bool:
+    """Whether a table's cells are identifiers rather than statements."""
+    cells = [
+        text
+        for grid in passage.table_cells
+        for cell in grid.get("cells", ())
+        if (text := (cell.get("text") or "").strip())
+    ]
+    if not cells:
+        return False
+    codes = sum(1 for one in cells if _CODE_CELL.match(one))
+    return codes / len(cells) > _CODE_CELLS
+
 
 def _reference_list(passage: PassageToExtract) -> bool:
     """Whether the passage is a list of references rather than prose.
@@ -326,6 +403,12 @@ def skipped(passage: PassageToExtract) -> str | None:
     if passage.block_type in _NAVIGATION:
         return f"{passage.block_type}: navigation rather than content"
     if passage.block_type in ("table",):
+        # The one furniture check a table is not exempt from. The exemptions
+        # below exist because a grid carries no sentences and so no claims,
+        # which the signals they read are counted in; this one reads the
+        # cells themselves and so says something about a table.
+        if _code_grid(passage):
+            return "a grid of identifiers rather than of statements"
         return None
     if _is_heading(passage):
         return "heading"
@@ -424,6 +507,20 @@ def _refuse(fact: CheckedFact, cap: int) -> CheckedFact:
     )
 
 
+def _duplicate(fact: CheckedFact, twin: Twin, threshold: float) -> CheckedFact:
+    """Marks one fact as a near twin of a fact already stored."""
+    return replace(
+        fact,
+        validated=False,
+        rejection_code=Rejection.DUPLICATE,
+        validation_error=(
+            f"says what fact {twin.fact_id} already says at cosine "
+            f"{twin.similarity:.3f}, over the {threshold:.2f} "
+            f"EXTRACTION_DUPLICATE_COSINE allows: {twin.statement!r}"
+        ),
+    )
+
+
 class ExtractionService(StageService):
     """Draws facts out of passages, one passage at a time.
 
@@ -443,6 +540,8 @@ class ExtractionService(StageService):
         digest: DigestExtractor | None = None,
         atomic_cap: int | None = None,
         digest_min_chars: int = 0,
+        embedder: Embedder | None = None,
+        duplicate_cosine: float = 0.0,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -456,6 +555,11 @@ class ExtractionService(StageService):
                 no cap. EXTRACTION_MIN_OTHER_SHARE is where it comes from.
             digest_min_chars: The shortest passage worth digesting. 0
                 digests every passage carrying enough claims.
+            embedder: The embedding model, or None to write no vectors and
+                run no dedup gate.
+            duplicate_cosine: How alike two statements may be before the
+                second is refused. 0 turns the gate off and leaves the
+                vectors being written.
         """
         super().__init__(repository)
         self._repository: PassageQueue = repository
@@ -464,6 +568,8 @@ class ExtractionService(StageService):
         self._digest = digest
         self._atomic_cap = atomic_cap
         self._digest_min_chars = digest_min_chars
+        self._embedder = embedder
+        self._duplicate_cosine = duplicate_cosine
 
     def process_next(self) -> int | None:
         """Reads one queued passage and stores what it yielded.
@@ -486,7 +592,10 @@ class ExtractionService(StageService):
         ) as current:
             try:
                 facts = self._passage(passage, current)
-                stored = self._repository.store(passage.id, facts)
+                facts = self._deduplicated(facts, current)
+                stored = self._repository.store(
+                    passage.id, facts, self._embedded(passage)
+                )
                 validated = sum(1 for fact in facts if fact.validated)
                 self._done(current)
                 current.set_attribute("extract.facts", stored)
@@ -533,6 +642,60 @@ class ExtractionService(StageService):
                 for position, fact in enumerate(facts)
             ]
         return facts + self._digested(passage)
+
+    def _embedded(self, passage: PassageToExtract) -> list[float] | None:
+        """The passage's own vector, or None when this deployment writes none."""
+        if self._embedder is None:
+            return None
+        return self._embedder.embed(normalised(passage.text))
+
+    def _deduplicated(self, facts: list[CheckedFact], current) -> list[CheckedFact]:
+        """Embeds every fact and refuses the ones already in the corpus.
+
+        Two probes per candidate, because neither alone is enough. The index
+        holds what earlier passages stored; `written` holds what this passage
+        has already kept, without which one passage would happily store the
+        same statement twice - a summary and an atomic fact often say the
+        same thing about a short passage.
+
+        Only validated facts compete and only they are refused: a fact a
+        check already threw out is not a duplicate of anything, and comparing
+        it would make the corpus's first copy depend on which passage was
+        read first.
+        """
+        if self._embedder is None:
+            return facts
+        vectors = self._embedder.embed_all([fact.statement for fact in facts])
+        threshold = self._duplicate_cosine
+        written: list[tuple[str, list[float]]] = []
+        checked: list[CheckedFact] = []
+        refused = 0
+        for fact, vector in zip(facts, vectors, strict=True):
+            fact = replace(fact, embedding=vector)
+            if threshold <= 0 or not fact.validated:
+                checked.append(fact)
+                continue
+            twin = self._nearest(vector, written)
+            if twin is not None and twin.similarity >= threshold:
+                refused += 1
+                checked.append(_duplicate(fact, twin, threshold))
+                continue
+            written.append((fact.statement, vector))
+            checked.append(fact)
+        if refused:
+            current.set_attribute("extract.duplicates", refused)
+        return checked
+
+    def _nearest(
+        self, vector: list[float], written: Sequence[tuple[str, list[float]]]
+    ) -> Twin | None:
+        """The closest stored fact, this passage's own kept facts included."""
+        twin = self._repository.nearest_fact(vector)
+        for statement, other in written:
+            score = cosine(vector, other)
+            if twin is None or score > twin.similarity:
+                twin = Twin(fact_id=0, statement=statement, similarity=score)
+        return twin
 
     def _readers(self, passage: PassageToExtract, current) -> list:
         """Which extractors read one passage, in the order they are applied.

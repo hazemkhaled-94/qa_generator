@@ -7,10 +7,13 @@ passage that raised something nobody expected.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from drivers import Extraction, passage, table_passage
 
-from database.qa_generator import FactKind
+from database.qa_generator import FactKind, Rejection
+from extraction.models import Twin
 from llm.client import ModelUnavailable
 
 pytestmark = pytest.mark.nlp
@@ -196,3 +199,84 @@ class TestProseMergedWithATable:
             if one.extraction_method == "deterministic"
         ]
         assert composed, "the grid is still read from its cells"
+
+
+class TestTheDedupGate:
+    """A statement the corpus already holds is stored refused, not dropped."""
+
+    TWICE: ClassVar[dict] = {
+        "facts": [
+            {"sentences": [0], "statement": "The device weighs 4 kg."},
+            {"sentences": [0], "statement": "The device weighs 4 kg."},
+        ]
+    }
+
+    def test_one_passage_saying_a_thing_twice_keeps_it_once(self) -> None:
+        """The index holds nothing yet, so only the run's own memory catches it."""
+        run = Extraction(passage(), facts=self.TWICE, duplicate_cosine=0.9)
+        run.next()
+
+        stored = run.queue.stored[1]
+        assert [one.validated for one in stored] == [True, False]
+        assert stored[1].rejection_code == Rejection.DUPLICATE
+
+    def test_a_refused_duplicate_is_kept_with_its_reason(self) -> None:
+        """Drop-rate evidence, like every other refusal."""
+        run = Extraction(passage(), facts=self.TWICE, duplicate_cosine=0.9)
+        run.next()
+
+        refused = run.queue.stored[1][1]
+        assert "already says" in (refused.validation_error or "")
+        assert refused.embedding is not None, "the vector it was judged on is kept"
+
+    def test_a_statement_already_in_the_corpus_is_refused(self) -> None:
+        """What the HNSW probe answers is what the gate reads."""
+        run = Extraction(passage(), facts=ATOMIC, duplicate_cosine=0.9)
+        run.queue.twin = Twin(fact_id=7, statement="Already said.", similarity=0.99)
+        run.next()
+
+        stored = run.queue.stored[1]
+        assert stored[0].rejection_code == Rejection.DUPLICATE
+        assert "fact 7" in (stored[0].validation_error or "")
+
+    def test_a_twin_below_the_threshold_is_not_a_duplicate(self) -> None:
+        """Sharing a subject is not saying the same thing."""
+        run = Extraction(passage(), facts=ATOMIC, duplicate_cosine=0.9)
+        run.queue.twin = Twin(fact_id=7, statement="Something else.", similarity=0.7)
+        run.next()
+
+        assert run.queue.stored[1][0].validated
+
+    def test_the_gate_off_still_writes_the_vectors(self) -> None:
+        """A deployment may want the embeddings without the refusals."""
+        run = Extraction(passage(), facts=self.TWICE, embed=True)
+        run.next()
+
+        stored = run.queue.stored[1]
+        assert all(one.validated for one in stored)
+        assert all(one.embedding is not None for one in stored)
+
+    def test_no_embedder_writes_no_vector_and_refuses_nothing(self) -> None:
+        """The default deployment is unchanged."""
+        run = Extraction(passage(), facts=self.TWICE)
+        run.next()
+
+        stored = run.queue.stored[1]
+        assert all(one.validated for one in stored)
+        assert all(one.embedding is None for one in stored)
+        assert run.queue.embeddings[1] is None
+
+    def test_the_passage_is_embedded_beside_its_facts(self) -> None:
+        """One model load writes both, which is why extraction owns the column."""
+        run = Extraction(passage(), facts=ATOMIC, embed=True)
+        run.next()
+
+        assert run.queue.embeddings[1] is not None
+
+    def test_a_refused_fact_is_not_what_a_later_one_is_compared_against(self) -> None:
+        """Otherwise the first copy kept depends on which check ran first."""
+        run = Extraction(passage(), facts=self.TWICE, duplicate_cosine=0.9)
+        run.next()
+
+        kept = [one for one in run.queue.stored[1] if one.validated]
+        assert len(kept) == 1, "the second is refused against the first, not the third"

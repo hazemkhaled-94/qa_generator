@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -45,6 +46,15 @@ class Fact(Base):
             "evidence_text",
             postgresql_using="gin",
             postgresql_ops={"evidence_text": "gin_trgm_ops"},
+        ),
+        # The dedup gate cosine-searches every validated fact once per
+        # candidate. Without this the search is a sequential scan, and
+        # extraction makes one per fact a passage yields.
+        Index(
+            "ix_facts_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
         # Groups the quality report; without it every scan reads the table.
         Index("ix_facts_rejection_code", "rejection_code"),
@@ -210,6 +220,17 @@ class Fact(Base):
         DateTime(timezone=True),
         comment="When the verdict above was recorded. NULL exactly when "
         "reviewed_verdict is.",
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(1024),
+        comment="Statement embedding, used by the dedup gate. That gate cosine-"
+        "searches every validated fact, which the HNSW index above serves. The "
+        "same width and the same model as questions.embedding and "
+        "passages.embedding: one corpus is measured in one space, so a fact and "
+        "the question resting on it are comparable. NULL on a fact extracted "
+        "before the column existed, and on one no deployment asked to embed - "
+        "EXTRACTION_DUPLICATE_COSINE at 0 turns the gate and the embedding off "
+        "together.",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -149,6 +149,9 @@ class CheckedFact:
         extraction_temperature: Sampling temperature used, or None.
         spacy_model: The pipeline that judged it.
         spacy_version: That pipeline's version.
+        embedding: The statement's vector, or None when this deployment does
+            not embed. Written whatever the verdict: a rejected fact carries
+            the vector the gate rejected it on.
     """
 
     statement: str
@@ -169,6 +172,22 @@ class CheckedFact:
     extraction_temperature: float | None = None
     spacy_model: str | None = None
     spacy_version: str | None = None
+    embedding: list[float] | None = None
+
+
+@dataclass(frozen=True)
+class Twin:
+    """The stored fact a candidate is closest to.
+
+    Attributes:
+        fact_id: Which fact it is, so a rejection can name it.
+        statement: What that fact says.
+        similarity: Cosine likeness in [-1, 1]. 1 is the same vector.
+    """
+
+    fact_id: int
+    statement: str
+    similarity: float
 
 
 @dataclass(frozen=True)

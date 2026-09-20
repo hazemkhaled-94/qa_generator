@@ -433,6 +433,13 @@ Worked example. Facts:
 anywhere - it has to be worked out from two or more facts. If one fact already
 states it, this is the wrong kind of question.
 
+THE FIGURES MUST BE THE SAME KIND OF THING, counted in the same unit, and
+their total must be a quantity somebody would want. Two numbers that merely
+sit in the same corpus do not add up to anything: a year is not a count, a
+version number is not an amount, and a page number is not a duration. If the
+facts offer no two figures that measure one thing between them, this is the
+wrong kind of question for them - say so by asking about one of them instead.
+
 Worked example. Facts:
 
   [1] The northern site employs 40 people.
@@ -442,6 +449,14 @@ Worked example. Facts:
                     between them?"
          answer:   "65"
          facts:    [1, 2]
+
+  WRONG  facts:    [1] A method was first described in 2011.
+                   [2] The prior edition carried the version year 2023.
+         question: "What year do the first description and the prior edition
+                    come to together?"
+         answer:   "4034"
+         (two years are not two counts of one thing; their sum measures
+          nothing and no reader would ask for it)
 """,
     ),
     TypeSpec(

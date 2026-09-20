@@ -505,12 +505,14 @@ def test_each_failure_reaches_its_own_code(checker, offered) -> None:
         ).rejection_code,
     }
 
-    # Every code a CHECK emits. `over_cap` is not one of them: it is the
-    # service refusing what the checks already passed, because the passage
-    # yielded more atomic facts than EXTRACTION_MIN_OTHER_SHARE leaves room
-    # for. Nothing about the fact itself decides it, so nothing here can.
-    assert codes == set(Rejection) - {Rejection.OVER_CAP}, sorted(
-        set(Rejection) - {Rejection.OVER_CAP} - codes
+    # Every code a CHECK emits. Two are not among them, and for the same
+    # reason: the service refuses what the checks already passed, on
+    # something no one fact can be read for. `over_cap` is the passage
+    # yielding more atomic facts than EXTRACTION_MIN_OTHER_SHARE leaves room
+    # for, and `duplicate` is the corpus already holding the statement.
+    service_refuses = {Rejection.OVER_CAP, Rejection.DUPLICATE}
+    assert codes == set(Rejection) - service_refuses, sorted(
+        set(Rejection) - service_refuses - codes
     )
 
 

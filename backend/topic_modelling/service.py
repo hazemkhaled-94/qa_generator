@@ -208,6 +208,9 @@ class TopicModellingService(StageService):
                 held.append(weight.passage_id)
 
         named: list[FittedTopic] = []
+        # Every name given so far, including those a person typed: the model
+        # is shown them so one fit cannot put two topics under one name.
+        taken = [topic.label for topic in topics if topic.label]
         for topic in topics:
             if topic.label:
                 named.append(topic)
@@ -216,7 +219,10 @@ class TopicModellingService(StageService):
                 topic,
                 language,
                 self._repository.excerpts(strongest.get(topic.topic_index, [])),
+                taken,
             )
+            if label:
+                taken.append(label)
             named.append(
                 replace(topic, label=label, labelled_by=self._labeller.model)
                 if label

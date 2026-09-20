@@ -14,7 +14,13 @@ from typing import Any
 from factories import passage as build_passage
 
 from database.qa_generator import FactKind
-from extraction.models import CandidateFact, CheckedFact, Cited, PassageToExtract
+from extraction.models import (
+    CandidateFact,
+    CheckedFact,
+    Cited,
+    PassageToExtract,
+    Twin,
+)
 from extraction.validation import FactChecker
 
 #: The share a digest must come in under. Stated here rather than read from
@@ -285,17 +291,30 @@ class Queue:
         """Initialises the queue with the passages waiting on it."""
         self._pending = list(passages)
         self.stored: dict[int, list[CheckedFact]] = {}
+        self.embeddings: dict[int, list[float] | None] = {}
         self.failed: dict[int, str] = {}
         self.swept = 0
+        #: What `nearest_fact` answers, or None for an empty corpus.
+        self.twin: Twin | None = None
 
     def claim(self) -> PassageToExtract | None:
         """Takes the next passage off the queue."""
         return self._pending.pop(0) if self._pending else None
 
-    def store(self, passage_id: int, facts: list[CheckedFact]) -> int:
-        """Records what one passage yielded."""
+    def store(
+        self,
+        passage_id: int,
+        facts: list[CheckedFact],
+        embedding: list[float] | None = None,
+    ) -> int:
+        """Records what one passage yielded, and the passage's own vector."""
         self.stored[passage_id] = facts
+        self.embeddings[passage_id] = embedding
         return len(facts)
+
+    def nearest_fact(self, embedding: list[float], within=()) -> Twin | None:
+        """The stored fact this queue was told to answer with."""
+        return self.twin
 
     def fail(self, passage_id: int, error: str) -> None:
         """Records a passage the service could not read."""
@@ -380,6 +399,36 @@ class Catalogue:
         return [fact.kind for fact in self.written]
 
 
+class Vectors:
+    """An embedder that needs no weights.
+
+    One axis per distinct text, so two identical texts are cosine 1.0 and two
+    different ones are 0.0. That is the whole range the dedup gate reads, and
+    a threshold between the two is what the tests set.
+    """
+
+    def __init__(self) -> None:
+        """Starts with no axes assigned."""
+        self.seen: list[str] = []
+        self.calls = 0
+
+    def embed(self, text: str) -> list[float]:
+        """One text's unit vector."""
+        return self.embed_all([text])[0]
+
+    def embed_all(self, texts: list[str]) -> list[list[float]]:
+        """One unit vector per text."""
+        self.calls += 1
+        for text in texts:
+            if text not in self.seen:
+                self.seen.append(text)
+        width = 1024
+        return [
+            [1.0 if i == self.seen.index(text) % width else 0.0 for i in range(width)]
+            for text in texts
+        ]
+
+
 class Extraction:
     """The per-passage service, wired around scripted models."""
 
@@ -389,6 +438,8 @@ class Extraction:
         facts: dict | Exception | None = None,
         digest: dict | Exception | None = None,
         kinds: tuple[str, ...] = (),
+        duplicate_cosine: float = 0.0,
+        embed: bool = False,
     ) -> None:
         """Wires the service.
 
@@ -398,6 +449,10 @@ class Extraction:
             digest: What the digest model answers with.
             kinds: Which digest kinds to keep. No digest reader at all when
                 empty.
+            duplicate_cosine: What the dedup gate refuses at.
+            embed: Whether to wire an embedder at all. Implied by a threshold
+                above 0, and asked for on its own to write vectors with no
+                gate.
         """
         from extraction.extractors import (
             DigestExtractor,
@@ -410,6 +465,7 @@ class Extraction:
         self.queue = Queue(*passages)
         self.model = Model(facts if facts is not None else {"facts": []})
         self.digest_model = Model(digest)
+        self.vectors = Vectors() if embed or duplicate_cosine > 0 else None
         self.service = ExtractionService(
             repository=self.queue,  # type: ignore[arg-type]
             extractors=ExtractorRegistry(
@@ -420,6 +476,8 @@ class Extraction:
             digest=DigestExtractor(self.digest_model, kinds)  # type: ignore[arg-type]
             if kinds
             else None,
+            embedder=self.vectors,  # type: ignore[arg-type]
+            duplicate_cosine=duplicate_cosine,
         )
 
     def run(self) -> int:

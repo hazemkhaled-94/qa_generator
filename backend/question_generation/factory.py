@@ -6,10 +6,10 @@ import logging
 
 from llm.client import Client
 from llm.config import Settings as ModelSettings
+from nlp.embedding import Embedder
 from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
-from question_generation.embedding import Embedder
 from question_generation.generation import QuestionWriter
 from question_generation.queue import QuestionQueue
 from question_generation.service import QuestionGenerationService

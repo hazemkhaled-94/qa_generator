@@ -214,6 +214,7 @@ class Rejection(StrEnum):
     NOT_LISTED = "not_listed"
     NOT_BRIDGING = "not_bridging"
     OVER_CAP = "over_cap"
+    DUPLICATE = "duplicate"
 
 
 def one_of(column: str, values: type[StrEnum]) -> str:

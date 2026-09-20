@@ -13,7 +13,7 @@ import sys
 from extraction.config import Settings
 from extraction.factory import build_bridge, build_service
 from extraction.repository import FactCatalog, PassageQueue
-from extraction.service import bridge, recap, revalidate
+from extraction.service import bridge, embed, recap, revalidate
 from extraction.validation import FactChecker
 from llm.config import Settings as ModelSettings
 from settings.store import snapshot
@@ -76,6 +76,17 @@ def main(argv: list[str] | None = None) -> int:
         _, settings, version = configured()
         return recap(FactCatalog(version=version), settings.atomic_cap, within)
 
+    def run_embed(within) -> int:
+        """Writes the vectors onto passages and facts already stored."""
+        from nlp.embedding import Embedder
+
+        _, settings, version = configured()
+        return embed(
+            FactCatalog(version=version),
+            Embedder(settings.embedding_model, settings.embedding_max_tokens),
+            within,
+        )
+
     #: This stage's own operations. `revalidate` calls no model: it re-reads
     #: what the checks read off facts already stored, which is how a change to
     #: the checks reaches facts extracted before it.
@@ -94,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
             "refuse the atomic facts over the cap, without calling the model",
             "refused",
             run_recap,
+        ),
+        "embed": (
+            "write the vectors onto stored rows, without calling the model",
+            "embedded",
+            run_embed,
         ),
     }
 

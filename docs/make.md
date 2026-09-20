@@ -108,7 +108,7 @@ one given wins.
 
 ## Replaying a stage without redoing it
 
-Four operations re-derive what a stage computed, over rows already stored,
+Five operations re-derive what a stage computed, over rows already stored,
 **without the expensive part**:
 
 | Target | Does |
@@ -117,10 +117,12 @@ Four operations re-derive what a stage computed, over rows already stored,
 | `make chunk-revocabulary` | Reads every stored passage's language and vocabulary again. Only `passages.language` and `passages.lemmas` change |
 | `make questions-reverify` | Puts every stored question through the gates that need no model |
 | `make extract-recap` | Re-applies the atomic cap `EXTRACTION_MIN_OTHER_SHARE` works out to. A corpus extracted before the cap existed is re-balanced in seconds rather than re-read over hours |
+| `make extract-embed` | Writes the vectors onto passages and facts already stored. A corpus extracted before the embedding columns existed is filled in at the speed of the embedding model. It does not apply the dedup gate: a fact accepted before that gate existed was accepted |
 | `make extract-bridge` | Reads each topic's passage groups for claims spanning passages |
 
-`chunk-revocabulary` and `extract-revalidate` take `SHA`, `extract-revalidate`
-and `extract-recap` take `PASSAGE`, and `questions-reverify` takes `TOPIC`.
+`chunk-revocabulary` and `extract-revalidate` take `SHA`, `extract-revalidate`,
+`extract-recap` and `extract-embed` take `PASSAGE`, and `questions-reverify`
+takes `TOPIC`.
 
 These exist because the obvious way to apply a change is the destructive one.
 `extract-rerun` calls the model again over the whole corpus, which costs hours

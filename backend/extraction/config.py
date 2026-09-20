@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from database.qa_generator import FactKind
-from settings import Source, csv, decimal, integer, optional
+from settings import Source, csv, decimal, integer, optional, required
 
 #: The kind the routed extractor always produces. It is not optional: a
 #: passage read for nothing else is still read for its claims.
@@ -65,6 +65,10 @@ class Settings:
         bridges_per_topic: How many bridge calls one topic is worth.
         bridge_passages: How many passages one bridge call is shown.
         model: The model that reads a passage, or None for the shared one.
+        duplicate_cosine: How alike two statements may be before the second
+            is refused. 0 runs no dedup gate and writes no vectors.
+        embedding_model: The model the vectors come from.
+        embedding_max_tokens: How much of a statement it reads.
     """
 
     kinds: frozenset[str]
@@ -74,6 +78,14 @@ class Settings:
     bridges_per_topic: int
     bridge_passages: int
     model: str | None
+    duplicate_cosine: float
+    embedding_model: str
+    embedding_max_tokens: int
+
+    @property
+    def embeds(self) -> bool:
+        """Whether a run embeds what it stores."""
+        return self.duplicate_cosine > 0
 
     @property
     def digests(self) -> tuple[str, ...]:
@@ -109,4 +121,7 @@ class Settings:
             # Absent means the model LLM_MODEL names, which is what every
             # stage called before any of them could name its own.
             model=optional("EXTRACTION_MODEL", source),
+            duplicate_cosine=decimal("EXTRACTION_DUPLICATE_COSINE", source),
+            embedding_model=required("EMBEDDING_MODEL", source),
+            embedding_max_tokens=integer("EMBEDDING_MAX_TOKENS", source),
         )

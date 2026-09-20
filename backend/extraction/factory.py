@@ -50,7 +50,19 @@ def build_service(
         # checks is a suggestion.
         atomic_cap=cap,
         digest_min_chars=settings.digest_min_chars,
+        # Imported here rather than at the top of the module: loading it
+        # loads torch, and a deployment that runs no dedup gate should not
+        # pay two gigabytes for a name it never uses.
+        embedder=_embedder(settings) if settings.embeds else None,
+        duplicate_cosine=settings.duplicate_cosine,
     )
+
+
+def _embedder(settings: Settings):
+    """Loads the embedding model the dedup gate and the vectors need."""
+    from nlp.embedding import Embedder
+
+    return Embedder(settings.embedding_model, settings.embedding_max_tokens)
 
 
 def build_bridge(

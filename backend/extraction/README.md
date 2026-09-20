@@ -87,6 +87,21 @@ One model call costs minutes. A passage is skipped when:
 A table is exempt from the last two: it is read from its cell grid, not from
 its prose.
 
+It is **not** exempt from one check, because that one reads the cells rather
+than the prose: a grid whose filled cells are more than half **identifiers** —
+`TA-BO1`, `K2`, `1.7`, a tick — states nothing a reader would look up. A
+traceability matrix of learning objectives against business outcomes is the
+case; read as a table it gave a fact per cell, every one of them checkable
+and every one about how the document is organised.
+
+The threshold is 0.5, set where nothing good is refused rather than where
+everything bad is caught. Measured over this corpus: no table carrying prose
+reaches 0.155 on average and none exceeds half, while the matrices, the
+release-note tables and the abbreviation lists average 0.424 and 28 of them
+are over it. A glossary stays: one column is a term, which looks like an
+identifier, but the other is its definition, and the definitions are the best
+thing it holds.
+
 A skipped passage is marked *read with nothing found*, not failed. There was
 nothing there, which is an answer.
 
@@ -162,7 +177,29 @@ winning:
 | two points or more | `not_listed` | | | ● | |
 | rests on two passages | `not_bridging` | | | | ● |
 
-One refusal is not in that table because no check makes it. `over_cap` is the
+Two refusals are not in that table because no check makes either: both are
+the service refusing what the checks already passed, on something no one
+statement can be read for.
+
+`duplicate` is the corpus already holding the statement.
+`EXTRACTION_DUPLICATE_COSINE` is how alike two may be, cosine over
+`EMBEDDING_MODEL`, and a candidate is probed against two things: every
+validated fact in the corpus, through the HNSW index on `facts.embedding`,
+and the facts this passage has already kept. Both, because neither alone is
+enough — the first misses two copies inside one passage, where a summary and
+an atomic fact often say the same thing, and the second misses the same claim
+restated in the next document.
+
+The search is over the **whole corpus** rather than one topic. A duplicate
+written from another subject is still a duplicate, and narrowing to a topic
+would lose it to save nothing: the index answers a corpus of this size in
+about two milliseconds, against the minutes the model call that wrote the
+fact took. `make extract-embed` fills in the vectors for facts and passages
+already stored, without calling the model; it does not apply the gate,
+because a fact accepted before the gate existed was accepted, and refusing it
+now would rewrite a verdict the corpus was measured under.
+
+`over_cap` is the
 service refusing what the checks already passed: `EXTRACTION_MIN_OTHER_SHARE`
 is a floor on the share of a passage's facts that are *not* atomic, a passage
 yields a fixed two digests however much it says, and so the floor works out

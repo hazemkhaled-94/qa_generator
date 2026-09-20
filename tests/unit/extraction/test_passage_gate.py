@@ -148,3 +148,64 @@ def test_prose_carrying_a_reference_is_not_skipped() -> None:
     )
 
     assert skipped(prose) is None
+
+
+def _grid(*texts: str) -> list[dict]:
+    """One grid holding the given cell texts."""
+    return [
+        {
+            "cells": [
+                {"row": i, "col": 0, "line": None, "text": text}
+                for i, text in enumerate(texts)
+            ]
+        }
+    ]
+
+
+def test_a_grid_of_identifiers_is_skipped() -> None:
+    """A traceability matrix asserts nothing a reader would look up.
+
+    Its cells are learning-objective codes and levels, and read as a table
+    it gave a fact per cell - "TA-BO1 is traced to TA-3.4.2" - every one of
+    them checkable, and about how the document is organised.
+
+    The claim-density signals the other rules read are all zero for a table,
+    which is why this one reads the cells instead.
+    """
+    matrix = passage(
+        "| TA-BO1 | TA-3.4.2 |",
+        block_type="table",
+        table_cells=_grid("TA-BO1", "TA-3.4.2", "K2", "X", "1.7", "TM-2.2.1"),
+    )
+
+    assert skipped(matrix) == "a grid of identifiers rather than of statements"
+
+
+def test_a_table_whose_cells_say_something_is_still_read() -> None:
+    """The threshold is set where no table carrying prose reaches it.
+
+    A glossary is the case that matters: one column is a term, which looks
+    like an identifier, and the other is its definition. Refusing it would
+    lose the definitions, which are the best thing a glossary holds.
+    """
+    glossary = passage(
+        "| Richtig Negativ | Eine Vorhersage ... |",
+        block_type="table",
+        table_cells=_grid(
+            "Richtig Negativ (RN)",
+            "Eine Vorhersage, bei der das Modell die negative Klasse korrekt "
+            "vorhersagt.",
+            "K2",
+            "Anpassbarkeit",
+            "Die Leichtigkeit, mit der ein System angepasst werden kann.",
+        ),
+    )
+
+    assert skipped(glossary) is None
+
+
+def test_a_table_with_no_cells_is_not_judged_on_them() -> None:
+    """An empty grid is not a grid of identifiers."""
+    empty = passage("| a | b |", block_type="table", table_cells=[])
+
+    assert skipped(empty) is None

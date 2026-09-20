@@ -12,7 +12,7 @@ from llm.client import Client, ModelUnavailable
 
 #: Recorded on every fact drawn with the prompt below. Bumped whenever that
 #: prompt changes what counts as a fact.
-PROMPT_VERSION = "6"
+PROMPT_VERSION = "7"
 
 _SYSTEM = """You break a numbered excerpt down into the separate claims it
 makes. Each claim becomes one fact.
@@ -48,6 +48,13 @@ Rules, all of them mandatory:
 - Write the statement in the language of the excerpt.
 - Do not copy the sentence out. A statement that repeats its sentence adds
   nothing; it has to carry ONE of the claims and leave the rest.
+- A SENTENCE THAT ASKS SOMETHING STATES NOTHING. A checklist item, a review
+  question or a heading written as a question yields no fact. Do not turn it
+  round into the claim it would be if the answer were yes:
+
+    "Are imported data checked for validity?"
+      -> no fact. The excerpt asks this; it does not say it happens.
+
 - A sentence with no factual content yields no facts. Returning none is a
   correct answer and is better than a weak one.
 
