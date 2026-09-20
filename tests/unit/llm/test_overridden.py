@@ -46,7 +46,12 @@ def test_no_name_keeps_the_shared_model(absent) -> None:
 
 
 def test_nothing_but_the_model_changes() -> None:
-    """A stage names a model; it does not get its own deployment."""
+    """A stage names a model of the same provider; nothing else moves.
+
+    Crossing providers is the exception and has its own tests below: an
+    address and a thinking switch belong to the provider rather than to
+    the deployment, so they follow the prefix.
+    """
     before = shared()
     after = before.overridden("ollama/other")
 
@@ -94,6 +99,7 @@ def test_a_self_hosted_override_is_sent_where_it_is_served() -> None:
     was posted to the wrong host.
     """
     settings = shared(
+        model="azure/gpt-4.1",
         base_url="https://example.openai.azure.com",
         ollama_base_url="http://localhost:11434",
     )
@@ -118,6 +124,44 @@ def test_a_hosted_override_keeps_the_shared_address() -> None:
 
 def test_a_self_hosted_override_with_nowhere_to_send_it_is_left_alone() -> None:
     """A deployment that never named a runtime gets the old behaviour."""
-    settings = shared(base_url="http://one-place", ollama_base_url=None)
+    settings = shared(
+        model="azure/gpt-4.1", base_url="http://one-place", ollama_base_url=None
+    )
 
     assert settings.overridden("ollama_chat/other").base_url == "http://one-place"
+
+
+def test_a_self_hosted_override_turns_thinking_off() -> None:
+    """A thinking model asked for a structured answer reasons instead.
+
+    Measured: gemma4:12b answered one boolean in a median 19.5s with
+    thinking at its default and 3.2s with it off, and the schema it was
+    answering has a single field. `off` is Ollama's spelling and a hosted
+    provider refuses it, so it cannot be one global value.
+    """
+    settings = shared(
+        model="azure/gpt-4.1",
+        reasoning_effort=None,
+        ollama_base_url="http://localhost:11434",
+    )
+
+    assert settings.overridden("ollama_chat/gemma4:12b").reasoning_effort == "off"
+
+
+def test_a_deployment_that_chose_an_effort_keeps_it() -> None:
+    """Filled in where nothing was chosen, never overridden."""
+    settings = shared(
+        model="azure/gpt-4.1",
+        reasoning_effort="low",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    assert settings.overridden("ollama_chat/gemma4:12b").reasoning_effort == "low"
+
+
+def test_a_hosted_override_is_left_thinking_as_it_was() -> None:
+    """`off` is not a value a hosted provider accepts."""
+    assert (
+        shared(reasoning_effort=None).overridden("azure/gpt-4.1").reasoning_effort
+        is None
+    )

@@ -8,6 +8,11 @@ from datetime import timedelta
 from settings import Source, decimal, integer, optional, required
 
 
+def _provider(model: str) -> str:
+    """The provider a litellm model id names, which is its prefix."""
+    return model.split("/", 1)[0] if "/" in model else ""
+
+
 @dataclass(frozen=True)
 class Settings:
     """Which model to call, where, and how patiently.
@@ -55,6 +60,12 @@ class Settings:
 
         Returns self when nothing is named, so a caller needs no branch.
 
+        **Only a CROSS-PROVIDER override moves anything else.** Naming
+        another model of the provider already configured is the one-thing
+        change this has always been; naming a model of a different one is
+        not, because two of these values belong to the provider rather than
+        to the deployment.
+
         **The address follows the provider.** litellm reads a model id's
         prefix to pick the provider, so a stage naming `ollama_chat/...`
         while `LLM_BASE_URL` points at Azure sends an Ollama request to
@@ -71,11 +82,23 @@ class Settings:
         Args:
             model: The model to call, or None to keep the shared one.
         """
-        if not model:
-            return self
-        if model.startswith("ollama") and self.ollama_base_url:
-            return replace(self, model=model, base_url=self.ollama_base_url)
-        return replace(self, model=model)
+        if not model or _provider(model) == _provider(self.model):
+            return self if not model else replace(self, model=model)
+        if not model.startswith("ollama"):
+            return replace(self, model=model)
+        moved: dict[str, object] = {"model": model}
+        if self.ollama_base_url:
+            moved["base_url"] = self.ollama_base_url
+        # And thinking goes off, unless the deployment chose otherwise.
+        # Every call in this pipeline asks for a structured answer, and a
+        # thinking model asked for one spends its window reasoning: measured
+        # here, gemma4:12b answered a single boolean in a median 19.5s and a
+        # maximum of 118s with thinking left at its default, against 3.2s
+        # with it off. `off` is Ollama's spelling and a hosted provider
+        # refuses it, which is why this cannot be one global value.
+        if self.reasoning_effort is None:
+            moved["reasoning_effort"] = "off"
+        return replace(self, **moved)
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:
