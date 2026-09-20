@@ -6,7 +6,8 @@ from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, select, text, update
+from sqlalchemy.orm import aliased
 
 from database.qa_generator import (
     Fact,
@@ -26,6 +27,7 @@ from topic_modelling.models import (
     PassageVocabulary,
     StoredTopic,
     TopicFit,
+    TopicPair,
     TopicRemoval,
 )
 
@@ -35,6 +37,28 @@ _OUTSTANDING = Topic.topic_index.is_(None)
 
 #: How many passages to hold at once while streaming the corpus.
 _BATCH = 500
+
+#: Each topic's centroid, as the mean of its passages' vectors normalised back
+#: to length 1. Written in SQL rather than by a worker: it is an average of a
+#: column, so nothing has to load a model to compute it and it cannot come to
+#: disagree with the passages it is the mean of.
+#:
+#: Unweighted over the members, because pgvector has no vector-by-scalar
+#: multiply to weight them with. The membership floor has already dropped the
+#: passages a topic barely holds, which is most of what a weighting would do.
+_PLACE = text(
+    "UPDATE topics t SET embedding = c.centroid FROM ("
+    "  SELECT pt.topic_id AS id, l2_normalize(avg(p.embedding)) AS centroid"
+    "  FROM passage_topics pt JOIN passages p ON p.id = pt.passage_id"
+    "  WHERE p.embedding IS NOT NULL GROUP BY pt.topic_id"
+    ") c WHERE t.id = c.id"
+)
+
+
+def _place(session) -> int:
+    """Writes every topic's centroid in the caller's transaction."""
+    return session.execute(_PLACE).rowcount
+
 
 #: The next fit to run. Both conditions are load-bearing: status alone would
 #: let a fitted topic that somehow reached `pending` be claimed as a request.
@@ -263,7 +287,40 @@ class TopicQueue(StageQueue):
             ]
             if memberships:
                 session.execute(insert(PassageTopic), memberships)
+                _place(session)
         return len(memberships)
+
+    def place(self) -> int:
+        """Writes each topic's centroid from the passages it holds.
+
+        Run by `replace` as part of a fit, and on its own after the passages
+        have been embedded for the first time - a fit that ran before there
+        were any vectors wrote none.
+
+        Returns:
+            How many topics were placed.
+        """
+        with self._session.begin() as session:
+            return _place(session)
+
+    def bearing_facts(self, passage_ids: list[int]) -> set[int]:
+        """Which of these passages carry a validated fact.
+
+        What the label pre-check reads. A passage extraction found nothing
+        in is one the corpus says nothing about, whatever its terms look
+        like, and that is the same signal in any language.
+        """
+        if not passage_ids:
+            return set()
+        with self._session() as session:
+            return set(
+                session.scalars(
+                    select(FactPassage.passage_id)
+                    .join(Fact, Fact.id == FactPassage.fact_id)
+                    .where(Fact.validated, FactPassage.passage_id.in_(passage_ids))
+                    .distinct()
+                ).all()
+            )
 
     def counts(self) -> dict[str, int]:
         """Reports what this service owns, for the status panel.
@@ -291,6 +348,54 @@ class TopicQueue(StageQueue):
 
 class TopicCatalog(Repository):
     """Reads the fitted topics, and records what a person decided about one."""
+
+    def crowded(self, threshold: float) -> list[TopicPair]:
+        """Pairs of topics whose centroids sit closer together than `threshold`.
+
+        A factorisation asked for twelve topics returns twelve whether the
+        corpus holds twelve subjects or nine, so two of them are sometimes
+        one subject split down the middle. Nothing here fixes that - it says
+        so, which is what a coverage report read by its names needs.
+
+        Args:
+            threshold: Cosine likeness above which two are reported.
+
+        Returns:
+            Each pair once, closest first.
+        """
+        left, right = aliased(Topic), aliased(Topic)
+        distance = left.embedding.cosine_distance(right.embedding)
+        query = (
+            select(
+                left.language,
+                left.topic_index.label("one"),
+                left.label.label("one_label"),
+                right.topic_index.label("other"),
+                right.label.label("other_label"),
+                distance.label("far"),
+            )
+            .where(
+                left.language == right.language,
+                # Each pair once, and never a topic against itself.
+                left.topic_index < right.topic_index,
+                left.embedding.is_not(None),
+                right.embedding.is_not(None),
+                distance < (1.0 - threshold),
+            )
+            .order_by(distance)
+        )
+        with self._session() as session:
+            return [
+                TopicPair(
+                    language=row.language,
+                    one=row.one,
+                    one_label=row.one_label,
+                    other=row.other,
+                    other_label=row.other_label,
+                    similarity=1.0 - float(row.far),
+                )
+                for row in session.execute(query)
+            ]
 
     def describe(
         self, topic_id: int, *, label: str | None, include_in_coverage: bool

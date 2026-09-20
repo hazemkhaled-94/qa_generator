@@ -260,6 +260,12 @@ class Reading:
     #: Whether every pointing word in the question has an antecedent inside
     #: it. False is a question only somebody holding the passage could ask.
     self_contained: bool = True
+    #: The span the subject was read off, kept rather than reduced to the
+    #: boolean beside it. Nothing gates on it: it is what says WHY a question
+    #: was found to name nothing, and it is what the phrasing harness scores
+    #: containment against, since two correct readings disagree about a
+    #: span's edges but not about the word inside it.
+    subject: str = ""
 
 
 class Verifier:
@@ -420,4 +426,5 @@ class Verifier:
             stands_alone=bool(got.subject.strip()),
             names_its_source=got.names_its_source,
             self_contained=got.self_contained,
+            subject=got.subject.strip(),
         )

@@ -44,6 +44,7 @@ from question_generation.gates import (
     NAMES_SOMETHING,
     OFF_TOPIC_OVERLAP,
     OVERLAP,
+    adds_up,
     agrees,
     anchored,
     asserted,
@@ -337,6 +338,23 @@ class QuestionChecker:
                 QuestionRejection.NOT_RECOVERABLE,
                 "it carries no answer to check the passages against",
             )
+        if candidate.spec.derived == Derivation.ARITHMETIC:
+            # Done here rather than asked, when the answer is a figure. A
+            # total has a right value rather than a likely one, and a model
+            # asked whether two numbers come to a third is being asked to
+            # agree. None is an answer this cannot read - a total in words, a
+            # range, a date - and falls through to the model below.
+            computed = adds_up(target, candidate.group.passages)
+            if computed is True:
+                return None
+            if computed is False:
+                return (
+                    QuestionRejection.NOT_RECOVERABLE,
+                    (
+                        f"{target!r} is not a total of any figures the cited "
+                        f"passages state, or is two years added together"
+                    ),
+                )
         asked = (
             self._verifier.computes
             if candidate.spec.derived == Derivation.ARITHMETIC

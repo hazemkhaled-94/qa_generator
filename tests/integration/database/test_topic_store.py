@@ -11,7 +11,7 @@ import pytest
 from topics import TopicStore, fitting
 
 from database.qa_generator import Status
-from topic_modelling.models import FittedTopic
+from topic_modelling.models import FittedTopic, PassageWeight
 
 pytestmark = pytest.mark.integration
 
@@ -618,3 +618,109 @@ def test_deleting_leaves_the_passages_alone(store) -> None:
     store.catalog.delete_all()
 
     assert len(list(store.queue.passages("de"))) == 2
+
+
+# ── Where a topic sits ────────────────────────────────────────────────────
+
+
+class TestATopicSitsWhereItsPassagesDo:
+    """The centroid, and what it is for.
+
+    Computed in SQL out of `passages.embedding` rather than asked of a model:
+    it is an average of a column, so nothing loads two gigabytes to write it
+    and it cannot come to disagree with the passages it is the mean of.
+    """
+
+    def placed(self, store: TopicStore, *, first: int, second: int) -> TopicStore:
+        """Two topics over four passages, on the axes given."""
+        store.given_passages(de=4)
+        one, two, three, four = store.passages["de"]
+        store.given_passage_vectors(
+            **{str(one): first, str(two): first, str(three): second, str(four): second}
+        )
+        store.queue.replace(
+            store.request(),
+            [
+                fitting(
+                    "de",
+                    weights=[
+                        PassageWeight(one, 0, 0.9),
+                        PassageWeight(two, 0, 0.8),
+                        PassageWeight(three, 1, 0.9),
+                        PassageWeight(four, 1, 0.8),
+                    ],
+                )
+            ],
+        )
+        return store
+
+    def test_a_fit_writes_each_topic_its_centroid(self, store) -> None:
+        """Two passages on one axis average to that axis."""
+        vectors = self.placed(store, first=0, second=7).topic_vectors()
+
+        assert vectors[0] is not None and vectors[1] is not None
+        assert vectors[0][0] == pytest.approx(1.0)
+        assert vectors[1][7] == pytest.approx(1.0)
+
+    def test_a_centroid_is_a_unit_vector(self, store) -> None:
+        """Normalised, so a cosine between two is a dot product."""
+        vectors = self.placed(store, first=0, second=7).topic_vectors()
+
+        length = sum(one * one for one in vectors[0]) ** 0.5
+        assert length == pytest.approx(1.0)
+
+    def test_a_topic_whose_passages_carry_no_vector_is_not_placed(self, store) -> None:
+        """NULL rather than a zero vector, which would sit near everything."""
+        store.given_passages(de=2)
+        one, two = store.passages["de"]
+        store.queue.replace(
+            store.request(),
+            [
+                fitting(
+                    "de",
+                    weights=[PassageWeight(one, 0, 0.9), PassageWeight(two, 1, 0.9)],
+                )
+            ],
+        )
+
+        assert store.topic_vectors() == {0: None, 1: None}
+
+    def test_two_topics_on_one_subject_are_reported(self, store) -> None:
+        """The pair a factorisation split down the middle.
+
+        This corpus had two topics named `Testverfahren` and two named
+        `Testen KI-basierter Systeme`, which is what this exists to say.
+        """
+        self.placed(store, first=0, second=0)
+
+        crowded = store.catalog.crowded(0.95)
+
+        assert [(one.one, one.other) for one in crowded] == [(0, 1)]
+        assert crowded[0].similarity == pytest.approx(1.0)
+
+    def test_two_topics_on_different_subjects_are_not(self, store) -> None:
+        """Orthogonal centroids are as far apart as this space goes."""
+        self.placed(store, first=0, second=7)
+
+        assert store.catalog.crowded(0.95) == []
+
+    def test_placing_again_is_how_an_embedded_corpus_catches_up(self, store) -> None:
+        """A fit run before the passages were embedded wrote no centroid."""
+        store.given_passages(de=2)
+        one, two = store.passages["de"]
+        store.queue.replace(
+            store.request(),
+            [
+                fitting(
+                    "de",
+                    weights=[PassageWeight(one, 0, 0.9), PassageWeight(two, 1, 0.9)],
+                )
+            ],
+        )
+        assert store.topic_vectors() == {0: None, 1: None}
+
+        store.given_passage_vectors(**{str(one): 0, str(two): 7})
+        placed = store.queue.place()
+
+        assert placed == 2
+        assert store.topic_vectors()[0] is not None

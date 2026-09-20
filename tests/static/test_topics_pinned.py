@@ -36,6 +36,7 @@ SETTINGS = frozenset(
         "TOPIC_MIN_WEIGHT",
         "TOPIC_NO_BELOW",
         "TOPIC_NO_ABOVE",
+        "TOPIC_LABEL_MIN_FACT_SHARE",
         "TOPIC_MODEL",
     }
 )

@@ -42,6 +42,7 @@ class TopicModellingService(StageService):
         fitter: TopicFitter,
         export: ExportBucket,
         labeller: TopicLabeller | None = None,
+        min_fact_share: float = 0.0,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -51,12 +52,15 @@ class TopicModellingService(StageService):
             export: Where each language's figure is stored.
             labeller: Names the unnamed topics. Without one a topic keeps its
                 terms and no name.
+            min_fact_share: The smallest share of a topic's passages that must
+                carry a fact before it is worth naming. 0 names every topic.
         """
         super().__init__(repository)
         self._repository: TopicQueue = repository
         self._fitter = fitter
         self._export = export
         self._labeller = labeller
+        self._min_fact_share = min_fact_share
 
     def request(self) -> int:
         """Asks for a fit, without doing it.
@@ -189,6 +193,50 @@ class TopicModellingService(StageService):
             except Exception:
                 log.exception("could not draw the %s topics", fitting.language)
 
+    def _barren(self, fitting: Fitting) -> frozenset[int]:
+        """Which topics hold almost no facts, and so name no subject.
+
+        The deterministic half of "Mixed". Asking the model was answered
+        `Mixed` for none of 38 topics, including one whose terms were
+        `inhaltsverzeichnis, einführung, urheberschutzvermerk,
+        änderungsübersicht, danksagung` and which it named `Testverfahren`
+        off the one subject word among them. A model reliably names
+        whatever it is shown, so what it is shown is decided here.
+
+        Read off the facts rather than off the terms, which is what makes it
+        language-neutral: a passage extraction found nothing in says nothing,
+        whatever language it says it in, and a word list of front-matter
+        terms would have to be written again for every language a deployment
+        adds.
+
+        Turned off when the corpus carries no facts at all - on a fit run
+        before extraction, every topic looks barren and the signal is absent
+        rather than unanimous.
+        """
+        floor = self._min_fact_share
+        if floor <= 0:
+            return frozenset()
+
+        dominant: dict[int, int] = {}
+        best: dict[int, float] = {}
+        for weight in fitting.weights:
+            if weight.weight > best.get(weight.passage_id, 0.0):
+                best[weight.passage_id] = weight.weight
+                dominant[weight.passage_id] = weight.topic_index
+
+        bearing = self._repository.bearing_facts(list(dominant))
+        if not bearing:
+            return frozenset()
+
+        held: dict[int, list[int]] = {}
+        for passage_id, topic_index in dominant.items():
+            held.setdefault(topic_index, []).append(passage_id)
+        return frozenset(
+            topic_index
+            for topic_index, passages in held.items()
+            if sum(1 for one in passages if one in bearing) / len(passages) < floor
+        )
+
     def _named(
         self, topics: list[FittedTopic], fitting: Fitting, language: str
     ) -> list[FittedTopic]:
@@ -207,12 +255,22 @@ class TopicModellingService(StageService):
             if len(held) < _EXCERPTS:
                 held.append(weight.passage_id)
 
+        barren = self._barren(fitting)
         named: list[FittedTopic] = []
         # Every name given so far, including those a person typed: the model
         # is shown them so one fit cannot put two topics under one name.
         taken = [topic.label for topic in topics if topic.label]
         for topic in topics:
             if topic.label:
+                named.append(topic)
+                continue
+            if topic.topic_index in barren:
+                # Mixed, decided before the call rather than asked for in it.
+                log.info(
+                    "%s topic %d: its passages carry almost no facts; not named",
+                    language,
+                    topic.topic_index,
+                )
                 named.append(topic)
                 continue
             label = self._labeller.label(

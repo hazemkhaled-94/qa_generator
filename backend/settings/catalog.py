@@ -315,6 +315,17 @@ SETTINGS: tuple[Setting, ...] = (
         "vocabulary, being too common to tell two topics apart.",
     ),
     Setting(
+        name="TOPIC_LABEL_MIN_FACT_SHARE",
+        service="topics",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("topics",),
+        help="The smallest share of a topic's passages that must carry a "
+        "validated fact before the topic is worth naming. Below it the topic "
+        "is left unnamed and no model is called for it. 0 names every topic.",
+    ),
+    Setting(
         name="TOPIC_MODEL",
         service="topics",
         kind="text",

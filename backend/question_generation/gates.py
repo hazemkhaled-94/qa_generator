@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from itertools import combinations
 
 from database.qa_generator import AnswerForm, QuestionRejection
 from nlp.analysis import claim, content, interrogatives, normalised, vocabulary
@@ -544,3 +545,92 @@ def agrees(
 
     left, right = normalised(recovered), normalised(target)
     return bool(left) and (left in right or right in left)
+
+
+#: A figure as either convention writes one: 1.234,56 and 1,234.56 are the
+#: same value, and 65 is itself.
+_FIGURE = re.compile(
+    r"(?<![\w.,])\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?(?![\w])|(?<![\w.,])\d+(?![\w.,])"
+)
+
+#: The most figures a sum is searched over, and the most terms in one. The
+#: search is every combination of up to this many, so both are what keeps it
+#: from being exponential. Four covers every aggregation this corpus asked
+#: for; a total of five figures nobody wrote down is not a question anybody
+#: would type.
+_FIGURE_CAP = 40
+_TERM_CAP = 4
+
+#: The range a bare four-digit number is read as a year in. Two of them
+#: summed is the arithmetic that produced the answer 4034, which is exactly
+#: right and measures nothing.
+_YEAR = range(1900, 2101)
+
+
+def figures(text: str) -> list[float]:
+    """Every number in a text, as a value.
+
+    A group of exactly three digits after the last separator is a thousands
+    group in both conventions, so 1.234 and 1,234 are 1234. Anything else
+    after the last separator is a fraction, so 12,5 and 12.5 are 12.5. A
+    number that resolves to neither is left out rather than guessed at.
+    """
+    found: list[float] = []
+    for match in _FIGURE.finditer(text):
+        raw = match.group()
+        head, _, tail = raw.rpartition(",") if "," in raw[-4:] else raw.rpartition(".")
+        try:
+            if not head or len(tail) == 3:
+                found.append(float(raw.replace(".", "").replace(",", "")))
+            else:
+                found.append(float(f"{head.replace('.', '').replace(',', '')}.{tail}"))
+        except ValueError:
+            continue
+    return found
+
+
+def adds_up(answer: str, passages: Sequence[str]) -> bool | None:
+    """Whether the answer is a total of figures the passages state.
+
+    The check an `aggregation` gets instead of asking a model to do the
+    arithmetic. A total is arithmetic, and arithmetic is the one judgement
+    here that has a right answer rather than a likely one: a model asked
+    whether 40 and 25 come to 65 is being asked to agree, and it agrees with
+    68 often enough to matter.
+
+    Returns:
+        True when some combination of at most four of the figures in the
+        passages sums to the answer, False when none does, and None when the
+        answer is not a single figure - a total in words, a range, or a date -
+        which is not this check's to judge and falls back to the model.
+    """
+    wanted = figures(answer)
+    if len(wanted) != 1:
+        return None
+    total = wanted[0]
+
+    available = [one for text in passages for one in figures(text)][:_FIGURE_CAP]
+    if not available:
+        return False
+
+    # Stated outright is not an aggregation, but it is not wrong arithmetic
+    # either; `_derived` is the gate that refuses a lookup wearing this name.
+    for size in range(1, _TERM_CAP + 1):
+        for combination in combinations(available, size):
+            if abs(sum(combination) - total) < 1e-9:
+                return not _summed_years(combination, size)
+    return False
+
+
+def _summed_years(combination: tuple[float, ...], size: int) -> bool:
+    """Whether a total is two or more years added together.
+
+    Refused rather than accepted, because the arithmetic is right and the
+    quantity is not one: a year is a point on a calendar, and two of them
+    come to nothing. This corpus produced `Welche Jahreszahl ergibt sich aus
+    dem Veroeffentlichungsjahr ... und der Versionsjahreszahl ...?` answered
+    `4034`, which the model checking the arithmetic correctly confirmed.
+    """
+    return size > 1 and all(
+        one.is_integer() and int(one) in _YEAR for one in combination
+    )

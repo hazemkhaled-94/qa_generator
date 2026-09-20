@@ -167,6 +167,41 @@ class TopicStore:
         """The rows that are fit requests rather than topics."""
         return [row for row in self.rows() if row["topic_index"] is None]
 
+    def given_passage_vectors(self, **by_passage: int) -> TopicStore:
+        """Points each named passage down one axis of the embedding space.
+
+        `given_passage_vectors(**{"1": 0, "2": 0, "3": 7})` puts passages 1
+        and 2 on the same axis and 3 on another, so a centroid over the first
+        two is that axis and the two centroids are orthogonal.
+        """
+        with self.engine.connect() as connection:
+            for passage_id, axis in by_passage.items():
+                vector = [0.0] * 1024
+                vector[axis] = 1.0
+                connection.execute(
+                    text("UPDATE passages SET embedding = :v WHERE id = :id"),
+                    {"v": str(vector), "id": int(passage_id)},
+                )
+            connection.commit()
+        return self
+
+    def topic_vectors(self) -> dict[int, list[float] | None]:
+        """Each topic's centroid, by topic index."""
+        with self.engine.connect() as connection:
+            return {
+                row.topic_index: (
+                    [float(one) for one in str(row.embedding)[1:-1].split(",")]
+                    if row.embedding is not None
+                    else None
+                )
+                for row in connection.execute(
+                    text(
+                        "SELECT topic_index, embedding FROM topics "
+                        "WHERE topic_index IS NOT NULL ORDER BY topic_index"
+                    )
+                )
+            }
+
     def stored_topics(self) -> list[dict[str, Any]]:
         """The rows that are topics."""
         return [row for row in self.rows() if row["topic_index"] is not None]

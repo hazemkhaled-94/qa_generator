@@ -346,6 +346,49 @@ concern even though the code that decides it is not.
 
 ---
 
+## Where a topic sits, and which two are one
+
+`topics.embedding` is the mean of the vectors of the passages a topic holds,
+normalised back to length 1. It is written in SQL out of `passages.embedding`
+rather than asked of a model — it is an average of a column, so nothing loads
+two gigabytes to compute it and it cannot come to disagree with the passages
+it is the mean of. `TopicCatalog.crowded(threshold)` reads it and returns the
+pairs of one language's topics whose centroids sit closer than that.
+
+The factorisation is asked for *n* topics and returns *n*, whether the corpus
+holds *n* subjects or fewer. One fit over this corpus produced two topics
+named `Testverfahren` and two named `Testen KI-basierter Systeme`. Nothing
+here merges them: a coverage report read by its names needs to be told, and
+what to do about it is a person's.
+
+No HNSW index on that column. A fit is tens of rows, and an index over 38 of
+them is read more slowly than the rows are.
+
+### Naming, and the half of it that is not the model's
+
+A topic is offered to the labeller only when its passages carry facts.
+`TOPIC_LABEL_MIN_FACT_SHARE` is the floor; below it the topic keeps its terms
+and no name, and no model is called for it.
+
+The prompt has always offered `Mixed` for a topic whose terms share no
+subject, and over 38 topics it was answered for none of them. A model
+reliably names whatever it is shown, so what it is shown is decided before
+the call. One topic here had the terms `inhaltsverzeichnis, einführung,
+urheberschutzvermerk, änderungsübersicht, danksagung, testverfahren` and was
+named `Testverfahren` off the one subject word among them.
+
+It reads the facts rather than the terms, which is what keeps it
+language-neutral: a passage extraction found nothing in says nothing,
+whatever language it says it in, and a front-matter word list would have to
+be written again for every language `NLP_MODELS` adds. Measured over this
+corpus by the share of a topic's dominant passages carrying a validated fact,
+the two front-matter topics came in at 0.00 and 0.11 and the next topic up
+was 0.56.
+
+The labeller is also shown the names already given and refuses one it
+repeats, because two topics under one name cannot be told apart in the report
+they appear in.
+
 ## Known limits of the output
 
 These are properties of the input, not defects in this service, and they bound

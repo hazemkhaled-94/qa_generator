@@ -50,4 +50,5 @@ def build_service(
             passages_per_topic=settings.passages_per_topic,
         ),
         labeller=labeller,
+        min_fact_share=settings.label_min_fact_share,
     )

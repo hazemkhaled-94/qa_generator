@@ -176,3 +176,196 @@ QUESTIONS = (
         "recoverable": True,
     },
 )
+
+
+#: ── The three phrasing judgements ─────────────────────────────────────
+#: What a correct reading of a question alone says about it, independent of
+#: any passage. These exist because the verifier answers all three in the
+#: same call that reads the answer out of the passages, and nothing measured
+#: whether it answers them WELL: the only ground truth for
+#: `names_its_source`, `self_contained` and `subject` was the model that
+#: answered them, so a change to the prompt or the model moved the numbers
+#: with nothing to say which way was better.
+#:
+#: Half of these are German and drawn from what this corpus actually
+#: produced, rejections included. The hard cases are deliberately here:
+#:
+#: - a question naming a PARTY, a period or a regulated thing, which reads
+#:   like a source and is not one - the failure the prompt spends six
+#:   examples on;
+#: - a pointing word whose antecedent is inside the question, which is
+#:   self-contained however much it reads like a reference;
+#: - a question that names nothing at all, whose subject is empty, against
+#:   one whose subject is a bare noun that is still a subject.
+#:
+#: `subject` is scored on containment rather than on equality: what a correct
+#: reading copies out is a span, and two correct readings disagree about its
+#: edges. `holds` is a word the span must carry; "" means the question names
+#: nothing and the span should be empty.
+PHRASING = (
+    # ── names its source ──────────────────────────────────────────────
+    {
+        "name": "names a section, in German",
+        "question": (
+            "Wie unterscheiden sich in Abschnitt 2.2 die Themen zur "
+            "Testschätzung und zur Fehlerbehebung?"
+        ),
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "Testschätzung",
+    },
+    {
+        "name": "names a chapter, in German",
+        "question": "Welches Thema behandelte Kapitel 5 in der älteren Fassung?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "Kapitel",
+    },
+    {
+        "name": "names a bibliography entry, in German",
+        "question": "In welchem Monat wurde die Referenz [R22] aufgerufen?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "R22",
+    },
+    {
+        "name": "names an author and a year, in German",
+        "question": "Wie definiert Beck 2003 Refactoring in der testgetriebenen Entwicklung?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "Refactoring",
+    },
+    {
+        "name": "names a document, in English",
+        "question": "According to the service agreement, how long may a reply take?",
+        "language": "en",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "reply",
+    },
+    # ── names a party, a period or a thing, which is NOT a source ─────
+    {
+        "name": "names the party a duty falls on, not a source",
+        "question": "How many faults were reported to the site manager in 2025?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "faults",
+    },
+    {
+        "name": "names a standard as the subject, not as a source",
+        "question": "Welche Reviewverfahren beschreibt die Norm ISO/IEC 20246?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": True,
+        "holds": "20246",
+    },
+    {
+        "name": "names a regulated thing, in German",
+        "question": "Wer trägt die Verantwortung für den vierteljährlichen Risikobericht?",
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "Risikobericht",
+    },
+    {
+        "name": "names a period, not a source",
+        "question": "Within how many hours is an urgent support request answered?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "support request",
+    },
+    # ── self-contained, and not ───────────────────────────────────────
+    {
+        "name": "points at the corpus itself, in German",
+        "question": "Unter welchen Einteilungen werden Testverfahren in diesem Lehrplan klassifiziert?",
+        "language": "de",
+        "names_its_source": True,
+        "self_contained": False,
+        "holds": "Testverfahren",
+    },
+    {
+        "name": "points at a context the asker cannot see, in German",
+        "question": "Warum wird ISO/IEC/IEEE 29119-4 in diesem Zusammenhang erwähnt?",
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "29119",
+    },
+    {
+        "name": "points at unnamed angaben, in German",
+        "question": "Wie unterscheiden sich der Lehrplaninhalt und ein Testteammitglied laut diesen Angaben?",
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "Lehrplaninhalt",
+    },
+    {
+        "name": "points at two editions it never names, in English",
+        "question": "How long is the gap between these two editions?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": False,
+        "holds": "editions",
+    },
+    {
+        "name": "a pointing word answered inside the question",
+        "question": (
+            "If a system meets its target by editing the stored score instead "
+            "of doing the task, how is this behaviour classified?"
+        ),
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "behaviour",
+    },
+    {
+        "name": "a pointing word answered inside the question, in German",
+        "question": (
+            "Wenn ein Team lineare Skripterstellung einführt, ist dieser "
+            "Ansatz für einen großen Umfang geeignet?"
+        ),
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "Skripterstellung",
+    },
+    {
+        "name": "nothing points anywhere",
+        "question": "How do the reply times for standard and urgent requests differ?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "reply times",
+    },
+    # ── subject: named, and not ───────────────────────────────────────
+    {
+        "name": "names nothing at all, in English",
+        "question": "What specific components are included?",
+        "language": "en",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "",
+    },
+    {
+        "name": "names nothing at all, in German",
+        "question": "Für welche Kriterien gelten die Anforderungen?",
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "",
+    },
+    {
+        "name": "a subject a reader could not answer still exists",
+        "question": "Wie viele Testfälle verlangt die Grenzwertanalyse bei drei Partitionen?",
+        "language": "de",
+        "names_its_source": False,
+        "self_contained": True,
+        "holds": "Grenzwertanalyse",
+    },
+)

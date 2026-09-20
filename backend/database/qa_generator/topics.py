@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CHAR,
     BigInteger,
@@ -92,6 +93,16 @@ class Topic(Base):
     )
     label: Mapped[str | None] = mapped_column(
         Text, comment="The subject this topic is, in words."
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(1024),
+        comment="Where this topic sits, as the membership-weighted mean of its "
+        "passages' vectors, normalised back to length 1. Derived rather than "
+        "asked for: it is an average of passages.embedding computed in SQL, so "
+        "no worker loads a model to write it and it cannot disagree with the "
+        "passages it is the mean of. What it is for is telling two topics apart "
+        "- a factorisation splits one subject in two often enough that the "
+        "coverage report needs to say so. NULL until the passages are embedded.",
     )
     labelled_by: Mapped[str | None] = mapped_column(
         Text,

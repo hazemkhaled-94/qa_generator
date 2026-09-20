@@ -75,6 +75,27 @@ class Fitting:
 
 
 @dataclass(frozen=True)
+class TopicPair:
+    """Two topics of one language whose centroids sit close together.
+
+    Attributes:
+        language: The language both belong to.
+        one: Index of the first, always the lower of the two.
+        one_label: Its name, or None.
+        other: Index of the second.
+        other_label: Its name, or None.
+        similarity: Cosine likeness of the two centroids, in [-1, 1].
+    """
+
+    language: str | None
+    one: int
+    one_label: str | None
+    other: int
+    other_label: str | None
+    similarity: float
+
+
+@dataclass(frozen=True)
 class StoredTopic:
     """One topic as it is read back out, with how much of the corpus it holds."""
 

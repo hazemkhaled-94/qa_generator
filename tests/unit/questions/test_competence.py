@@ -12,7 +12,12 @@ from __future__ import annotations
 import pytest
 from factories import candidate, group, source
 
-from database.qa_generator import CognitiveLevel, Derivation, QuestionType
+from database.qa_generator import (
+    CognitiveLevel,
+    Derivation,
+    QuestionRejection,
+    QuestionType,
+)
 from question_generation.types import SPECS
 from question_generation.verifier import Reading
 
@@ -162,7 +167,6 @@ def reasoned(kind: str):
 @pytest.mark.parametrize(
     ("kind", "gate"),
     [
-        (QuestionType.AGGREGATION, "computes"),
         (QuestionType.IMPLICATION, "follows"),
         (QuestionType.APPLICATION, "follows"),
     ],
@@ -175,6 +179,85 @@ def test_a_derived_question_is_sent_to_its_own_gate(kind: str, gate: str) -> Non
 
     assert gate in recording.asked
     assert result.status == "accepted"
+
+
+class TestAnAggregationIsCheckedArithmetically:
+    """A total has a right value rather than a likely one.
+
+    So it is computed here and not asked of a model, which agrees with a
+    wrong total often enough to matter and which cannot be shown to have
+    added anything up.
+    """
+
+    PASSAGES = (
+        "The northern site employs 40 people.",
+        "The southern site employs 25 people.",
+    )
+
+    def aggregation(self, answer: str, *passages: str):
+        """One aggregation question with the given answer and material.
+
+        Distinct passage ids, or the group holds one passage and the figures
+        the total is made of are never both in front of the gate.
+        """
+        return candidate(
+            question_text="How many people do the two sites employ between them?",
+            target_answer=answer,
+            question_type=QuestionType.AGGREGATION,
+            facts=group(
+                *(
+                    source(fact_id=at, passage_id=at, passage_text=one)
+                    for at, one in enumerate(passages or self.PASSAGES, 1)
+                )
+            ),
+        )
+
+    def test_a_right_total_is_accepted_without_a_call(self) -> None:
+        """40 and 25 come to 65, and nothing has to be asked whether they do."""
+        recording = Recording(answer=False)
+
+        result = build(recording).check(self.aggregation("65"))
+
+        assert result.status == "accepted"
+        assert "computes" not in recording.asked, "the model was asked anyway"
+
+    def test_a_wrong_total_is_refused_without_a_call(self) -> None:
+        """The failure a model asked to agree produces."""
+        recording = Recording(answer=True)
+
+        result = build(recording).check(self.aggregation("68"))
+
+        assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+        assert "computes" not in recording.asked
+
+    def test_two_years_added_together_are_refused(self) -> None:
+        """The arithmetic is right and the quantity is not one.
+
+        This corpus asked what year the first description and the prior
+        edition "come to together" and answered 4034, which every check it
+        faced confirmed.
+        """
+        recording = Recording(answer=True)
+
+        result = build(recording).check(
+            self.aggregation(
+                "4034",
+                "The method was first described in 2011.",
+                "The prior edition carried the version year 2023.",
+            )
+        )
+
+        assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+        assert "computes" not in recording.asked
+
+    def test_a_total_in_words_still_goes_to_the_model(self) -> None:
+        """What the arithmetic cannot read, it does not judge."""
+        recording = Recording(answer=True)
+
+        result = build(recording).check(self.aggregation("sixty-five"))
+
+        assert "computes" in recording.asked, "it should have fallen through"
+        assert result.status == "accepted"
 
 
 @pytest.mark.parametrize("kind", [QuestionType.IMPLICATION, QuestionType.APPLICATION])

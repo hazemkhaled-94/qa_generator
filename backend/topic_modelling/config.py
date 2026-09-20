@@ -29,6 +29,10 @@ class Settings:
     min_weight: float
     no_below: int
     no_above: float
+    #: The smallest share of a topic's passages that must carry a validated
+    #: fact before the topic is worth naming. Below it the topic is left
+    #: unnamed without a model call. 0 names every topic.
+    label_min_fact_share: float
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:
@@ -57,4 +61,5 @@ class Settings:
             min_weight=decimal("TOPIC_MIN_WEIGHT", source),
             no_below=integer("TOPIC_NO_BELOW", source),
             no_above=decimal("TOPIC_NO_ABOVE", source),
+            label_min_fact_share=decimal("TOPIC_LABEL_MIN_FACT_SHARE", source),
         )
