@@ -361,6 +361,19 @@ carrying a pointer set a case up first and refer back to it, which is the
 `application` type working — so like `anchored()` it may only **veto** the
 verifier's verdict, never make one.
 
+**Measured over a full run of 3,131 questions, this gate fired zero times**, and
+both of its halves are why. The verifier answered `self_contained: true` for
+*"…zwischen den beiden Lehrplänen"* and for *"Kursmaterial, das diesem Lehrplan
+entspricht"*, so the verdict never came. And the measurement would have missed
+the first of those anyway: `diesen beiden` is `PronType=Dem`, but `den beiden`
+is an article plus `PronType=Ind` and reads as pointing nowhere. Requiring two
+permissive judgements to agree is what makes a gate inert.
+
+What did move was the prompt. The `READS` rule against pointing at what the
+asker cannot see took dangling references in accepted root questions from 9.4%
+to 2.3% on its own. Treat this gate as unproven until the verdict is asked for
+in a call of its own — see the note on that call's load below.
+
 They are also the only gates here that are **opinions**, and an opinion needs
 an independent holder. With `QUESTIONS_VERIFIER_MODEL` unset the writer marks
 its own work, and one measured run rejected *"According to the ECB and NCAs,
@@ -369,6 +382,20 @@ naming nothing — three of four rejections in that topic were false positives.
 So the factory turns those gates off when no second model is named, and logs
 the verdict instead. Recoverability stays on regardless, because that one is
 checkable against the passage rather than a matter of taste.
+
+### What that one call is now carrying
+
+`read()` asks for five things at once: whether the answer is in the passages,
+what it is, whether the question names its source, what its subject is, and
+whether it stands alone. The prompt already has to warn that two of those are
+"easy to confuse, so read both" — which is the shape of a call doing too much.
+
+The run bears it out. `leaks_source` fired 9 times in 3,131 questions and
+`self_contained` never fired at all, while `not_recoverable` — the judgement
+this call exists for — fired 147 times. The judgements that share the call are
+the ones that starve, and the newest one starved completely. Splitting the
+phrasing verdicts into their own call is the obvious next move; they need a far
+smaller model than recoverability does, so it need not cost more.
 
 Three things about the round trip are load-bearing. The verifier is a
 **different** model, because a model marking its own work recovers what it just
@@ -391,11 +418,17 @@ Some questions are written to have **no answer in the corpus**, by perturbing a
 verified fact just out of reach. These test whether a chatbot says it does not
 know instead of inventing something, which is half of what this dataset is for.
 
-`QUESTIONS_UNANSWERABLE_SHARE` sets how many are attempted, spread by position
-rather than drawn at random, so a share of 0.10 is exactly one in ten and is
-the same one in ten on a re-run. An unanswerable question is always planned
-`easy` and from one passage: it is written by moving one fact out of reach, so
-a second passage has nothing to do with it.
+`QUESTIONS_UNANSWERABLE_SHARE` sets how many are **attempted**, spread by
+position rather than drawn at random, so a share of 0.10 is exactly one in ten
+and is the same one in ten on a re-run. An unanswerable question is always
+planned `easy` and from one passage: it is written by moving one fact out of
+reach, so a second passage has nothing to do with it.
+
+Attempted, not held: they now face two gates of their own, and those gates
+bite. Over 3,131 questions, 0.10 produced 239 attempts and 101 accepted — 4.9%
+of the accepted set, because 93 went as `answerable_after_all`. Set this above
+the share the release is meant to hold and read the outcome off
+`make questions-balance`.
 
 Three gates exist only for these, and each closes a different hole:
 
