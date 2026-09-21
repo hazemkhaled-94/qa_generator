@@ -603,3 +603,48 @@ class QuestionQuality:
     cognitive_level: dict[str, int]
     #: Questions whose band is the one the plan asked for.
     planned_met: int
+    #: How much of the corpus the accepted questions actually reach.
+    #:
+    #: Corpus-wide rather than filtered, as the topic counts above are: a
+    #: filter selecting no question of a passage cannot say that passage is
+    #: unasked. Read together these say what the topic counts cannot - a run
+    #: can cover every topic and still have asked about a third of the
+    #: material, because a topic is covered by its first accepted question.
+    #:
+    #: `passages_with_facts` is the reachable denominator rather than every
+    #: passage: a passage no validated fact rests on cannot be asked about,
+    #: and counting it as uncovered measures extraction rather than this
+    #: stage.
+    passages_total: int = 0
+    passages_with_facts: int = 0
+    passages_asked: int = 0
+    facts_validated: int = 0
+    facts_asked: int = 0
+
+    @property
+    def passage_coverage(self) -> float:
+        """The share of askable passages an accepted question rests on."""
+        return (
+            self.passages_asked / self.passages_with_facts
+            if (self.passages_with_facts)
+            else 0.0
+        )
+
+    @property
+    def fact_coverage(self) -> float:
+        """The share of validated facts an accepted question cites."""
+        return self.facts_asked / self.facts_validated if self.facts_validated else 0.0
+
+    @property
+    def questions_per_passage(self) -> float:
+        """Accepted questions per passage that has any."""
+        return self.accepted / self.passages_asked if self.passages_asked else 0.0
+
+    @property
+    def questions_per_fact(self) -> float:
+        """Accepted questions per fact that any of them cites.
+
+        Below 1 is ordinary rather than a fault: a question may cite
+        several facts, and every one of them counts as asked about.
+        """
+        return self.accepted / self.facts_asked if self.facts_asked else 0.0

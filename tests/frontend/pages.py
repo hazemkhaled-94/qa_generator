@@ -197,6 +197,13 @@ QUESTION_QUALITY = {
     "answer_form": {"value": 1},
     "planned_difficulty": {"easy": 1},
     "planned_met": 1,
+    # What the accepted questions reach, which the topic counts above
+    # cannot say: a topic is covered by its first accepted question.
+    "passages_total": 4,
+    "passages_with_facts": 3,
+    "passages_asked": 2,
+    "facts_validated": 6,
+    "facts_asked": 3,
 }
 
 PLAN = {

@@ -12,7 +12,16 @@ from collections.abc import Iterator, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ARRAY, Select, Text, cast, func, select, update
+from sqlalchemy import (
+    ARRAY,
+    Select,
+    Text,
+    cast,
+    distinct,
+    func,
+    select,
+    update,
+)
 
 from database.qa_generator import (
     Fact,
@@ -229,6 +238,52 @@ def _stored(row: Any) -> StoredQuestion:
         answer_form=row.answer_form,
         planned_difficulty=row.planned_difficulty,
     )
+
+
+#: How much of the corpus the ACCEPTED questions reach.
+#:
+#: Four counts in one statement rather than four round trips, and every one
+#: of them corpus-wide: coverage is a property of the material, so a filter
+#: that selects no question of a passage cannot say that passage is
+#: unasked.
+#:
+#: `passages_with_facts` counts only passages a VALIDATED fact rests on,
+#: because that is the most this stage could ever ask about. Measuring
+#: against every passage would report extraction's refusals as question
+#: generation's gap.
+_ASKED_PASSAGES = (
+    select(FactPassage.passage_id)
+    .join(QuestionFact, QuestionFact.fact_id == FactPassage.fact_id)
+    .join(Question, Question.id == QuestionFact.question_id)
+    .where(Question.status == QuestionStatus.ACCEPTED)
+    .distinct()
+    .scalar_subquery()
+)
+
+_COVERAGE = select(
+    select(func.count()).select_from(Passage).scalar_subquery().label("passages_total"),
+    select(func.count(distinct(FactPassage.passage_id)))
+    .select_from(FactPassage)
+    .join(Fact, Fact.id == FactPassage.fact_id)
+    .where(Fact.validated)
+    .scalar_subquery()
+    .label("passages_with_facts"),
+    select(func.count())
+    .select_from(_ASKED_PASSAGES.subquery())
+    .scalar_subquery()
+    .label("passages_asked"),
+    select(func.count())
+    .select_from(Fact)
+    .where(Fact.validated)
+    .scalar_subquery()
+    .label("facts_validated"),
+    select(func.count(distinct(QuestionFact.fact_id)))
+    .select_from(QuestionFact)
+    .join(Question, Question.id == QuestionFact.question_id)
+    .where(Question.status == QuestionStatus.ACCEPTED)
+    .scalar_subquery()
+    .label("facts_asked"),
+)
 
 
 class QuestionCatalog(Repository):
@@ -724,6 +779,7 @@ class QuestionCatalog(Repository):
                 )
                 or 0
             )
+            reach = session.execute(_COVERAGE).one()
 
         return QuestionQuality(
             total=row.total,
@@ -745,4 +801,9 @@ class QuestionCatalog(Repository):
             answer_form=spread["answer_form"],
             planned_difficulty=spread["planned_difficulty"],
             planned_met=row.planned_met,
+            passages_total=reach.passages_total,
+            passages_with_facts=reach.passages_with_facts,
+            passages_asked=reach.passages_asked,
+            facts_validated=reach.facts_validated,
+            facts_asked=reach.facts_asked,
         )

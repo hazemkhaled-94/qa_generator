@@ -94,6 +94,11 @@ _UNANSWERABLE_FLOOR = 0.05
 _TURNS = {"Opening": False, "Follow-up": True}
 
 
+def _per(count: int, over: int) -> str:
+    """One figure per another, or a dash when there is nothing to divide by."""
+    return f"{count / over:.1f}" if over else "-"
+
+
 def view() -> None:
     """Renders the questions page."""
     page.header("Questions")
@@ -168,6 +173,22 @@ def view() -> None:
                     ),
                     "Topics counted in coverage that generation has finished.",
                 ),
+                # One figure rather than three, because the page holds
+                # five and this is one thing: how much of the material the
+                # accepted questions actually reach. A topic is covered by
+                # its FIRST accepted question, so the count above can read
+                # 38 of 38 while a third of the corpus was never asked
+                # about. The Analysis fold carries the parts.
+                "Corpus reached": (
+                    page.share(
+                        quality["passages_asked"], quality["passages_with_facts"]
+                    ),
+                    (
+                        "Passages an accepted question rests on, of those a "
+                        "validated fact rests on. A passage no fact rests on "
+                        "cannot be asked about, so it is not counted here."
+                    ),
+                ),
             }
         )
 
@@ -231,6 +252,37 @@ def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:
             "What it means": tests,
         }
         for code, tests in _GATES.items()
+    ]
+
+    # Coverage, which is about the SET and not about any question in it.
+    # A run can clear every gate and still have asked about a third of the
+    # corpus, and nothing on the row level would say so.
+    asked, askable = quality["passages_asked"], quality["passages_with_facts"]
+    cited, validated = quality["facts_asked"], quality["facts_validated"]
+    rows += [
+        {
+            "Check": "Passages asked about",
+            "Value": page.share(asked, askable),
+            "Should be": "as high as the material allows",
+            "State": "OK" if asked else "Attention",
+            "What it means": (
+                f"{asked:,} of the {askable:,} passages a validated fact "
+                f"rests on. The other {max(askable - asked, 0):,} are what "
+                f"another run would reach first."
+            ),
+        },
+        {
+            "Check": "Facts asked about",
+            "Value": page.share(cited, validated),
+            "Should be": "as high as the material allows",
+            "State": "OK" if cited else "Attention",
+            "What it means": (
+                f"{cited:,} of {validated:,} validated facts are cited by an "
+                f"accepted question, at {_per(quality['accepted'], cited)} "
+                f"questions per fact and "
+                f"{_per(quality['accepted'], asked)} per passage."
+            ),
+        },
     ]
 
     # Not a gate: no single question fails for being the only answerable

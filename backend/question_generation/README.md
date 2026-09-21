@@ -551,6 +551,40 @@ third turn after a discarded second is a conversation with a hole in it.
 Each follow-up is another writer call and another verifier call, so a thread
 multiplies what a topic costs.
 
+## Coverage, and what the topic count cannot say
+
+`topics_covered` reads 38 of 38 whenever every topic produced one accepted
+question, which is a low bar: a topic holds eighty passages. So
+`/questions/quality` also reports how much of the MATERIAL the accepted
+questions reach.
+
+| | Measured over this corpus |
+|---|---|
+| passages | 1,495 |
+| passages a validated fact rests on | 1,167 |
+| **passages an accepted question rests on** | **880 — 75% of askable, 59% of all** |
+| validated facts | 6,242 |
+| **facts an accepted question cites** | **2,114 — 34%** |
+| questions per passage asked about | 1.98 |
+| questions per fact cited | 0.82 |
+
+Two things about the denominators.
+
+**Passages are counted against those a validated fact rests on**, not against
+every passage. A passage no fact rests on cannot be asked about, so counting
+it here would report extraction's refusals as this stage's gap. The 328 that
+are missing from 1,495 are passages the extractor skipped or whose every
+fact a check refused.
+
+**Questions per fact below 1 is ordinary.** A question may cite several
+facts and each one counts as asked about, so the ratio falls as questions
+get wider rather than as they get fewer.
+
+The figure to read for headroom is the fact one. At 34%, two thirds of the
+validated corpus has never been asked about — and because selection skips
+the facts an accepted question already rests on, another run reaches that
+two thirds rather than re-asking the first third.
+
 ## The balanced release
 
 Accepting a question says it is sound. It says nothing about what the SET looks

@@ -249,6 +249,19 @@ _ANAPHORIC = frozenset(
     }
 )
 
+#: Words a tagger reads as demonstrative that are ASKING rather than
+#: pointing. German `wessen` - "whose" - comes back PDS with
+#: `PronType=Dem`, which is simply wrong: it is an interrogative, and
+#: `_interrogative` does not catch it because that tag carries neither a W
+#: prefix nor `PronType=Int`. English `whose` is tagged WP$ and needs no
+#: help, which is why this list is one word long per language at most.
+#:
+#: A question word cannot point outside the question it is asking, so this
+#: corrects a parse rather than making a judgement. It cost a real
+#: question: `Wessen Zustimmung braucht man für die Nutzung eines
+#: ISTQB-Lehrwerks?` was refused as pointing at something unseeable.
+_ASKING = frozenset({"wessen", "whose"})
+
 #: What an anaphoric trigger has to be tagged as. `said` is the past tense of
 #: `say` far more often than it is `the said document`, and the tagger tells
 #: them apart: one is a VERB and the other a modifier.
@@ -311,6 +324,10 @@ def pointing(text: str, language: str | None) -> tuple[str, ...]:
     """
     found: set[str] = set()
     for token in pipeline(language)(text):
+        # A question word asks; it cannot point outside the question it is
+        # asking. The tagger does not always agree - see `_ASKING`.
+        if _interrogative(token) or token.lemma_.casefold() in _ASKING:
+            continue
         if "Dem" in token.morph.get("PronType", []) or (
             token.pos_ in _ANAPHORIC_POS and token.lemma_.casefold() in _ANAPHORIC
         ):
