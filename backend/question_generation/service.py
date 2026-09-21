@@ -468,7 +468,11 @@ class QuestionGenerationService(StageService):
         accepted: list[CheckedQuestion] = []
         written = 0
         followed = 0
-        for index, plan in enumerate(planned):
+        #: Accepted roots so far, which is what the follow-up share is a
+        #: share OF. Counted here rather than taken from `accepted`, which
+        #: a follow-up joins as soon as it is kept.
+        roots = 0
+        for plan in planned:
             sample = deal.sample(plan.shape)
             if sample is None:
                 # The topic ran out of passages before the plan ran out of
@@ -485,9 +489,17 @@ class QuestionGenerationService(StageService):
             thread = [checked]
             if checked.accepted:
                 accepted.append(checked)
-                if spread(index, self._settings.followup_share):
+                # Spread over the accepted roots rather than over the plan's
+                # slots. Over the slots the share was picked before the
+                # question was written, so what landed was this share TIMES
+                # the acceptance rate: 0.5 gave 448 threads from 1,209
+                # accepted roots, which is 37%. A setting whose value moves
+                # with an unrelated rate cannot be reasoned about, and both
+                # the catalogue and the README already said it meant this.
+                if spread(roots, self._settings.followup_share):
                     thread += self._followups(sample, plan, checked, accepted, followed)
                     followed += 1
+                roots += 1
             threads.append(thread)
         current.set_attribute("questions.samples", written)
         return threads

@@ -754,7 +754,7 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_UNANSWERABLE_SHARE` | 0.10 | What share of questions are written to have no answer in the corpus |
 | `QUESTIONS_OFF_TOPIC_OVERLAP` | 0.3 | Below this share of shared lemmas, an unanswerable question is about nothing the material covers |
 | `QUESTIONS_ELSEWHERE_PASSAGES` | 4 | How many uncited passages the `answerable_elsewhere` probe reads |
-| `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of the plan's SLOTS are followed by a thread, where the root was accepted and answerable. Not a share of accepted questions: 0.5 measured 448 threads from 1,209 accepted roots, which is 37% |
+| `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of the accepted, answerable roots get a thread. It was a share of the plan's slots, which realised as this times the acceptance rate - 0.5 gave 37% |
 | `QUESTIONS_MAX_FOLLOWUPS` | 2 | How far a thread may run past its root |
 | `QUESTIONS_FOLLOWUP_TYPES` | `condition,reason,comparison` | The kinds the turns of a thread take, cycled |
 | `QUESTIONS_RETRIES` | 1 | How many further attempts a refused candidate gets. Every attempt is stored |

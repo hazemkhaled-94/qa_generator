@@ -746,3 +746,51 @@ def wide_plan():
         shape=Shape.CROSS,
         answerable=True,
     )
+
+
+def test_the_follow_up_share_is_a_share_of_the_ACCEPTED_roots() -> None:
+    """Not of the plan's slots, which is what it used to be.
+
+    Picked over the slots, the share was decided before the question was
+    written and the thread only happened where that question was then
+    accepted - so what landed was the share TIMES the acceptance rate. One
+    run asked for 0.5 and got 448 threads from 1,209 accepted roots, which
+    is 37%, and the number would have moved again if acceptance had.
+    """
+
+    class EverySecondRoot(StubChecker):
+        """Rejects every other ROOT, so slot number and accepted number part.
+
+        A follow-up carries the thread it joins, which is how this tells
+        the two apart without counting its own follow-up checks into the
+        alternation.
+        """
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.roots = 0
+
+        def check(self, candidate, seen=()):
+            """Accepts, then rejects, then accepts - roots only."""
+            checked = super().check(candidate, seen)
+            if candidate.thread:
+                return checked
+            self.roots += 1
+            if self.roots % 2 == 0:
+                return replace(checked, status="rejected", rejected_reason="malformed")
+            return checked
+
+    facts = [source(n, document="a", passage_id=n) for n in range(24)]
+    settings = replace(SETTINGS, followup_share=1.0, max_followups=1)
+    service, queue = build(topic(), facts, checker=EverySecondRoot(), settings=settings)
+
+    service.process_next()
+
+    threads = queue.stored[0]
+    accepted_roots = [one for one in threads if one[0].accepted]
+    followed = [one for one in threads if len(one) > 1]
+
+    assert accepted_roots, "the fixture accepted no root to follow"
+    # A share of 1.0 means EVERY accepted root, whatever the rejections
+    # between them did to the slot numbering.
+    assert len(followed) == len(accepted_roots)

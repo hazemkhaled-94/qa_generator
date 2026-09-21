@@ -412,10 +412,10 @@ SETTINGS: tuple[Setting, ...] = (
         kind="decimal",
         low=0,
         high=1,
-        help="Share of the plan's slots whose question, if it is accepted "
-        "and answerable, is followed by a thread. Follow-ups are written on "
-        "TOP of the slots rather than instead of them, so this raises what "
-        "a topic costs and not what it covers.",
+        help="Share of the accepted, answerable root questions that are "
+        "followed by a thread. Follow-ups are written on TOP of the plan's "
+        "slots rather than instead of them, so this raises what a topic "
+        "costs and not what it covers.",
     ),
     Setting(
         name="QUESTIONS_MAX_FOLLOWUPS",
