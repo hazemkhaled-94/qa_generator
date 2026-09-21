@@ -443,6 +443,16 @@ SETTINGS: tuple[Setting, ...] = (
         "questions against new bounds.",
     ),
     Setting(
+        name="QUESTIONS_EXPLANATION_CHARS",
+        service="questions",
+        kind="text",
+        invalidates=("questions",),
+        help="Shortest and longest explanation, as `min:max`. The second "
+        "answer every question carries: the key written out for somebody "
+        "who has not seen the material. The floor is what matters - below "
+        "it an explanation is the key restated.",
+    ),
+    Setting(
         name="QUESTIONS_ANSWER_OVERLAP",
         service="questions",
         kind="decimal",
@@ -491,6 +501,18 @@ SETTINGS: tuple[Setting, ...] = (
         invalidates=("questions",),
         help="How close two question embeddings may be before the later one "
         "is refused as already asked.",
+    ),
+    Setting(
+        name="QUESTIONS_BOILERPLATE_COSINE",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How alike a passage must be to one in another document before "
+        "it is read as the corpus's furniture - a copyright notice, a "
+        "contents page, a revision table - and never asked about. 0 turns "
+        "the reading off, and a corpus of one document excludes nothing.",
     ),
     Setting(
         name="QUESTIONS_RELEASE_SIZE",

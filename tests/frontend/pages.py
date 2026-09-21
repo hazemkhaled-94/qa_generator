@@ -147,6 +147,11 @@ QUESTION = {
     "id": 1,
     "question_text": "Within how long is a standard request answered?",
     "target_answer": "48 hours",
+    "answer_explanation": (
+        "A standard support request has to be answered within 48 hours. That "
+        "is the ordinary service level, and the slower of the two the "
+        "material sets: an urgent request is answered within 4 hours."
+    ),
     "answerable": True,
     "difficulty": "easy",
     "passage_scope": "single_passage",

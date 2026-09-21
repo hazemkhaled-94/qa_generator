@@ -72,6 +72,26 @@ def _bounds(name: str, source: Source = None) -> dict[str, tuple[int, int]]:
     return read
 
 
+def _span(name: str, source: Source = None) -> tuple[int, int]:
+    """Reads one `min:max` pair of character bounds.
+
+    Raises:
+        KeyError: If the setting is unset or empty.
+        ValueError: If either bound is not a whole number, or the floor is
+            above the ceiling.
+    """
+    low, _, high = required(name, source).partition(":")
+    try:
+        span = (int(low), int(high))
+    except ValueError:
+        raise ValueError(
+            f"{name} gives the bounds {low}:{high}; it takes min:max, as 150:900"
+        ) from None
+    if span[0] > span[1]:
+        raise ValueError(f"{name} gives a floor of {span[0]} above its ceiling")
+    return span
+
+
 @dataclass(frozen=True)
 class Settings:
     """What to write per topic, of what kinds, and what to hold it to.
@@ -110,6 +130,12 @@ class Settings:
     retries: int
     #: Shortest and longest target answer per form.
     answer_chars: dict[str, tuple[int, int]]
+    #: Shortest and longest explanation, whatever form the target took. One
+    #: pair rather than one per form, because the explanation is the same
+    #: job every time: the target is what changes shape, not the reading of
+    #: it. A floor at all because a one-line explanation is the target said
+    #: twice, which is the failure this column was added to fix.
+    explanation_chars: tuple[int, int]
     #: How much of a list or an explanation has to come back for the verifier
     #: to be agreeing with it.
     answer_overlap: float
@@ -123,6 +149,21 @@ class Settings:
     elsewhere_passages: int
     long_answer_chars: int
     duplicate_cosine: float
+    #: How alike a passage must be to one in ANOTHER document before it is
+    #: read as boilerplate and never asked about. 0 turns the reading off.
+    #:
+    #: A corpus repeats its own furniture: a copyright notice, a table of
+    #: contents, an accreditation clause, a revision table. Each is real
+    #: text that a fact can be extracted from and a question can be written
+    #: about, and no gate refuses the result, because nothing is wrong with
+    #: it except that nobody wants to know. What separates it from subject
+    #: matter is that it appears in document after document nearly
+    #: unchanged, which is a measurement rather than a word list: no
+    #: language, no domain and no section name is assumed.
+    #:
+    #: A corpus of one document has no other document to repeat into, so
+    #: nothing is excluded, which is the right answer rather than a gap.
+    boilerplate_cosine: float
     #: How many questions a balanced release holds. 0 draws the largest one
     #: the accepted pool can fill without missing a quota.
     release_size: int
@@ -236,11 +277,13 @@ class Settings:
             max_followups=integer("QUESTIONS_MAX_FOLLOWUPS", source),
             retries=integer("QUESTIONS_RETRIES", source),
             answer_chars=_bounds("QUESTIONS_ANSWER_CHARS", source),
+            explanation_chars=_span("QUESTIONS_EXPLANATION_CHARS", source),
             answer_overlap=decimal("QUESTIONS_ANSWER_OVERLAP", source),
             off_topic_overlap=decimal("QUESTIONS_OFF_TOPIC_OVERLAP", source),
             elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES", source),
             long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS", source),
             duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE", source),
+            boilerplate_cosine=decimal("QUESTIONS_BOILERPLATE_COSINE", source),
             release_size=integer("QUESTIONS_RELEASE_SIZE", source),
             release_unanswerable=decimal("QUESTIONS_RELEASE_UNANSWERABLE", source),
             release_difficulty=_weights(

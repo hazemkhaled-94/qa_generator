@@ -401,11 +401,24 @@ class Candidate:
     target_answer: str | None
     answerable: bool
     group: FactGroup
+    #: The answer said at length, for a reader who has never seen the
+    #: material. None where the writer returned none, and on every
+    #: unanswerable question: one with no answer has nothing to explain.
+    answer_explanation: str | None = None
     #: The question and answer of everything earlier in this thread, oldest
     #: first. Empty on a root question. A follow-up is written with these in
     #: front of the model and judged with them in front of the verifier,
     #: because relying on them is what makes it a follow-up.
     thread: tuple[tuple[str, str | None], ...] = ()
+    #: The facts the ROOT of this thread cited. What `moves_on` reads: a
+    #: follow-up citing nothing outside this has asked one fact twice.
+    #: Empty on a root question, which follows nothing.
+    root_facts: tuple[int, ...] = ()
+    #: The passages the turn DIRECTLY before this one rested on. What
+    #: `same_material` reads. The parent's rather than the root's, because a
+    #: thread is allowed to walk: turn three continues turn two, and holding
+    #: it to turn one would refuse a conversation that went somewhere.
+    parent_passages: tuple[int, ...] = ()
     #: What this was asked to be. The gates read the form off it, and the row
     #: records the type, so a set can be filtered to the reasons or the
     #: comparisons.
@@ -437,6 +450,12 @@ class CheckedQuestion:
     status: str
     rejected_reason: str | None
     fact_ids: tuple[int, ...]
+    answer_explanation: str | None = None
+    #: The passages this question's cited facts rest on. Not a column:
+    #: `question_facts` already records the citation and the passages hang
+    #: off that. Carried because the next turn of a thread is judged
+    #: against them, and a follow-up is written before anything is stored.
+    passage_ids: tuple[int, ...] = ()
     embedding: list[float] | None = None
     thread_position: int = 1
     question_type: str | None = None
@@ -511,6 +530,7 @@ class StoredQuestion:
     id: int
     question_text: str
     target_answer: str | None
+    answer_explanation: str | None
     answerable: bool
     difficulty: str | None
     passage_scope: str | None

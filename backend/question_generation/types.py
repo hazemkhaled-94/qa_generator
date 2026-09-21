@@ -31,7 +31,7 @@ from database.qa_generator import (
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "7"
+PROMPT_VERSION = "8"
 
 #: How every question must READ, whatever it is for. Shared by the writer and
 #: by the perturbation that writes the unanswerable ones: a rule in one prompt
@@ -77,6 +77,43 @@ Rules, all of them mandatory:
 - Write in the language of the facts.
 """
 
+#: What the second answer is for. Every question carries two, and they are
+#: scored by different gates because they make different claims: the target
+#: is matched against what a verifier independently recovered, and this one
+#: is only ever checked for asserting something the passages do not.
+#:
+#: Written as a rule AND into every worked example below, because the
+#: examples are what a model actually copies. An instruction asking for
+#: prose, under an example answering `it is closed`, gets `it is closed`.
+EXPLAINS = """You write TWO answers to your own question, and they are not the
+same answer written twice.
+
+`answer` is the KEY. It is what a chatbot's reply is matched against, so it
+stays exactly as short and as literal as the form below demands. Do not pad it,
+do not explain in it, do not add a clause to make it read better.
+
+`explanation` is what somebody who has never seen this material needs in order
+to understand the answer. Write it for them:
+
+- THREE TO SIX SENTENCES. Prose, not bullets, not a heading.
+
+- SAY WHY, NOT JUST WHAT. The key already says what. This says what the thing
+  is, how it works, what it is for, what follows from it, what it is in
+  contrast to - whatever the material actually gives you. An explanation that
+  restates the key in longer words has explained nothing.
+
+- STAND ON ITS OWN. Somebody reads the question and this, and nothing else.
+  Name the thing again rather than saying "it"; give the context the passage
+  gives you.
+
+- ONLY WHAT THE FACTS AND PASSAGES SAY. No outside knowledge, no filling a gap
+  with what is usually true. Every number, date and name in it has to be in the
+  material in front of you - one that is not is how this gets thrown away.
+
+- SAME LANGUAGE as the question, and NEVER SAY WHERE THE ANSWER IS: the rules
+  above about naming a document, a section or a heading apply here too.
+"""
+
 _RULES = f"""You write ONE test question for measuring a document-search chatbot.
 
 You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
@@ -87,7 +124,8 @@ something to ask about and never as something to cite.
 {READS}
 - `facts` is the NUMBERS of the facts your question needs. Use several only
   when the question genuinely cannot be answered without all of them.
-"""
+
+{EXPLAINS}"""
 
 #: Appended to the rules above for every type whose sample spans more than one
 #: passage. Without it the writer answers the first passage and ignores the
@@ -269,6 +307,12 @@ _SPECS = (
   RIGHT  question: "How long is allowed for answering a standard support
                     request?"
          answer:   "48 hours"
+         explanation: "A standard support request has to be answered within 48
+                    hours. That is the ordinary service level, and it is the
+                    slower of the two the material sets: a request marked
+                    urgent is answered within 4 hours instead. The 48 hours are
+                    the time allowed for the answer, not for resolving what was
+                    asked about."
          facts:    [1]
 """,
     ),
@@ -287,6 +331,11 @@ _SPECS = (
 
   RIGHT  question: "Who signs off a change to the shift plan?"
          answer:   "the site manager"
+         explanation: "Every change to the shift plan is approved by the site
+                    manager. Approval rests with that one role rather than with
+                    whoever proposed the change, so a shift plan cannot be
+                    altered by the team working to it. The requirement covers
+                    every change, not only the substantial ones."
          facts:    [1]
 """,
     ),
@@ -308,6 +357,13 @@ Worked example. Facts:
 
   RIGHT  question: "What counts as a priority request?"
          answer:   "one that is raised by phone and confirmed in writing"
+         explanation: "A priority request is defined by how it is raised rather
+                    than by what it asks for. Two things have to happen: it is
+                    raised by phone, and it is then confirmed in writing. Both
+                    are required, so a phone call nobody confirms is not a
+                    priority request and neither is a written request that
+                    began as an email. The written confirmation is what leaves
+                    a record of it."
          facts:    [1]
 """,
     ),
@@ -330,6 +386,12 @@ Worked example. Facts:
 
   RIGHT  question: "Which ways can a support request be raised?"
          answer:   "by phone, through the web form and by email"
+         explanation: "There are three routes into the support process: a phone
+                    call, the web form, and email. They are alternatives rather
+                    than steps, so a request needs only one of them. Which one
+                    is used still matters elsewhere, because a request raised
+                    by phone is the one that can become a priority request once
+                    it is confirmed in writing."
          facts:    [1, 2, 3]
 """,
     ),
@@ -351,6 +413,13 @@ Worked example. Facts:
 
   RIGHT  question: "When does the four-hour reply time apply?"
          answer:   "for requests marked urgent, and only on working days"
+         explanation: "The four-hour reply time is not the general rule. Two
+                    conditions have to hold together: the request must be
+                    marked urgent, and the clock only runs on working days.
+                    A request that is not marked urgent falls back to the
+                    ordinary time, and an urgent one raised outside working
+                    days does not consume its four hours until the next
+                    working day begins."
          facts:    [1, 2]
 """,
     ),
@@ -372,6 +441,13 @@ Worked example. Facts:
 
   RIGHT  question: "Why does a request have to be confirmed in writing?"
          answer:   "so that the agreed response time can be evidenced later"
+         explanation: "The written confirmation exists to create evidence. A
+                    request agreed by phone leaves nothing showing what was
+                    promised, so if the response time is disputed afterwards
+                    there is no record to settle it. Confirming in writing
+                    fixes the agreed time at the moment it is agreed, which is
+                    what makes the commitment enforceable rather than merely
+                    stated."
          facts:    [1]
 """,
     ),
@@ -393,6 +469,12 @@ Worked example. Facts:
   RIGHT  question: "How is a support request raised and confirmed?"
          answer:   "it is raised through the web form, and confirmed by email
                     before work begins"
+         explanation: "The process runs in two steps and the order is fixed.
+                    The request is first raised through the web form, which is
+                    what puts it into the system. It is then confirmed by
+                    email, and that confirmation has to arrive before any work
+                    starts. The sequencing is the point: work begun on an
+                    unconfirmed request has no agreed scope behind it."
          facts:    [1, 2]
 """,
     ),
@@ -412,6 +494,13 @@ Worked example. Facts:
   RIGHT  question: "What happens to a request nobody confirms for five working
                     days?"
          answer:   "it is closed"
+         explanation: "An unconfirmed request does not stay open indefinitely.
+                    Once five working days pass without confirmation it is
+                    closed. The count is in working days rather than calendar
+                    days, so a weekend does not shorten the window. Closing is
+                    automatic in the sense that it follows from the time
+                    elapsing, not from anybody deciding the request is no
+                    longer wanted."
          facts:    [1]
 """,
     ),
@@ -433,6 +522,13 @@ Worked example. Facts:
                     requests differ?"
          answer:   "48 hours for a standard request and 4 hours for an urgent
                     one"
+         explanation: "The two classes of request carry different commitments.
+                    A standard request is answered within 48 hours; an urgent
+                    one within 4. The urgent time is twelve times shorter, so
+                    marking a request urgent is what determines whether it is
+                    handled the same working day or over the following two.
+                    Both figures are times to answer, so the two are directly
+                    comparable."
          facts:    [1, 2]
 """,
     ),
@@ -462,6 +558,12 @@ Worked example. Facts:
   RIGHT  question: "How many people do the northern and southern sites employ
                     between them?"
          answer:   "65"
+         explanation: "The two sites employ 65 people in total. The material
+                    gives the figures separately - 40 at the northern site and
+                    25 at the southern one - and states no combined number
+                    anywhere, so the total has to be added up. Both figures
+                    count the same thing, employees at a site, which is what
+                    makes them addable."
          facts:    [1, 2]
 
   WRONG  facts:    [1] A method was first described in 2011.
@@ -490,6 +592,12 @@ Worked example. Facts:
   RIGHT  question: "How did the reply time for a standard request change from
                     2024 to 2025?"
          answer:   "from 72 hours in 2024 to 48 hours in 2025"
+         explanation: "The commitment for a standard request tightened between
+                    the two years. In 2024 it stood at 72 hours and in 2025 at
+                    48, a reduction of a full day. Both figures describe the
+                    same class of request, so the change is a real tightening
+                    of the service level rather than a difference in what was
+                    being measured."
          facts:    [1, 2]
 """,
     ),
@@ -520,6 +628,14 @@ Worked example. Facts:
                     answered?"
          answer:   "the following Tuesday, because the 48 hours count only
                     working days and the weekend does not"
+         explanation: "Two rules combine here. A standard request is answered
+                    within 48 hours, and those 48 hours count working days
+                    only. A request raised on a Friday therefore has one
+                    working day left that week; the Saturday and Sunday are not
+                    counted, and the remaining day falls on the Monday. The
+                    deadline lands at the end of the Tuesday. The material
+                    states neither the Friday case nor the Tuesday answer - it
+                    follows from putting the two rules together."
          facts:    [1, 2]
 """,
     ),
@@ -554,6 +670,13 @@ Worked example. Facts:
                     request is raised. How quickly must it be answered?"
          answer:   "within 4 hours, because work has stopped at the site and
                     that is what marks a request urgent"
+         explanation: "The rule to apply is the one about what makes a request
+                    urgent: a request is marked urgent when it stops work at a
+                    site. A scanner failure that prevents dispatch has stopped
+                    work, so the request qualifies, and an urgent request is
+                    answered within 4 hours rather than the standard 48. The
+                    material never mentions scanners; the case is settled by
+                    reading the stated rule onto it."
          facts:    [1, 2]
 """,
     ),

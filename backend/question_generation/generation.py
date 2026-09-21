@@ -129,6 +129,12 @@ class _Answered(BaseModel):
         "asks about the way a searcher would have to."
     )
     answer: str = Field(description="The answer, in the form the instructions ask for.")
+    explanation: str = Field(
+        default="",
+        description="The same answer said at length, three to six sentences, "
+        "for a reader who has not seen the material. Says why and not only "
+        "what, and asserts no number or name the material does not.",
+    )
     facts: list[int] = Field(
         default_factory=list,
         description="The NUMBERS of the facts this question needs.",
@@ -188,6 +194,7 @@ class QuestionWriter:
             plan,
             question=written.question,
             answer=written.answer,
+            explanation=written.explanation,
             group=self._used(sample, written.facts),
         )
 
@@ -196,6 +203,8 @@ class QuestionWriter:
         sample: FactGroup,
         thread: tuple[tuple[str, str | None], ...],
         plan: Plan,
+        root_facts: tuple[int, ...] = (),
+        parent_passages: tuple[int, ...] = (),
     ) -> Candidate:
         """Asks the model for the question somebody would ask next.
 
@@ -221,8 +230,11 @@ class QuestionWriter:
             plan,
             question=written.question,
             answer=written.answer,
+            explanation=written.explanation,
             group=self._used(sample, written.facts),
             thread=thread,
+            root_facts=root_facts,
+            parent_passages=parent_passages,
         )
 
     def _unanswerable(self, sample: FactGroup, plan: Plan, note: str = "") -> Candidate:
@@ -256,15 +268,21 @@ class QuestionWriter:
         question: str,
         answer: str,
         group: FactGroup,
+        explanation: str = "",
         thread: tuple[tuple[str, str | None], ...] = (),
+        root_facts: tuple[int, ...] = (),
+        parent_passages: tuple[int, ...] = (),
     ) -> Candidate:
         """Assembles one written question, whatever kind it was."""
         return Candidate(
             question_text=question.strip(),
             target_answer=answer.strip() or None,
+            answer_explanation=explanation.strip() or None,
             answerable=True,
             group=group,
             thread=thread,
+            root_facts=root_facts,
+            parent_passages=parent_passages,
             spec=plan.spec,
             planned_difficulty=plan.band,
         )

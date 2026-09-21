@@ -141,6 +141,9 @@ def candidate(
     thread: tuple[tuple[str, str | None], ...] = (),
     question_type: str = QuestionType.FACTOID,
     planned_difficulty: str = Difficulty.EASY,
+    answer_explanation: str | None = None,
+    root_facts: tuple[int, ...] = (),
+    parent_passages: tuple[int, ...] = (),
 ) -> Candidate:
     """A question as the model wrote it, before any gate has read it.
 
@@ -152,6 +155,10 @@ def candidate(
 
     `question_type` decides which gates read the answer how: a factoid's is
     a value and may carry no verb, a reason's is an explanation and must.
+
+    `answer_explanation` is None by default, which `explains` lets through:
+    the column is nullable, so a test about another gate is not made to
+    write a paragraph to reach it.
     """
     return Candidate(
         question_text=question_text,
@@ -161,6 +168,9 @@ def candidate(
         thread=thread,
         spec=SPECS[question_type],
         planned_difficulty=planned_difficulty,
+        answer_explanation=answer_explanation,
+        root_facts=root_facts,
+        parent_passages=parent_passages,
     )
 
 

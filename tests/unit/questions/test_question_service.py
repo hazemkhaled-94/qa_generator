@@ -40,10 +40,12 @@ SETTINGS = Settings(
     # tests count the calls a topic costs.
     retries=0,
     answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+    explanation_chars=(150, 900),
     answer_overlap=0.6,
     off_topic_overlap=0.3,
     elsewhere_passages=0,
     long_answer_chars=60,
+    boilerplate_cosine=0.0,
     duplicate_cosine=0.93,
     release_size=0,
     release_unanswerable=0.1,
@@ -133,7 +135,7 @@ class StubWriter:
             planned_difficulty=plan.band,
         )
 
-    def follow_up(self, group, thread, plan):
+    def follow_up(self, group, thread, plan, root_facts=(), parent_passages=()):
         """Writes the next question in a thread."""
         self.calls += 1
         self.plans.append(plan)
@@ -513,10 +515,10 @@ def test_a_follow_up_is_shown_what_was_already_asked() -> None:
     class Watching(StubWriter):
         """Records the conversation each follow-up was written from."""
 
-        def follow_up(self, group, thread, plan):
+        def follow_up(self, group, thread, plan, root_facts=(), parent_passages=()):
             """Keeps the thread and writes as scripted."""
             seen.append(tuple(thread))
-            return super().follow_up(group, thread, plan)
+            return super().follow_up(group, thread, plan, root_facts, parent_passages)
 
     facts = [source(n, document="a", passage_id=n) for n in range(8)]
     service, _ = build(topic(), facts, writer=Watching())

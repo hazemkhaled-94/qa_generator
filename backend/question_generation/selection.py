@@ -279,6 +279,12 @@ class Deal:
         """Deals one topic's facts, strided over the whole of it."""
         self._order = strided(interleaved(by_passage(facts)), wanted)
         self._bridges = interleaved(by_passage(bridges))
+        #: Every passage this topic can offer, by id. `widen` reaches a
+        #: passage by name rather than by turn, and a bridge's passages are
+        #: in here too because a thread may have started on one.
+        self._by_passage = {
+            passage[0].passage_id: passage for passage in (*self._bridges, *self._order)
+        }
         self._size = max(size, 1)
         self._rounds = max(rounds, 1)
         self._offered: dict[int, int] = {}
@@ -311,6 +317,44 @@ class Deal:
 
         partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
         return self._group([head, partner] if partner else [head])
+
+    def widen(self, group: FactGroup, more: int = 1) -> FactGroup:
+        """The same sample with unspent facts of the same passages added.
+
+        What a follow-up is written from. Handed the root's own sample it
+        has nothing to ask that the root did not already answer, and the
+        type cycle then asks for the same fact in another shape: over one
+        measured run 739 of 1,047 accepted follow-ups - 70.6% - cited
+        nothing new, which is how a thread comes to read `Warum erstellt
+        ein Team ein Teamvokabular?` / `Was können die Teammitglieder
+        vermeiden?` / `Unter welchen Umständen können die Teammitglieder
+        Missverständnisse vermeiden?`.
+
+        The SAME passages, because a thread that changes material is not a
+        conversation - that is what `same_material` refuses at the other
+        end. So this widens rather than deals: it never reaches a passage
+        the root did not use.
+
+        Rounds are not counted against the passage and `_taken` is not
+        consulted, for the same reason. A thread is one subject followed
+        down, not another turn of the rotation, and a passage whose rounds
+        are spent is still the passage this conversation is about.
+
+        Returns the group unchanged where the passages hold nothing
+        unspent. The follow-up is then written from what the root had, and
+        `asks_nothing_new` is what refuses it if it asks nothing new - a
+        thread that stops because the material ran out is the honest
+        outcome, not one to manufacture a turn for.
+        """
+        fresh: list[SourceFact] = []
+        for pid in dict.fromkeys(passage.id for passage in group.resting):
+            passage = self._by_passage.get(pid)
+            if not passage:
+                continue
+            fresh.extend(closest(list(group.facts) + fresh, self._left(passage), more))
+        for fact in fresh:
+            self._spent.add(fact.id)
+        return FactGroup((*group.facts, *fresh)) if fresh else group
 
     def _left(self, passage: list[SourceFact]) -> list[SourceFact]:
         """The facts of this passage no sample has taken yet, in rank order."""

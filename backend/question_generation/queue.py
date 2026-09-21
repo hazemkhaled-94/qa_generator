@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from sqlalchemy import false as sa_false
 from sqlalchemy import func, insert, select
-from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, aliased
 
 from database.qa_generator import (
     Document,
@@ -63,6 +64,56 @@ _ALREADY_ASKED = (
     .where(QuestionFact.fact_id == Fact.id, Question.status == QuestionStatus.ACCEPTED)
     .exists()
 )
+
+
+def repeated_across_documents(threshold: float):
+    """Whether this passage recurs, nearly unchanged, in another document.
+
+    The reading of "this is the document's furniture, not its subject". A
+    corpus repeats its own boilerplate: a copyright notice, a table of
+    contents, an accreditation clause, a revision table, a
+    learning-objective preamble. Every one of those is real text, a fact
+    extracts from it cleanly, and a question written about it passes every
+    gate here - because nothing is wrong with it except that nobody wants
+    to know. Measured over one corpus of eight documents, 25% of a balanced
+    release rested on exactly this.
+
+    What separates furniture from subject matter is not a word. A list of
+    section names is a different list per corpus, and a list of words is
+    worse: `Norm`, `Standard` and `Bericht` are the furniture of one corpus
+    and the subject of another, and reading them as document words fired on
+    58% of this one. What generalises is the repetition itself - boilerplate
+    is what a publisher puts in every document, so it is what appears twice.
+
+    Measured against the same corpus: of the 234 passages with a
+    cross-document twin above 0.95, 71% sat in a document's first or last
+    twelve pages, against 17% of everything else.
+
+    Three ways this abstains, all of them correct rather than missing:
+    a corpus of one document has no other document to repeat into, a
+    passage with no embedding cannot be compared, and a threshold of 0
+    turns the reading off.
+
+    ponytail: one k-NN probe per candidate passage, which is what pgvector
+    can do without a stored score. Fine at the 1,495 passages this was
+    measured on and linear in the corpus; past roughly 100k passages this
+    wants the nearest-foreign-neighbour distance materialised on `passages`
+    at chunk time, and this predicate reading that column instead.
+    """
+    if threshold <= 0:
+        return sa_false()
+    twin = aliased(Passage)
+    return (
+        select(twin.id)
+        .where(
+            twin.doc_sha256 != Passage.doc_sha256,
+            twin.embedding.is_not(None),
+            Passage.embedding.is_not(None),
+            (1 - twin.embedding.cosine_distance(Passage.embedding)) >= threshold,
+        )
+        .limit(1)
+        .exists()
+    )
 
 
 #: The kinds of fact a question may be written from, by the name the setting
@@ -216,6 +267,7 @@ class QuestionQueue(RowQueue):
         lease=None,
         kinds: tuple[str, ...] = ASKABLE,
         version: str | None = None,
+        boilerplate_cosine: float = 0.0,
     ) -> None:
         """Binds to the session factory, with the kinds of fact it may offer.
 
@@ -224,10 +276,16 @@ class QuestionQueue(RowQueue):
 
         `version` is the configuration every question it writes was written
         under.
+
+        `boilerplate_cosine` is QUESTIONS_BOILERPLATE_COSINE. 0 by default,
+        so a caller that says nothing gets every passage: this excludes
+        material, and a default that quietly dropped some would be the
+        wrong way round.
         """
         super().__init__(lease)
         self._kinds = kinds
         self._version = version
+        self._boilerplate = boilerplate_cosine
 
     def claim(self) -> TopicToCover | None:
         """Takes the next topic off the queue."""
@@ -268,6 +326,9 @@ class QuestionQueue(RowQueue):
                     # detector has no language to write one in.
                     Passage.language.is_not(None),
                     ~_ALREADY_ASKED,
+                    # The corpus's own furniture, which passes every gate
+                    # and is worth nobody's time.
+                    ~repeated_across_documents(self._boilerplate),
                 ).order_by(Fact.id)
             ).all()
         return self._read(rows)
@@ -369,6 +430,7 @@ class QuestionQueue(RowQueue):
                         .values(
                             question_text=question.question_text,
                             target_answer=question.target_answer,
+                            answer_explanation=question.answer_explanation,
                             answerable=question.answerable,
                             difficulty=question.criteria.difficulty,
                             planned_difficulty=question.planned_difficulty,

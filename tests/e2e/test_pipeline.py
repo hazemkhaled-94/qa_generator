@@ -130,10 +130,12 @@ QUESTIONS = QuestionSettings(
     # models, and a retry would double the calls the run is counted by.
     retries=0,
     answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
+    explanation_chars=(150, 900),
     answer_overlap=0.6,
     off_topic_overlap=0.3,
     elsewhere_passages=0,
     long_answer_chars=60,
+    boilerplate_cosine=0.0,
     duplicate_cosine=0.93,
     release_size=0,
     release_unanswerable=0.1,

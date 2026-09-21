@@ -26,6 +26,11 @@ _GATES = {
     "answer_too_short": "The answer clears the floor its form is held to.",
     "answer_too_long": "The answer is within the ceiling its form is held to.",
     "wrong_form": "A value names a thing, an explanation explains one.",
+    "wrong_type": "An entity question asks after a party, an enumeration a set.",
+    "explanation_unusable": "The long answer reads, rests on the passages, and "
+    "says more than the key.",
+    "asks_nothing_new": "A follow-up reaches a fact the question before it did not.",
+    "off_thread": "A follow-up stays on the material the turn before it used.",
     "leaks_source": "The question does not say which document holds the answer.",
     "off_topic": "An unanswerable question is about what the material covers.",
     "duplicate": "The question is far enough from every question accepted.",
@@ -400,6 +405,7 @@ def _detail(client, question: dict) -> None:
                 "Written": question["created_at"],
                 "Question": question["question_text"],
                 "Target answer": question["target_answer"],
+                "Explanation": question["answer_explanation"],
             }
         )
 

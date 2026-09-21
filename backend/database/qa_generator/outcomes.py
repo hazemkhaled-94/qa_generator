@@ -158,6 +158,8 @@ class QuestionRejection(StrEnum):
     ANSWER_TOO_SHORT = "answer_too_short"
     ANSWER_TOO_LONG = "answer_too_long"
     WRONG_FORM = "wrong_form"
+    WRONG_TYPE = "wrong_type"
+    EXPLANATION_UNUSABLE = "explanation_unusable"
     LEAKS_SOURCE = "leaks_source"
     UNANCHORED = "unanchored"
     NOT_RECOVERABLE = "not_recoverable"
@@ -165,6 +167,8 @@ class QuestionRejection(StrEnum):
     ANSWERABLE_AFTER_ALL = "answerable_after_all"
     ANSWERABLE_ELSEWHERE = "answerable_elsewhere"
     OFF_TOPIC = "off_topic"
+    ASKS_NOTHING_NEW = "asks_nothing_new"
+    OFF_THREAD = "off_thread"
     SOURCE_CHANGED = "source_changed"
 
 

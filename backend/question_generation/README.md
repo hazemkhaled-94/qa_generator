@@ -124,6 +124,33 @@ the facts have no single honest question between them, ask about one of them
 and cite only that. `difficulty` is read off what it cited, so a question that
 took the narrower option bands as what it actually is.
 
+**The corpus's own furniture is never offered.** A publisher puts the same
+copyright notice, contents page, accreditation clause and revision table in
+every document it issues. Each is real text, a fact extracts from it
+cleanly, and **no gate downstream refuses the question** — there is nothing
+wrong with it except that nobody wants to know:
+
+> *"Welche Errata enthalten wörtliche Verbesserungen, für die die
+> D.A.CH-Arbeitsgruppe den Reviewern dankt?"* → `3.1.1 und 3.1.2`
+
+Measured on one corpus of eight documents, **25% of a balanced release
+rested on exactly this**. So it is excluded before a question is written
+rather than gated after.
+
+What it is read by is **repetition, not vocabulary**. A list of section
+names is a different list per corpus, and a list of words is worse:
+`Norm`, `Standard` and `Bericht` are furniture in one corpus and subject
+matter in another, and reading them as document words fired on 58% of this
+one at 26% precision. Boilerplate is what a publisher repeats, so what
+generalises is that it appears twice. Of the 234 passages here with a
+cross-document twin above `QUESTIONS_BOILERPLATE_COSINE`, **71% sat in a
+document's first or last twelve pages, against 17% of everything else**.
+
+Nothing about a language, a domain or a section name is assumed. Three ways
+it abstains, each correct rather than missing: a corpus of one document has
+nothing to repeat into, a passage with no embedding cannot be compared, and
+a threshold of `0` turns the reading off.
+
 ### Step 3 — Write one question
 
 **Where:** [`generation.py`](generation.py), [`types.py`](types.py).
@@ -132,6 +159,11 @@ One shared rule block holds what is true of every question — do not name the
 source, name the subject, one question, the language of the facts — and each
 kind adds what it asks for, what its answer looks like, and one worked
 example. Two prompts for one rule is how the two come to disagree.
+
+Each call returns **two answers**, and they are not one answer written
+twice. `target_answer` is the key a chatbot is scored against; the
+`answer_explanation` beside it is that key written out for somebody who has
+never seen the material. See [the two answers](#the-two-answers).
 
 Which facts a question actually cites is the **writer's** answer, not the
 sample's. That distinction was missing at first and produced a measurable lie:
@@ -223,6 +255,55 @@ Why, how, what-happens-if and which-things were not badly written. They were
 is refused for carrying *no* verb, which is the opposite failure; and each
 form has its own length bounds in `QUESTIONS_ANSWER_CHARS`.
 
+### The two answers
+
+`target_answer` is short by design and stays that way. `answer_explanation`
+is three to six sentences that say what the thing is, how it works or what
+follows from it — enough that a reader who never saw the passage understands
+the answer rather than merely being able to mark it.
+
+They are two columns because they are scored by two different gates, and
+that is not a tidiness argument. Recoverability compares a `list` or an
+`explanation` by how much of it a second model, shown only the cited
+passages, independently wrote back — and **the denominator is the target's
+own content lemmas**. Every lemma an answer gains is another one the
+verifier has to reproduce. Lengthening `target_answer` therefore makes the
+gate that protects the keys harder to pass, in proportion to how much the
+answer teaches, and `not_recoverable` is already a third of every rejection.
+
+Measured before the column existed: explanations sat at a **median of 157
+characters against a ceiling of 600**, and 32% were under 120. The ceiling
+was never what held them short. `QUESTIONS_ANSWER_CHARS` had nothing to do
+with it and raising it does nothing — six of 1,551 answers came near the
+limit. What held them short was the prompt asking for "one or two sentences"
+and, more than that, **every worked example answering in a fragment**:
+`48 hours`, `the site manager`, `it is closed`. A model copies the example
+over the instruction, so both had to change and neither would have been
+enough alone.
+
+The explanation faces `explanation_unusable`, which reads three things and
+calls no model:
+
+| | |
+|---|---|
+| Length | Within `QUESTIONS_EXPLANATION_CHARS`. The floor is the half that matters: below it an explanation is the key restated. |
+| Supported | Every figure, date and name it asserts is in the cited passages — `asserted`'s reading, which is extraction's `unsupported_addition` pointed the other way. The only one of the three that can put a wrong claim in front of a reader. |
+| Not a copy | Fewer than 90% of its content lemmas are already in the target. The floor is high on purpose: restating the answer is most of what an explanation does. |
+
+**A spelled-out numeral is not a claim.** `asserted` reads every number,
+which is right for a short key where every unit is the answer. Prose counts
+as it goes — *the slower of the two*, *both editions* — and the explanation
+of a 48-hour reply time was refused for saying `two` about two figures it
+had just quoted correctly. So a unit that `like_num` marks and that carries
+no digit is dropped; `48` is a claim the passages can contradict and `two`
+is how a sentence is built. Proper nouns stay, because no language invents
+a name to hold a sentence together.
+
+The column is NULL on every question written before it, and **not
+backfilled** — copying the target in would say a reader was given something
+nobody wrote for them. NULL on every unanswerable question too, by CHECK:
+one with no answer has nothing to explain.
+
 ### What a question asks of a reader
 
 `difficulty` says how far an answer is spread — over two passages, two
@@ -303,7 +384,7 @@ the row.
 ## The gates
 
 Applied cheapest first, because each one that fires saves the cost of those
-behind it. Thirteen codes, and `questions.rejected_reason` holds exactly these.
+behind it.
 
 | Gate | Rejects a question that | Costs |
 |---|---|---|
@@ -311,6 +392,10 @@ behind it. Thirteen codes, and `questions.rejected_reason` holds exactly these.
 | `answer_too_short` | is scored against an answer below its form's floor | nothing |
 | `answer_too_long` | answers past its form's ceiling — a value answered with a paragraph | nothing |
 | `wrong_form` | answers in the wrong shape: a value describing an action, an explanation explaining nothing | nothing |
+| `wrong_type` | is not the kind it was planned as, where a rule can say so: an `entity` asking after no party, an `enumeration` answered with one thing | nothing |
+| `explanation_unusable` | carries a long answer that is the wrong length, asserts a figure the passages do not, or only restates the key | nothing |
+| `asks_nothing_new` | is a follow-up citing nothing the question it follows did not | nothing |
+| `off_thread` | is a follow-up resting on no passage the turn before it used | nothing |
 | `leaks_source` | names the material its answer is in: a quoted title, a numbered division, a bracketed reference, an author with a year, or what the residue call finds | nothing, or one question-only call |
 | `off_topic` | was written to have no answer and is about nothing the material mentions, which any chatbot declines | nothing |
 | `duplicate` | is a near twin of one already accepted | one index probe |
@@ -320,6 +405,8 @@ behind it. Thirteen codes, and `questions.rejected_reason` holds exactly these.
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
 | `answerable_elsewhere` | was written to have no answer and a passage it does not cite answers it | a lemma probe and a second call |
 | `source_changed` | rests on a fact that no longer passes its own checks | nothing |
+
+Seventeen codes now, and `questions.rejected_reason` holds exactly these.
 
 `source_changed` is the one no run of the writer produces. It is
 `make questions-reverify` carrying a change made further up the pipeline
@@ -333,7 +420,7 @@ them — `Welche Arten von Kryptowerten gelten als reguliert?` carries two verbs
 and is one question — and measured over 17 real questions the interrogatives
 separated 16.
 
-It replaced `wrong_type`, which is gone, and the reason is worth recording.
+It replaced the model's `wrong_type`, and the reason is worth recording.
 The verifier was asked whether a question was the kind it had been planned as,
 and answered `true` for a bare `Wie viele Anlassprüfungen wurden 2025
 durchgeführt?` written into a `reason` slot. It fired **zero times over 71
@@ -541,6 +628,37 @@ standing alone is what it is for; and the verifier is shown the conversation
 when it judges recoverability, because read alone *"And for an urgent one?"*
 has no answer in any passage.
 
+**A follow-up is written from a widened sample, and has to reach it.** It
+used to be handed the root's own sample, so the only material a thread
+could ask about was the material its first turn had already answered — and
+the type cycle then asked for the same fact in another shape. Measured over
+one run, **739 of 1,047 accepted follow-ups, 70.6%, cited nothing new**:
+
+> `reason`: *Warum erstellt ein agiles Team ein Teamvokabular?* → *Damit …
+> Missverständnisse vermeiden*
+> `comparison`: *Was können die Teammitglieder vermeiden?* → *Missverständnisse*
+> `condition`: *Unter welchen Umständen können die Teammitglieder
+> Missverständnisse vermeiden?* → *mit dem Teamvokabular*
+
+One fact, three interrogatives, and nothing learned after the first.
+`Deal.widen` now adds unspent facts **of the same passages** before the
+turn is written, and `asks_nothing_new` refuses one that cited nothing
+outside its root anyway. The same passages, because a thread that changes
+material is not a conversation — which is the other gate.
+
+`off_thread` is that other one: a follow-up has to rest on a passage the
+turn before it used. 147 accepted follow-ups shared none, and read like
+*Warum sollen beim Mehrfachbedingungstest Testfälle entworfen werden?*
+followed by *Warum wurde TTA-2.6.1 entfernt?*. Read on **passages and not
+on words**, deliberately: a good follow-up may name nothing at all, so a
+lexical reading would refuse exactly the elliptical turns a thread exists
+to produce. What has to stay constant is the material, not the vocabulary.
+
+A thread that widens to nothing — the passages hold no unspent fact — is
+written from what the root had and stops at `asks_nothing_new`. A thread
+ending because the material ran out is the honest outcome, not one to
+manufacture a turn for.
+
 Only an accepted, **answerable** root is followed. A thread whose first turn has
 no answer has nothing to follow on from — the chatbot was supposed to say it did
 not know — and one whose root a gate refused would be a conversation starting
@@ -718,7 +836,7 @@ it is strongest in, and those passages.
 
 | Table | Holds |
 |---|---|
-| `questions` | the question, its target answer, its type, form and cognitive level, the three scopes and the band derived from them, the planned band beside it, the thread columns, the embedding, the release id, and the gate that stopped it when one did |
+| `questions` | the question, its target answer and the explanation beside it, its type, form and cognitive level, the three scopes and the band derived from them, the planned band beside it, the thread columns, the embedding, the release id, and the gate that stopped it when one did |
 | `question_facts` | which facts each question cites. A trigger deletes a question once its last citation is gone |
 
 **Serves:** `/questions`, `/questions/{id}`, `/questions/plan`,
@@ -750,6 +868,8 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_TYPE_MIX` | thirteen kinds, weight 1 each | Which kinds are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
 | `QUESTIONS_DIFFICULTY_MIX` | `easy:2,medium:3,hard:3` | Which bands the plan aims for. A request for a shape of sample; the band itself stays derived |
 | `QUESTIONS_ANSWER_CHARS` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form, as `form:min:max` |
+| `QUESTIONS_EXPLANATION_CHARS` | `150:900` | Shortest and longest `answer_explanation`, as `min:max`. One pair for every form: the target is what changes shape, not the reading of it. The floor is the half that matters |
+| `QUESTIONS_BOILERPLATE_COSINE` | 0.95 | How alike a passage must be to one in **another** document before it is read as the corpus's furniture and never asked about. `0` turns the reading off, and a corpus of one document excludes nothing |
 | `QUESTIONS_ANSWER_OVERLAP` | 0.6 | How much of a list or an explanation has to come back for the verifier to have recovered it. Numbers are always exact |
 | `QUESTIONS_UNANSWERABLE_SHARE` | 0.10 | What share of questions are written to have no answer in the corpus |
 | `QUESTIONS_OFF_TOPIC_OVERLAP` | 0.3 | Below this share of shared lemmas, an unanswerable question is about nothing the material covers |
@@ -814,6 +934,15 @@ Things that are true, are not bugs, and have surprised somebody.
 - **`questions-reverify` only ever rejects.** Accepting is a person's
   decision, and a re-check that un-rejected would overturn one on its next
   run.
+- **A corpus of one document gets no boilerplate filtering.** There is no
+  second document for a copyright notice to repeat into, so
+  `QUESTIONS_BOILERPLATE_COSINE` excludes nothing. That is the right answer
+  rather than a gap, but it means a single-document run is the one where
+  the furniture still has to be watched for.
+- **A thread can be shorter than `QUESTIONS_MAX_FOLLOWUPS` and be working.**
+  A follow-up is refused once the passages hold no fact its root did not
+  already use. The thread stopping is the material running out, not a gate
+  misfiring.
 - **`planned_difficulty` disagreeing with `difficulty` is not a fault.** The
   writer cited fewer facts than it was offered. It is a measurement of the
   plan.

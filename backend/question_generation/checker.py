@@ -7,6 +7,14 @@ it:
   answer_too_short  free: nothing worth scoring against
   answer_too_long   free: not the form of answer that was asked for
   wrong_form        free: a value carrying a verb, an explanation with none
+  wrong_type      free: an entity question asking after no party, an
+                  enumeration answered with one thing
+  explanation_unusable  free: the long answer is the wrong length, asserts a
+                  number the passages do not carry, or only restates the key
+  asks_nothing_new  free: a follow-up citing nothing its root did not, so a
+                  thread asks one fact twice
+  off_thread      free: a follow-up resting on no passage the turn before it
+                  used, so the conversation changed subject
   leaks_source    free where the title is quoted, the verifier's otherwise
   off_topic       free: an unanswerable question about nothing the material
                   mentions, which any chatbot declines
@@ -38,12 +46,14 @@ from database.qa_generator import (
     Derivation,
     QuestionRejection,
     QuestionStatus,
+    QuestionType,
 )
 from nlp.analysis import content, pointing
 from nlp.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
     ENTAILMENT_OVERLAP,
+    EXPLANATION_CHARS,
     NAMES_SOMETHING,
     OFF_TOPIC_OVERLAP,
     OVERLAP,
@@ -51,10 +61,15 @@ from question_generation.gates import (
     adds_up,
     agrees,
     anchored,
+    asks_for_an_agent,
     asserted,
     cites_source,
+    enumerates,
+    explains,
+    moves_on,
     near_verdict,
     on_topic,
+    same_material,
     structural,
     subject,
 )
@@ -81,6 +96,7 @@ class QuestionChecker:
         threshold: float,
         judge_phrasing: bool = True,
         bounds: Mapping[str, tuple[int, int]] | None = None,
+        explanation_chars: tuple[int, int] = EXPLANATION_CHARS,
         overlap: float = OVERLAP,
         long_answer_chars: int = LONG_ANSWER_CHARS,
         elsewhere=None,
@@ -121,6 +137,7 @@ class QuestionChecker:
         self._nearest = nearest
         self._judge_phrasing = judge_phrasing
         self._bounds = dict(bounds or BOUNDS)
+        self._explanation_chars = explanation_chars
         self._overlap = overlap
         self._long_answer_chars = long_answer_chars
         self._threshold = threshold
@@ -186,6 +203,12 @@ class QuestionChecker:
                 form,
             )
 
+        # Free, and ahead of the embedding for that reason: each of these is
+        # a rule reading what the writer already returned.
+        failed = self._kind(candidate) or self._thread(candidate)
+        if failed:
+            return self._verdict(candidate, failed, None, self._long_answer_chars, form)
+
         embedding = self._embedder.embed(candidate.question_text)
         failed = near_verdict(
             self._near(embedding, seen),
@@ -215,6 +238,98 @@ class QuestionChecker:
             self._long_answer_chars,
             form,
         )
+
+    def _kind(self, candidate: Candidate) -> tuple[str, str] | None:
+        """What a rule can settle about the kind and the long answer.
+
+        Three readings, none of which calls anything. They sit ahead of the
+        embedding because every one of them reads what the writer already
+        returned, and a candidate refused here costs nothing at all.
+
+        An unanswerable question faces none of them: it has no answer, so
+        it has no explanation and no answer shape to be wrong about.
+        """
+        if not candidate.answerable:
+            return None
+
+        target = candidate.target_answer or ""
+        language = candidate.group.language
+
+        if candidate.spec.name == QuestionType.ENTITY and not asks_for_an_agent(
+            candidate.question_text, target, language
+        ):
+            return (
+                QuestionRejection.WRONG_TYPE,
+                (
+                    "it was planned as an entity question and asks after no "
+                    "party: neither the question word nor the answer names "
+                    "anybody who does, decides or owns anything"
+                ),
+            )
+
+        if candidate.spec.name == QuestionType.ENUMERATION and not enumerates(
+            target, language
+        ):
+            return (
+                QuestionRejection.WRONG_TYPE,
+                (
+                    "it was planned as an enumeration and its answer holds one "
+                    "thing, so there is no set behind it"
+                ),
+            )
+
+        if not explains(
+            candidate.answer_explanation or "",
+            target,
+            candidate.group.passages,
+            language,
+            self._explanation_chars,
+        ):
+            return (
+                QuestionRejection.EXPLANATION_UNUSABLE,
+                (
+                    "its long answer is outside the length a reading takes, "
+                    "asserts a number or a name the passages do not carry, or "
+                    "says nothing the target answer had not already said"
+                ),
+            )
+        return None
+
+    def _thread(self, candidate: Candidate) -> tuple[str, str] | None:
+        """Whether a follow-up is one, read on the facts rather than the words.
+
+        Nothing here applies to a root question, which follows nothing.
+
+        Both readings are structural on purpose. A follow-up MAY lean on the
+        conversation, so what makes it a good one cannot be read off its
+        wording - `Und bei einem dringenden?` names nothing and is exactly
+        the turn a thread exists to produce. What can be read is the
+        material underneath it: a thread that walks forward cites something
+        new, and a thread that stays a conversation keeps a passage.
+        """
+        if not candidate.follows:
+            return None
+        cited = [fact.id for fact in candidate.group.facts]
+        if not moves_on(cited, candidate.root_facts):
+            return (
+                QuestionRejection.ASKS_NOTHING_NEW,
+                (
+                    "it cites nothing the question it follows did not, so the "
+                    "thread asks one fact twice in two shapes"
+                ),
+            )
+        if not same_material(
+            [passage.id for passage in candidate.group.resting],
+            candidate.parent_passages,
+        ):
+            return (
+                QuestionRejection.OFF_THREAD,
+                (
+                    "it rests on no passage the turn before it used, so it "
+                    "changes the subject rather than continuing"
+                ),
+            )
+        return None
 
     def _phrasing(self, candidate: Candidate) -> tuple[str, str] | None:
         """What the question's own wording says, before any passage is read.
@@ -657,6 +772,8 @@ class QuestionChecker:
             status=QuestionStatus.REJECTED if code else QuestionStatus.ACCEPTED,
             rejected_reason=code,
             fact_ids=tuple(fact.id for fact in candidate.group.facts),
+            answer_explanation=candidate.answer_explanation,
+            passage_ids=tuple(passage.id for passage in candidate.group.resting),
             embedding=embedding,
             thread_position=candidate.thread_position,
             question_type=candidate.spec.name,

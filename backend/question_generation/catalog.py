@@ -49,8 +49,12 @@ from question_generation.queue import IS_TOPIC
 #: Which columns the search box looks in, by the name the API accepts.
 SEARCH_FIELDS = {
     "question": (Question.question_text,),
-    "answer": (Question.target_answer,),
-    "both": (Question.question_text, Question.target_answer),
+    "answer": (Question.target_answer, Question.answer_explanation),
+    "both": (
+        Question.question_text,
+        Question.target_answer,
+        Question.answer_explanation,
+    ),
 }
 
 DEFAULT_FIELD = "both"
@@ -176,6 +180,7 @@ def _listing() -> Select:
                 Question.id,
                 Question.question_text,
                 Question.target_answer,
+                Question.answer_explanation,
                 Question.answerable,
                 Question.difficulty,
                 Question.passage_scope,
@@ -218,6 +223,7 @@ def _stored(row: Any) -> StoredQuestion:
         id=row.id,
         question_text=row.question_text,
         target_answer=row.target_answer,
+        answer_explanation=row.answer_explanation,
         answerable=row.answerable,
         difficulty=row.difficulty,
         passage_scope=row.passage_scope,

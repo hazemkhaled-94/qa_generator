@@ -846,6 +846,8 @@ def _settings(**overrides):
                 "list": (3, 300),
                 "explanation": (20, 600),
             },
+            "explanation_chars": (150, 900),
+            "boilerplate_cosine": 0.0,
             "answer_overlap": 0.6,
             "off_topic_overlap": 0.3,
             "elsewhere_passages": 0,
@@ -1056,3 +1058,77 @@ class TestFindingThePassageThatAnswersItAnyway:
         found = QuestionCatalog().elsewhere([], "en", [], 5, asked)
 
         assert "Contents" not in found
+
+
+# ── The corpus's own furniture ─────────────────────────────────────────────
+
+
+#: One vector every passage shares, which is what a notice reprinted in
+#: each document looks like to the reading. Built at the column's width:
+#: `passages.embedding` is vector(1024) and pgvector refuses any other.
+_SAME = (
+    "UPDATE passages SET embedding = "
+    "('[' || array_to_string(array_fill(1.0, ARRAY[1024]), ',') || ']')::vector"
+)
+
+#: A different axis per passage, so no two meet at all.
+_DIFFERENT = """
+UPDATE passages SET embedding = (
+    SELECT ('[' || string_agg(
+        CASE WHEN i = (passages.id % 1024) + 1 THEN '1' ELSE '0' END, ',' ORDER BY i
+    ) || ']')::vector
+    FROM generate_series(1, 1024) AS i
+)
+"""
+
+
+def _embed(engine, sql: str) -> None:
+    """Gives the passages an embedding, so the reading has vectors to read."""
+    with engine.begin() as connection:
+        connection.execute(text(sql))
+
+
+def test_a_passage_repeated_in_another_document_is_never_asked_about(
+    corpus, engine
+) -> None:
+    """A copyright notice is real text that no other gate refuses.
+
+    Nothing is wrong with a question about one except that nobody wants to
+    know, so it has to be excluded before it is written rather than after.
+    """
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    _embed(engine, _SAME)
+
+    kept = QuestionQueue(boilerplate_cosine=0.95).facts(written["topics"][0])
+
+    assert kept == [], "the repeated passage was offered anyway"
+
+
+def test_a_passage_unlike_anything_in_another_document_is_kept(corpus, engine) -> None:
+    """The reading must not empty a corpus whose documents differ."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    _embed(engine, _DIFFERENT)
+
+    kept = QuestionQueue(boilerplate_cosine=0.95).facts(written["topics"][0])
+
+    assert kept, "a passage nothing repeats was excluded"
+
+
+def test_a_threshold_of_zero_turns_the_reading_off(corpus, engine) -> None:
+    """The default, so a caller that says nothing gets every passage."""
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    _embed(engine, _SAME)
+
+    assert QuestionQueue(boilerplate_cosine=0.0).facts(written["topics"][0])
+
+
+def test_a_passage_with_no_embedding_is_never_called_furniture(corpus, engine) -> None:
+    """A corpus extracted before the column existed carries no vectors.
+
+    Excluding what cannot be compared would empty it, so the reading
+    abstains rather than refusing.
+    """
+    written = corpus(topics=1, facts_per_topic=2, documents=2)
+    _embed(engine, "UPDATE passages SET embedding = NULL")
+
+    assert QuestionQueue(boilerplate_cosine=0.95).facts(written["topics"][0])

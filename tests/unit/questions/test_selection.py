@@ -663,3 +663,62 @@ def test_no_reranker_leaves_the_measure_in_charge() -> None:
     deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4)
 
     assert deal.sample(Shape.CROSS) is not None
+
+
+# ── Widening a sample for the thread that follows it ───────────────────────
+
+
+def test_a_widened_sample_reaches_facts_the_root_did_not() -> None:
+    """The defect the follow-up gates were added against.
+
+    `_followups` was handed the root's own sample, so the only material a
+    thread could ask about was the material its first turn had already
+    answered. Over one measured run 739 of 1,047 accepted follow-ups -
+    70.6% - cited nothing new.
+    """
+    deal = Deal(facts_of(1, "a", count=4), wanted=1, size=2)
+    root = deal.sample()
+    assert root is not None
+
+    wider = deal.widen(root)
+
+    assert set(root.facts) < set(wider.facts), "the sample was not widened"
+
+
+def test_widening_stays_on_the_passages_the_root_used() -> None:
+    """A thread that changes material is not a conversation."""
+    deal = Deal(facts_of(1, "a", count=4) + facts_of(2, "b", count=4), wanted=2, size=2)
+    root = deal.sample()
+    assert root is not None
+    used = {passage.id for passage in root.resting}
+
+    wider = deal.widen(root)
+
+    assert {passage.id for passage in wider.resting} == used, (
+        "widening reached a passage the root never used"
+    )
+
+
+def test_a_passage_with_nothing_left_widens_to_itself() -> None:
+    """A thread that stops because the material ran out is the honest end.
+
+    `asks_nothing_new` is what refuses the follow-up then; manufacturing a
+    turn out of another passage would be the defect this avoids.
+    """
+    deal = Deal(facts_of(1, "a", count=2), wanted=1, size=2)
+    root = deal.sample()
+    assert root is not None
+
+    assert deal.widen(root).facts == root.facts
+
+
+def test_a_widened_fact_is_spent_and_never_dealt_again() -> None:
+    """A sample is an offer, and offering one twice writes it twice."""
+    deal = Deal(facts_of(1, "a", count=4) + facts_of(2, "b", count=2), wanted=2, size=2)
+    root = deal.sample()
+    assert root is not None
+    taken = {fact.id for fact in deal.widen(root).facts}
+
+    later = deal.sample()
+
+    assert later is None or not (taken & {fact.id for fact in later.facts})

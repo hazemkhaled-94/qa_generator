@@ -25,10 +25,10 @@ ROOT = Path(__file__).resolve().parents[2]
 #: not in the sibling scan, which is why a mix could be read without being
 #: declared anywhere.
 #:
-#: The three leading-underscore names are a stage's own readers, which take
-#: the setting's name first and hand it to `mapping` or `csv` through a
-#: variable. Without them the mixes and the answer bounds are invisible to a
-#: scan that only looks at the readers themselves.
+#: The four leading-underscore names are a stage's own readers, which take
+#: the setting's name first and hand it to `required`, `mapping` or `csv`
+#: through a variable. Without them the mixes and the two kinds of length
+#: bound are invisible to a scan that only looks at the readers themselves.
 READERS = frozenset(
     {
         "required",
@@ -41,6 +41,7 @@ READERS = frozenset(
         "_kinds",
         "_weights",
         "_bounds",
+        "_span",
     }
 )
 

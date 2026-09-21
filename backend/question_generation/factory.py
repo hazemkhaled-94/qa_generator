@@ -83,6 +83,9 @@ def build_service(
             kinds=settings.fact_kinds,
             # Recorded on every question written.
             version=version,
+            # A passage that repeats across the corpus is its furniture,
+            # and no gate downstream refuses a question about furniture.
+            boilerplate_cosine=settings.boilerplate_cosine,
         ),
         writer=QuestionWriter(Client(writer_model)),
         checker=QuestionChecker(
@@ -101,6 +104,7 @@ def build_service(
             # answer would wave through everything its own recall missed.
             entail=independent,
             bounds=settings.answer_chars,
+            explanation_chars=settings.explanation_chars,
             overlap=settings.answer_overlap,
             long_answer_chars=settings.long_answer_chars,
             elsewhere=catalog.elsewhere,

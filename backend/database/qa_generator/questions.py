@@ -76,6 +76,11 @@ class Question(Base):
             "answerable OR target_answer IS NULL",
             name="questions_unanswerable_has_no_target",
         ),
+        # And so it has nothing to explain either.
+        CheckConstraint(
+            "answerable OR answer_explanation IS NULL",
+            name="questions_unanswerable_has_no_explanation",
+        ),
         CheckConstraint(
             f"difficulty IS NULL OR {one_of('difficulty', Difficulty)}",
             name="questions_difficulty_valid",
@@ -144,6 +149,15 @@ class Question(Base):
         comment="The expected answer. Must be NULL when answerable is false, "
         "enforced by a CHECK constraint: an unanswerable question is scored on "
         "behaviour, not on content.",
+    )
+    answer_explanation: Mapped[str | None] = mapped_column(
+        Text,
+        comment="The same answer said at length, for a reader who has not seen "
+        "the material. Separate from target_answer because the two are scored "
+        "differently: recoverability compares the target whole, and every lemma "
+        "added to it is another one the verifier has to reproduce, so an answer "
+        "that teaches cannot also be the answer that is matched. NULL on every "
+        "question written before this column, and on every unanswerable one.",
     )
     answerable: Mapped[bool] = mapped_column(
         Boolean,

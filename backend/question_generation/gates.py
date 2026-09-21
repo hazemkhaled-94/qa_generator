@@ -11,14 +11,17 @@ asked for. One rule for all of them was what made the set what it was: a value
 may carry no verb, so applied to every answer that rule refused every why,
 how, procedure and consequence question ever written.
 
-There is no gate here for "it is not the kind of question it was asked to be",
-and that is a finding rather than an omission. The verifier was asked it, as
-`matches_intent`, and answered `true` for a bare `Wie viele Anlassprüfungen
-wurden 2025 durchgeführt?` written into a `reason` slot - the same failure the
-phrasing judgement had when it was a yes or no. What survives is structural:
-a kind declares an answer form, and `wrong_form` reads the answer against it,
-so a reason answered with a value is still refused. `question_type` records
-what was ASKED for, as `planned_difficulty` does.
+The gate for "it is not the kind of question it was asked to be" is
+structural, and only ever structural. The verifier was once asked the
+judgement, as `matches_intent`, and answered `true` for a bare `Wie viele
+Anlassprüfungen wurden 2025 durchgeführt?` written into a `reason` slot - it
+fired zero times over 71 questions while the kind was plainly wrong on six of
+27, which is the same failure the phrasing judgement had when it was a yes or
+no. So a model is not asked again. What a rule can settle is settled: a kind
+declares an answer form and `wrong_form` reads the answer against it, an
+`entity` question has to ask after a party, and an `enumeration` has to answer
+with more than one thing. Every other kind records what was ASKED for, as
+`planned_difficulty` does.
 """
 
 from __future__ import annotations
@@ -706,6 +709,204 @@ def asserted(target: str, passages: Sequence[str], language: str | None) -> bool
         return True
     found = {_folded(one) for one in vocabulary("\n".join(passages), language)}
     return all(_folded(unit) in found for unit in units)
+
+
+#: Shortest and longest explanation, as QUESTIONS_EXPLANATION_CHARS sets
+#: them. The fallback for a re-check reading a row whose settings are not to
+#: hand, as BOUNDS is.
+EXPLANATION_CHARS = (150, 900)
+
+#: How much of an explanation may be lemmas the target answer already had
+#: before it has said nothing the target did not. An explanation is SUPPOSED
+#: to restate its answer - it is an answer written out - so this is set where
+#: only a near-copy fails it, not where a faithful expansion does.
+_RESTATES = 0.9
+
+
+def _asserts(text: str, language: str | None) -> tuple[str, ...]:
+    """The units an explanation claims, minus the ones prose counts with.
+
+    `asserted` reads every number and proper noun, which is right for a
+    target answer: that is short, and every unit in one is the answer. Prose
+    counts as it goes - `the slower of the two`, `both editions`, `the first
+    of these` - and none of those is a claim the material has to carry. The
+    explanation of a 48-hour reply time was refused for saying `two` about
+    two figures it had just quoted correctly.
+
+    So a spelled-out numeral is dropped and a figure is kept. `48` is a
+    claim the passages can contradict; `two` is how a sentence is built.
+    Read off `like_num`, which every Universal Dependencies tagset marks, so
+    no list of number words per language is needed.
+
+    Proper nouns stay. A name an explanation invents is the failure this is
+    for, and no language writes one to hold a sentence together.
+    """
+    counted = {
+        token.text.casefold()
+        for token in pipeline(language)(text)
+        if token.like_num and not any(char.isdigit() for char in token.text)
+    }
+    return tuple(
+        unit for unit in claim(text, language).units if unit.casefold() not in counted
+    )
+
+
+def explains(
+    explanation: str,
+    target: str,
+    passages: Sequence[str],
+    language: str | None,
+    span: tuple[int, int] = EXPLANATION_CHARS,
+) -> bool:
+    """Whether the long answer is worth showing a reader.
+
+    Three readings, and none of them is recoverability. That gate compares
+    the TARGET against what a verifier independently wrote back, and its
+    denominator is the target's own content lemmas - so every lemma an
+    answer gains is another one the verifier has to reproduce, and an answer
+    written to teach somebody is an answer it refuses. Measured before this
+    column existed: explanations sat at a median of 157 characters against a
+    ceiling of 600, because the prompt asked for one or two sentences and
+    every worked example answered in a fragment.
+
+    So the explanation is held to what it is actually for:
+
+    - LONG ENOUGH to be a reading rather than the target said twice, and
+      short enough to stay an answer rather than becoming the passage.
+
+    - ASSERTING NOTHING THE MATERIAL DOES NOT. Every figure, date and name
+      has to be in the cited passages - `asserted`'s reading, over the units
+      `_asserts` keeps. This is the only one of the three that can put a
+      wrong claim in front of a reader, and it is why the gate is not simply
+      a length check.
+
+    - SAYING SOMETHING THE TARGET DID NOT. An explanation whose every
+      content lemma is already in the target has expanded nothing. The floor
+      is high on purpose: restating the answer is most of what an
+      explanation does, and only a near-copy should fail here.
+
+    Returns True where there is no explanation at all. A question written
+    before this column, or by a writer that returned none, is not rejected
+    for it - the column is nullable and the checker decides whether one was
+    required.
+    """
+    if not explanation.strip():
+        return True
+    low, high = span
+    if not low <= len(explanation) <= high:
+        return False
+    units = _asserts(explanation, language)
+    if units:
+        found = {_folded(one) for one in vocabulary("\n".join(passages), language)}
+        if not all(_folded(unit) in found for unit in units):
+            return False
+    said = content(explanation, language)
+    if not said or not target:
+        return bool(said)
+    return len(said & content(target, language)) / len(said) < _RESTATES
+
+
+#: The question words that ask for a party rather than a thing. An `entity`
+#: question asks who, and a language marks that in one word - the same
+#: reading `compound` makes of interrogatives, which measured 16 of 17.
+#:
+#: A list per language and not a feature, because no Universal Dependencies
+#: tagset marks animacy on an interrogative: German `wer` and English `who`
+#: are both PRON/PronType=Int, exactly as `was` and `what` are. Short, and
+#: the two languages NLP_MODELS configures are in it.
+_AGENTS = frozenset({"wer", "wem", "wen", "wessen", "who", "whom", "whose"})
+
+
+def asks_for_an_agent(question: str, answer: str, language: str | None) -> bool:
+    """Whether an `entity` question asks after a party at all.
+
+    The type is defined as "who does, decides, owns or must be told
+    something", and over one measured run 208 of 244 accepted `entity`
+    questions - 85% - answered with no party in sight: `Womit können
+    Test-Chartas erstellt werden?` answered `mit Flipcharts und
+    Tabellenkalkulationen` is a factoid wearing the label.
+
+    That matters beyond the label, because `cognitive_level` is derived from
+    the type and inherits whatever the type got wrong.
+
+    Two ways to pass, because the question is not the only place the party
+    shows. Either the question uses an agent interrogative, or the answer
+    names a person or an organisation - which is spaCy's `PER` and `ORG`,
+    and so needs no word list of roles. A role that is neither, `the site
+    manager`, is caught by the first reading, because a question whose
+    answer is a role asks `who`.
+
+    This is the structural half of the gate that was deleted. The verifier
+    was once asked whether a question was the kind it had been planned as
+    and fired zero times over 71 questions while the kind was plainly wrong
+    on six of 27; a rule reads what a rule can settle, and nothing here is
+    a matter of taste.
+    """
+    if any(word.casefold() in _AGENTS for word in interrogatives(question, language)):
+        return True
+    return any(
+        entity.label_ in ("PER", "PERSON", "ORG")
+        for entity in pipeline(language)(answer).ents
+    )
+
+
+#: The fewest items an enumeration answers with. Its own directive says "if
+#: there is only one item, you asked the wrong question for this kind", and
+#: nothing enforced it.
+_ENUMERATED = 2
+
+
+def enumerates(answer: str, language: str | None) -> bool:
+    """Whether an `enumeration` answer holds a set rather than one thing.
+
+    Counted on noun phrases rather than on separators, because a list is
+    written with commas in one language and with none in another, and
+    `Systemtests, der Testmanager und der Technical Test Analyst` is three
+    items however it is punctuated.
+    """
+    return len(phrases(answer, language)) >= _ENUMERATED
+
+
+def moves_on(cited: Sequence[int], root: Sequence[int]) -> bool:
+    """Whether a follow-up reaches a fact the question before it did not.
+
+    A thread is supposed to walk through the material, and this is the
+    reading of whether it did. Over one measured run 739 of 1,047 accepted
+    follow-ups - 70.6% - cited nothing new, because `_followups` was handed
+    the root's own sample and the type cycle then asked for the same fact in
+    another shape. That is what produced threads like `Warum erstellt ein
+    Team ein Teamvokabular?` / `Was können die Teammitglieder vermeiden?` /
+    `Unter welchen Umständen können die Teammitglieder Missverständnisse
+    vermeiden?` - one fact, three interrogatives, and nothing learned after
+    the first.
+
+    Read on facts and not on wording, because wording is what a type cycle
+    changes and the defect is that the material underneath did not.
+    """
+    return bool(set(cited) - set(root))
+
+
+def same_material(cited: Sequence[int], parent: Sequence[int]) -> bool:
+    """Whether a follow-up rests on a passage the turn before it used.
+
+    The other way a thread fails: not asking the same thing again, but
+    changing the subject. `Warum sollen beim Mehrfachbedingungstest
+    Testfälle entworfen werden?` followed by `Warum wurde TTA-2.6.1
+    entfernt?` is not a conversation, and 147 accepted follow-ups shared no
+    passage with their parent.
+
+    Read on passages rather than on shared words. A follow-up MAY lean on
+    the conversation - `Und bei einem dringenden?` is a good one and carries
+    no content word at all - so a lexical reading would refuse exactly the
+    elliptical follow-ups the thread exists to produce. What has to stay
+    constant is the material, not the vocabulary.
+
+    Abstains where either side rests on nothing, which a question with no
+    citation does; the orphan trigger is what handles that.
+    """
+    if not cited or not parent:
+        return True
+    return bool(set(cited) & set(parent))
 
 
 #: How much of what a question asks ABOUT has to occur in the passages

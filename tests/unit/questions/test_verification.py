@@ -21,9 +21,14 @@ from question_generation.gates import (
     OVERLAP,
     agrees,
     anchored,
+    asks_for_an_agent,
+    enumerates,
+    explains,
     fitting,
+    moves_on,
     near_verdict,
     on_topic,
+    same_material,
     structural,
 )
 from question_generation.models import Neighbour
@@ -1979,3 +1984,137 @@ def test_a_span_found_elsewhere_still_goes_to_the_verifier() -> None:
 
     assert result.rejected_reason == QuestionRejection.ANSWERABLE_ELSEWHERE
     assert recording.verified == 2, "the recall call, and the verifier confirming"
+
+
+# ── The long answer ────────────────────────────────────────────────────────
+
+
+#: A passage holding every figure the explanations below assert, so a test
+#: about length or restatement is not stopped by `asserted`.
+_PASSAGES = (
+    (
+        "A standard support request is answered within 48 hours. An urgent "
+        "request is answered within 4 hours, and only on working days."
+    ),
+)
+
+
+def _reads(text: str) -> bool:
+    """Whether one explanation of the 48-hour answer is usable."""
+    return explains(text, "48 hours", _PASSAGES, "en")
+
+
+def test_no_explanation_at_all_is_not_a_failure() -> None:
+    """The column is nullable, and a row written before it has none."""
+    assert _reads("")
+    assert explains("", "48 hours", _PASSAGES, "en")
+
+
+def test_an_explanation_too_short_to_be_a_reading_is_refused() -> None:
+    """This is the failure the column was added for: the key said twice."""
+    assert not _reads("It is 48 hours.")
+
+
+def test_an_explanation_past_its_ceiling_is_refused() -> None:
+    """An explanation that long has become the passage."""
+    assert not explains("word " * 400, "48 hours", _PASSAGES, "en", (150, 900))
+
+
+def test_an_explanation_asserting_a_figure_the_passages_lack_is_refused() -> None:
+    """The one failure here that can put a wrong claim before a reader.
+
+    Everything else this gate catches is a bad read. A number the material
+    never gave is the defect `asserted` exists for, and 72 is not in the
+    passages.
+    """
+    assert not _reads(
+        "A standard support request has to be answered within 72 hours. That "
+        "is the ordinary service level and the slower of the two the material "
+        "sets, because an urgent request is answered far sooner than a "
+        "standard one ever is."
+    )
+
+
+def test_an_explanation_that_only_restates_the_key_is_refused() -> None:
+    """Padding the key to length is not explaining it."""
+    assert not explains(
+        "48 hours. 48 hours. 48 hours. 48 hours. 48 hours. 48 hours. 48 "
+        "hours. 48 hours. 48 hours. 48 hours. 48 hours. 48 hours. 48 hours.",
+        "48 hours",
+        _PASSAGES,
+        "en",
+    )
+
+
+def test_an_explanation_that_reads_and_rests_on_the_passages_passes() -> None:
+    """What the column is for."""
+    assert _reads(
+        "A standard support request has to be answered within 48 hours. That "
+        "is the ordinary service level, and it is the slower of the two the "
+        "material sets: a request marked urgent is answered within 4 hours "
+        "instead. The hours are the time allowed for the answer rather than "
+        "for resolving what was asked about."
+    )
+
+
+# ── The kind a question turned out to be ───────────────────────────────────
+
+
+def test_an_entity_question_asking_who_names_a_party() -> None:
+    """The interrogative settles it without reading the answer."""
+    assert asks_for_an_agent("Who signs off a change to the shift plan?", "", "en")
+
+
+def test_an_entity_question_whose_answer_names_an_organisation_passes() -> None:
+    """The other way to pass: the party is in the answer, not the question."""
+    assert asks_for_an_agent(
+        "Which body accredits a training provider?", "the ISTQB", "en"
+    )
+
+
+def test_an_entity_question_asking_after_no_party_is_refused() -> None:
+    """85% of one run's accepted entity questions read like this one."""
+    assert not asks_for_an_agent(
+        "Womit können Test-Chartas erstellt werden?",
+        "mit Flipcharts und Tabellenkalkulationen",
+        "de",
+    )
+
+
+def test_an_enumeration_answering_with_one_thing_is_refused() -> None:
+    """Its own directive says so, and nothing enforced it."""
+    assert not enumerates("an ISTQB examination", "en")
+
+
+def test_an_enumeration_answering_with_a_set_passes() -> None:
+    """Counted on noun phrases, so the punctuation does not decide."""
+    assert enumerates("by phone, through the web form and by email", "en")
+
+
+# ── A follow-up, read on its facts rather than its words ───────────────────
+
+
+def test_a_follow_up_citing_only_its_root_asks_nothing_new() -> None:
+    """70.6% of one run's accepted follow-ups were this."""
+    assert not moves_on(cited=(1, 2), root=(1, 2, 3))
+
+
+def test_a_follow_up_reaching_one_new_fact_moves_on() -> None:
+    """One is enough: the thread went somewhere."""
+    assert moves_on(cited=(2, 4), root=(1, 2))
+
+
+def test_a_follow_up_sharing_a_passage_stays_on_thread() -> None:
+    """What makes it the next turn rather than another question."""
+    assert same_material(cited=(7, 8), parent=(8, 9))
+
+
+def test_a_follow_up_sharing_no_passage_has_changed_the_subject() -> None:
+    """`Warum wurde TTA-2.6.1 entfernt?` after a question about test design."""
+    assert not same_material(cited=(7,), parent=(8, 9))
+
+
+def test_a_turn_resting_on_nothing_is_left_to_the_orphan_trigger() -> None:
+    """A measurement with nothing to measure is not evidence."""
+    assert same_material(cited=(), parent=(8,))
+    assert same_material(cited=(8,), parent=())

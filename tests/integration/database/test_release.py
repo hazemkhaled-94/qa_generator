@@ -198,6 +198,8 @@ def _settings(**overrides):
             "type_mix": TYPES,
             "difficulty_mix": {"easy": 1},
             "followup_types": ("condition",),
+            "explanation_chars": (150, 900),
+            "boilerplate_cosine": 0.0,
             "unanswerable_share": 0.1,
             "followup_share": 0.5,
             "max_followups": 2,

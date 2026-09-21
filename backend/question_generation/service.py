@@ -497,7 +497,13 @@ class QuestionGenerationService(StageService):
                 # with an unrelated rate cannot be reasoned about, and both
                 # the catalogue and the README already said it meant this.
                 if spread(roots, self._settings.followup_share):
-                    thread += self._followups(sample, plan, checked, accepted, followed)
+                    thread += self._followups(
+                        deal.widen(sample),
+                        plan,
+                        checked,
+                        accepted,
+                        followed,
+                    )
                     followed += 1
                 roots += 1
             threads.append(thread)
@@ -575,6 +581,12 @@ class QuestionGenerationService(StageService):
 
         turns: list[tuple[str, str | None]] = [(root.question_text, root.target_answer)]
         written: list[CheckedQuestion] = []
+        # What the two thread gates read. The root's facts stay the root's
+        # all the way down - a third turn re-asking the first is the defect
+        # either way - while the passages are the turn before this one's,
+        # because a thread is allowed to walk from one passage to the next.
+        cited = root.fact_ids
+        previous = root.passage_ids
         for turn in range(self._settings.max_followups):
             names = self._settings.followup_types
             candidate = self._writer.follow_up(
@@ -586,6 +598,8 @@ class QuestionGenerationService(StageService):
                     shape=plan.shape,
                     answerable=True,
                 ),
+                root_facts=cited,
+                parent_passages=previous,
             )
             checked = self._checker.check(candidate, accepted)
             written.append(checked)
@@ -593,4 +607,5 @@ class QuestionGenerationService(StageService):
                 break
             accepted.append(checked)
             turns.append((checked.question_text, checked.target_answer))
+            previous = checked.passage_ids
         return written
