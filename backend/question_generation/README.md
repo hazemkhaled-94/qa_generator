@@ -585,6 +585,39 @@ validated corpus has never been asked about — and because selection skips
 the facts an accepted question already rests on, another run reaches that
 two thirds rather than re-asking the first third.
 
+### Why more questions per topic stops helping
+
+A sample **burns** `QUESTIONS_FACT_SAMPLE` facts whether or not the
+question cites them, and no fact is offered twice in one run. So a topic
+runs out of samples at its own facts divided by that number, and past that
+point `QUESTIONS_PER_TOPIC` is inert. Modelled over this corpus's spread
+(37 topics, 9 to 426 facts each):
+
+| Cap | Limited by | Facts reached |
+|---|---|---|
+| 60 | 17 topics by the cap, 20 out of facts | 26% |
+| 120 | 1 by the cap, 36 out of facts | 31% |
+| 180 | none by the cap | 31% |
+| 360 | none by the cap | 31% |
+
+The model reads 26% where 60 actually measured 34%, so its absolute numbers
+are a floor; the shape is the finding.
+
+Three things raise coverage past it, and the cap is not one of them:
+
+- **Run it again.** Selection excludes only the facts an ACCEPTED question
+  rests on, so the ones offered and never cited come back. Runs compound:
+  roughly 34%, 54%, 68%, 78% over four.
+- **`QUESTIONS_FACT_SAMPLE`.** At a cap of 240 it models 31% at 3, 46% at 2
+  and 86% at 1 — it is the number of facts a sample spends. Below 2 the
+  five two-passage types cannot be written, which is why it is not simply
+  lowered.
+- **`QUESTIONS_FOLLOWUP_SHARE`.** 759 follow-ups in one run cited exactly
+  **76 facts no root question cited**. They are a quarter of the writing
+  and 1.2% of the coverage — which is not an argument against them, because
+  carrying a thread is a capability no single-turn question tests, but it
+  is the number to have when the run is too expensive.
+
 ## The balanced release
 
 Accepting a question says it is sound. It says nothing about what the SET looks
