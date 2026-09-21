@@ -15,6 +15,7 @@ until something asks it to.
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
 import pytest
@@ -147,6 +148,24 @@ QUESTIONS = QuestionSettings(
 )
 
 
+#: A four-digit year, which is what makes the proper noun before it read as
+#: an author. The stub keeps out of the way of `leaks_source` with it.
+_YEAR = re.compile(r"\b(1[89]|20)\d{2}\b")
+
+#: What the stub explains its answer with. Every figure and name in it -
+#: 4 kg, 12 hours, March 2026, Hamburg - is in PARAGRAPHS above, because the
+#: gate refuses an explanation asserting one the passages do not carry. Long
+#: enough to clear the floor in QUESTIONS, which is what stops an
+#: explanation being the key restated.
+EXPLANATION = (
+    "The device weighs 4 kg, which is the figure recorded for it against a "
+    "run time of 12 hours. The weight is a property of the device itself "
+    "rather than of a particular delivery, so it does not change with the "
+    "March 2026 arrival from the Hamburg plant. It is the figure to quote "
+    "when the device has to be carried or mounted."
+)
+
+
 class StubWriter:
     """A served model that turns each group of facts into one question."""
 
@@ -158,12 +177,39 @@ class StubWriter:
         self.calls = 0
 
     def answer(self, *, system: str, user: str, shape):
-        """Writes a question naming the facts it was given."""
+        """Writes a question naming the facts it was given.
+
+        The FACTS block alone, never the PASSAGE one below it. Both are
+        rendered as `[n] ...` lines, so taking every line that opens with a
+        bracket spliced the passage and its heading trail into the question
+        - and `leaks_source` refused the result, correctly. A question
+        carrying `Under: The Device` has named where its answer lives.
+
+        The `[n]` labels come off too, for the same gate and a second
+        reason: a bracketed number is how a bibliography writes a
+        reference, so `[1]` in a question reads as a citation whatever it
+        was numbering.
+
+        And a fact carrying a year is not quoted at all. `March 2026` is a
+        proper noun with a year directly after it, which is how `Beck 2003`
+        is written, so a question repeating it has cited an author. The
+        gate is right about the shape and wrong about this fact; a stub
+        that has to quote something quotes one of the others.
+        """
         self.calls += 1
-        cited = [line for line in user.splitlines() if line.startswith("[")]
-        asked = f"Which of these does the device do: {' '.join(cited)}?"
+        facts, _, _ = user.partition("PASSAGE(S)")
+        quotable = [
+            line.partition("] ")[2]
+            for line in facts.splitlines()
+            if line.startswith("[") and not _YEAR.search(line)
+        ]
+        asked = (
+            f"Which of these does the device do: {' '.join(quotable)}?"
+            if quotable
+            else "What does the device do?"
+        )
         if "answer" in shape.model_fields:
-            return shape(question=asked, answer="4 kg")
+            return shape(question=asked, answer="4 kg", explanation=EXPLANATION)
         return shape(question=f"On Mars, {asked}")
 
 
@@ -508,12 +554,22 @@ def _through_questions(pipeline, engine) -> int:
 
 
 def test_a_document_becomes_questions(pipeline, engine) -> None:
-    """The sixth stage, claiming from a topic the way the rest claim from a row."""
+    """The sixth stage, claiming from a topic the way the rest claim from a row.
+
+    One of them has to be ACCEPTED, not merely written. A rejected question
+    is stored like any other, so a run whose every question a gate refused
+    counts the same here as a run that worked - and one did: the stub wrote
+    a question carrying its passage's heading trail, `leaks_source` refused
+    it correctly, and this test went on passing on the row it left behind.
+    """
     topic_id = _through_questions(pipeline, engine)
 
     held = counts(engine)
     assert held["questions"] > 0
     with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM questions WHERE status = 'accepted'")
+        ).scalar(), "every question written was refused by a gate"
         assert (
             connection.execute(
                 text("SELECT question_status FROM topics WHERE id = :id"),
@@ -521,6 +577,30 @@ def test_a_document_becomes_questions(pipeline, engine) -> None:
             ).scalar()
             == Status.GENERATED
         )
+
+
+def test_an_accepted_question_carries_both_of_its_answers(pipeline, engine) -> None:
+    """The key that is matched, and the reading beside it.
+
+    Two columns because two gates: recoverability compares the target and
+    divides by its own lemmas, so the answer that teaches cannot also be
+    the answer that is matched.
+    """
+    _through_questions(pipeline, engine)
+
+    with engine.connect() as connection:
+        answers = connection.execute(
+            text(
+                "SELECT target_answer, answer_explanation FROM questions "
+                "WHERE status = 'accepted' AND answerable"
+            )
+        ).all()
+
+    assert answers, "no answerable question was accepted"
+    for target, explanation in answers:
+        assert target, "an accepted answerable question carries no key"
+        assert explanation, "an accepted answerable question carries no reading"
+        assert len(explanation) > len(target)
 
 
 def test_nothing_generates_until_something_asks_it_to(pipeline, engine) -> None:
