@@ -449,6 +449,55 @@ close before trusting the number.
 `unanchored` going 1 → 0 is the `genannt` fix removing the false positive
 the pilot found, not the model.
 
+## The full run under all of it, 2026-09-21
+
+Every change above, over the whole corpus. 3,094 questions written, **1,744
+accepted**, against the baseline's 3,131 and 2,077.
+
+| Gate | Baseline | This run |
+|---|---|---|
+| **accepted** | **2,077 — 66.3%** | **1,744 — 56.4%** |
+| `not_recoverable` | 147 | **512** |
+| `compound` | 298 | 265 |
+| `duplicate` | 433 | **180** |
+| `leaks_source` | 9 | **89** |
+| `answerable_after_all` | 93 | 83 |
+| `unanchored` | 0 | **82** |
+| `answerable_elsewhere` | 8 | **69** |
+
+**Fewer questions, and that is not the same as worse.** Where the 333 went:
+
+- `duplicate` fell by 253 and `not_recoverable` rose by 365. Those are
+  mostly the same questions: the dedup gate ran *before* the round trip, so
+  a question it refused never reached recall. Sampled, only 12% of the new
+  `not_recoverable` is the `about` guard and 66% is a judge saying no. **The
+  duplicates were largely questions that would have failed recall anyway** —
+  which is worth knowing, because it means the 70%-different-question-word
+  finding was right about the gate and wrong about the prize.
+- `leaks_source`, `unanchored` and `answerable_elsewhere` refuse 232
+  questions the baseline accepted.
+
+Whether that is a gain turns on whether those 232 are bad, so they were
+read. `leaks_source` splits 35 by rule and 54 by the model. Of ten
+model-driven ones sampled, seven are right — `TM-2.3.1`, `FL-5.2.3`,
+`ISO 25010`, `im Material`, `R01`, and *"Auf welcher Seite steht der
+Indexeintrag?"*, which is a question about the document's pagination and
+has no business in a benchmark — and three are wrong, including *"laut den
+Angaben"*, which the labelled set says is False and which the rules
+correctly abstain on. **So roughly a 30% false-positive rate on the model
+half, and none measured on the rule half.**
+
+`answerable_elsewhere` going 8 → 69 is not the extractive reader being
+loose: it only ever *saves* a call there, and the verifier still confirms
+every rejection. It is the probe retrieving on `passages.embedding` instead
+of on shared lemmas and actually finding the passage that answers.
+
+### What came out
+
+`make questions-balance` drew **610 questions**, a 35% yield, balanced to
+8–9% per type and 32–35% per band, 94% answerable. The pool came up short on
+medium and hard, which is what limits the draw.
+
 ## Layout
 
 | File | Holds |
