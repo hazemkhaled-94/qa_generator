@@ -34,3 +34,17 @@ class HealthApi(Endpoint):
         except requests.exceptions.RequestException as exc:
             log.warning("cannot read backend status: %s", exc)
             return {}
+
+    def services(self) -> list[dict]:
+        """Fetches every container the deployment runs, and where to open it.
+
+        A second call rather than a field on `components`: that reports what
+        the pipeline holds and this reports what is up, and a page showing
+        both has to say which is which. Empty when the backend cannot be
+        reached, which the page already reports on its own.
+        """
+        try:
+            return self._request("GET", "/services", timeout=20).json()
+        except requests.exceptions.RequestException as exc:
+            log.warning("cannot read the service list: %s", exc)
+            return []

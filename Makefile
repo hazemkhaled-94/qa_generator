@@ -77,7 +77,8 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         review-status review-push-facts review-pull-facts \
         review-push-topics review-pull-topics \
         review-push-questions review-pull-questions \
-        eval-upload eval-score
+        eval-upload eval-score \
+        all corpus open services review pull auto manual pipeline runs
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -882,3 +883,118 @@ dagster-dev:
 	  DAGSTER_DB_HOST=localhost DAGSTER_DB_PORT=$$POSTGRES_PORT \
 	  BACKEND_URL=http://localhost:$$BACKEND_PORT \
 	  poetry run dagster dev
+
+
+# ── Journeys ───────────────────────────────────────────────────────────────
+#
+# Fewer commands, each of which is several of the ones above in the order
+# somebody runs them. Nothing here does anything the fine-grained targets
+# cannot, and nothing here is required: every stage still has its own six.
+#
+# They exist because the common paths were six commands long and the order
+# mattered, which is a thing to get wrong rather than a thing to decide.
+
+# The whole of it: bring the stack up, then take the corpus end to end.
+all: up corpus
+
+# Every stage, in the order a document moves through them, stopping at the
+# first failure.
+#
+# Incremental, not a rebuild. Each `-start` queues only what has not been
+# asked for yet, so a corpus already through a stage costs one HTTP call
+# there and a run after one upload does that document alone.
+#
+# One `$(MAKE)` per line rather than a prerequisite list: prerequisites are
+# ordered only while nothing runs in parallel, and this order is the point.
+corpus:
+	$(MAKE) parse-start     && $(MAKE) parse
+	$(MAKE) chunk-start     && $(MAKE) chunk
+	$(MAKE) extract-start   && $(MAKE) extract
+	$(MAKE) topics-discover && $(MAKE) topics
+	$(MAKE) questions-start && $(MAKE) questions
+	$(MAKE) questions-balance
+
+# Every container, whether it is listening, and where to open it.
+#
+# Asked of the api rather than read out of .env, so this and the System
+# health page cannot come to disagree about what is running. A worker
+# serves no port and is shown as `-`: it reads a queue, and its own stage
+# page is what says whether it is doing that.
+#
+# localhost and BACKEND_PORT, not BACKEND_URL: that one is the container's
+# view - `http://api:8000` - and this runs on the host.
+services:
+	@$(LOADENV) && answer=$$(curl -sf http://localhost:$$BACKEND_PORT/services) \
+	  && printf '%s' "$$answer" | python3 -c 'import sys, json; [print("{:>4}  {:<20}  {}".format({True: "up", False: "DOWN", None: "-"}[r["ok"]], r["name"], r["url"] or "")) for r in json.load(sys.stdin)]' \
+	  || echo "The api is not answering. Try: make up"
+
+# The same, and open the application.
+open: services
+	@$(LOADENV) && url=http://localhost:$$STREAMLIT_PORT; \
+	  if command -v open >/dev/null; then open $$url; \
+	  elif command -v xdg-open >/dev/null; then xdg-open $$url; \
+	  else echo "Open $$url"; fi
+
+# Everything a person reviews, pushed to Argilla in one go.
+review: review-push-facts review-push-topics review-push-questions
+	@$(LOADENV) && echo "Review at http://localhost:$$ARGILLA_PORT"
+
+# Every decision made there, pulled back into the database.
+pull: review-pull-facts review-pull-topics review-pull-questions
+
+# ── Dagster, from here rather than from its own UI ─────────────────────────
+#
+# The asset graph already chains the stages: each waits for the one before
+# it to drain, which is the order `corpus` above runs them in. What these
+# decide is WHEN, which is the only thing an orchestrator was ever for.
+#
+# Run inside the webserver container, which is where DAGSTER_HOME and the
+# workspace already are. Doing it from the host would need both again, and
+# a second definition of either is a second thing to keep in step.
+#
+# A function rather than a prefix, because `-w` belongs after the
+# subcommand and not before it:
+#
+#     $(call DAGSTER,sensor list)
+#
+# Its output is filtered at each call site rather than here. The compose
+# shim hands back the container's two streams merged, so the interesting
+# line arrives among the code server's startup logging and there is no
+# redirection that separates them.
+DAGSTER = $(COMPOSE) exec -T dagster-webserver dagster $(1) \
+          -w /opt/dagster/dagster_home/workspace.yaml 2>&1
+
+# What it is doing: the sensor, the schedule, and the last few runs.
+#
+# `run list` reads the instance and takes no `-w`, so it is not written
+# through DAGSTER above. It asks the run storage what happened; the other
+# two ask the code location what is defined.
+#
+# Matched without anchoring: the CLI colours its output, so a line starts
+# with an escape sequence rather than with its own first word.
+runs:
+	-@$(call DAGSTER,sensor list)   | grep -E "Sensor: "
+	-@$(call DAGSTER,schedule list) | grep -E "Schedule: "
+	-@$(COMPOSE) exec -T dagster-webserver dagster run list --limit 5 2>&1 \
+	  | grep -E "Run: |Job: |Status: "
+
+# Every stage once, through Dagster instead of in the foreground. The same
+# work `corpus` does; the difference is that it is recorded as a run, with
+# a materialisation and a check per stage, and it survives this terminal
+# closing.
+pipeline:
+	@$(call DAGSTER,job launch -j corpus) | grep -E "Launched run|Error" 
+
+# Hand it over: an upload starts a run on its own from now on.
+#
+# The sensor watches parsing for documents nobody has asked for, and the
+# asset graph carries them the rest of the way. Stopped until this runs,
+# because a pipeline that starts the moment the stack comes up is one
+# nobody chose.
+auto:
+	@$(call DAGSTER,sensor start arrivals) | grep -E "sensor arrivals|Error" || true
+	@echo "An upload now starts the pipeline. 'make manual' hands it back."
+
+# Take it back.
+manual:
+	@$(call DAGSTER,sensor stop arrivals) | grep -E "sensor arrivals|Error" || true

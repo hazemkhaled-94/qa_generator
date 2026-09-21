@@ -35,7 +35,9 @@ def _clients(configured: Answers) -> dict:
         "catalog_api": Answers(**answers()),
         "settings_api": configured,
         "upload_api": Answers(counts={"documents": 3, "upload_attempts": 5}),
-        "health_api": Answers(reachable=(True, "Reachable."), components={}),
+        "health_api": Answers(
+            reachable=(True, "Reachable."), components={}, services=[]
+        ),
     }
 
 

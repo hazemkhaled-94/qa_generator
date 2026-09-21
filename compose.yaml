@@ -430,6 +430,21 @@ services:
       # model-env, and no provider.env: the api serves the model settings
       # and calls no model.
       <<: [*service-env, *store-env, *model-env]
+      # Where a person opens each service, for the System health page. Built
+      # here rather than in .env because it is the PUBLISHED port that a
+      # browser needs and the ports below are the only place both halves are
+      # written down - grafana serves 3000 and is published on 3001. A
+      # service left out simply gets no link.
+      SERVICE_URLS: >-
+        api=http://localhost:${BACKEND_PORT}/docs,
+        streamlit=http://localhost:${STREAMLIT_PORT},
+        dagster-webserver=http://localhost:${DAGSTER_WEBSERVER_PORT},
+        argilla=http://localhost:${ARGILLA_PORT},
+        phoenix=http://localhost:${PHOENIX_PORT},
+        grafana=http://localhost:${GRAFANA_PORT},
+        adminer=http://localhost:${ADMINER_PORT},
+        seaweedfs-ui=http://localhost:${SEAWEEDFS_MASTER_PORT},
+        seaweedfs-filer=http://localhost:${SEAWEEDFS_FILER_PORT}
     volumes:
       - ./backend/api:/app/api:ro
       - ./backend/database:/app/database:ro

@@ -430,6 +430,14 @@
       ]
     }
   },
+  "/services": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
   "/settings/{service}": {
     "get": {
       "parameters": [

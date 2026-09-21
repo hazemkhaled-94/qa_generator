@@ -38,6 +38,29 @@ OUTSIDE = {
     "health": {
         "health_api": Answers(
             reachable=(True, "Reachable."),
+            services=[
+                {
+                    "name": "argilla",
+                    "purpose": "Where a person accepts or rejects.",
+                    "ok": True,
+                    "detail": "Listening on argilla:6900.",
+                    "url": "http://localhost:6900",
+                },
+                {
+                    "name": "parse-worker",
+                    "purpose": "Turns a file into a document.",
+                    "ok": None,
+                    "detail": "Serves no port.",
+                    "url": None,
+                },
+                {
+                    "name": "redis",
+                    "purpose": "The lock a stage takes.",
+                    "ok": False,
+                    "detail": "redis:6379 refused the connection.",
+                    "url": None,
+                },
+            ],
             components={
                 "database": {"ok": True, "detail": "Connected.", "metrics": {}},
                 "ingestion": {
@@ -142,7 +165,9 @@ def test_a_page_reports_an_unreachable_backend_rather_than_raising(
         if name in LISTING
         else {
             "upload_api": Answers(counts=down),
-            "health_api": Answers(reachable=(False, "down"), components={}),
+            "health_api": Answers(
+                reachable=(False, "down"), components={}, services=[]
+            ),
         }
     )
     page = View(run_view(name, **clients), name)
@@ -359,12 +384,42 @@ def test_the_health_page_shows_a_component_s_figures_when_it_is_picked(
     assert "accepted and refused" in picked.tables()
 
 
+def test_the_health_page_lists_every_service_with_a_link_to_it(run_view) -> None:
+    """The whole of compose, not the browsable half.
+
+    A page called System health that listed only what has a web page could
+    not answer "is Redis up", which is the question somebody has when a
+    stage stops claiming rows.
+    """
+    page = opened(run_view, "health")
+
+    assert "argilla" in page.tables()
+    assert "redis" in page.tables()
+    assert "http://localhost:6900" in page.tables()
+
+
+def test_the_health_page_says_a_worker_is_neither_up_nor_down(run_view) -> None:
+    """It reads a queue and serves no port, so a red mark would be a lie."""
+    page = opened(run_view, "health")
+
+    assert "no port" in page.tables()
+
+
+def test_the_health_page_names_what_is_not_answering(run_view) -> None:
+    """A table of twenty-three rows buries one failure."""
+    page = opened(run_view, "health")
+
+    assert "redis" in page.text()
+
+
 def test_the_health_page_survives_a_backend_that_is_down(run_view) -> None:
     """A failed backend card makes every other card unknowable."""
     page = View(
         run_view(
             "health",
-            health_api=Answers(reachable=(False, "refused"), components={}),
+            health_api=Answers(
+                reachable=(False, "refused"), components={}, services=[]
+            ),
         ),
         "health",
     )

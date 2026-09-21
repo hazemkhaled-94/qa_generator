@@ -645,6 +645,17 @@ SETTINGS: tuple[Setting, ...] = (
         "the provider off the id's prefix and the address has to follow it.",
     ),
     Setting(
+        name="SERVICE_URLS",
+        service="platform",
+        kind="text",
+        optional=True,
+        fixed=True,
+        help="Where a person opens each service, as `name=url` pairs, for "
+        "the System health page. Composed by compose out of the published "
+        "ports, because the port a browser needs is not the one a service "
+        "listens on. A service left out gets no link and is still reported.",
+    ),
+    Setting(
         name="LLM_STRUCTURED_MODE",
         service="platform",
         kind="text",

@@ -3,6 +3,26 @@
 Every target, grouped. `make` is the only entry point a person needs: it
 sources the same configuration the containers read, so one value reaches both.
 
+## The short list
+
+Six targets cover the common paths. Each is several of the ones below in the
+order somebody runs them, and none of them can do anything those cannot.
+
+| Target | Does |
+|---|---|
+| `make all` | Bring the stack up, then take the corpus end to end |
+| `make corpus` | Every stage in order, stopping at the first failure. Incremental: a stage with nothing queued costs one call |
+| `make services` | Every container, whether it is listening, and where to open it |
+| `make open` | The same, and open the application |
+| `make review` | Push facts, topic labels and questions to Argilla in one go |
+| `make pull` | Pull every decision made there back into the database |
+
+`make auto` hands the whole thing to Dagster, so an upload starts a run on
+its own — see [Orchestration](#orchestration).
+
+Everything below is still there. A stage with a problem is fixed with its own
+six verbs, not with these.
+
 ## How a target reads its configuration
 
 In the order the containers do: the tuning values from
@@ -246,9 +266,25 @@ to another model.
 
 ## Orchestration
 
+The asset graph already chains the stages: each waits for the one before it
+to drain. What these decide is **when**.
+
 | Target | Does |
 |---|---|
+| `make runs` | The sensor, the schedule and the last five runs |
+| `make pipeline` | Every stage once, as a recorded Dagster run rather than in the foreground |
+| `make auto` | Start the `arrivals` sensor: an upload now starts a run on its own |
+| `make manual` | Stop it again |
 | `make dagster-dev` | Run the code location on the host, against the containerised PostgreSQL and API |
+
+`auto` is the unattended mode. The sensor watches parsing for documents
+nobody has asked for, and the graph carries them the rest of the way. It
+ships stopped, because a pipeline that starts the moment the stack comes up
+is one nobody chose.
+
+`pipeline` and `make corpus` do the same work. The difference is where it
+runs: `corpus` in this terminal, `pipeline` as a run with a materialisation
+and a check per stage, which survives the terminal closing.
 
 ## Known edges
 

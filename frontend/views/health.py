@@ -27,6 +27,63 @@ _COUNTS = {
 }
 
 
+#: How a service's state reads. None is not a failure: a worker reads a
+#: queue and serves no port, so there is nothing to connect to and a red
+#: mark would say something untrue about it.
+_STATE = {True: "up", False: "down", None: "no port"}
+
+
+def _services(client) -> None:
+    """Draws every container the deployment runs, with a link to each.
+
+    The whole of compose rather than the browsable half. A page called
+    System health that lists only what has a web page cannot answer "is
+    Redis up", which is the question somebody has when a stage stops
+    claiming rows.
+    """
+    running = client.services()
+    if not running:
+        st.caption("The backend is unreachable, so it cannot report the services.")
+        return
+
+    up = sum(1 for one in running if one["ok"] is True)
+    down = [one for one in running if one["ok"] is False]
+    page.stats(
+        {
+            "Services": (f"{len(running):,}", "Containers this deployment runs."),
+            "Up": (f"{up:,}", "Accepted a connection on their port."),
+            "Down": (f"{len(down):,}", "Refused one. A worker serves no port."),
+        }
+    )
+    if down:
+        st.warning(
+            "Not answering: " + ", ".join(one["name"] for one in down),
+            icon=":material/error:",
+        )
+
+    st.dataframe(
+        [
+            {
+                "Service": one["name"],
+                "State": _STATE[one["ok"]],
+                "Open": one["url"],
+                "What it does": one["purpose"],
+            }
+            for one in running
+        ],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Open": st.column_config.LinkColumn("Open", display_text="open"),
+            "What it does": st.column_config.TextColumn(width="large"),
+        },
+    )
+    st.caption(
+        "A service is *up* when it accepted a connection, which is not the "
+        "same as working. What a stage is actually doing is on its own page."
+    )
+
+
 def view() -> None:
     """Renders the system health page.
 
@@ -67,6 +124,9 @@ def view() -> None:
                 ),
             }
         )
+
+    with page.panel("Services"):
+        _services(client)
 
     # The model, the tokenizer and the language pipelines the six stages
     # share. A stage naming its own model does it on its own page.
