@@ -226,7 +226,9 @@ class PhrasingJudge:
     def _asked(self, system: str, user: str, shape, field: str) -> bool | None:
         """One question, one judgement, and None when it could not be had."""
         try:
-            answered = self._client.answer(system=system, user=user, shape=shape)
+            answered = self._client.answer(
+                system=system, user=user, shape=shape, prompt_version=PROMPT_VERSION
+            )
         except ModelUnavailable as exc:
             # Logged and abstained rather than raised. These are opinions
             # about phrasing, and the run is about the answers: losing one

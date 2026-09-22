@@ -135,8 +135,29 @@ The api and the frontend pass nothing and keep the default project. Neither
 produces a run, and a project per API process is a project per restart.
 
 Question generation also opens a span per question, carrying the gate that
-stopped it. The model calls that question made are its children, so a run's
-`leaks_source` rejections carry the price of the calls they wasted.
+stopped it **and every gate that read it** — `question.gates_ran`, in order.
+The checker returns on the first failure, so the gate alone could never say
+how far a question got, and two of the gates are conditional, so the
+sequence cannot be derived from a verdict and a fixed order either. The
+model calls that question made are its children, so a run's `leaks_source`
+rejections carry the price of the calls they wasted.
+
+### What a model call says it was
+
+The instrumentor names every call `completion` and gives it the prompt, the
+answer, the tokens and the price. Two things it cannot know go on beside
+them, from `telemetry.asking`, which `llm/client.py` wraps every call in:
+
+| On the span | Is | Why |
+|---|---|---|
+| `tag.tags` | the Pydantic **shape** — `_Answered`, `_NamesItsSource`, `_Recovered` | Otherwise a run is two hundred identical spans and nothing says which judgement cost what. This is `llm.shape` in the log, spelled the same |
+| `llm.prompt_template.version` | the caller's **`PROMPT_VERSION`** | Two prompts are two datasets. Eight versions of the question prompt were declared before anything recorded which one a call had used |
+
+Both are context, not a span of our own: the instrumentor's span is the one
+carrying the prompt and the price, and wrapping it would be a second place
+for the same call. A caller that names no version sets none — absent means
+a prompt that has never been given one, which is not the same as version
+zero.
 
 ## Verdicts
 

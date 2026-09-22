@@ -270,13 +270,24 @@ class Model:
         """How many times it was asked."""
         return len(self.asked)
 
-    def answer(self, *, system: str, user: str, shape):
+    def answer(self, *, system: str, user: str, shape, prompt_version=None):
         """Answers, and records what it was sent.
+
+        `prompt_version` is recorded rather than ignored: it is what the
+        span and the log line say a call was made under, and a caller that
+        stops passing it is a run nothing can tell from the one before it.
 
         Raises:
             Exception: Whatever it was built with, when that is one.
         """
-        self.asked.append({"system": system, "user": user, "shape": shape})
+        self.asked.append(
+            {
+                "system": system,
+                "user": user,
+                "shape": shape,
+                "prompt_version": prompt_version,
+            }
+        )
         if isinstance(self._answer, Exception):
             raise self._answer
         return shape(**self._answer)

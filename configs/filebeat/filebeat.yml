@@ -139,7 +139,12 @@ setup.template.append_fields:
   # a self-hosted model, which litellm has no price for.
   - name: llm.model
     type: keyword
+  # Which judgement the call was, and which version of the prompt asked
+  # it. The same two the span carries as a tag and as
+  # `llm.prompt_template.version`, so a call reads the same either side.
   - name: llm.shape
+    type: keyword
+  - name: llm.prompt_version
     type: keyword
   - name: llm.duration_ms
     type: long

@@ -112,7 +112,10 @@ class DigestExtractor(Extractor):
         """
         try:
             answer = self._client.answer(
-                system=_SYSTEM, user=self._prompt(passage), shape=_Digest
+                system=_SYSTEM,
+                user=self._prompt(passage),
+                shape=_Digest,
+                prompt_version=PROMPT_VERSION,
             )
         except ModelUnavailable as exc:
             raise ExtractionFailed(str(exc)) from exc

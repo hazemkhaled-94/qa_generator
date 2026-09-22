@@ -97,7 +97,7 @@ class StubModel:
         """Initialises the call counter."""
         self.calls = 0
 
-    def answer(self, *, system: str, user: str, shape):
+    def answer(self, *, system: str, user: str, shape, prompt_version=None):
         """Answers with one fact per numbered sentence in the excerpt."""
         self.calls += 1
         numbered = [line for line in user.splitlines() if line.startswith("[")]
@@ -179,7 +179,7 @@ class StubWriter:
         """Initialises the call counter."""
         self.calls = 0
 
-    def answer(self, *, system: str, user: str, shape):
+    def answer(self, *, system: str, user: str, shape, prompt_version=None):
         """Writes a question naming the facts it was given.
 
         The FACTS block alone, never the PASSAGE one below it. Both are
@@ -226,7 +226,7 @@ class StubVerifier:
         """Initialises the call counter."""
         self.calls = 0
 
-    def answer(self, *, system: str, user: str, shape):
+    def answer(self, *, system: str, user: str, shape, prompt_version=None):
         """Recovers 4 kg unless the question was perturbed onto Mars."""
         self.calls += 1
         found = "Mars" not in user

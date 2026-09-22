@@ -166,7 +166,10 @@ class LlmExtractor(Extractor):
         """
         try:
             answer = self._client.answer(
-                system=self._system, user=self._prompt(passage), shape=_Facts
+                system=self._system,
+                user=self._prompt(passage),
+                shape=_Facts,
+                prompt_version=PROMPT_VERSION,
             )
         except ModelUnavailable as exc:
             raise ExtractionFailed(str(exc)) from exc

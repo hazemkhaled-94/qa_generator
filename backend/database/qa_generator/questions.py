@@ -299,10 +299,19 @@ class Question(Base):
         index=True,
         comment="The configuration this question was written under, as the digest "
         "settings.store computes, or 'environment' when nothing was overridden. "
-        "The only provenance a question carries: which model wrote it, what mix "
-        "the plan aimed for and what bounds the gates held it to are all in the "
-        "settings that version names. NULL for a question written before a "
-        "setting could be changed without a restart.",
+        "Which model wrote it, what mix the plan aimed for and what bounds the "
+        "gates held it to are all in the settings that version names. NULL for a "
+        "question written before a setting could be changed without a restart.",
+    )
+    prompt_version: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="Version of the prompt that wrote this question, as "
+        "question_generation.types.PROMPT_VERSION declares it. The prompt decides "
+        "what a question IS, so two prompts are two datasets - the same reason "
+        "facts.prompt_version exists. Not covered by settings_version, which is a "
+        "digest of the stored overrides and does not move when a prompt is "
+        "edited. NULL for a question written before the version was recorded.",
     )
     run_id: Mapped[str | None] = mapped_column(
         Text,

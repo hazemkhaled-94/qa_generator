@@ -464,6 +464,14 @@ class CheckedQuestion:
     #: What the question's type asks of whoever answers it. Carried from
     #: the spec rather than judged, like the type itself.
     cognitive_level: str | None = None
+    #: Every gate that READ this question, in the order they read it, the
+    #: one that refused it last. Not a column: it goes on the span, where
+    #: the question it answers is asked - `rejected_reason` says what
+    #: stopped a question and could never say what it got past, because
+    #: the checker returns on the first failure. Two of the gates are
+    #: conditional, so the sequence cannot be derived from the verdict and
+    #: a fixed order.
+    gates_ran: tuple[str, ...] = ()
 
     @property
     def accepted(self) -> bool:

@@ -2236,3 +2236,48 @@ def test_subject_matter_is_not_a_credits_page() -> None:
 def test_a_density_of_zero_turns_the_reading_off() -> None:
     """The default, so a caller that says nothing gets every passage."""
     assert not names_parties("Graham Bath, Judy McKay, Rex Black", "en", 0.0)
+
+
+# ── What a question got past ───────────────────────────────────────────────
+
+
+def test_an_accepted_question_records_every_gate_that_read_it() -> None:
+    """`rejected_reason` can only ever say what STOPPED one.
+
+    The checker returns on the first failure, so a question refused at
+    the round trip and one refused at the first rule were the same shape
+    of record: a code and nothing about how far it got.
+    """
+    result = build(Recording(recovers="4 kg")).check(candidate())
+
+    assert result.accepted
+    assert result.gates_ran == (
+        "structural",
+        "kind_and_thread",
+        "near_duplicate",
+        "phrasing",
+        "round_trip",
+    )
+
+
+def test_a_question_stopped_early_names_only_what_ran() -> None:
+    """The expensive gates are not in the list because they never ran."""
+    result = build(Recording()).check(candidate(question_text="   "))
+
+    assert result.rejected_reason == QuestionRejection.MALFORMED
+    assert result.gates_ran == ("structural",)
+
+
+def test_the_gate_only_an_unanswerable_question_faces_is_not_claimed() -> None:
+    """Why this is recorded rather than derived from a fixed order.
+
+    `off_topic` runs for an unanswerable question and for no other, so
+    the sequence cannot be read off the verdict and a list of gate names.
+    """
+    answerable = build(Recording(recovers="4 kg")).check(candidate())
+    unanswerable = build(Recording(recovers="4 kg")).check(
+        candidate(answerable=False, target_answer=None)
+    )
+
+    assert "off_topic" not in answerable.gates_ran
+    assert "off_topic" in unanswerable.gates_ran

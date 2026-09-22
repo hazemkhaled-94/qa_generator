@@ -21,11 +21,45 @@ import hashlib
 
 import pytest
 
+from question_generation import phrasing, verifier
 from question_generation.generation import _FOLLOW, _PERTURB
 from question_generation.types import PROMPT_VERSION, SPECS
 
 #: The version every digest below was taken under.
 VERSION = "8"
+
+#: The prompts of the two gates that are not the writer's, each pinned to
+#: its own module's PROMPT_VERSION. They were unpinned and the verifier was
+#: unversioned until a gate verdict had to say which prompt reached it - and
+#: an unpinned prompt is exactly the drift the writer's pinning exists to
+#: stop, so all three are held the same way now.
+GATES = {
+    "phrasing": (
+        phrasing,
+        "2",
+        {"source": phrasing._SOURCE, "contained": phrasing._CONTAINED},
+    ),
+    "verifier": (
+        verifier,
+        "1",
+        {
+            "verify": verifier._VERIFY,
+            "support": verifier._SUPPORT,
+            "computes": verifier._COMPUTES,
+            "follows": verifier._FOLLOWS,
+        },
+    ),
+}
+
+#: Each gate prompt's digest, under its module's version above.
+GATE_PROMPTS = {
+    "source": "39806a8d46bcba25",
+    "contained": "233676753e8fff37",
+    "verify": "aa2ba7278d12f3c7",
+    "support": "5839f6c9ba418d4a",
+    "computes": "936687282578bc61",
+    "follows": "752a6da85ab3fa5f",
+}
 
 #: Each type's whole system prompt: the shared rules, the answer form, the
 #: directive and its worked examples.
@@ -80,6 +114,37 @@ def test_the_prompts_that_are_not_a_type_are_pinned_too(name: str, text: str) ->
     """The unanswerable share and the follow-ups are written by these."""
     assert digest(text) == OTHERS[name], (
         f"the {name} prompt changed. Bump PROMPT_VERSION and write the new digest here."
+    )
+
+
+@pytest.mark.parametrize("gate", sorted(GATES))
+def test_a_gate_declares_the_version_pinned_here(gate: str) -> None:
+    """Bumping one and not the other leaves the pinning meaningless."""
+    module, version, _ = GATES[gate]
+    assert module.PROMPT_VERSION == version, (
+        f"{gate}'s PROMPT_VERSION is {module.PROMPT_VERSION} and this file "
+        f"pins {version}. Update both in the same commit."
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        (name, text)
+        for _, _, prompts in GATES.values()
+        for name, text in prompts.items()
+    ],
+)
+def test_a_gate_asks_what_it_was_pinned_asking(name: str, text: str) -> None:
+    """A gate's prompt moving is a gate that judges something else.
+
+    The verdict on a question names the gate and the prompt version that
+    reached it. Editing the prompt under a fixed version makes those two
+    records disagree about what was judged.
+    """
+    assert digest(text) == GATE_PROMPTS[name], (
+        f"the {name} prompt changed. Bump its module's PROMPT_VERSION and "
+        f"write the new digest here."
     )
 
 

@@ -33,7 +33,7 @@ from question_generation.planning import Plan, plans
 from question_generation.queue import QuestionQueue
 from question_generation.runs import ACCEPTED
 from question_generation.selection import Deal, spread
-from question_generation.types import SPECS, spec
+from question_generation.types import PROMPT_VERSION, SPECS, spec
 from settings.runs import run_id
 from stages import StageService
 from telemetry import tracer, working
@@ -605,6 +605,12 @@ class QuestionGenerationService(StageService):
             # than a boolean and a nullable code, because what every query
             # here groups on is "what became of it".
             current.set_attribute("question.gate", checked.rejected_reason or ACCEPTED)
+            # And every gate that READ it, in order. The line above says
+            # what stopped a question and can never say what it got past,
+            # because the checker returns on the first failure - so a
+            # question refused at the round trip and one refused at the
+            # first rule were indistinguishable in how far they got.
+            current.set_attribute("question.gates_ran", list(checked.gates_ran))
             current.set_attribute("question.accepted", checked.accepted)
             current.set_attribute("question.answerable", checked.answerable)
             current.set_attribute("question.language", checked.language)
@@ -638,6 +644,8 @@ class QuestionGenerationService(StageService):
                             "language": checked.language,
                             "answerable": checked.answerable,
                             "question_type": checked.question_type or "",
+                            "gates_ran": ",".join(checked.gates_ran),
+                            "prompt_version": PROMPT_VERSION,
                         },
                     )
                 )

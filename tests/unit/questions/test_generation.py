@@ -23,7 +23,7 @@ class StubModel:
         self._fields = fields
         self.asked: list[tuple[str, str]] = []
 
-    def answer(self, *, system: str, user: str, shape):
+    def answer(self, *, system: str, user: str, shape, prompt_version=None):
         """Records the call and answers in the shape asked for."""
         self.asked.append((system, user))
         return shape(

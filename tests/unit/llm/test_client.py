@@ -324,3 +324,67 @@ def test_a_response_carrying_no_usage_records_nothing(monkeypatch) -> None:
 def test_what_a_person_watching_the_logs_reads(fields, expected) -> None:
     """The JSON copy carries the fields whether or not this renders them."""
     assert priced(fields) == expected
+
+
+def test_the_shape_and_the_prompt_version_reach_the_log_line(
+    monkeypatch, caplog
+) -> None:
+    """What a call was and which prompt asked it, on the line it writes.
+
+    `llm.shape` is what `make spend-by-shape` reads. `llm.prompt_version`
+    is what says two runs are two datasets - eight versions of the
+    question prompt were declared before anything recorded which one a
+    call had used.
+    """
+    monkeypatch.setattr(
+        Client, "_ask", lambda self, system, user, shape: answered(shape)
+    )
+
+    with caplog.at_level("INFO"):
+        Client(settings()).answer(system="s", user="u", shape=Shape, prompt_version="8")
+
+    written = [one for one in caplog.records if one.name == "llm.client"]
+    assert written, [one.name for one in caplog.records]
+    assert written[-1].__dict__["llm.shape"] == "Shape"
+    assert written[-1].__dict__["llm.prompt_version"] == "8"
+
+
+def test_a_prompt_with_no_version_claims_none(monkeypatch, caplog) -> None:
+    """Absent says something: this prompt has never been versioned.
+
+    An empty string would be a version, and would group with every other
+    unversioned call as though they were one prompt.
+    """
+    monkeypatch.setattr(
+        Client, "_ask", lambda self, system, user, shape: answered(shape)
+    )
+
+    with caplog.at_level("INFO"):
+        Client(settings()).answer(system="s", user="u", shape=Shape)
+
+    written = [one for one in caplog.records if one.name == "llm.client"]
+    assert "llm.prompt_version" not in written[-1].__dict__
+
+
+def test_the_span_is_told_the_same_two_things(monkeypatch) -> None:
+    """One fact said twice, spelled the same in the trace and the log.
+
+    The instrumentor names every model call `completion`, so without these
+    a run is two hundred identical spans. Read off the context the way the
+    instrumentor reads it, rather than by exporting a span: what is being
+    checked is that the context carries them at all.
+    """
+    from openinference.instrumentation import get_attributes_from_context
+
+    seen: dict[str, object] = {}
+
+    def record(self, system, user, shape):
+        """Reads what the instrumentor would read, mid-call."""
+        seen.update(dict(get_attributes_from_context()))
+        return answered(shape)
+
+    monkeypatch.setattr(Client, "_ask", record)
+    Client(settings()).answer(system="s", user="u", shape=Shape, prompt_version="8")
+
+    assert seen["tag.tags"] == ["Shape"]
+    assert seen["llm.prompt_template.version"] == "8"

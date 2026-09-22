@@ -25,9 +25,16 @@ from opentelemetry import trace
 
 from telemetry import logs, traces
 from telemetry.logs import bind
-from telemetry.traces import instrument_llm, trace_app, trace_engine, tracer
+from telemetry.traces import (
+    asking,
+    instrument_llm,
+    trace_app,
+    trace_engine,
+    tracer,
+)
 
 __all__ = [
+    "asking",
     "bind",
     "configure",
     "instrument_llm",

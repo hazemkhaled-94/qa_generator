@@ -33,6 +33,7 @@ from question_generation.models import (
     SourcePassage,
     TopicToCover,
 )
+from question_generation.types import PROMPT_VERSION
 from settings.runs import run_id
 from stages import Columns, RowQueue
 
@@ -461,6 +462,12 @@ class QuestionQueue(RowQueue):
                             rejected_reason=question.rejected_reason,
                             status_changed_at=func.now(),
                             settings_version=self._version,
+                            # Read here rather than carried on the row, as
+                            # run_id above is and for the same reason: the
+                            # process that writes a question is the one
+                            # that stores it, so the constant it wrote with
+                            # is the constant in scope now.
+                            prompt_version=PROMPT_VERSION,
                             run_id=run_id(),
                             follows_id=follows,
                             thread_position=position,

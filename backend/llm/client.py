@@ -148,7 +148,14 @@ class Client:
         """The sampling temperature, recorded alongside the model."""
         return self._settings.temperature
 
-    def answer(self, *, system: str, user: str, shape: type[Shape]) -> Shape:
+    def answer(
+        self,
+        *,
+        system: str,
+        user: str,
+        shape: type[Shape],
+        prompt_version: str | None = None,
+    ) -> Shape:
         """Asks the model one question and parses the answer into `shape`.
 
         Timed, counted and logged either way. The model is the pipeline's
@@ -157,6 +164,13 @@ class Client:
         provider what it cost is the second. Both are in the logs as well as
         in the traces, which is what makes them readable when the collector
         is down or was never configured.
+
+        `prompt_version` is the caller's own PROMPT_VERSION, and it goes on
+        the log line and the span alike. Two prompts are two datasets, and
+        without it a run under version 7 and a run under version 8 are the
+        same rows and the same spans. Optional, because a prompt that has
+        never been versioned should say nothing rather than claim a
+        version it does not have.
 
         Raises:
             ModelUnavailable: If it could not be reached, or did not return
@@ -169,8 +183,14 @@ class Client:
             "llm.model": self._settings.model,
             "llm.shape": shape.__name__,
         }
+        if prompt_version:
+            about["llm.prompt_version"] = prompt_version
         try:
-            answered, completion = self._attempt(system, user, shape)
+            # The same two facts on the span the instrumentor opens inside,
+            # spelled as they are in `about`, so a call reads the same in
+            # Phoenix and in Grafana.
+            with telemetry.asking(shape.__name__, prompt_version):
+                answered, completion = self._attempt(system, user, shape)
         except Exception as exc:
             # Logged with the traceback before it is rewrapped: what the
             # caller records against the row is one line, and litellm's own

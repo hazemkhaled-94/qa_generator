@@ -171,6 +171,12 @@ class QuestionChecker:
         Raises:
             ModelUnavailable: If the verifier could not be reached.
         """
+        # Appended to as each gate reads the question, so the span can say
+        # what it got past and not only what stopped it. A list rather than
+        # a fixed order read off the verdict: `off_topic` runs only for an
+        # unanswerable question and `round_trip` only for what reaches it,
+        # so the sequence is not derivable from the code that fired.
+        ran: list[str] = ["structural"]
         failed, form = structural(
             question_text=candidate.question_text,
             target_answer=candidate.target_answer,
@@ -182,38 +188,47 @@ class QuestionChecker:
             titles=candidate.group.titles,
         )
         if failed:
-            return self._verdict(candidate, failed, None, self._long_answer_chars, form)
+            return self._verdict(
+                candidate, failed, None, self._long_answer_chars, form, ran
+            )
 
         # Free, and only an unanswerable question can fail it: an answerable
         # one is about its material by construction, because the answer came
         # out of it.
-        if not candidate.answerable and not on_topic(
-            candidate.question_text,
-            candidate.group.language,
-            candidate.group.lemmas,
-            self._off_topic_overlap,
-        ):
-            return self._verdict(
-                candidate,
-                (
-                    QuestionRejection.OFF_TOPIC,
+        if not candidate.answerable:
+            ran.append("off_topic")
+            if not on_topic(
+                candidate.question_text,
+                candidate.group.language,
+                candidate.group.lemmas,
+                self._off_topic_overlap,
+            ):
+                return self._verdict(
+                    candidate,
                     (
-                        "it names almost nothing the passages it was drawn from "
-                        "name, so any chatbot declines it and declining it "
-                        "proves nothing"
+                        QuestionRejection.OFF_TOPIC,
+                        (
+                            "it names almost nothing the passages it was drawn from "
+                            "name, so any chatbot declines it and declining it "
+                            "proves nothing"
+                        ),
                     ),
-                ),
-                None,
-                self._long_answer_chars,
-                form,
-            )
+                    None,
+                    self._long_answer_chars,
+                    form,
+                    ran,
+                )
 
         # Free, and ahead of the embedding for that reason: each of these is
         # a rule reading what the writer already returned.
+        ran.append("kind_and_thread")
         failed = self._kind(candidate) or self._thread(candidate)
         if failed:
-            return self._verdict(candidate, failed, None, self._long_answer_chars, form)
+            return self._verdict(
+                candidate, failed, None, self._long_answer_chars, form, ran
+            )
 
+        ran.append("near_duplicate")
         embedding = self._embedder.embed(candidate.question_text)
         failed = near_verdict(
             self._near(embedding, seen),
@@ -224,24 +239,27 @@ class QuestionChecker:
         )
         if failed:
             return self._verdict(
-                candidate, failed, embedding, self._long_answer_chars, form
+                candidate, failed, embedding, self._long_answer_chars, form, ran
             )
 
         # Before the round trip, because none of it reads a passage: a
         # question naming its own source is refused without ever paying for
         # the call that would have answered it.
+        ran.append("phrasing")
         failed = self._phrasing(candidate)
         if failed:
             return self._verdict(
-                candidate, failed, embedding, self._long_answer_chars, form
+                candidate, failed, embedding, self._long_answer_chars, form, ran
             )
 
+        ran.append("round_trip")
         return self._verdict(
             candidate,
             self._round_trip(candidate, form, embedding),
             embedding,
             self._long_answer_chars,
             form,
+            ran,
         )
 
     def _kind(self, candidate: Candidate) -> tuple[str, str] | None:
@@ -797,6 +815,7 @@ class QuestionChecker:
         embedding: list[float] | None,
         long_answer: int = LONG_ANSWER_CHARS,
         form: str | None = None,
+        ran: Sequence[str] = (),
     ) -> CheckedQuestion:
         """Assembles one judged question, kept whichever way it went.
 
@@ -804,6 +823,9 @@ class QuestionChecker:
         will take. Stored rather than the asked-for one, because it is what
         the gates read it against and a row saying otherwise could not be
         re-checked to the same verdict.
+
+        `ran` is every gate that read it. Defaulted, because the re-check
+        in `service.py` builds a verdict without going through `check`.
         """
         code, reason = failed if failed else (None, "")
         if code:
@@ -831,4 +853,5 @@ class QuestionChecker:
             # column says what shape the answer takes and there is none.
             answer_form=(form or candidate.spec.form) if candidate.answerable else None,
             planned_difficulty=candidate.planned_difficulty,
+            gates_ran=tuple(ran),
         )

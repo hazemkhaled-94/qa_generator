@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -138,6 +140,37 @@ def instrument_llm() -> None:
         log.warning("could not instrument the model client: %s", exc)
         return
     _llm_instrumented = True
+
+
+@contextmanager
+def asking(shape: str, version: str | None = None) -> Iterator[None]:
+    """Labels the model-call spans opened inside with what was asked of it.
+
+    The instrumentor names every call `completion`, so a run is two
+    hundred identical spans and nothing on one says whether it wrote a
+    question, judged its phrasing or read the answer back out. That is in
+    the log as `llm.shape` and was in no trace, which is the reason
+    `make spend-by-shape` reads log prose to answer what a judgement
+    costs.
+
+    `shape` becomes a **tag**, which Phoenix filters and groups on, and
+    `version` becomes `llm.prompt_template.version`, which is the field it
+    already has for exactly this. Neither is a span of our own: the
+    instrumentor's span is the one carrying the prompt and the price, and
+    a wrapper around it would be a second place for the same call.
+
+    Does nothing where openinference is not installed - the frontend and
+    the orchestrator have the tracer and not the instrumentor - and
+    nothing where a caller names no version, which is a prompt that has
+    not been given one.
+    """
+    try:
+        from openinference.instrumentation import using_attributes
+    except ImportError:
+        yield
+        return
+    with using_attributes(tags=[shape], prompt_template_version=version or ""):
+        yield
 
 
 def tracer(name: str) -> trace.Tracer:

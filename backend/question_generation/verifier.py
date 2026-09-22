@@ -22,6 +22,13 @@ from pydantic import BaseModel, Field
 
 from llm.client import Client
 
+#: Bumped whenever a prompt here changes what the round trip asks for.
+#: Version 1 is what these have always been; they had no version at all
+#: until the gate verdicts needed to say which prompt reached them, and a
+#: run recorded under no version cannot be told from one recorded under
+#: the next. Pinned by `tests/static/test_prompts_pinned.py`.
+PROMPT_VERSION = "1"
+
 _VERIFY = """You check one test question for a document-search chatbot.
 
 You are given some PASSAGES and a QUESTION. Answer the question using ONLY
@@ -282,6 +289,7 @@ class Verifier:
                 f"Question: {question}\nAnswer: {answer}"
             ),
             shape=_Supported,
+            prompt_version=PROMPT_VERSION,
         )
         return got.supported
 
@@ -317,6 +325,7 @@ class Verifier:
             system=_VERIFY,
             user=f"Passages:\n{numbered}\n\n{asked}",
             shape=_Recovered,
+            prompt_version=PROMPT_VERSION,
         )
         return Reading(
             recovered=(

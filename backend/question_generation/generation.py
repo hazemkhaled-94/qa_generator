@@ -189,6 +189,7 @@ class QuestionWriter:
             system=plan.spec.system(spans=plan.spans),
             user=self._prompt(sample, note),
             shape=_Answered,
+            prompt_version=PROMPT_VERSION,
         )
         return self._candidate(
             plan,
@@ -225,6 +226,7 @@ class QuestionWriter:
             ),
             user=f"{self._prompt(sample)}\n\n{self._conversation(thread)}",
             shape=_Answered,
+            prompt_version=PROMPT_VERSION,
         )
         return self._candidate(
             plan,
@@ -249,6 +251,7 @@ class QuestionWriter:
             system=f"{_PERTURB}\nTHE KIND OF QUESTION TO ASK: {plan.spec.asks}",
             user=self._prompt(first, note),
             shape=_Unanswered,
+            prompt_version=PROMPT_VERSION,
         )
         return Candidate(
             question_text=written.question.strip(),

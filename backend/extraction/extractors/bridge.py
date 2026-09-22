@@ -162,7 +162,10 @@ class BridgeExtractor:
             return []
         try:
             answer = self._client.answer(
-                system=_SYSTEM, user=self._prompt(offered), shape=_Bridges
+                system=_SYSTEM,
+                user=self._prompt(offered),
+                shape=_Bridges,
+                prompt_version=PROMPT_VERSION,
             )
         except ModelUnavailable as exc:
             raise ExtractionFailed(str(exc)) from exc
