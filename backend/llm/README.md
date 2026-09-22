@@ -49,8 +49,14 @@ TOPIC_MODEL=...
 QUESTIONS_MODEL=...
 ```
 
-Each is unset by default and each means `LLM_MODEL`. The address, the mode and
-the patience stay `LLM_*` — because a stage that could set its own timeout
+Each means `LLM_MODEL` when it is absent; `TOPIC_MODEL` ships naming a
+smaller one, because naming a topic is a short prompt over a term list.
+Three more name a model for one **judgement** rather than for a stage —
+`EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` and
+`QUESTIONS_VERIFIER_MODEL` — and `make spend-by-shape` is what each of them
+costs.
+
+The address, the mode and the patience stay `LLM_*` — because a stage that could set its own timeout
 would be a stage whose lease nobody could derive. Extraction's lease comes from
 `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`; if a stage could change either,
 a healthy worker could be swept as abandoned.
@@ -120,10 +126,14 @@ Every call is logged with its duration, its token counts and, where the
 provider prices it, what it cost:
 
 ```bash
-make spend                          # totals from the workers' logs
-make spend SINCE=2026-09-19
-make spend LOG=/path/to/one.log
+make spend LOG=run.log                    # totals from a captured log
+make spend LOG=run.log SINCE=2026-09-19   # one day of it
+make spend-by-shape LOG=run.log           # split by model and judgement
 ```
+
+`LOG` is **required**: it is the text log a drain wrote to a terminal, not
+the shipped JSON. For a run happening now, Grafana's Pipeline throughput
+dashboard and Phoenix are where the cost is.
 
 The model is the bottleneck, not the pipeline: a median passage measured at
 **473 s** on a 31B model. The panel worth watching during a long run is the
@@ -153,7 +163,10 @@ abandoned.
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | How many attempts one call gets. The lease is derived from this too |
 | `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for. Unset takes its default |
 | `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob |
-| `EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only |
+| `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a self-hosted model is served, for a stage naming `ollama_chat/…` while the shared model is somewhere else. The address follows the provider |
+| `EXTRACTION_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only |
+| `TOPIC_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | The same, for topic naming |
+| `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | One judgement on a smaller model. Neither reads a passage the way the stage's own model does |
 
 ## Tests
 
