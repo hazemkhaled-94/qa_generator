@@ -17,7 +17,15 @@ Once `make dev` reports ready:
 | Dagster | <http://localhost:3000> | The asset graph and run history |
 
 Behind them: PostgreSQL, SeaweedFS (master, two volumes, filer, S3 gateway,
-UI), Elasticsearch, Redis, Filebeat, and the five stage workers.
+UI), Elasticsearch, Redis, Filebeat, the Dagster daemon, and the five stage
+workers — twenty-three containers in all.
+
+This table is written down twice and the other copy is the one that cannot
+drift: `make services` and the **System health** page both ask
+`GET /services`, which is the catalogue in
+[`backend/api/services.py`](../backend/api/services.py) probed live. Use
+that for what is actually up; this is here for the seven addresses worth
+knowing before anything is running.
 
 ## Scaling
 
@@ -32,9 +40,10 @@ podman compose up -d --scale extract-worker=4
 `topic-worker` can be scaled too, though there is no point: a fit is one
 request row, and only one worker can claim it.
 
-`question-worker` scales the same way and has far less to divide. Its queue is
-one row per topic, so twelve topics per language is two dozen rows for the
-whole corpus, and a worker past that has nothing to claim.
+`question-worker` scales the same way and has far less to divide. Its queue
+is one row per topic, and how many topics there are follows the corpus:
+`TOPIC_PASSAGES_PER_TOPIC` is 40, so a 1400-passage language is 35 rows and
+a 51-passage one is 2. A worker past the total has nothing to claim.
 
 **Its first start is slow and looks like nothing happening.** It downloads
 `EMBEDDING_MODEL` before it claims anything — 2.2 GB into the `models` volume.

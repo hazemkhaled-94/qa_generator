@@ -269,6 +269,7 @@ and the catalogue omits, and a catalogue entry nothing reads. See
 | The api loads no model or converter | `tests/static/test_api_stays_light.py` |
 | Every setting is declared once and read | `tests/static/test_settings_catalogued.py` |
 | The dashboards match the fields that serve them | `tests/static/test_dashboards.py` |
+| Every relative link on any of these pages resolves | `tests/static/test_doc_links.py` |
 
 The diagrams are prose and can still drift. The layer list is the part most
 worth pinning, because it is the one a normal-looking edit breaks.

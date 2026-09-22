@@ -111,8 +111,13 @@ python -m question_generation.run --only topic=7
 
 A stage with an operation nobody else has declares it as one `Extra` and the
 parser grows a flag for it — `--revocabulary` on chunking, `--revalidate`,
-`--bridge` and `--recap` on extraction, `--reverify` and `--balance` on
-question generation, `--visualise` on topic modelling.
+`--bridge`, `--recap` and `--embed` on extraction, `--reverify` and
+`--balance` on question generation.
+
+Topic modelling is the exception. It builds the parser from a set of actions
+of its own rather than from the five plus extras, because it has no `start`
+and no `rerun` to extend: `--discover`, `--visualise` and `--delete` sit in
+the same mutually exclusive group as `--status`, `--stop` and `--retry`.
 
 ### Why a bare drain, on the host
 

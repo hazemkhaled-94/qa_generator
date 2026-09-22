@@ -967,7 +967,7 @@ container, not per lane.
 | Tool | Where | Why this one |
 |---|---|---|
 | **litellm** + **instructor** | [`generation.py`](generation.py), [`verifier.py`](verifier.py) | One model id names the provider; instructor is what makes the answer a typed object rather than prose to parse |
-| **sentence-transformers** | [`embedding.py`](embedding.py) | `EMBEDDING_MODEL` locally, for the dedup probe. No hosted embedding API bills for tens of thousands of "have I asked this?" |
+| **sentence-transformers** | [`nlp/embedding.py`](../nlp/embedding.py), through [`checker.py`](checker.py) | `EMBEDDING_MODEL` locally, for the dedup probe. No hosted embedding API bills for tens of thousands of "have I asked this?". It sits in `nlp/` because three columns now hold its output and a service may not import another service to reach one |
 | **pgvector** | `questions.embedding` | An HNSW index over 1024-wide vectors, so the dedup gate is one probe rather than a scan |
 | **spaCy** | [`gates.py`](gates.py) | Interrogatives for `compound`, finite verbs for `wrong_form`, lemmas for the overlap measures. No model call |
 | **SQLAlchemy** | [`queue.py`](queue.py), [`catalog.py`](catalog.py) | The topic queue, and reading the questions back |
@@ -1006,9 +1006,9 @@ make questions-balance          # draw the balanced release
 
 | Setting | Default | What it does |
 |---|---|---|
-| `QUESTIONS_PER_TOPIC` | 60 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
+| `QUESTIONS_PER_TOPIC` | 120 | How many questions to aim for per topic, and so how many of its passages are asked about. This times the topic count is what a full run costs. Not below the number of kinds with a weight, or a topic never sees some of them |
 | `QUESTIONS_FACT_KINDS` | `atomic,summary,outline,bridge` | Which kinds of fact a question may be written from |
-| `QUESTIONS_FACT_SAMPLE` | 3 | How many of a topic's facts are offered per call, divided between the passages the sample holds |
+| `QUESTIONS_FACT_SAMPLE` | 2 | How many of a topic's facts are offered per call, divided between the passages the sample holds |
 | `QUESTIONS_SAMPLES_PER_PASSAGE` | 3 | How many times one passage is dealt before the stride moves on |
 | `QUESTIONS_TYPE_MIX` | eleven kinds, weight 1 each; `entity` and `temporal` 0 | Which kinds are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
 | `QUESTIONS_DIFFICULTY_MIX` | `easy:2,medium:3,hard:3` | Which bands the plan aims for. A request for a shape of sample; the band itself stays derived |
@@ -1022,6 +1022,7 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_UNANSWERABLE_SHARE` | 0.30 | What share of questions are **attempted** with no answer in the corpus. Three to four times the share a release should hold, because 22.8% of them survive their own gates. Over-setting is safe — `QUESTIONS_RELEASE_UNANSWERABLE` is a ceiling |
 | `QUESTIONS_OFF_TOPIC_OVERLAP` | 0.3 | Below this share of shared lemmas, an unanswerable question is about nothing the material covers |
 | `QUESTIONS_ELSEWHERE_PASSAGES` | 4 | How many uncited passages the `answerable_elsewhere` probe reads |
+| `QUESTIONS_ENTAILMENT_OVERLAP` | 0.3 | How much of what a question asks **about** must occur in its passages before the entailment pass may rescue its answer. `0` turns the guard off |
 | `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of the accepted, answerable roots get a thread. It was a share of the plan's slots, which realised as this times the acceptance rate - 0.5 gave 37% |
 | `QUESTIONS_MAX_FOLLOWUPS` | 2 | How far a thread may run past its root |
 | `QUESTIONS_FOLLOWUP_TYPES` | `condition,reason,comparison` | The kinds the turns of a thread take, cycled |
@@ -1033,7 +1034,17 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_RELEASE_DIFFICULTY` | `easy:1,medium:1,hard:1` | How a release spreads over the bands |
 | `QUESTIONS_MODEL` | unset | A different writer from the rest of the pipeline. Unset means `LLM_MODEL` |
 | `QUESTIONS_VERIFIER_MODEL` | unset | The second model. Naming the writer's own, or none, turns off the gates only an independent model may apply; the worker warns on every start |
-| `QUESTIONS_PHRASING_MODEL` | unset | The model asked what a question's wording amounts to, where a rule has not settled it. Never sees a passage, so it can be far smaller than the verifier. Unset calls `QUESTIONS_VERIFIER_MODEL` |
+| `QUESTIONS_PHRASING_MODEL` | `ollama_chat/gemma4:12b` | The model asked what a question's wording amounts to, where a rule has not settled it. Never sees a passage, so it can be far smaller than the verifier. Unset calls `QUESTIONS_VERIFIER_MODEL` |
+
+Five more are the platform's rather than this stage's, because one model
+serves every stage that wants one: `EMBEDDING_MODEL` and
+`EMBEDDING_MAX_TOKENS` for the vectors the duplicate and boilerplate
+readings compare, `NLI_MODEL` and `NLI_ENTAILMENT_THRESHOLD` for the
+entailment pass, `QA_MODEL` and `QA_ANSWER_CONFIDENCE` for the extractive
+reader that answers the easy majority before the verifier is called, and
+`ENCODER_MAX_TOKENS` for how long a pair either of them reads. They are
+catalogued under `platform` and documented in
+[`backend/nlp/`](../nlp/README.md#configuration).
 
 The length bounds are per form and measured rather than guessed: a floor of 15
 on values refused 41% of the answers this corpus had accepted — `70%`, `2025`
@@ -1058,7 +1069,7 @@ poetry run pytest tests/integration/database/test_release.py
 | [`test_balance.py`](../../tests/unit/questions/test_balance.py) | Choosing a balanced release out of everything a run accepted |
 | [`test_models.py`](../../tests/unit/questions/test_models.py) | Which model writes a question, and which one checks it |
 | [`test_question_service.py`](../../tests/unit/questions/test_question_service.py) | What the service does with a topic, short of touching a database |
-| [`test_embedding.py`](../../tests/unit/questions/test_embedding.py) | The embedding behind the dedup gate, against the real model. Skips unless `EMBEDDING_MODEL` is already in the Hugging Face cache |
+| [`test_embedding.py`](../../tests/unit/nlp/test_embedding.py) | The embedding behind the dedup gate, against the real model. Skips unless `EMBEDDING_MODEL` is already in the Hugging Face cache |
 | [`test_question_queue.py`](../../tests/integration/database/test_question_queue.py) | Two queues on one table, against the database that has to keep them apart |
 | [`test_release.py`](../../tests/integration/database/test_release.py) | Drawing a balanced release, against the table that stores it |
 | [`test_trigger.py`](../../tests/integration/database/test_trigger.py) | The trigger that deletes a question once its last fact is gone |

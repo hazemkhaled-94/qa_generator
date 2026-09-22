@@ -242,6 +242,30 @@ every document leaves the topics standing — a topic has no foreign key to a
 document. It also drops the upload history, which a single deletion
 deliberately keeps.
 
+## The archive
+
+Every deletion above is the **first of two**. An AFTER DELETE trigger copies
+the row into `archived_rows` and the removal paths move the objects into the
+`archive` bucket, so nothing on this page loses data on its own.
+
+| Target | Does |
+|---|---|
+| `make archive` | What is held, by table, with its age and what it costs |
+| `make archive-purge` | The second deletion. **This one is final** |
+
+```bash
+make archive-purge TABLE=questions   # one table's rows
+make archive-purge DAYS=30           # everything archived before then
+make archive-purge ALL=1             # the whole thing, objects included
+```
+
+`TABLE` is about rows, so it leaves the bucket alone — an archived upload
+belongs to no table. `DAYS` and `ALL` take the objects too.
+
+Nothing purges itself, so the archive grows on ordinary runs as well: a
+re-extraction and a re-chunk both delete what they replace. See
+[`backend/archive/`](../backend/archive/README.md).
+
 ## Settings
 
 ```bash
@@ -299,12 +323,14 @@ at the same temperature. What it produces is a queue for a person.
 | `make test` | Everything that gates; starts containers of its own |
 | `make check` | An alias for `make test` |
 | `make test-fast` | Only the fast layers: no spaCy, no pyright, no containers |
-| `make test-unit` | Everything but the integration, smoke and eval layers |
+| `make test-unit` | Everything but the integration, smoke, eval and perf layers |
 | `make test-integration` | The container layers |
 | `make test-e2e` | One document through every stage, in this process |
 | `make test-smoke` | Build both images and look inside them |
 | `make test-eval` | Score the served model against the golden passages. Never gates |
+| `make test-perf` | Time the ceilings the code names in a comment. Never gates — a budget on a shared runner measures the runner |
 | `make test-coverage` | The gating layers, with a coverage report |
+| `make mutation` | Whether the tests would notice a gate changing. Hours, so nightly rather than per change |
 | `make lint` | ruff check and format check |
 | `make format` | Apply every fix ruff can make |
 | `make typecheck` | pyright, at zero |
@@ -315,6 +341,11 @@ at the same temperature. What it produces is a queue for a person.
 
 `lint`, `format` and `typecheck` all cover `backend`, `frontend`, `telemetry`,
 `orchestration`, `review`, `evaluation` and `tests`.
+
+`test-perf` and `mutation` are the two nightly ones. Line coverage says a
+line ran; `mutation` changes it and asks whether anything fails. Which
+modules and which layers it covers are `[tool.mutmut]` in `pyproject.toml`,
+and `mutmut browse` reads the survivors afterwards.
 
 ## Cost
 

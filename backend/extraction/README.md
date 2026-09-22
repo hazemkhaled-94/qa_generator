@@ -395,9 +395,24 @@ version 1. Neither is offered to question generation.
 
 ## Configuration
 
-Four settings of its own, in `configs/env/backend.env`. Everything else this
+Nine settings of its own, in `configs/env/backend.env`. Everything else this
 stage needs is shared: `LLM_*` for the model, `NLP_MODELS` and
-`NLP_DEFAULT_LANGUAGE` for the pipelines, `DATABASE_*` for the connection.
+`NLP_DEFAULT_LANGUAGE` for the pipelines, `EMBEDDING_MODEL` for the vectors,
+`DATABASE_*` for the connection.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `EXTRACTION_KINDS` | `atomic,summary,outline,bridge` | Which kinds a run writes. Below |
+| `EXTRACTION_DIGEST_MAX_SHARE` | 0.75 | The longest a digest may be. Below |
+| `EXTRACTION_DIGEST_MIN_CHARS` | 800 | Shortest passage worth digesting at all. A passage of two short sentences cannot be condensed |
+| `EXTRACTION_BRIDGES_PER_TOPIC` | 12 | Groups one topic is worth. Below |
+| `EXTRACTION_BRIDGE_PASSAGES` | 2 | Passages one group holds. Below |
+| `EXTRACTION_MIN_OTHER_SHARE` | 0.33 | The floor a passage's non-atomic kinds keep, which is what the atomic cap is worked out from. `make extract-recap` re-applies it with no model call |
+| `EXTRACTION_DUPLICATE_COSINE` | 0.95 | How alike two facts may be, cosine over `EMBEDDING_MODEL` |
+| `EXTRACTION_MODEL` | unset | A different reader from the rest of the pipeline. Unset means `LLM_MODEL` |
+| `EXTRACTION_DIGEST_MODEL` | `ollama_chat/gemma4:12b` | The model the digest call goes to. It condenses a passage rather than decomposing one, which is the cheaper of the two jobs |
+
+The four with a paragraph behind them:
 
 ### `EXTRACTION_KINDS`
 
@@ -424,7 +439,7 @@ reads the same in both languages. Above it the fact is refused as
 `not_condensed`.
 
 ```
-EXTRACTION_DIGEST_MAX_SHARE=0.6
+EXTRACTION_DIGEST_MAX_SHARE=0.75
 ```
 
 Lower is stricter. At 1.0 nothing is refused for length, and a summary that
@@ -438,7 +453,7 @@ not digested at all.
 How many groups one topic is worth, and how many passages one group holds.
 
 ```
-EXTRACTION_BRIDGES_PER_TOPIC=5
+EXTRACTION_BRIDGES_PER_TOPIC=12
 EXTRACTION_BRIDGE_PASSAGES=2
 ```
 
@@ -469,10 +484,16 @@ make extract-retry                  # return every failed passage to the queue
 make extract-rerun                  # read every passage again
 make extract-revalidate             # re-judge stored facts; no model is called
 make extract-bridge                 # read every topic's groups for bridges
+make extract-recap                  # re-apply the atomic cap; no model is called
+make extract-embed                  # write the vectors onto rows already stored
 
 make extract-retry PASSAGE=<id>     # any of them, narrowed to one passage
 make extract-rerun SHA=<sha256>     # or to one document
 ```
+
+`extract-embed` fills in a corpus extracted before the embedding columns
+existed, at the speed of the embedding model. It does **not** apply the
+dedup gate: a fact accepted before that gate existed was accepted.
 
 ## Tests
 

@@ -147,6 +147,22 @@ anything over one.
 |---|---|
 | `GET /health` | That the process is up, for the container healthcheck |
 | `GET /status` | Every component behind the API, and what each service holds |
+| `GET /services` | Every container the deployment runs, whether it is listening, and where to open it |
+
+`/status` and `/services` are beside each other rather than one inside the
+other, and the split is deliberate: `/status` reports what the pipeline
+**holds**, counted out of the database, and `/services` reports what is
+**up**. A page wanting both asks twice and says which is which.
+
+What `/services` proves is that something accepted a TCP connection on the
+port — one code path for a web UI, a database and a broker, with no auth and
+no TLS. A service can listen and be broken; the pipeline pages are where
+that shows. The alternative was nine health protocols, nine sets of
+credentials, and a page reporting Argilla as failed because it answered 401.
+A worker serves no port and is reported as neither up nor down.
+
+`SERVICE_URLS` is where the links come from, built by compose out of the
+**published** ports. A service nobody published simply gets no link.
 
 `GET /docs` is FastAPI's own OpenAPI page. Nothing else is served.
 

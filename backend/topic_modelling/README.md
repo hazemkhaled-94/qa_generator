@@ -511,13 +511,14 @@ in code: a missing one stops the container naming itself, rather than failing
 the first fit an hour in. Tuning lives in `configs/env/backend.env`, which is
 in git because these are decisions rather than credentials.
 
-Changing any of the first seven changes what the topics *are*, so changing one
-without refitting leaves stored topics that describe settings no longer in
-force. There is no partial refit to reach for.
+Changing any of the first eight changes what the topics *are*, so changing
+one without refitting leaves stored topics that describe settings no longer
+in force. There is no partial refit to reach for.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `TOPIC_NUM_TOPICS` | `12` | Topics per language. Must be at least 2. |
+| `TOPIC_PASSAGES_PER_TOPIC` | `40` | How many passages one topic is worth. Above 0 this turns `TOPIC_NUM_TOPICS` into a **ceiling** and fits `passages / this` instead, floored at 2. `0` turns it off. |
+| `TOPIC_NUM_TOPICS` | `40` | Topics per language, and the ceiling the line above works under. Must be at least 2. |
 | `TOPIC_PASSES` | `10` | Times the factorisation walks the corpus. More is a better fit and a longer wait. |
 | `TOPIC_RANDOM_STATE` | `42` | Seed. Fixed on purpose. |
 | `TOPIC_TOP_TERMS` | `12` | Terms stored as a topic's signature. Must be at least 1. |
@@ -525,12 +526,30 @@ force. There is no partial refit to reach for.
 | `TOPIC_NO_BELOW` | `3` | Drop a term appearing in fewer than this many passages. |
 | `TOPIC_NO_ABOVE` | `0.5` | Drop a term appearing in more than this share of passages. Must be in `(0, 1]`. |
 | `TOPIC_LANGUAGE_NAMES` | `de:German,en:English` | ISO code to language name, for the naming prompt. |
-| `LLM_MODEL` | — | Shared with every other stage. Unset means topics are fitted but not named. |
+| `TOPIC_LABEL_MIN_FACT_SHARE` | `0.15` | Below this share of the corpus's validated facts, a topic keeps its terms and is not sent to the model to be named. |
+| `TOPIC_MODEL` | `ollama_chat/gemma4:12b` | The model that names a topic. Naming is a short prompt over a term list and a handful of excerpts, so it does not need the writer's model. |
+| `LLM_MODEL` | — | Shared with every other stage. What `TOPIC_MODEL` falls back to; with neither, topics are fitted but not named. |
 
 ### How each default was chosen
 
-**`TOPIC_NUM_TOPICS=12`.** Measured over 501 German and 240 English passages,
-three seeds each:
+**`TOPIC_PASSAGES_PER_TOPIC=40`, and why the count is derived rather than
+set.** One fit runs per language and two languages are rarely the same size.
+This corpus carries 1434 passages in one and 51 in the other; twelve topics
+over each gave twelve subjects on one side and twelve slivers of four
+passages on the other, and those slivers produced thirteen questions between
+them. What a topic is worth asking about is how much material sits under it,
+not how many topics were asked for — so the count follows the corpus and
+`TOPIC_NUM_TOPICS` becomes the ceiling.
+
+40 is the figure this corpus was measured at. It keeps a topic at roughly
+the size twelve gave the larger language before, while letting the number of
+them rise with the material. A topic is also the unit question generation
+claims, so this and `QUESTIONS_PER_TOPIC` multiply out to how many questions
+a run can write.
+
+**The measurement the fixed count came from**, over 501 German and 240
+English passages, three seeds each — still the reason a topic is sized the
+way it is:
 
 | k | de coherence | biggest topic | en coherence | biggest topic |
 |---|---|---|---|---|
@@ -542,9 +561,9 @@ three seeds each:
 Coherence alone always prefers fewer topics, because broad topics share terms
 trivially — at four, one German topic held 71% of the corpus, which is no
 partition at all. Read beside that share and beside inter-topic overlap,
-twelve is the best German point: the lowest overlap (11%) and the most stable
-across seeds. English is within its own noise of its best there. Re-measure if
-the corpus grows a lot.
+twelve was the best German point on that corpus: the lowest overlap (11%) and
+the most stable across seeds. English is within its own noise of its best
+there. Re-measure if the corpus grows a lot.
 
 **`TOPIC_RANDOM_STATE=42`.** The same corpus and settings must give the same
 topics, or a reference dataset's topic weighting moves under its own feet

@@ -17,10 +17,17 @@ asked the API for.
 | Facts | facts | extraction | a passage | extraction |
 | Topics | topics | topic modelling | the whole corpus | topics |
 | Questions | questions | question generation | a topic | questions |
-| System health | components | nothing | — | the platform all six share |
+| System health | components, and every container with a link to it | nothing | — | the platform all six share |
 
 A page lists what its stage produces and runs the stage that produced it.
 **Nothing on a page can reach another page's stage.**
+
+System health is the one that lists something the pipeline did not produce:
+every container the deployment runs, whether it is listening, and a link to
+it. It asks `GET /services` for that rather than probing anything itself —
+the topology puts the api between the browser and everything else, and a
+page reaching twenty-odd hosts of its own would be the one thing on the
+network that ignores it.
 
 The queue's unit is not always the row: chunking replaces all of a document's
 passages at once, and extraction reads a passage and writes all of its facts

@@ -77,8 +77,12 @@ Each configures its own settings and no others: `ingestion` on Upload,
 tokenizer and the language pipelines the six of them share — on System health.
 
 A stage that wants a different model from the rest names one of its own:
-`EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL`, each absent by default
-and each meaning `LLM_MODEL`.
+`EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL`, each meaning
+`LLM_MODEL` when it is absent. Three more name a model for one *judgement*
+rather than for a stage — `EXTRACTION_DIGEST_MODEL`,
+`QUESTIONS_PHRASING_MODEL` and `QUESTIONS_VERIFIER_MODEL` — because what
+each judgement costs is not the same question as what a run costs. See
+`make spend-by-shape`.
 
 The pool sizes and the addresses are **not** configurable. They are read
 before a service could ask a database for anything, so they are served
@@ -92,14 +96,23 @@ read-only and marked as the deployment's.
 |---|---|---|---|
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | `http://localhost:11434` | Where that model is served |
+| `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a **self-hosted** model is served, for the case where one stage names `ollama_chat/…` while the shared model is somewhere else. The address follows the provider: a stage overriding only the model would otherwise send an Ollama request to Azure |
 | `LLM_TIMEOUT_SECONDS` | `backend.env` | 900 | How long one call may take. The extraction lease is derived from it |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease is derived from this too |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable to the last one |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
-| `EXTRACTION_MODEL`, `TOPIC_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only — where it is served and how patient to be stay `LLM_*`, because a stage that could set its own timeout would be a stage whose lease nobody could derive |
+| `LLM_NUM_CTX`, `LLM_REASONING_EFFORT` | `backend.env` | unset | The context window to ask the runtime for, and the knob a reasoning model has. Both follow the provider |
+| `EXTRACTION_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only — where it is served and how patient to be stay `LLM_*`, because a stage that could set its own timeout would be a stage whose lease nobody could derive |
+| `TOPIC_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | The same, for topic naming, which is a short prompt over a term list and does not need the writer's model |
+| `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | One judgement on a smaller model. Neither reads a passage the way the stage's own model does |
 | `QUESTIONS_VERIFIER_MODEL` | `.env` | unset | The second model, which checks that a question's answer is in the passages it cites. Naming the writer's own model, or none at all, turns off the gates only an independent model may apply; the worker warns on every start |
-| `EMBEDDING_MODEL` | `backend.env` | `intfloat/multilingual-e5-large` | The one embedding model, and the only tokenizer in the project. **Changing it is a migration** |
+| `EMBEDDING_MODEL` | `backend.env` | `intfloat/multilingual-e5-large` | The one embedding model, and the tokenizer chunking sizes a passage by. **Changing it is a migration** |
 | `EMBEDDING_MAX_TOKENS` | `backend.env` | 512 | That model's context window, and so the longest passage |
+| `NLI_MODEL` | `backend.env` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | A local entailment encoder, asked whether the cited passages entail an answer recall did not find. Absent asks the verifier instead |
+| `NLI_ENTAILMENT_THRESHOLD` | `backend.env` | 0.7 | How sure it must be before it rescues one |
+| `QA_MODEL` | `backend.env` | unset | A local extractive reader, asked for the answer span before the verifier is. Absent asks the verifier for every question |
+| `QA_ANSWER_CONFIDENCE` | `backend.env` | 0.9 | How sure that reader must be before its span is taken and no model is called |
+| `ENCODER_MAX_TOKENS` | `backend.env` | 8192 | The longest pair either encoder reads. A **ceiling**: a checkpoint that cannot read that far is held to its own window |
 | `NLP_MODELS` | `backend.env` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, and the languages the detector may answer with. Must be in the image. **Medium, not small**: the small German model does not tag a modal as a finite verb |
 | `NLP_DEFAULT_LANGUAGE` | `backend.env` | `en` | What a passage too short to judge is read as |
 | `WORKER_POLL_SECONDS` | `backend.env` | 5 | How long a watching worker sleeps between drains |
@@ -113,6 +126,19 @@ read-only and marked as the deployment's.
 | `ALLOWED_MIME_TYPES` | `backend.env` | `application/pdf` | Types with a parser behind them |
 | `PIPELINE_VERSION` | — | — | Not a setting. Read from `version` in `pyproject.toml` and recorded on each object as it is stored: it describes the build, not the deployment |
 
+### Topic modelling
+
+The two that decide how many topics there are. The rest of the table is in
+[`backend/topic_modelling/`](../backend/topic_modelling/README.md#configuration).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TOPIC_PASSAGES_PER_TOPIC` | 40 | How many passages one topic is worth. Above 0 this turns `TOPIC_NUM_TOPICS` into a **ceiling** and fits `passages / this` instead, floored at 2. One fit runs per language and two languages are rarely the same size, so a fixed count gives one side subjects and the other slivers |
+| `TOPIC_NUM_TOPICS` | 40 | Topics per language, and the ceiling the line above works under. At least 2 |
+
+A topic is also the unit question generation claims, so this and
+`QUESTIONS_PER_TOPIC` multiply out to how many questions a run can write.
+
 ### Question generation
 
 The settings most worth tuning, and the ones a run's cost is decided by. The
@@ -121,12 +147,12 @@ full table is in
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `QUESTIONS_PER_TOPIC` | 60 | How many to aim for per topic. This times the topic count is what a full run costs, twice over — each candidate is a writer call and a verifier call |
-| `QUESTIONS_FACT_SAMPLE` | 3 | How many of a topic's facts are offered per call, divided between the passages the sample holds |
-| `QUESTIONS_TYPE_MIX` | thirteen kinds, weight 1 each | Which kinds are written and in what proportion. A weight of 0, or a name left out, is never written |
+| `QUESTIONS_PER_TOPIC` | 120 | How many to aim for per topic. This times the topic count is what a full run costs, twice over — each candidate is a writer call and a verifier call |
+| `QUESTIONS_FACT_SAMPLE` | 2 | How many of a topic's facts are offered per call, divided between the passages the sample holds |
+| `QUESTIONS_TYPE_MIX` | thirteen kinds named, eleven at weight 1 | Which kinds are written and in what proportion. A weight of 0, or a name left out, is never written — `entity` and `temporal` ship at 0 |
 | `QUESTIONS_DIFFICULTY_MIX` | `easy:2,medium:3,hard:3` | Which bands the plan aims for. A request for a shape of sample; the band itself stays derived |
-| `QUESTIONS_UNANSWERABLE_SHARE` | 0.10 | What share are written to have no answer in the corpus |
-| `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of accepted questions get a follow-up thread |
+| `QUESTIONS_UNANSWERABLE_SHARE` | 0.30 | What share are **attempted** with no answer in the corpus. Three to four times the share a release should hold, because that is roughly how many survive their own gates |
+| `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of the accepted, answerable roots get a follow-up thread |
 | `QUESTIONS_ANSWER_CHARS` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form |
 | `QUESTIONS_DUPLICATE_COSINE` | 0.93 | How alike two questions must be before the later one is thrown away |
 | `QUESTIONS_RELEASE_SIZE` | 0 | How many to draw. `0` is the largest the pool can fill without missing a quota |
@@ -156,10 +182,12 @@ full table is in
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `BACKEND_URL` | `.env` | `http://api:8000` | The one address the frontend holds |
-| `PAGE_SIZE` | `.env` | — | Rows per page in the listings |
+| `PAGE_SIZE` | `.env` | 50 | Rows per page in the listings |
+| `SERVICE_URLS` | `compose.yaml` | built from the ports | Where a person opens each container, as `name=url` pairs, for the System health page. Built by compose rather than written in `.env`, because a browser needs the **published** port and the compose file is the only place both halves are written down — grafana serves 3000 and is published on 3001. A service left out simply gets no link |
 
-Both must **also** be listed in the `streamlit` service's `environment` in
-`compose.yaml` — being in `.env` alone is not enough, and the error says so.
+The first two must **also** be listed in the `streamlit` service's
+`environment` in `compose.yaml` — being in `.env` alone is not enough, and
+the error says so.
 
 ## Two settings with constraints
 
@@ -170,12 +198,13 @@ dropping the `phoenix` database.
 
 ## What is declared where is enforced
 
-Two static tests, both in `tests/static/`:
+Three static tests, all in `tests/static/`:
 
 | | |
 |---|---|
 | `test_settings_documented.py` | Every setting the code reads is named in a file that declares it |
 | `test_settings_catalogued.py` | Every setting the code reads is described in `settings/catalog.py`, and every description is read by something |
+| `test_doc_links.py` | Every relative link in a README points at a file that is there |
 
 A setting the code reads and the catalogue does not describe cannot be
 configured at all; one the catalogue describes and nothing reads is a control

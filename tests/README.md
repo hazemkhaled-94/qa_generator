@@ -1,24 +1,26 @@
 # Tests
 
-Ten directories, seven markers. `make test` runs everything that gates a
-merge; the two that do not are excluded from it.
+Eleven directories, eight markers. `make test` runs everything that gates a
+merge; the three that do not are excluded from it.
 
 ```bash
 make test           # everything that gates; starts containers of its own
 make test-fast      # only the fast layers: no spaCy, no pyright, no containers
-make test-unit      # everything but the integration, smoke and eval layers
+make test-unit      # everything but the integration, smoke, eval and perf layers
 make test-integration
 make test-e2e
 make test-smoke     # build both images and look inside them
 make test-eval      # score the served model against the golden passages
+make test-perf      # time the ceilings the code names in a comment
 make test-coverage  # the gating layers, with a coverage report
+make mutation       # change a gate and ask whether a test notices. Hours
 ```
 
 ## The layers
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, the frontend's gate list, the two import contracts, and pyright at zero | nothing |
+| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, the frontend's gate list, the two import contracts, every relative link in a README, and pyright at zero | nothing |
 | [`unit/`](unit/) | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
 | [`property/`](property/) | Invariants over generated input, with hypothesis | spaCy, for some |
 | [`regression/`](regression/) | The verdicts the checks have always reached, pinned as a table | spaCy |
@@ -28,6 +30,7 @@ make test-coverage  # the gating layers, with a coverage report
 | [`frontend/`](frontend/) | Each Streamlit page against a scripted backend | nothing |
 | [`smoke/`](smoke/) | Both images built and looked inside, and the compose file resolved: no service behind a profile, and the orchestrator holding no database credential | a container engine |
 | [`eval/`](eval/) | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions. The cases are in [`evaluation/cases.py`](../evaluation/cases.py), read by this and by `make eval-score` | a served model |
+| [`perf/`](perf/) | The ceilings the code already names in a comment — the combination search in `adds_up`, the release draw, the composition report — as loose wall-clock budgets. They fail on a change of order, not on a slow laptop | nothing |
 
 ## The markers
 
@@ -43,6 +46,7 @@ silently never runs.
 | `e2e` | Drives the whole pipeline in this process |
 | `smoke` | Builds images and reads the compose file |
 | `eval` | Scores a real served model; **never gates** |
+| `perf` | Times the ceilings the code names; **never gates** |
 
 ## Two checks that are a tool rather than a test
 
@@ -95,6 +99,10 @@ Nothing they do touches a running stack.
 move between versions and between runs at the same temperature, so a threshold
 there would fail on somebody else's Tuesday rather than on a regression.
 
+`tests/perf/` does assert, but never on a pull request: a wall-clock budget
+on a shared runner measures the runner. It runs nightly, and by hand with
+`make test-perf`.
+
 The one thing it does assert is that the round-trip gate splits its golden
 questions the right way round — not a measurement of the model's taste, but
 whether the gate is wired up at all. **A gate that accepts everything cannot
@@ -102,7 +110,7 @@ be told from no gate.**
 
 ## Two tests that skip rather than download 2.2 GB
 
-- [`unit/questions/test_embedding.py`](unit/questions/test_embedding.py) skips
+- [`unit/nlp/test_embedding.py`](unit/nlp/test_embedding.py) skips
   unless `EMBEDDING_MODEL` is already in the Hugging Face cache.
 - [`e2e/test_pipeline.py`](e2e/test_pipeline.py) stands the embedder in for
   with a digest.
@@ -136,6 +144,7 @@ request and on every push to `main`:
 | `unit` | Everything that needs neither a container nor a served model |
 | `integration` | The container layers, against pulled images |
 | `smoke` | Builds both images and looks inside them |
+| `coverage` | Combines the three jobs' shares into one figure, and puts it in the job summary |
 | `gate` | Waits for the rest. **This is the one a branch protection rule needs to require** |
 
 `smoke` is the slow one. It is also the only layer that can see what an image
@@ -143,10 +152,15 @@ contains, and a lock that does not install is not worth finding out about
 after the merge.
 
 [`.github/workflows/nightly.yml`](../.github/workflows/nightly.yml) runs at
-03:00 what is worth knowing but not worth blocking on: advisories against both
-locks, every layer including the images, and the model evaluation — which
-skips itself unless `LLM_MODEL` and `LLM_BASE_URL` are set as repository
-variables.
+03:00 what is worth knowing but not worth blocking on:
+
+| Job | Runs |
+|---|---|
+| `audit` | Known advisories against both locks |
+| `everything` | Every layer, images included |
+| `mutation` | `make mutation`, and puts the survivors in the job summary |
+| `ceilings` | `make test-perf` |
+| `evaluate` | The model evaluation — skips itself unless `LLM_MODEL` and `LLM_BASE_URL` are set as repository variables |
 
 The first run of any job installs the dependencies and caches the virtualenv
 against `poetry.lock` and the Makefile. Later runs restore it.
@@ -157,8 +171,9 @@ Things that are true, are not bugs, and have surprised somebody.
 
 - **A skipped integration test is not a passing one.** With no container
   engine the whole layer skips with a reason. Read the reason.
-- **`make test` excludes `smoke` and `eval`.** Those are `make test-smoke` and
-  `make test-eval`, and CI runs `smoke` as its own job.
+- **`make test` excludes `smoke`, `eval` and `perf`.** Those are
+  `make test-smoke`, `make test-eval` and `make test-perf`; CI runs `smoke`
+  as its own job and the nightly run takes the other two.
 - **`tests/contract/openapi.json` is a committed fixture.** A route added
   without updating it fails the contract test. That is the point.
 - **`make test-fast` skips spaCy, pyright and every container.** It is a

@@ -55,8 +55,11 @@ exhaustive = False
 # write that would stop a service parsing its own settings, which it can only
 # check by calling that service's own `Settings.load`. It imports the
 # `config` submodule of each and nothing else - never a service, never a
-# repository - which is why this list is exactly six names long and why a
-# seventh should be argued for rather than added.
+# repository - which is why this list is exactly seven names long and why an
+# eighth should be argued for rather than added. Seven rather than six
+# because `llm.config` is one too: the model settings are a service on the
+# Configuration panel like any other, and refusing a bad one means parsing
+# it the way the stages do.
 ignore_imports =
     settings.changes -> extraction.config
     settings.changes -> ingestion.config

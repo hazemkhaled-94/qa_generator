@@ -9,20 +9,26 @@ One of the three packages that load something expensive; the others are
 it never loads a pipeline.
 
 **No model is SERVED from here.** Everything in this package is local and
-deterministic — spaCy, a language detector, and two encoders that run in the
-worker's own process. That is what lets the fact checks run without a served
-model, and it is why `make extract-revalidate` costs seconds rather than
-hours.
+deterministic — spaCy, a language detector, and three encoders that run in
+the worker's own process. That is what lets the fact checks run without a
+served model, and it is why `make extract-revalidate` costs seconds rather
+than hours.
 
-Three of the files load weights, and nothing outside a worker may import
-them: [`embedding.py`](embedding.py), [`entailment.py`](entailment.py) and
-the spaCy pipelines. `tests/static/test_api_stays_light.py` pins that the API
-process loads none of them.
+Four of the files load weights, and nothing outside a worker may import
+them: [`embedding.py`](embedding.py), [`entailment.py`](entailment.py),
+[`qa.py`](qa.py) and the spaCy pipelines.
+`tests/static/test_api_stays_light.py` pins that the API process loads none
+of them.
 
 | File | Loads | Asked |
 |---|---|---|
 | [`embedding.py`](embedding.py) | `EMBEDDING_MODEL` | one text's vector, for every column that holds one |
-| [`entailment.py`](entailment.py) | `QUESTIONS_ENTAILMENT_MODEL` | whether one premise entails one hypothesis |
+| [`entailment.py`](entailment.py) | `NLI_MODEL` | whether one premise entails one hypothesis |
+| [`qa.py`](qa.py) | `QA_MODEL` | where in a passage the answer is, or that there is none |
+
+Each is held to its own window by [`windows.py`](windows.py):
+`ENCODER_MAX_TOKENS` is the ceiling a deployment asks for, and a checkpoint
+that cannot read that far is given what it can.
 
 ## One call, one judgement
 
@@ -53,7 +59,7 @@ than assuming the mean — a model trained to be read off its CLS token was
 being averaged.
 
 The two-way heads are wanted rather than tolerated. `bge-m3-zeroshot-v2.0`
-reads **8,194 tokens** where `mDeBERTa-v3-base-xnli` reads 512, and a premise
+reads **8,192 tokens** where `mDeBERTa-v3-base-xnli` reads 512, and a premise
 here is a passage this pipeline already sized to 512 of its own — so the
 three-way model would truncate exactly the text the judgement rests on. What
 a two-way head cannot do is tell "says something different" from "does not
@@ -62,7 +68,8 @@ address it", and both are refusals here, so it costs this caller nothing.
 What the encoder returns is a **probability**, which is the other reason to
 prefer it to a served model answering true or false: a boolean carries no
 confidence, so a deployment cannot decide how sure it wants a gate to be.
-`QUESTIONS_ENTAILMENT_THRESHOLD` is that decision.
+`NLI_ENTAILMENT_THRESHOLD` is that decision, and `QA_ANSWER_CONFIDENCE` is
+the same decision for the extractive reader.
 
 ## What it does
 
@@ -199,16 +206,30 @@ Most of it, because most readings are features rather than words:
 |---|---|---|
 | **spaCy** | [`pipelines.py`](pipelines.py), [`analysis.py`](analysis.py) | Sentence boundaries, the POS tags the finite-verb count reads, and the lemmas. One pipeline per language, loaded once per process |
 | **lingua** | [`language.py`](language.py) | Answers from a closed set of languages and is confident on short text, which a passage often is |
+| **sentence-transformers** | [`embedding.py`](embedding.py) | Reads the checkpoint's own `1_Pooling` config rather than assuming the mean, which the hand-written pooling did |
+| **transformers** | [`entailment.py`](entailment.py), [`qa.py`](qa.py) | Its text-classification pipeline hands back label names, so no NLI verdict is read off an index. The QA task was removed in transformers 5, so that span decode is written out here |
 
-Both are baked into the backend image, because the runtime has no network.
+spaCy and lingua are baked into the backend image, because the runtime has
+no network. The encoder weights are not: they are fetched on first use into
+the `models` volume.
 
 ## Configuration
+
+Only the first three are read here. The rest are the caller's — the stage
+that wants an encoder loads it and passes the name in — and they are
+catalogued under `platform`, because one model serves every stage.
 
 | Setting | Default | What it does |
 |---|---|---|
 | `NLP_MODELS` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, **and** the languages the detector may answer with. One list, so the two cannot disagree |
 | `NLP_DEFAULT_LANGUAGE` | `en` | What a passage too short to judge is read as |
 | `NLP_CAPITALISED_NOUNS` | `de` | Languages where capitalisation is not evidence of a proper noun |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | The one embedding model, and the tokenizer chunking sizes a passage by |
+| `NLI_MODEL` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | The entailment encoder. Absent asks the verifier instead |
+| `NLI_ENTAILMENT_THRESHOLD` | `0.7` | How sure it must be before it rescues an answer recall did not find |
+| `QA_MODEL` | unset | The extractive reader asked for a span before the verifier is. Absent asks the verifier for every question |
+| `QA_ANSWER_CONFIDENCE` | `0.9` | How sure that reader must be before its span is taken and no model is called |
+| `ENCODER_MAX_TOKENS` | `8192` | The longest pair an encoder reads. A **ceiling**: a checkpoint that cannot read that far is held to its own window |
 
 **Medium, not small.** The small German model does not tag a modal as a finite
 verb, which silently changes what `not_atomic` means.
@@ -232,9 +253,17 @@ poetry run pytest tests/unit/nlp -m nlp
 | [`test_sentences.py`](../../tests/unit/nlp/test_sentences.py) | Sentence numbering, which every citation resolves against |
 | [`test_claims.py`](../../tests/unit/nlp/test_claims.py) | How many claims a sentence reads as |
 | [`test_language.py`](../../tests/unit/nlp/test_language.py) | Reading the language a passage is written in |
+| [`test_pointing.py`](../../tests/unit/nlp/test_pointing.py) | What a claim points at, and what it does not |
+| [`test_entailment.py`](../../tests/unit/nlp/test_entailment.py) | A verdict read off the label rather than off a position, and the refusal of a head that is not an NLI model's |
+| [`test_qa.py`](../../tests/unit/nlp/test_qa.py) | The span decode, the no-answer head, and the window that slides |
+| [`test_embedding.py`](../../tests/unit/nlp/test_embedding.py) | The vector, when `EMBEDDING_MODEL` is already cached. Skips rather than downloading 2.2 GB |
 
-These carry the `nlp` marker, because they load a pipeline. `make test-fast`
-excludes them.
+`test_sentences`, `test_claims`, `test_pointing` and `test_entailment` carry
+the `nlp` marker, and `make test-fast` excludes them. **No encoder weights
+are loaded by any of these** — the entailment and QA tests stand the model in
+for and cover the label handling and the span decode, which is the half that
+is ours. The encoders against real weights are `tests/eval/`, which needs a
+served model.
 
 ## Known edges
 
