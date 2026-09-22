@@ -31,6 +31,30 @@ for line in TUNING.read_text().splitlines():
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/x")
 
+
+def _hypothesis() -> None:
+    """Registers the two example budgets and selects one.
+
+    A property test is worth more examples than a laptop wants to wait for
+    and fewer than CI should settle for, and the per-test `max_examples` in
+    `tests/property/` cannot express that: it is one number written at the
+    test. A profile is the same number chosen by where it is running.
+
+    `deadline=None` throughout because several of these load a spaCy
+    pipeline on their first example and time out on it rather than on
+    anything the property says.
+    """
+    from hypothesis import settings
+
+    for name, examples in (("dev", 25), ("ci", 200), ("nightly", 1000)):
+        settings.register_profile(
+            name, max_examples=examples, deadline=None, print_blob=True
+        )
+    settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+
+
+_hypothesis()
+
 #: The same images compose runs.
 POSTGRES_IMAGE = "pgvector/pgvector:pg18"
 SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.44"

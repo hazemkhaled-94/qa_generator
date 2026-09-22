@@ -33,6 +33,25 @@ class Record:
 
     metadata: dict
     responses: list[Response]
+    id: str | None = None
+
+
+class Records:
+    """A dataset's records: read by calling, written by logging."""
+
+    def __init__(self, held: list[Record]) -> None:
+        """Initialises with what the dataset already holds."""
+        self._held = held
+        self.logged: list = []
+
+    def __call__(self, with_responses: bool = False):
+        """Every record in it."""
+        del with_responses
+        return iter(self._held)
+
+    def log(self, records) -> None:
+        """Records what a push wrote."""
+        self.logged += list(records)
 
 
 class Dataset:
@@ -40,12 +59,7 @@ class Dataset:
 
     def __init__(self, records: list[Record]) -> None:
         """Initialises with the records a pull will read."""
-        self._records = records
-
-    def records(self, with_responses: bool = False):
-        """Every record in it."""
-        del with_responses
-        return iter(self._records)
+        self.records = Records(records)
 
 
 class Client:
@@ -220,6 +234,98 @@ def test_a_missing_dataset_is_not_an_error(monkeypatch, settings) -> None:
     catalogs = Catalogs(facts=Facts(), questions=Questions(), topics=Topics())
 
     assert pull(datasets.FACTS, settings, catalogs) == 0
+
+
+# ── What a second push offers ──────────────────────────────────────────────
+
+
+def asking(monkeypatch, held: list[Record], rows: list) -> tuple[Catalogs, Dataset]:
+    """Points a push at a dataset already holding these records."""
+    dataset = Dataset(held)
+    monkeypatch.setattr("review.service.connect", lambda settings: Client(dataset))
+
+    class Sampled:
+        """A repository handing back a fixed sample."""
+
+        def questions(self, sample: int, ids=None):
+            """The rows, whatever was asked for."""
+            del sample, ids
+            return rows
+
+    return Catalogs(facts=Sampled(), questions=Questions(), topics=Topics()), dataset
+
+
+def row(question_id: int):
+    """One question as the review reads it."""
+    from review.records import QuestionRow
+
+    return QuestionRow(
+        id=question_id,
+        question_text="What does the device weigh?",
+        target_answer="4 kg",
+        answerable=True,
+        difficulty="easy",
+        question_type="factoid",
+        language="en",
+        status="accepted",
+        rejected_reason=None,
+        facts=["The device weighs 4 kg."],
+    )
+
+
+def test_a_second_push_does_not_offer_a_question_already_answered(
+    monkeypatch, settings
+) -> None:
+    """A sample that keeps drawing judged rows never reaches the rest.
+
+    `facts` skips one through `reviewed_verdict`; a question carries no
+    such column, so the answers Argilla already holds are what says so.
+    """
+    from review.service import push
+
+    catalogs, dataset = asking(
+        monkeypatch,
+        [Record({"question_id": 7}, [submitted("verdict", "accepted")], id="7")],
+        [row(7), row(8)],
+    )
+
+    assert push(datasets.QUESTIONS, settings, catalogs) == 1
+    assert [one.id for one in dataset.records.logged] == ["8"]
+
+
+def test_a_push_still_offers_a_question_somebody_only_started_on(
+    monkeypatch, settings
+) -> None:
+    """A draft is not an answer, so the record is offered again."""
+    from review.service import push
+
+    catalogs, _ = asking(
+        monkeypatch,
+        [
+            Record(
+                {"question_id": 7}, [Response("verdict", "accepted", "draft")], id="7"
+            )
+        ],
+        [row(7)],
+    )
+
+    assert push(datasets.QUESTIONS, settings, catalogs) == 1
+
+
+def test_a_named_queue_is_pushed_whatever_has_been_answered(
+    monkeypatch, settings
+) -> None:
+    """Naming an id asks for that row, not for a sample of what is left."""
+    from review.service import push
+
+    catalogs, dataset = asking(
+        monkeypatch,
+        [Record({"question_id": 7}, [submitted("verdict", "accepted")], id="7")],
+        [row(7)],
+    )
+
+    assert push(datasets.QUESTIONS, settings, catalogs, ids=[7]) == 1
+    assert [one.id for one in dataset.records.logged] == ["7"]
 
 
 def test_the_response_status_is_read_either_way_it_is_spelled() -> None:

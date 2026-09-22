@@ -163,6 +163,44 @@ def test_a_setting_of_the_wrong_shape_names_itself(
         settings.load()
 
 
+def _questions(**overridden: str):
+    """The question settings, read with some values replaced.
+
+    Through `source` rather than the environment, so nothing a later test
+    reads is left changed.
+    """
+    import os
+
+    from question_generation.config import Settings
+
+    return Settings.load({**os.environ, **overridden})
+
+
+def test_an_answer_bound_below_its_own_floor_is_refused() -> None:
+    """It parses, and then every answer of that form is too short.
+
+    QUESTIONS_ANSWER_CHARS is operator-writable and its values are a
+    mapping, which the catalogue's range check cannot read, so this is the
+    only place the pair is compared.
+    """
+    with pytest.raises(ValueError, match="above its ceiling"):
+        _questions(QUESTIONS_ANSWER_CHARS="value:80:1,list:3:300,explanation:20:600")
+
+
+def test_an_explanation_bound_below_its_own_floor_is_refused() -> None:
+    """The same rule, on the setting that already had it."""
+    with pytest.raises(ValueError, match="above its ceiling"):
+        _questions(QUESTIONS_EXPLANATION_CHARS="900:150")
+
+
+def test_the_bounds_that_ship_are_read_the_way_round_they_are_written() -> None:
+    """Floor first, so the guard above cannot be satisfied by inverting it."""
+    loaded = _questions()
+
+    assert all(low < high for low, high in loaded.answer_chars.values())
+    assert loaded.explanation_chars[0] < loaded.explanation_chars[1]
+
+
 def test_a_fact_kind_this_stage_cannot_use_is_refused_at_start_up() -> None:
     """Rather than selecting nothing and writing no questions at all.
 

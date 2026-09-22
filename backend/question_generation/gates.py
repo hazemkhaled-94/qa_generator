@@ -1212,9 +1212,12 @@ def agrees(
 
 
 #: A figure as either convention writes one: 1.234,56 and 1,234.56 are the
-#: same value, and 65 is itself.
+#: same value, and 65 is itself. The second alternative stops at a separator
+#: that carries a digit, so 1200 in `1200.` is a figure and the 1 of `1.234`
+#: is not.
 _FIGURE = re.compile(
-    r"(?<![\w.,])\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?(?![\w])|(?<![\w.,])\d+(?![\w.,])"
+    r"(?<![\w.,])\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?(?![\w])"
+    r"|(?<![\w.,])\d+(?![\w]|[.,]\d)"
 )
 
 #: The most figures a sum is searched over, and the most terms in one. The

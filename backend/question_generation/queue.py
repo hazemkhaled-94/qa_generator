@@ -467,13 +467,14 @@ class QuestionQueue(RowQueue):
                         )
                         .returning(Question.id)
                     )
-                    session.execute(
-                        insert(QuestionFact),
-                        [
-                            {"question_id": question_id, "fact_id": fact_id}
-                            for fact_id in question.fact_ids
-                        ],
-                    )
+                    # Guarded: an empty list is not a no-op, it is an
+                    # INSERT ... DEFAULT VALUES against a NOT NULL key.
+                    links = [
+                        {"question_id": question_id, "fact_id": fact_id}
+                        for fact_id in question.fact_ids
+                    ]
+                    if links:
+                        session.execute(insert(QuestionFact), links)
                     follows = question_id
                     written += 1
             self._finish(topic_id, session=session)

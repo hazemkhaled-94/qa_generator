@@ -1899,9 +1899,9 @@ def test_a_reader_finding_nothing_elsewhere_saves_the_call() -> None:
     result = checker.check(candidate(target_answer=None, answerable=False))
 
     assert result.accepted
-    # Twice: once for the recall half, which an unanswerable question still
-    # faces so `answerable_after_all` can fire, and once here.
-    assert reader.asked == 2
+    # Once, here. The recall half of an unanswerable question does not ask
+    # it: a span there is a rejection, which is not an extractor's to make.
+    assert reader.asked == 1
     assert recording.verified == 1, "only the recall call, not the corpus one"
 
 
@@ -1939,6 +1939,36 @@ def test_a_span_found_elsewhere_still_goes_to_the_verifier() -> None:
 
     assert result.rejected_reason == QuestionRejection.ANSWERABLE_ELSEWHERE
     assert recording.verified == 2, "the recall call, and the verifier confirming"
+
+
+def test_a_span_in_its_own_passages_does_not_reject_an_unanswerable_question() -> None:
+    """The same verdict as the gate above, so the same rule applies.
+
+    `answerable_after_all` says the cited passages answer a question
+    written to have none, which marks a correct chatbot wrong. The reader
+    was deciding that alone, where one passage further on it may only ask.
+    """
+    recording = Recording(recovers=None)
+    reader = Reader("4 kg")
+
+    result = _with_reader(recording, reader).check(
+        candidate(target_answer=None, answerable=False)
+    )
+
+    assert result.accepted
+    assert reader.asked == 0, "the recall half of an unanswerable one is the verifier's"
+    assert recording.verified == 1
+
+
+def test_the_verifier_still_rejects_an_unanswerable_question_it_can_answer() -> None:
+    """Removing the reader from this path must not remove the gate."""
+    recording = Recording(recovers="4 kg")
+
+    result = _with_reader(recording, Reader("4 kg")).check(
+        candidate(target_answer=None, answerable=False)
+    )
+
+    assert result.rejected_reason == QuestionRejection.ANSWERABLE_AFTER_ALL
 
 
 # ── The long answer ────────────────────────────────────────────────────────

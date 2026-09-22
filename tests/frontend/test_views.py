@@ -485,6 +485,31 @@ def test_the_questions_page_lists_what_the_backend_returns(run_view) -> None:
     assert "48 hours" in tables
 
 
+def test_a_question_with_no_scope_recorded_does_not_read_as_a_wide_one(
+    run_view,
+) -> None:
+    """The columns are nullable, and absent is not `2+`."""
+    page = View(
+        run_view(
+            "questions",
+            catalog_api=Answers(
+                **answers(
+                    questions={
+                        "total": 1,
+                        "questions": [
+                            changed(QUESTION, passage_scope=None, document_scope=None)
+                        ],
+                    }
+                )
+            ),
+            settings_api=Answers(**settings()),
+        ),
+        "questions",
+    )
+
+    assert "2+" not in page.tables()
+
+
 def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> None:
     """A person overruling a gate changes the verdict, not the question."""
     client = Answers(**answers(questions={"total": 1, "questions": [QUESTION_DRAFT]}))

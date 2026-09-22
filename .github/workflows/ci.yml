@@ -45,7 +45,21 @@ jobs:
       # summary instead of as one failing test among six hundred.
       - run: make lint-imports
       - run: make deps
-      - run: poetry run pytest tests/static
+      # Measured too: the pinned-surface gates import the app and every
+      # service to read them, and the combined figure is short by that
+      # much without this third share of it.
+      - run: poetry run pytest tests/static --cov --cov-report= --cov-fail-under=0
+      # Named for the job: pytest-cov combines its own workers into one
+      # `.coverage`, so three artifacts of that name would overwrite each
+      # other on the way back down rather than combine.
+      - name: Keep this job's share of the coverage
+        run: mv .coverage .coverage.static
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-static
+          path: .coverage.static
+          include-hidden-files: true
+          retention-days: 1
 
   # Everything that needs neither a container nor a served model: the unit
   # layers, the properties, the contract shapes and the Streamlit pages.
@@ -61,9 +75,25 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: huggingface-${{ runner.os }}-multilingual-e5-large
+      # HYPOTHESIS_PROFILE: 200 examples where a laptop runs 25. See the
+      # profiles in tests/conftest.py.
       - run: >-
-          poetry run pytest -m "not integration and not smoke and not eval"
-          --ignore=tests/static
+          poetry run pytest
+          -m "not integration and not smoke and not eval and not perf"
+          --ignore=tests/static --cov --cov-report= --cov-fail-under=0
+        env:
+          HYPOTHESIS_PROFILE: ci
+      # Named for the job: pytest-cov combines its own workers into one
+      # `.coverage`, so three artifacts of that name would overwrite each
+      # other on the way back down rather than combine.
+      - name: Keep this job's share of the coverage
+        run: mv .coverage .coverage.unit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: .coverage.unit
+          include-hidden-files: true
+          retention-days: 1
 
   # Postgres and SeaweedFS, started by testcontainers against the runner's
   # own Docker. Includes the API, the contract and the end-to-end layers,
@@ -84,7 +114,20 @@ jobs:
         run: |
           docker pull pgvector/pgvector:pg18
           docker pull chrislusf/seaweedfs:4.44
-      - run: poetry run pytest -m integration
+      - run: poetry run pytest -m integration --cov --cov-report= --cov-fail-under=0
+        env:
+          HYPOTHESIS_PROFILE: ci
+      # Named for the job: pytest-cov combines its own workers into one
+      # `.coverage`, so three artifacts of that name would overwrite each
+      # other on the way back down rather than combine.
+      - name: Keep this job's share of the coverage
+        run: mv .coverage .coverage.integration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: .coverage.integration
+          include-hidden-files: true
+          retention-days: 1
 
   # Builds both images and looks inside them. Minutes rather than seconds,
   # because the backend image installs torch - but it is the only layer that
@@ -106,12 +149,39 @@ jobs:
       - uses: ./.github/actions/setup
       - run: make test-smoke
 
+  # The two halves put together. Neither job covers the other's: the
+  # repositories are the integration layer's and the gates are the unit
+  # layer's, so a threshold against either alone is against the wrong
+  # number. The floor is [tool.coverage.report] fail_under in pyproject.
+  coverage:
+    name: Coverage
+    needs: [static, unit, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - run: poetry run coverage combine
+      - run: poetry run coverage report
+      - name: Put the figure in the job summary
+        if: always()
+        run: |
+          {
+            echo '## Coverage'
+            echo '```'
+            poetry run coverage report || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # One job for a branch protection rule to require, so adding a job above
   # does not mean editing the rule.
   gate:
     name: All gates
     if: always()
-    needs: [setup, static, unit, integration, smoke]
+    needs: [setup, static, unit, integration, smoke, coverage]
     runs-on: ubuntu-latest
     steps:
       - name: Report which gates did not pass
@@ -121,8 +191,10 @@ jobs:
           echo "unit:        ${{ needs.unit.result }}"
           echo "integration: ${{ needs.integration.result }}"
           echo "smoke:       ${{ needs.smoke.result }}"
+          echo "coverage:    ${{ needs.coverage.result }}"
           [ "${{ needs.setup.result }}" = "success" ] \
             && [ "${{ needs.static.result }}" = "success" ] \
             && [ "${{ needs.unit.result }}" = "success" ] \
             && [ "${{ needs.integration.result }}" = "success" ] \
-            && [ "${{ needs.smoke.result }}" = "success" ]
+            && [ "${{ needs.smoke.result }}" = "success" ] \
+            && [ "${{ needs.coverage.result }}" = "success" ]

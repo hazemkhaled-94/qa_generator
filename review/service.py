@@ -97,9 +97,15 @@ def push(
             datasets.fact_record(one) for one in catalogs.facts.facts(settings.sample)
         ]
     elif name == datasets.QUESTIONS:
+        # `facts` skips a row already judged through `reviewed_verdict`;
+        # questions carry no such column, so the answers already in Argilla
+        # are what says which rows a sample has nothing left to ask about.
+        # Never for an explicit queue: naming an id asks for that row.
+        judged = set() if ids else answered(dataset)
         records = [
             datasets.question_record(one)
             for one in catalogs.facts.questions(settings.sample, ids)
+            if str(one.id) not in judged
         ]
     else:
         # Every topic, not a sample. A corpus has dozens, not thousands,
@@ -164,6 +170,19 @@ def pull(name: str, settings: Settings, catalogs: Catalogs) -> int:
     return written
 
 
+#: How Argilla spells a response somebody has finished giving.
+_SUBMITTED = ("submitted", "ResponseStatus.submitted")
+
+
+def answered(dataset) -> set[str]:
+    """The records of one dataset that already carry a submitted answer."""
+    return {
+        str(record.id)
+        for record in dataset.records(with_responses=True)
+        if any(str(one.status) in _SUBMITTED for one in record.responses)
+    }
+
+
 def _answer(record, question: str) -> str | None:
     """What a reviewer submitted for one question, or None.
 
@@ -172,9 +191,6 @@ def _answer(record, question: str) -> str | None:
     writing it back would record an opinion nobody has finished having.
     """
     for response in record.responses:
-        if response.question_name == question and str(response.status) in (
-            "submitted",
-            "ResponseStatus.submitted",
-        ):
+        if response.question_name == question and str(response.status) in _SUBMITTED:
             return response.value
     return None

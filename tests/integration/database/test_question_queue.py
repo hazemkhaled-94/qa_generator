@@ -414,6 +414,34 @@ def test_the_probe_can_be_told_to_look_only_at_earlier_questions(
     assert found is not None and found.question_text == "first"
 
 
+def test_the_probe_skips_the_questions_a_caller_is_about_to_reject(
+    corpus, engine
+) -> None:
+    """A re-check batches its verdicts, so its own rejections are unwritten.
+
+    Read without them the answer depends on whether the batch happened to
+    have been flushed, and the same pass over the same rows rejects a
+    different set at a different batch size.
+    """
+    with Session(engine) as session:
+        first = question(
+            question_text="first", embedding=[1.0] + [0.0] * 1023, status="accepted"
+        )
+        second = question(
+            question_text="second", embedding=[1.0] + [0.0] * 1023, status="accepted"
+        )
+        session.add_all([first, second])
+        session.commit()
+        ids = (first.id, second.id)
+
+    catalog = QuestionCatalog()
+
+    assert catalog.nearest([1.0] + [0.0] * 1023, before=ids[1]) is not None
+    assert (
+        catalog.nearest([1.0] + [0.0] * 1023, before=ids[1], excluding=[ids[0]]) is None
+    )
+
+
 # ── Edges the outer joins and the empty cases leave ────────────────────────
 
 
@@ -569,6 +597,84 @@ def test_a_re_check_rejects_a_question_whose_evidence_moved(engine, database) ->
             {"id": asked_id},
         ).one()
     assert (row.status, row.rejected_reason) == ("rejected", "source_changed")
+
+
+def test_a_re_check_does_not_call_a_question_a_twin_of_one_it_is_rejecting(
+    engine, database
+) -> None:
+    """The twin is going away in the same pass, so it is not a twin to keep.
+
+    `nearest` reads the stored status and the verdicts are written in
+    batches, so without holding the pending ones out this answered one way
+    inside a batch and another way across one.
+    """
+    from question_generation.service import reverify
+
+    with Session(engine) as session:
+        session.add(document(digest("a")))
+        session.flush()
+        here = passage(digest("a"), ordinal=1, language="en")
+        session.add(here)
+        session.flush()
+        going = fact(here.id, statement="The device weighs 4 kg.")
+        staying = fact(here.id, statement="The device weighs 4 kg exactly.")
+        session.add_all([going, staying])
+        session.flush()
+        asked = [
+            question(
+                question_text="What does the device weigh?",
+                target_answer="4 kg",
+                status="accepted",
+                difficulty="easy",
+                passage_scope="single_passage",
+                document_scope="single_document",
+                topic_scope="single_topic",
+                answer_chars=4,
+                embedding=[1.0] + [0.0] * 1023,
+            ),
+            question(
+                question_text="How heavy is the device?",
+                target_answer="4 kg",
+                status="accepted",
+                difficulty="easy",
+                passage_scope="single_passage",
+                document_scope="single_document",
+                topic_scope="single_topic",
+                answer_chars=4,
+                embedding=[1.0] + [0.0] * 1023,
+            ),
+        ]
+        session.add_all(asked)
+        session.flush()
+        session.add_all(
+            [
+                QuestionFact(question_id=asked[0].id, fact_id=going.id),
+                QuestionFact(question_id=asked[1].id, fact_id=staying.id),
+            ]
+        )
+        session.commit()
+        twin, kept, refused = asked[0].id, asked[1].id, going.id
+
+    # The first question's fact stops passing its own checks, so the
+    # re-check rejects it as source_changed on the way past.
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE facts SET validated = false, rejection_code = 'copied' "
+                "WHERE id = :id"
+            ),
+            {"id": refused},
+        )
+
+    assert reverify(QuestionCatalog(), _settings()) == 1
+    with engine.connect() as connection:
+        rows = dict(
+            connection.execute(
+                text("SELECT id, rejected_reason FROM questions ORDER BY id")
+            ).all()
+        )
+    assert rows[twin] == "source_changed"
+    assert rows[kept] is None, "rejected as a twin of a question being rejected"
 
 
 # ── The kind a question was asked to be ────────────────────────────────────

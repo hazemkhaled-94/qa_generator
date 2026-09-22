@@ -50,7 +50,52 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: huggingface-${{ runner.os }}-multilingual-e5-large
-      - run: poetry run pytest -m "not eval"
+      # A thousand examples per property where CI runs 200 and a laptop
+      # runs 25, which is the budget nothing else has time for.
+      - run: poetry run pytest -m "not eval and not perf"
+        env:
+          HYPOTHESIS_PROFILE: nightly
+
+  # Whether a test would notice a gate changing. Line coverage says the
+  # line ran; this changes it and asks whether anything fails. Reported and
+  # never gated: a surviving mutant is sometimes a mutant nobody should
+  # care about, and that judgement is a person's.
+  mutation:
+    name: Mutation
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Cache the chunker's tokenizer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-multilingual-e5-large
+      - run: make mutation
+        continue-on-error: true
+      - name: Put the survivors in the job summary
+        if: always()
+        run: |
+          {
+            echo '## Mutants that survived'
+            echo '```'
+            poetry run mutmut results || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The ceilings the code names in a comment. Reported rather than gated: a
+  # wall-clock budget on a shared runner measures the runner.
+  ceilings:
+    name: Ceilings
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: make test-perf
+        continue-on-error: true
 
   # Skips itself unless a model is reachable, which no hosted runner has.
   # Here so that pointing LLM_BASE_URL at one is all it takes.

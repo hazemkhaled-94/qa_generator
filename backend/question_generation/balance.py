@@ -269,7 +269,8 @@ def largest(
 
 def composition(pool: Sequence[Row], ids: Sequence[int]) -> dict[str, dict[str, int]]:
     """What a chosen set actually came out as, for the report."""
-    taken = [row for row in pool if row.id in set(ids)]
+    chosen = set(ids)
+    taken = [row for row in pool if row.id in chosen]
     return {
         "answerable": Counter(
             "unanswerable" if not row.answerable else "answerable" for row in taken

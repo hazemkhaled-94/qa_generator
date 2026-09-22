@@ -48,8 +48,8 @@ def _bounds(name: str, source: Source = None) -> dict[str, tuple[int, int]]:
 
     Raises:
         KeyError: If the setting is unset or empty.
-        ValueError: If a form is unknown, a bound is not a whole number, or a
-            form is missing.
+        ValueError: If a form is unknown, a bound is not a whole number, a
+            floor is above its ceiling, or a form is missing.
     """
     read = {}
     for form, value in mapping(name, source).items():
@@ -66,6 +66,14 @@ def _bounds(name: str, source: Source = None) -> dict[str, tuple[int, int]]:
                 f"{name} gives {form!r} the bounds {value!r}; it takes "
                 f"form:min:max, as value:1:80"
             ) from None
+        # An inverted pair parses and then refuses every answer of the form,
+        # as `_span` refuses one for the same reason.
+        if read[form][0] > read[form][1]:
+            raise ValueError(
+                f"{name} gives {form!r} a floor of {read[form][0]} above its "
+                f"ceiling of {read[form][1]}, so no answer of that form could "
+                f"pass"
+            )
     missing = [form for form in AnswerForm if form not in read]
     if missing:
         raise ValueError(f"{name} says nothing about {', '.join(missing)}")

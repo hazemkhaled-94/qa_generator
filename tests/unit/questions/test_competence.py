@@ -272,6 +272,59 @@ class TestAnAggregationIsCheckedArithmetically:
         assert "computes" in recording.asked, "it should have fallen through"
         assert result.status == "accepted"
 
+    def test_a_figure_ending_a_sentence_is_still_a_figure(self) -> None:
+        """A four-digit summand followed by a full stop.
+
+        `figures` read a group of up to three digits or a whole number with
+        no separator after it, so 1200 in `1200.` matched neither and the
+        total was refused as arithmetic over nothing.
+        """
+        recording = Recording(answer=False)
+
+        result = build(recording).check(
+            self.aggregation(
+                "1500",
+                "The northern site employs 1200.",
+                "The southern site employs 300.",
+            )
+        )
+
+        assert result.status == "accepted"
+        assert "computes" not in recording.asked
+
+    def test_a_figure_before_a_comma_is_still_a_figure(self) -> None:
+        """The other separator a sentence puts after a number."""
+        recording = Recording(answer=False)
+
+        result = build(recording).check(
+            self.aggregation(
+                "1500",
+                "The northern site employs 1200, at two depots.",
+                "The southern site employs 300, at one.",
+            )
+        )
+
+        assert result.status == "accepted"
+
+    def test_two_years_ending_their_sentences_are_still_refused(self) -> None:
+        """The 4034 case as the corpus actually writes it.
+
+        Both years were invisible to `figures`, so this was refused for
+        finding no arithmetic rather than for summing two calendar points.
+        """
+        recording = Recording(answer=True)
+
+        result = build(recording).check(
+            self.aggregation(
+                "4034",
+                "The method was first described in 2011.",
+                "The prior edition carried the version year 2023.",
+            )
+        )
+
+        assert result.rejected_reason == QuestionRejection.NOT_RECOVERABLE
+        assert "computes" not in recording.asked
+
 
 @pytest.mark.parametrize("kind", [QuestionType.IMPLICATION, QuestionType.APPLICATION])
 def test_a_conclusion_that_does_not_follow_is_refused(kind: str) -> None:

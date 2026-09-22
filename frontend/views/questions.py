@@ -106,6 +106,17 @@ def _per(count: int, over: int) -> str:
     return f"{count / over:.1f}" if over else "-"
 
 
+def _scope(value: str | None, single: str) -> str:
+    """How many a scope column says, or a dash where it says nothing.
+
+    The columns are nullable, and read as "anything but single" a question
+    that was never given one shows as spanning two.
+    """
+    if not value:
+        return "—"
+    return "1" if value == single else "2+"
+
+
 def view() -> None:
     """Renders the questions page."""
     page.header("Questions")
@@ -219,12 +230,8 @@ def view() -> None:
                     "Answer shape": row["answer_form"] or "—",
                     "Answerable": "yes" if row["answerable"] else "no",
                     "Difficulty": row["difficulty"] or "—",
-                    "Passages": "1"
-                    if row["passage_scope"] == "single_passage"
-                    else "2+",
-                    "Documents": "1"
-                    if row["document_scope"] == "single_document"
-                    else "2+",
+                    "Passages": _scope(row["passage_scope"], "single_passage"),
+                    "Documents": _scope(row["document_scope"], "single_document"),
                     "Turn": row["thread_position"],
                     "Question": row["question_text"],
                     "Answer": row["target_answer"] or "—",

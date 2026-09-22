@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import ClassVar
 
 from opentelemetry.trace import Span
@@ -148,7 +149,11 @@ def reverify(catalog: QuestionCatalog, settings: Settings, within=None) -> int:
         verdicts.clear()
 
     for question in catalog.judged(within):
-        failed = _recheck(catalog, settings, question)
+        # What this pass has decided to reject and not yet written. Held out
+        # of the duplicate probe, which reads the stored status and would
+        # otherwise answer differently either side of a flush.
+        pending = [question_id for question_id, _ in verdicts]
+        failed = _recheck(catalog, settings, question, pending)
         if failed and question.status != QuestionStatus.REJECTED:
             code, reason = failed
             log.info("rejecting question %d: %s (%s)", question.id, reason, code)
@@ -161,9 +166,16 @@ def reverify(catalog: QuestionCatalog, settings: Settings, within=None) -> int:
 
 
 def _recheck(
-    catalog: QuestionCatalog, settings: Settings, question: JudgedQuestion
+    catalog: QuestionCatalog,
+    settings: Settings,
+    question: JudgedQuestion,
+    pending: Sequence[int] = (),
 ) -> tuple[str, str] | None:
-    """Says why a stored question no longer holds, or None if it still does."""
+    """Says why a stored question no longer holds, or None if it still does.
+
+    `pending` is what this pass has already rejected and not yet written,
+    which the duplicate probe must not offer back as an accepted twin.
+    """
     if not question.facts_validated:
         return (
             QuestionRejection.SOURCE_CHANGED,
@@ -216,7 +228,7 @@ def _recheck(
     if question.embedding is None:
         return None
     return near_verdict(
-        catalog.nearest(question.embedding, before=question.id),
+        catalog.nearest(question.embedding, before=question.id, excluding=pending),
         answerable=question.answerable,
         threshold=settings.duplicate_cosine,
     )

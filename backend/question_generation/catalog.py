@@ -461,7 +461,10 @@ class QuestionCatalog(Repository):
             return [row.text for row in session.execute(query)]
 
     def nearest(
-        self, embedding: list[float], before: int | None = None
+        self,
+        embedding: list[float],
+        before: int | None = None,
+        excluding: Sequence[int] = (),
     ) -> Neighbour | None:
         """The accepted question closest to this vector, or None if there is none.
 
@@ -469,6 +472,12 @@ class QuestionCatalog(Repository):
         it: without it, two questions that are duplicates of each other each
         find the other and both are rejected, which leaves the benchmark
         with neither rather than with one.
+
+        `excluding` drops questions a caller has decided to reject but has
+        not written yet. A re-check batches its verdicts, and without this
+        the answer depends on whether the batch happened to have been
+        flushed - the same pass over the same rows rejecting a different
+        set at a different batch size.
 
         The HNSW index serves the ordering and the filter on status is
         applied over it, which at this corpus's size costs nothing; a corpus
@@ -487,6 +496,8 @@ class QuestionCatalog(Repository):
         )
         if before is not None:
             query = query.where(Question.id < before)
+        if excluding:
+            query = query.where(Question.id.notin_(list(excluding)))
         with self._session() as session:
             found = session.execute(query).one_or_none()
         if found is None:

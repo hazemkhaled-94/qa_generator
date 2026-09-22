@@ -478,8 +478,21 @@ class QuestionChecker:
         statements; and a follow-up is answered in a conversation, which an
         extractive model has nowhere to put. So a confident span is taken,
         and everything else falls through to something that can read.
+
+        An ANSWERABLE question only. There a span agreeing with the target
+        accepts the question, and the entailment pass is behind it either
+        way. On an unanswerable one the same span is `answerable_after_all`,
+        which is a rejection, and rejecting an unanswerable question wrongly
+        marks a correct chatbot wrong - the verdict `_answered_elsewhere`
+        refuses to let an extractor make alone. It is not asked here for the
+        same reason, and asking it would buy nothing: a span it does not
+        find falls through to the verifier regardless.
         """
-        if self._extractive is not None and not candidate.thread:
+        if (
+            self._extractive is not None
+            and candidate.answerable
+            and not candidate.thread
+        ):
             found = self._extractive.answer(
                 candidate.question_text,
                 candidate.group.passages,

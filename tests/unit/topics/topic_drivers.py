@@ -400,7 +400,7 @@ class CommandDriver:
             module, "snapshot", lambda: (dict(os.environ), "test-settings")
         )
         monkeypatch.setattr(module, "_DRAWN", written)
-        monkeypatch.setattr(module.telemetry, "configure", lambda *_: None)
+        monkeypatch.setattr(module.telemetry, "configure", lambda *_, **__: None)
         monkeypatch.setattr(module.telemetry, "trace_engine", lambda *_: None)
         monkeypatch.setattr(module, "engine", lambda: None)
         monkeypatch.setattr(
