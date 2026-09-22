@@ -15,6 +15,7 @@ import telemetry
 from blob_store.seaweedfs import ArchiveBucket, ExportBucket
 from database.qa_generator import engine
 from settings import decimal
+from settings.runs import run_id
 from settings.store import snapshot
 from stages import watch
 from stages.cli import parser, reloading
@@ -61,7 +62,10 @@ def main(argv: list[str] | None = None) -> int:
         source, version = snapshot()
         return build_service(Settings.load(source), version)
 
-    telemetry.configure("topic_modelling")
+    # With the run, as `stages/cli.queue_main` does for the other four
+    # stages. Without it this stage's spans went to Phoenix's `default`
+    # project, so a pass over the pipeline was four projects and a heap.
+    telemetry.configure("topic_modelling", run=run_id())
     telemetry.trace_engine(engine())
 
     if args.status:

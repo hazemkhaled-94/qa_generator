@@ -191,20 +191,32 @@ them; `make open` does that and opens the application.
 
 ## 5. Where the signals go
 
-Two paths, joined by `trace.id`, which is on every log line.
+Each of these sees the whole pipeline and none of them sees it the way
+another does. Nothing is collected twice on one path, and no service stores
+what belongs to another.
 
 | Signal | Path | Read with |
 |---|---|---|
 | Logs | process → `logs` volume (JSON, ECS fields) → Filebeat → Elasticsearch | Grafana, `make logs` |
 | Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
-| Cost | the same log lines, with tokens and price per call | `make spend`, `make spend-by-shape` |
+| Cost and tokens | on the span, and on the log line beside it | Phoenix per run; Grafana's throughput dashboard over time; `make spend LOG=` over a captured log |
+| Gate verdicts | the row in Postgres, an attribute on the span, an annotation in Phoenix | the Questions page; Phoenix's Evaluations view |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
+| Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |
+| Runs | which stage ran when, and whether it finished | Dagster |
+| State | the tables themselves — what is true now, rather than what happened once | Grafana's state dashboard, the pipeline pages |
 
 A slow extraction is one span in Phoenix and a set of lines in Grafana,
-findable from either end. See [`telemetry/`](../telemetry/README.md).
+findable from either end: `trace.id` is on every log line and is the join.
+See [`telemetry/`](../telemetry/README.md).
 
-**Nothing is deleted until `make logs-retention` has run once.** That is the
-state the stack ships in, deliberately.
+Cost is the one figure in two stores on purpose. The span is what makes it
+comparable per run and per judgement; the log line is what makes it readable
+when the collector is down or was never configured.
+
+**Nothing is deleted until `make logs-retention` and `make logs-prune` have
+run.** The first ages the Elasticsearch index, the second the files on the
+volume. That is the state the stack ships in, deliberately.
 
 ## 6. Where to change things
 

@@ -37,16 +37,21 @@ from opentelemetry import trace
 
 log = logging.getLogger(__name__)
 
-#: Where Phoenix's HTTP API is, as the PROCESS reaches it. Not the same
-#: address as the OTLP endpoint and not the same as the host's: a worker in
-#: compose reaches `http://phoenix:6006` and the host reaches
-#: `http://localhost:6006`, which is what PHOENIX_BASE_URL already holds for
-#: `evaluation/`.
-ENDPOINT = "PHOENIX_CONTAINER_BASE_URL"
-FALLBACK = "PHOENIX_BASE_URL"
+#: Where Phoenix's HTTP API is, as THIS process reaches it. One name for
+#: both, the way OTEL_EXPORTER_OTLP_ENDPOINT is one name for both: .env
+#: holds the host's address and compose overwrites it per container with
+#: OTEL_CONTAINER_ENDPOINT's opposite number. Two names read in order was
+#: the bug - the Makefile sources .env for a host command, so the container
+#: address was set there too and preferred, and `make questions` posted its
+#: verdicts to a hostname the host cannot resolve.
+ENDPOINT = "PHOENIX_BASE_URL"
 
-#: Phoenix's API key, where one is set.
-API_KEY = "PHOENIX_API_KEY"
+#: Phoenix's API key. compose passes PHOENIX_ADMIN_SECRET under the first
+#: name; a host command has only the second, because that is what .env
+#: calls it. Phoenix compares the bearer token against that value directly,
+#: so they are the same credential - and without the fallback a host run
+#: posted no annotations at all against an authenticated Phoenix.
+API_KEY = ("PHOENIX_API_KEY", "PHOENIX_ADMIN_SECRET")
 
 #: How many annotations are held before they are posted. One HTTP call per
 #: question would cost more than the gate it is recording; a topic writes
@@ -120,7 +125,7 @@ class Evaluations:
 
     def __init__(self, base_url: str | None = None, batch: int = BATCH) -> None:
         """Names where Phoenix is. Nothing is connected until asked."""
-        self._base_url = base_url or os.getenv(ENDPOINT) or os.getenv(FALLBACK)
+        self._base_url = base_url or os.getenv(ENDPOINT)
         self._batch = max(batch, 1)
         self._held: list[dict[str, Any]] = []
         self._client: Any = None
@@ -184,7 +189,7 @@ class Evaluations:
                 "annotations"
             )
             return None
-        key = os.getenv(API_KEY)
+        key = next((os.getenv(name) for name in API_KEY if os.getenv(name)), None)
         self._client = Client(
             base_url=self._base_url,
             headers={"Authorization": f"Bearer {key}"} if key else None,

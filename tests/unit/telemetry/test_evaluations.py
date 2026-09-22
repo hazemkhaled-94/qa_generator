@@ -57,7 +57,6 @@ def test_a_verdict_with_no_score_carries_none() -> None:
 
 def test_nothing_is_posted_without_somewhere_to_post_to(monkeypatch) -> None:
     """A deployment with no Phoenix records nothing and says nothing."""
-    monkeypatch.delenv("PHOENIX_CONTAINER_BASE_URL", raising=False)
     monkeypatch.delenv("PHOENIX_BASE_URL", raising=False)
 
     held = Evaluations()
@@ -65,6 +64,48 @@ def test_nothing_is_posted_without_somewhere_to_post_to(monkeypatch) -> None:
     assert not held.enabled
     held.record(_verdict())
     assert held.flush() == 0
+
+
+def test_one_name_holds_the_address_a_process_can_actually_reach(
+    monkeypatch,
+) -> None:
+    """The container's address is set OVER this name, not beside it.
+
+    Read as a fallback behind PHOENIX_CONTAINER_BASE_URL, a host command
+    took the container's address - the Makefile sources .env, which holds
+    both - and posted a run's verdicts to a hostname the host cannot
+    resolve.
+    """
+    monkeypatch.setenv("PHOENIX_CONTAINER_BASE_URL", "http://phoenix:6006")
+    monkeypatch.setenv("PHOENIX_BASE_URL", "http://localhost:6006")
+
+    assert Evaluations()._base_url == "http://localhost:6006"
+
+
+def test_a_host_command_signs_in_with_the_name_it_has(monkeypatch) -> None:
+    """One credential under two names, and both are read.
+
+    compose passes the secret as PHOENIX_API_KEY and `.env` calls it
+    PHOENIX_ADMIN_SECRET; Phoenix compares the bearer token against that
+    value directly, so they are the same thing.
+
+    Reading only the first name, a host run against an authenticated
+    Phoenix posted every batch unsigned, was refused, and gave up for the
+    rest of the run on one warning.
+    """
+    monkeypatch.delenv("PHOENIX_API_KEY", raising=False)
+    monkeypatch.setenv("PHOENIX_ADMIN_SECRET", "a-secret")
+    signed: dict[str, object] = {}
+
+    class _Client:
+        def __init__(self, base_url: str, headers=None) -> None:
+            signed["headers"] = headers
+
+    monkeypatch.setattr("phoenix.client.Client", _Client)
+
+    Evaluations(BASE)._connect()
+
+    assert signed["headers"] == {"Authorization": "Bearer a-secret"}
 
 
 def test_a_verdict_about_no_span_is_dropped_rather_than_invented() -> None:

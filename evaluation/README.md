@@ -592,9 +592,12 @@ pytest layer and the Phoenix layer without either importing the other.
 | **arize-phoenix-evals** | [`second_opinion.py`](second_opinion.py) | A tested hallucination template, a constrained answer, retries and concurrency — which is what `phrasing.py` hand-rolls per judgement. Used for the queue only, never for a verdict |
 | The pipeline's own checker | [`experiments.py`](experiments.py) | The evaluator. Anything else would measure something production does not use |
 
-Neither Phoenix package is in any image. Both run on the host, like
+Neither of these two runs in an image. Both run on the host, like
 `review/`'s Argilla client and for the same reason: a worker has no
-business holding a judge.
+business holding a judge. The backend image does carry
+`arize-phoenix-client`, for the one thing a worker posts itself — the gate
+verdicts in [`telemetry/evaluations.py`](../telemetry/evaluations.py),
+which are a rule's answer and not a judge's.
 
 Phoenix is the same service `OTEL_CONTAINER_ENDPOINT` sends spans to, read the
 other way round.

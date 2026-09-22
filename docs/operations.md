@@ -55,10 +55,17 @@ The model is the bottleneck, not the pipeline: a median passage measured at
 heading, a caption, a navigation line — is skipped before the call rather than
 sent and rejected afterwards.
 
+Live, that is the **Pipeline throughput** dashboard below and Phoenix, each
+per run. Over a run that is already finished, off a log that was captured
+while it ran:
+
 ```bash
-make spend                    # calls, tokens and cost from the workers' logs
-make spend SINCE=2026-09-19
+make spend LOG=run.log                      # calls, tokens and cost
+make spend LOG=run.log SINCE=2026-09-19
 ```
+
+`LOG` is required. There is no default: the shipped files are JSON inside a
+container, and the pattern this reads is the text one a terminal saw.
 
 ## Dashboards
 
@@ -95,7 +102,8 @@ podman compose exec postgres bash /docker-entrypoint-initdb.d/init.sh
 make logs                # everything, from the container engine
 make logs-api
 make logs-shipper        # why nothing is arriving, when nothing is arriving
-make logs-retention      # set the retention. Run once
+make logs-retention      # how long Elasticsearch keeps them. Run once
+make logs-prune          # delete the files on the volume nothing writes to
 ```
 
 Only this project's processes are shipped to Elasticsearch. Postgres,
@@ -104,6 +112,12 @@ read with `make logs`.
 
 **Until `make logs-retention` has run, nothing is ever deleted.** That is the
 state the stack ships in.
+
+Retention has two halves, and that target is one of them. It ages what
+**Elasticsearch** holds; `make logs-prune` ages the **files** the shipper
+read them out of. Each process writes `{service}-{container}.log`, so a
+recreated container starts a new file and leaves the old one for ever —
+nothing else on the volume deletes anything.
 
 See [`telemetry/`](../telemetry/README.md) for the field names, the data
 stream, and the two Filebeat settings that are load-bearing.

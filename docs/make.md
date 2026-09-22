@@ -122,11 +122,14 @@ which needs a build and a run that compose has no equivalent of.
 | `make logs-frontend` | The frontend |
 | `make logs-orchestration` | The Dagster webserver and daemon |
 | `make logs-shipper` | The log shipper, when Grafana shows nothing |
-| `make logs-retention` | Not a follow: sets how long a day's logs are kept. **Run once**, against a running stack |
+| `make logs-retention` | Not a follow: sets how long Elasticsearch keeps them. **Run once**, against a running stack |
+| `make logs-prune` | Not a follow: deletes the files on the `logs` volume that no process has written to |
 
 ```bash
-make logs-retention                        # 30 days
+make logs-retention                        # 30 days in Elasticsearch
 make logs-retention LOGS_RETENTION_DAYS=90
+make logs-prune                            # 30 days of files on the volume
+make logs-prune LOGS_KEEP_DAYS=7
 ```
 
 ## The five verbs every stage answers
@@ -316,15 +319,20 @@ at the same temperature. What it produces is a queue for a person.
 ## Cost
 
 ```bash
-make spend                    # totals from the workers' logs
-make spend SINCE=2026-09-19   # one day
-make spend LOG=/path/to.log   # one file
-make spend-by-shape           # the same, split by model and judgement
+make spend LOG=run.log                    # totals from a captured log
+make spend LOG=run.log SINCE=2026-09-19   # one day of it
+make spend-by-shape LOG=run.log           # the same, split by model and judgement
 ```
 
-Reads the priced model calls out of the logs and reports the call count, the
-token counts and the cost. Reads `/var/log/qa/*.log` unless `LOG` says
-otherwise, so it is run against a machine that has the logs volume mounted.
+Reads the priced model calls out of a log and reports the call count, the
+token counts and the cost. `LOG` is **required**, and it is the text log a
+drain wrote to a terminal — `make questions | tee run.log` — not the shipped
+JSON, which is a path inside the containers and a format this does not read.
+
+For a run that is happening now, neither of these: Grafana's **Pipeline
+throughput** dashboard sums `llm.cost_usd` off Elasticsearch and Phoenix
+holds the same figures per span. What these two have is a finished run, on a
+machine with no stack up.
 
 `spend-by-shape` splits the same numbers by the model that answered and the
 **shape** it was asked for, which is the Pydantic class the call had to
@@ -366,5 +374,8 @@ and a check per stage, which survives the terminal closing.
   equivalent of `--target`.
 - **A `make` target logs to the terminal and nowhere else.** `LOG_DIR` is
   unset on the host, so a host drain leaves no line in Grafana.
-- **`make spend` finds nothing on a machine with no logs volume.** Point it at
-  a file with `LOG=`.
+- **`make spend` takes no live reading.** `LOG=` is required and names a
+  captured text log. Grafana and Phoenix are where a running pipeline's cost
+  is.
+- **`make logs-retention` does not delete a file.** It ages what
+  Elasticsearch holds; `make logs-prune` is the volume's half.

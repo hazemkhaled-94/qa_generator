@@ -58,10 +58,14 @@ x-service-env: &service-env
   OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
   # Phoenix's HTTP API, as a CONTAINER reaches it. The two lines above are
   # the gRPC collector that receives spans; this is the same service read
-  # the other way, and it is what a gate verdict is posted through. Not
-  # PHOENIX_BASE_URL, which is the host's address and resolves to nothing
-  # from inside the network.
-  PHOENIX_CONTAINER_BASE_URL: ${PHOENIX_CONTAINER_BASE_URL:-http://phoenix:6006}
+  # the other way, and it is what a gate verdict is posted through.
+  #
+  # The same name the host reads, overwritten here with the container's
+  # address - exactly what the OTLP endpoint two lines above does. .env's
+  # value is the host's and resolves to nothing from inside the network;
+  # a second name read as a fallback meant the reverse, because the
+  # Makefile sources .env for a host command too.
+  PHOENIX_BASE_URL: ${PHOENIX_CONTAINER_BASE_URL:-http://phoenix:6006}
   PHOENIX_API_KEY: ${PHOENIX_ADMIN_SECRET}
 
 # Object store readers and writers.

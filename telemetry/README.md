@@ -109,10 +109,32 @@ produces a run, and a project per API process is a project per restart.
 
 Question generation also opens a span per question, carrying the gate that
 stopped it. The model calls that question made are its children, so a run's
-`leaks_source` rejections carry the price of the calls they wasted. The
-verdict goes on as attributes rather than through Phoenix's evaluations
-API, because no image carries a Phoenix client and recording an attribute
-needs none.
+`leaks_source` rejections carry the price of the calls they wasted.
+
+## Verdicts
+
+A gate verdict is written three times, and each answers something the other
+two cannot. The **row** in Postgres is the truth, and `make questions-runs`
+counts it. The **span attribute** is what a trace is filtered by. The
+**annotation** — [`evaluations.py`](evaluations.py), posted through
+`arize-phoenix-client`, which the backend image carries for this — is what
+puts a label, a score and an explanation in Phoenix's Evaluations view,
+where it sorts, charts and compares across two projects with nobody writing
+a query.
+
+`annotator_kind` separates them: a gate is **CODE**, and the three phrasing
+judgements, which are a model's opinion, are **LLM**.
+
+Best-effort, like the exporter: a Phoenix that is down costs the annotation
+and not the run, and warns once rather than once per batch.
+
+`PHOENIX_BASE_URL` is where they are posted. One name for both — compose
+sets the container's address over it, the way it does for
+`OTEL_EXPORTER_OTLP_ENDPOINT` — because the Makefile sources `.env` for a
+host command, so a second name read as a fallback is a host run posting to
+`http://phoenix:6006`. The bearer is `PHOENIX_API_KEY` where compose set it
+and `PHOENIX_ADMIN_SECRET` where `.env` did; Phoenix compares the token
+against that value directly, so the two are one credential.
 
 ## Tools, and where each is used
 
@@ -120,6 +142,7 @@ needs none.
 |---|---|---|
 | **logging** (stdlib) | [`logs.py`](logs.py) | A `LogRecord` factory is the one place trace ids can be added to every line, including a library's |
 | **OpenTelemetry** | [`traces.py`](traces.py) | The spans, and the exporter Phoenix reads |
+| **arize-phoenix-client** | [`evaluations.py`](evaluations.py) | An annotation is filed separately from the span it is about, which is what Phoenix's Evaluations view reads. An attribute cannot be one |
 | **Filebeat** | [`configs/filebeat/`](../configs/filebeat/) | Reads the volume and writes the data stream. Runs as its own container |
 
 The trace fields are read off the current span directly rather than through
@@ -144,15 +167,32 @@ settings scan cannot see it. It is checked by hand.
 
 ## Retention
 
+Two halves, because a line is in two places. One ages the **index**, the
+other the **files** it was read out of, and neither does the other's:
+
 ```bash
-make logs-retention                        # 30 days
+make logs-retention                        # 30 days in Elasticsearch
 make logs-retention LOGS_RETENTION_DAYS=90
+make logs-prune                            # 30 days of files on the volume
+make logs-prune LOGS_KEEP_DAYS=7
 ```
 
-Run **once** against a running stack, after the shipper has written something.
-Elasticsearch remembers it, and every backing index the stream rolls over to
-afterwards inherits it. Until it has run **nothing is deleted**, which is the
-state the stack ships in.
+`logs-retention` runs **once** against a running stack, after the shipper has
+written something. Elasticsearch remembers it, and every backing index the
+stream rolls over to afterwards inherits it. Until it has run **nothing is
+deleted**, which is the state the stack ships in.
+
+`logs-prune` runs whenever the volume has grown, and deletes by mtime, so a
+file a live process is appending to is never old enough to take. It goes
+through the api, which is the one container that mounts the volume writable
+— the shipper's mount is read-only on purpose.
+
+The volume needs its own target because the file name carries the container.
+`RotatingFileHandler` rotates the file its own process owns and nothing
+else's, and filebeat's `ignore_older` and `clean_inactive` age its
+**registry**, not the disk. So a recreated container starts a new file and
+leaves the old one for ever: the volume had reached 78 files and 110 MB
+before this existed.
 
 The retention belongs to the data stream, not to an ILM policy. This version
 of Filebeat writes to a data stream, which rolls its own backing indices over
@@ -192,7 +232,9 @@ poetry run pytest tests/unit/telemetry
 | File | Covers |
 |---|---|
 | [`tests/unit/telemetry/test_logs.py`](../tests/unit/telemetry/test_logs.py) | The JSON line the log shipper reads: the ECS names, the bound fields, and an exception written whole |
+| [`tests/unit/telemetry/test_evaluations.py`](../tests/unit/telemetry/test_evaluations.py) | The annotation a verdict becomes, the address it is posted to from either side, and a run surviving a Phoenix that is down |
 | [`tests/static/test_dashboards.py`](../tests/static/test_dashboards.py) | The provisioned dashboards against the datasources and fields that serve them |
+| [`tests/static/test_log_fields.py`](../tests/static/test_log_fields.py) | The other direction: every field the code binds against what the shipper declares |
 
 ## Known edges
 
@@ -200,11 +242,22 @@ Things that are true, are not bugs, and have surprised somebody.
 
 - **Nothing is deleted until `make logs-retention` has run once.** That is the
   state the stack ships in, deliberately.
+- **`make logs-retention` never deletes a file.** It ages the data stream.
+  The volume is `make logs-prune`, and until that runs every container the
+  stack has ever recreated still has its log file on it.
 - **A `make` target logs to the terminal and nowhere else.** `LOG_DIR` is
   unset on the host, so a host drain leaves no line in Grafana.
 - **Editing `filebeat.yml` without `setup.template.overwrite` changes
   nothing.** Filebeat leaves an existing template alone.
 - **A new bound field needs adding to `append_fields`.** Otherwise it arrives
   as `text` and nothing can group on it.
+  [`test_log_fields.py`](../tests/static/test_log_fields.py) is what says so
+  before the pipeline does.
+- **A declared field reaches the template at once and the index at
+  rollover.** A data stream's backing index keeps the mapping it was created
+  with, so today's `llm.cost_usd` is the `float` dynamic mapping gave it and
+  the `double` in `filebeat.yml` applies to the next backing index.
+  Harmless here; not harmless for a field that arrived as `text`, which
+  needs a rollover before a panel can group on it.
 - **The Elasticsearch heap is shared with Argilla.** One node serves both;
   `ES_JAVA_OPTS` is where to raise it.

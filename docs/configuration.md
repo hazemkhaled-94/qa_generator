@@ -137,7 +137,8 @@ full table is in
 |---|---|---|---|
 | `LOG_LEVEL` | `.env` | `INFO` | Every service, the frontend included. Everything at or above it reaches Grafana |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
-| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets and experiments go. The same service the line above sends spans to, read the other way |
+| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets, the experiments and the gate verdicts go. The same service the line above sends spans to, read the other way. Compose sets the container's address over this name, as it does for the collector |
+| `PHOENIX_CONTAINER_BASE_URL` | `.env` | `http://phoenix:6006` | What compose sets there. Read by compose only — a process reads `PHOENIX_BASE_URL` wherever it runs |
 | `GRAFANA_DB_USER` | `.env` | `grafana_reader` | The role Grafana reads the application database as. `SELECT` and nothing else |
 | `ARGILLA_API_URL` | `.env` | `http://localhost:6900` | Where the review tool reaches Argilla. The host's address: it is a `make` target, not a container |
 | `ARGILLA_API_KEY` | `.env` | — | Argilla shows it under "My settings". **Not** `ARGILLA_PASSWORD` |
@@ -146,7 +147,8 @@ full table is in
 | `EVAL_RUN_NAME` | `evaluation.env` | unset | What a golden-set run is called. Unset names it after the model |
 | `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | `orchestration.env` | 28800 | How long a Dagster asset waits for a stage to drain. Giving up is not failing the rows |
 | `ORCHESTRATION_POLL_SECONDS` | `orchestration.env` | 15 | How often it asks |
-| `LOGS_RETENTION_DAYS` | `make` | 30 | How long a day's log index is kept, applied by `make logs-retention` |
+| `LOGS_RETENTION_DAYS` | `make` | 30 | How long the log index is kept, applied by `make logs-retention` |
+| `LOGS_KEEP_DAYS` | `make` | 30 | How long a log FILE on the `logs` volume is kept, applied by `make logs-prune`. The other half: the target above deletes nothing from disk |
 
 ### The frontend
 

@@ -1,5 +1,6 @@
-# Reads the JSON lines the api, the four workers and the frontend write to
-# the shared `logs` volume, and puts each one in Elasticsearch.
+# Reads the JSON lines the api, the five workers, the frontend and the
+# orchestrator write to the shared `logs` volume, and puts each one in
+# Elasticsearch.
 #
 # Only this project's own processes. The infrastructure containers - Postgres,
 # SeaweedFS, Redis, Elasticsearch itself - keep the json-file driver and are
@@ -89,6 +90,8 @@ setup.template.append_fields:
   # What the pipeline was working on, bound where the row was claimed.
   - name: document.sha256
     type: keyword
+  - name: document.media_type
+    type: keyword
   - name: passage.id
     type: long
   - name: passage.block_type
@@ -99,6 +102,8 @@ setup.template.append_fields:
     type: keyword
   - name: topic_fit.id
     type: long
+  - name: topic_fit.language
+    type: keyword
   - name: upload.filename
     type: keyword
   - name: upload.size_bytes
