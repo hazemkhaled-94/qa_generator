@@ -494,7 +494,10 @@ services:
       <<: [*service-env, *store-env]
     deploy:
       resources:
-        limits: { cpus: "4.0", memory: 8G }
+        # Docling's layout models and no OCR. Measured at 888 MB idle and
+        # under 2 GB converting; 8 GB was the largest cap in the file for
+        # the stage that needs the third-largest.
+        limits: { cpus: "3.0", memory: 4G }
 
   # Splits a converted document into passages, and reads their sentences
   # and lemmas. Scalable.
@@ -505,7 +508,11 @@ services:
       <<: [*service-env, *store-env]
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 2G }
+        # EMBEDDING_MODEL's TOKENIZER, not its weights - which is why this
+        # is the one model-adjacent worker that stays small. Raised from 2
+        # because it measured 969 MB idle, and 45% of a cap at rest is the
+        # margin a long document eats.
+        limits: { cpus: "2.0", memory: 3G }
 
   # Draws facts out of passages. Scalable.
   extract-worker:
@@ -516,7 +523,14 @@ services:
       <<: [*service-env, *model-env]
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 1G }
+        # This one DOES load EMBEDDING_MODEL, and the note above
+        # question-worker saying the other workers load no weights was
+        # wrong about it. `Settings.embeds` is true whenever
+        # EXTRACTION_DUPLICATE_COSINE > 0, which it is at 0.95, and
+        # extraction/service.py imports the embedder at module scope. A
+        # 2.2 GB model under a 1 GB cap is an OOM waiting for the first
+        # passage.
+        limits: { cpus: "2.0", memory: 4G }
 
   # Fits the corpus topic model. Safe to scale, though pointless: a fit is one
   # request row, and SKIP LOCKED gives it to exactly one worker.
@@ -530,7 +544,10 @@ services:
       <<: [*service-env, *model-env, *store-env]
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 2G }
+        # gensim's NMF over the corpus vocabulary, measured at 402 MB idle.
+        # The factorisation grows with the corpus rather than with a model,
+        # so this is the one to raise when the corpus does.
+        limits: { cpus: "2.0", memory: 3G }
 
   # Writes the test questions, one topic at a time. Scalable, though there is
   # far less to divide than in the stages before it: the queue is one row per
@@ -542,14 +559,20 @@ services:
   # every gate, so they end up resident together. Each is a ~560M-parameter
   # model in float32, about 2.2 GB of weights before torch's own allocator:
   #
-  #   EMBEDDING_MODEL   always            ~2.2 GB
-  #   NLI_MODEL         entailment pass   ~2.2 GB
-  #   QA_MODEL          the recall half   ~2.2 GB
-  #   RERANKER_MODEL    unset by default  ~1.2 GB
+  #   EMBEDDING_MODEL   always            ~2.2 GB   ON
+  #   NLI_MODEL         entailment pass   ~2.2 GB   ON
+  #   QA_MODEL          the recall half   ~2.2 GB   OFF, and measured off
+  #   RERANKER_MODEL    -                 ~1.2 GB   gone with its module
   #
-  # So 6 GB was right for the embedder alone and is an OOM with two encoders
-  # beside it. Unsetting one in configs/env/backend.env gives that 2.2 GB
-  # back; the other workers load no weights at all.
+  # 12 GB was the sum of all four. Two of them are no longer loaded - QA_MODEL
+  # is empty because the span it finds is not the answer, and the reranker was
+  # deleted for costing 6.92 s a candidate to move no call - so what a run
+  # actually holds is 4.4 GB of weights and torch's allocator over them. 6 GB
+  # is that with room; raise it again the moment QA_MODEL is set.
+  #
+  # `extract-worker` loads EMBEDDING_MODEL too. This comment used to say the
+  # other workers load no weights at all, and that has not been true since
+  # facts got a vector.
   #
   # Per container, not per lane. That is the number to remember when
   # deciding between another worker and more lanes inside this one.
@@ -561,7 +584,7 @@ services:
       <<: [*service-env, *model-env]
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 12G }
+        limits: { cpus: "2.0", memory: 6G }
 
   streamlit:
     build:
