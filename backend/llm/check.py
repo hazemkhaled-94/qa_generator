@@ -15,8 +15,13 @@ an object rather than prose.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import logging
+import os
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import litellm
 from pydantic import BaseModel, Field
@@ -32,7 +37,13 @@ log = logging.getLogger(__name__)
 #: with every credential it tried - which is what a worker's log wants and
 #: not what somebody running a first check does. The refusal is reported
 #: here instead, in one line.
-QUIET = ("llm.client", "LiteLLM", "instructor", "azure.identity")
+QUIET = ("llm.client", "LiteLLM", "instructor", "azure.identity", "azure.core")
+
+#: A token minted by hand, which is the one Entra ID credential that goes
+#: stale on its own. Checked before the call because the refusal it causes
+#: says only "missing, invalid, audience is incorrect, or have expired",
+#: and which of those it was is the whole question.
+MINTED = "AZURE_OPENAI_AD_TOKEN"
 
 #: Long enough for a cold local model to load, short enough that a wrong
 #: address is a failure rather than a wait. LLM_TIMEOUT_SECONDS is the
@@ -44,6 +55,24 @@ class Reachable(BaseModel):
     """The smallest structured answer a provider can be asked for."""
 
     ok: bool = Field(description="true")
+
+
+def expired(token: str) -> datetime | None:
+    """When a JWT expired, or None if it has not or cannot be read.
+
+    The `exp` claim, read without verifying the signature: this is not
+    authenticating anybody, it is reading a date out of a string the
+    provider is about to reject.
+    """
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(
+            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        )
+        when = datetime.fromtimestamp(claims["exp"], UTC)
+    except (IndexError, KeyError, TypeError, ValueError, binascii.Error):
+        return None
+    return when if when < datetime.now(UTC) else None
 
 
 def main() -> int:
@@ -61,6 +90,18 @@ def main() -> int:
     log.info("model    %s", settings.model)
     log.info("address  %s", settings.base_url or "(the provider's own)")
     log.info("mode     %s", settings.structured_mode)
+
+    if stale := expired(os.environ.get(MINTED, "")):
+        days = (datetime.now(UTC) - stale).days
+        log.error(
+            "%s expired %s (%d day(s) ago) and is taken in preference to a "
+            "working credential, so every call is refused. Comment it out to "
+            "fall through to `az login`, or mint another one.",
+            MINTED,
+            stale.date(),
+            days,
+        )
+        return 1
 
     # One attempt: a doctor reports what happened rather than working around
     # it, and the backoff would hide an address that is simply wrong.

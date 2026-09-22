@@ -176,7 +176,10 @@ flowchart LR
 
     workers --> logs[/logs volume/]
     api --> logs
+    host([a make target]) --> hostlogs[/./logs/]
+    hostlogs --> filebeat
     logs --> filebeat --> elasticsearch --> grafana
+    host -.spans.-> phoenix
     workers -.spans.-> phoenix
     api -.spans.-> phoenix
     elasticsearch --> argilla
@@ -189,6 +192,28 @@ makes even that internal.
 `make services` asks the api which of these are listening and where to open
 them; `make open` does that and opens the application.
 
+### The same stage, run on the host
+
+A worker container is not the only way to drain a queue. `make extract`,
+`make topics` and `make questions` run the identical code in a host process
+against the same database, and the Makefile sources the same files compose
+hands the containers, so one value reaches both.
+
+That is not only a convenience. **An Entra ID deployment is a reason to
+prefer it**: `az login` leaves a refresh token in `~/.azure`, a host process
+finds it through `DefaultAzureCredential`, and a container finds nothing
+there unless it is given both the mounted directory and an `az` binary the
+image does not carry. A container's own path to Entra ID is a service
+principal, which is an app identity with no second factor to satisfy. See
+[`backend/llm/`](../backend/llm/README.md#entra-id-and-why-a-stage-is-run-from-the-host).
+
+There is no difference in what it is watched with. `LOG_DIR` names `./logs`
+on the host and the `logs` volume in a container — one name, set over in
+compose, the way the OTLP endpoint and Phoenix's API are — and filebeat
+reads both directories into the same data stream. So a host drain's lines
+land in Grafana beside a worker's, joined to the same trace, and
+`host.name` is what tells a machine from a container id.
+
 ## 5. Where the signals go
 
 Each of these sees the whole pipeline and none of them sees it the way
@@ -197,7 +222,7 @@ what belongs to another.
 
 | Signal | Path | Read with |
 |---|---|---|
-| Logs | process → `logs` volume (JSON, ECS fields) → Filebeat → Elasticsearch | Grafana, `make logs` |
+| Logs | process → the `logs` volume in a container, `./logs` on the host (JSON, ECS fields) → Filebeat → Elasticsearch | Grafana, `make logs` |
 | Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
 | Cost and tokens | on the span, and on the log line beside it | Phoenix per run; Grafana's throughput dashboard over time; `make spend LOG=` over a captured log |
 | Gate verdicts | the row in Postgres, an attribute on the span, an annotation in Phoenix | the Questions page; Phoenix's Evaluations view |
@@ -215,8 +240,9 @@ comparable per run and per judgement; the log line is what makes it readable
 when the collector is down or was never configured.
 
 **Nothing is deleted until `make logs-retention` and `make logs-prune` have
-run.** The first ages the Elasticsearch index, the second the files on the
-volume. That is the state the stack ships in, deliberately.
+run.** The first ages the Elasticsearch index, the second the files — both
+directories — the shipper read them out of. That is the state the stack
+ships in, deliberately.
 
 ## 6. Where to change things
 

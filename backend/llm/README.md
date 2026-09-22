@@ -88,6 +88,32 @@ for it.
 The one thing that does **not** move when you change providers is
 `EMBEDDING_MODEL`, which runs locally in the worker whatever `LLM_MODEL` names.
 
+### Entra ID, and why a stage is run from the host
+
+Two-factor happens when a token is **issued**, not when it is used. So a
+container never does the 2FA itself — it is either given an identity that
+has none, or lent the result of a 2FA somebody already did.
+
+| Where it runs | Credential | 2FA |
+|---|---|---|
+| A container, anywhere | A **service principal**: tenant, client, secret | None. An app identity is not a user |
+| A container on Azure | Managed or workload identity | None. Nothing to set |
+| **The host** | `az login`, found by `DefaultAzureCredential` | Once, in a browser, and the CLI keeps the refresh token |
+| A container, lent the host's | `AZURE_OPENAI_AD_TOKEN`, minted host-side | Once, and again every hour when it expires |
+
+The third row is why `make extract`, `make topics` and `make questions` are
+run from the host against an Entra ID deployment: they inherit the `az login`
+session, and the Makefile sources `provider.env` for them. A container could
+use that session too, but only by being handed both halves — bind-mount
+`~/.azure` *and* put the `az` CLI in the image, because `AzureCliCredential`
+works by shelling out to it. The image carries no az, so the host is the
+path that works today.
+
+The fourth row is the one that goes stale. `make doctor` reads the token's
+`exp` before it calls anything, because an expired token is taken in
+preference to a working credential and the provider's refusal names four
+possible causes without saying which.
+
 ## Cost and latency
 
 Every call is logged with its duration, its token counts and, where the
