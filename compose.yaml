@@ -56,6 +56,13 @@ x-service-env: &service-env
   HF_HOME: /home/app/.cache/huggingface
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
   OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
+  # Phoenix's HTTP API, as a CONTAINER reaches it. The two lines above are
+  # the gRPC collector that receives spans; this is the same service read
+  # the other way, and it is what a gate verdict is posted through. Not
+  # PHOENIX_BASE_URL, which is the host's address and resolves to nothing
+  # from inside the network.
+  PHOENIX_CONTAINER_BASE_URL: ${PHOENIX_CONTAINER_BASE_URL:-http://phoenix:6006}
+  PHOENIX_API_KEY: ${PHOENIX_ADMIN_SECRET}
 
 # Object store readers and writers.
 x-store-env: &store-env
@@ -125,6 +132,7 @@ x-worker: &worker
     - ./backend/nlp:/app/nlp:ro
     - ./backend/llm:/app/llm:ro
     - ./backend/question_generation:/app/question_generation:ro
+    - ./backend/archive:/app/archive:ro
     - ./telemetry:/shared/telemetry:ro
     - logs:/var/log/qa
     - models:/home/app/.cache/huggingface
@@ -458,6 +466,7 @@ services:
       - ./backend/question_generation:/app/question_generation:ro
       - ./backend/nlp:/app/nlp:ro
       - ./backend/llm:/app/llm:ro
+      - ./backend/archive:/app/archive:ro
       - ./telemetry:/shared/telemetry:ro
       - logs:/var/log/qa
     ports:
