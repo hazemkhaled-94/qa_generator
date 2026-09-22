@@ -100,6 +100,85 @@ The detector may only answer with a language `NLP_MODELS` names, because an
 answer with no pipeline behind it is a passage nothing can read.
 `NLP_DEFAULT_LANGUAGE` is what a passage too short to judge falls back to.
 
+## Adding a language
+
+German and English are configured. The pipeline is not bound to them, but it
+is not free of them either: most readings are Universal Dependencies features
+that every tagset marks, and a handful are lemma lists that only two
+languages are in. This is all of it.
+
+### 1. Configure it
+
+| Where | What |
+|---|---|
+| `NLP_MODELS` | `xx:xx_core_news_md`. One list, naming both the pipeline a language is read with and the languages the detector may answer with. `make install` and the Dockerfile download whatever it names |
+| `NLP_CAPITALISED_NOUNS` | Add the code **only** if the language writes every noun with a capital, as German does. In one of those a lower-case word tagged a noun is a word from another language |
+| `EMBEDDING_MODEL` | Check the new language is one the model covers. The default, `multilingual-e5-large`, covers about a hundred |
+
+**Medium, not small.** `de_core_news_sm` does not tag a German modal as a
+finite verb, so the atomicity check refused 11% of German facts for a parser
+limitation: measured over eight sentences, `sm` got 3 and `md` got 8.
+
+### 2. Add the language to five lemma lists
+
+These are the readings no feature marks, so they are words. Each is small,
+each is per-language, and a language missing from one means that gate
+**silently never fires** for it — no error, no log, just a judgement nothing
+makes.
+
+| List | Where | What goes in it | Example |
+|---|---|---|---|
+| `_DIVISIONS` | [`question_generation/gates.py`](../question_generation/gates.py) | Words naming a division of a document | `Abschnitt`, `section` |
+| `_DOCUMENTS` | same | Words naming a document **type**, never a subject | `Richtlinie`, `guideline` |
+| `_ATTRIBUTIONS` | same | Words that attribute what follows to a source | `laut`, `according` |
+| `_AGENTS` | same | The interrogatives that ask after a **party** rather than a thing | `wer`, `who` |
+| `_ANAPHORIC` | [`analysis.py`](analysis.py) | Adjectives pointing back at something already said | `besagt`, `aforementioned` |
+
+Read by **lemma and never as a substring**, and German compounding is why:
+`Risikobericht` is a thing a corpus is about and `Bericht` is a thing a corpus
+IS, and a substring test cannot tell them apart.
+
+`_AGENTS` is the one that could not be a feature. No tagset marks animacy on
+an interrogative — `wer` and `was` are both `PRON` with `PronType=Int`, as
+`who` and `what` are — so a list is the only reading available.
+
+### 3. Check three things the language has to support
+
+Not edits. A language failing one of these needs code, and the first is a
+crash rather than a gap:
+
+| | Needed by | What happens without it |
+|---|---|---|
+| **`noun_chunks`** | `phrases()`, and so `subject`, `anchored`, `enumerates`, `compares` | **Raises.** spaCy implements the syntax iterator per language and Russian, Chinese and Ukrainian have none; Japanese needs SudachiPy |
+| **An NER component with `PER` or `PERSON`** | `names_parties`, the credits-page reading | Density is always 0, so the reading never fires and nothing says so |
+| **`like_num` on spelled-out numerals** | `claim().units` | Asymmetric rather than broken: `de_core_news_md` tags `zwei` as `NUM` with `like_num` FALSE where `en_core_web_md` gives `two` both, so `units` collects English number words and not German ones |
+
+That third one is a trap rather than a bug, and it already bit: the
+circularity gate first read numbers off `claim().units` and therefore fired
+on German numerals and not English ones, in a corpus that is German. It reads
+the `NUM` part of speech now.
+
+### 4. One pattern that is Gregorian
+
+`_DATED` in [`question_generation/gates.py`](../question_generation/gates.py)
+reads a period off a four-digit year in 1800–2099 or a `DD.MM`-style pair. It
+matches `2024`, `2024-03-15`, `15.03.2024` and `Q1 2024`, and misses an era
+year, a Hijri year, Arabic-Indic digits and `FY24`. Only `temporal` questions
+read it, and that type ships weighted `0`.
+
+### What needs no edit at all
+
+Most of it, because most readings are features rather than words:
+
+| Reading | Feature |
+|---|---|
+| Question words, for `compound` | `PronType=Int`, or a Penn/STTS tag prefix as a fallback |
+| Content words and lemmas | `NOUN`, `PROPN`, `ADJ` |
+| A number, for the circularity exemption | `NUM` |
+| Pointing outward | `PronType=Dem`, and `Definite=Def` with `NumType=Card` for the definite-and-counted case |
+| Everything measured on an embedding | `EMBEDDING_MODEL`, which is multilingual |
+| Every length, share and citation reading | no language at all |
+
 ## Tools, and where each is used
 
 | Tool | Where | Why this one |

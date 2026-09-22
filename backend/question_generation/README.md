@@ -653,6 +653,11 @@ where each of them belongs:
 | `names_its_source` | `gates.cites_source`, a model for the residue | rules settle 5 cases with **0 errors**, including all four the model got wrong |
 | `self_contained` | `phrasing.py`, asked only where a pointer was found | see below |
 
+These are the readings that are words rather than features, and so the ones
+a third language has to be added to.
+[`backend/nlp/`](../nlp/README.md#adding-a-language) lists every one, and
+what happens to a gate whose language is missing from it: nothing, silently.
+
 `cites_source` matches what a pattern can settle — a numbered division
 (`Abschnitt 2.2`, `Kapitel 5`), a bracketed reference (`[R22]`), an author
 with a year (`Beck 2003`), a named and numbered document — and returns

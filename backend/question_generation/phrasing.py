@@ -35,8 +35,11 @@ from llm.client import Client, ModelUnavailable
 
 log = logging.getLogger(__name__)
 
-#: Bumped whenever a prompt here changes what it asks for.
-PROMPT_VERSION = "1"
+#: Bumped whenever a prompt here changes what it asks for. Version 2 recast
+#: every worked example into the neutral domain the rest of the prompts use:
+#: the examples had been taken from the corpus being debugged against, which
+#: is the one thing extraction's own prompt warns about.
+PROMPT_VERSION = "2"
 
 _SOURCE = """You are given ONE question, and you answer ONE thing about it.
 
@@ -46,7 +49,7 @@ report, a circular, a regulation by name, a section or a heading?
 TRUE:  "According to the service agreement, how long may a reply take?"
 TRUE:  "Under 'Support > Response times', what is the urgent reply time?"
 TRUE:  "What does section 4 say about weekend cover?"
-TRUE:  "Welche Reviewverfahren beschreibt die Norm ISO/IEC 20246?"
+TRUE:  "Welche Antwortzeiten schreibt die Norm XY-4711 vor?"
        (the norm is being cited as what states the answer)
 FALSE: "How long is allowed for answering an urgent support request?"
 FALSE: "Who approves a change to the shift plan?"
@@ -54,8 +57,10 @@ FALSE: "How many faults were reported to the site manager in 2025?"
        (the site manager is who they were reported TO, not a source)
 FALSE: "Wer trägt die Verantwortung für den vierteljährlichen Risikobericht?"
        (the report is what the question is ABOUT, not where the answer is)
-FALSE: "Warum wird ISO/IEC/IEEE 29119-4 in diesem Zusammenhang erwähnt?"
-       (the standard is the subject being asked about, not the source)
+FALSE: "Warum wird die Norm XY-4711 in diesem Zusammenhang erwähnt?"
+       (the standard is the subject being asked about, not the source.
+        The pair above and this one have the same shape and differ only by
+        which of the norm and the answer the question is about)
 
 Naming a party, a duty, a period or a thing being governed is NOT naming a
 source. Only saying which material holds the answer is. The hard cases are
@@ -79,16 +84,17 @@ TRUE:  "If a system meets its target by editing the stored score instead of
         doing the task, how is this behaviour classified?"
        (pointing word: "this". The question set the behaviour out first, so
         it points at something present.)
-TRUE:  "Wenn ein Team lineare Skripterstellung einführt, ist dieser Ansatz
-        für einen großen Umfang geeignet?"
+TRUE:  "Wenn ein Standort eine zentrale Warteschlange einführt, ist dieser
+        Ansatz für einen großen Standort geeignet?"
        (pointing word: "dieser". The approach was just named.)
 FALSE: "What changed in this version?"
        (pointing word: "this". No version is named anywhere in the question.)
-FALSE: "Wie groß ist der Unterschied zwischen den beiden Lehrplänen?"
+FALSE: "Wie groß ist der Unterschied zwischen den beiden Ausgaben?"
        (pointing word: "beiden". WHICH two? The question names neither, and
-        only somebody holding the material could know.)
-FALSE: "Wie unterscheiden sich der Lehrplaninhalt und ein Testteammitglied
-        laut diesen Angaben?"
+        only somebody holding the material could know. Naming them -
+        "zwischen der Ausgabe 2022 und der von 2024" - is a question.)
+FALSE: "Wie unterscheiden sich die Antwortzeit und ein Teammitglied laut
+        diesen Angaben?"
        (pointing word: "diesen". No Angaben are named.)
 
 The test is not whether the pointing word is ordinary. It is whether the
