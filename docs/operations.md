@@ -106,18 +106,23 @@ make logs-retention      # how long Elasticsearch keeps them. Run once
 make logs-prune          # delete the files on the volume nothing writes to
 ```
 
-Only this project's processes are shipped to Elasticsearch. Postgres,
-SeaweedFS, Redis and Elasticsearch itself keep the `json-file` driver and are
-read with `make logs`.
+Only this project's processes are shipped to Elasticsearch — but all of
+them, wherever they ran. A container writes to the `logs` volume and a host
+command to `./logs`; filebeat reads both into one data stream, so
+`make extract` on your laptop is in Grafana beside `extract-worker`, on the
+same trace. `host.name` is what separates them.
+
+Postgres, SeaweedFS, Redis and Elasticsearch itself keep the `json-file`
+driver and are read with `make logs`.
 
 **Until `make logs-retention` has run, nothing is ever deleted.** That is the
 state the stack ships in.
 
 Retention has two halves, and that target is one of them. It ages what
 **Elasticsearch** holds; `make logs-prune` ages the **files** the shipper
-read them out of. Each process writes `{service}-{container}.log`, so a
-recreated container starts a new file and leaves the old one for ever —
-nothing else on the volume deletes anything.
+read them out of, in both directories. Each process writes
+`{service}-{host}-{pid}.log`, so a recreated container and a host command
+each leave a file behind for ever — nothing else deletes one.
 
 See [`telemetry/`](../telemetry/README.md) for the field names, the data
 stream, and the two Filebeat settings that are load-bearing.

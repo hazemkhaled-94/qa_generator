@@ -14,7 +14,9 @@ reaches Elasticsearch. Same record, same fields; the JSON carries the ones a
 text line has no room for.
 
 ```
-api, 5 workers, streamlit  ──▶  logs volume  ──▶  filebeat  ──▶  elasticsearch  ──▶  grafana
+api, 5 workers, streamlit, dagster  ──▶  logs volume  ─┐
+                                                       ├─▶  filebeat  ──▶  elasticsearch  ──▶  grafana
+a make target, dagster dev, by hand  ──▶  ./logs  ─────┘
 ```
 
 Nothing is aggregated and nothing is dropped on the way. Every level from
@@ -65,19 +67,44 @@ These are not ECS, so they are declared in `setup.template.append_fields` in
 dynamic mapping a string arrives as `text`, which is analysed and has no doc
 values, and a panel grouping by `stage` finds nothing to group on.
 
-### The file, and why it is per container
+### The file, and why it is per process
 
-A worker writes to `{stage}-{container}.log` on a shared volume rather than to
-one file per stage, because a scaled stage runs several containers over one
-volume and **two processes rotating one file take each other's lines with
-them**.
+`{service}-{host}-{pid}.log`. The **writer** is what the name has to be
+unique per, because **two processes rotating one file take each other's
+lines with them** — and neither half alone is enough: a scaled stage is
+several containers over one volume, and `./logs` is one machine over many
+runs. So `extraction-3f15a9823823-1.log` from a worker sits beside
+`extraction-hazems-mac-48213.log` from a drain somebody ran by hand.
+
+The cost is a file per run, including the one-second ones. `make logs-prune`
+is what sweeps them, and it is the only thing that does.
 
 Files rotate at 50 MB, three kept; the shipper has read a line long before it
 is deleted.
 
-`LOG_DIR` is what turns the file on. It is set for the containers and unset
-for every `make` target, so a host command logs to the terminal and nowhere
-else.
+### Two directories, one data stream
+
+`LOG_DIR` is what turns the file on, and it names a different directory
+depending on where the process is:
+
+| Where | `LOG_DIR` | Set by |
+|---|---|---|
+| A container | `/var/log/qa`, the `logs` volume | compose, over the value below |
+| The host | `./logs`, bind-mounted into filebeat read-only | `.env` |
+| Anywhere else | unset — stdout only | nobody |
+
+One name, set over per container — the same arrangement
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `PHOENIX_BASE_URL` use, and for the same
+reason: the Makefile sources `.env`, so a host process must be able to read
+the host's answer from the name the code reads.
+
+Filebeat reads both paths in one input, so **a `make` target's lines land in
+Grafana beside a worker's**, joined to the same trace. `host.name` is what
+tells them apart: a container id on one side, a machine name on the other.
+
+`./logs` is made by `make up` rather than left to the container engine,
+which creates a missing bind-mount source itself and can leave it owned by
+root — and then the host process it exists for cannot write to it.
 
 ## Traces
 
@@ -154,7 +181,7 @@ pinned version.
 | Setting | Where | Default | What it does |
 |---|---|---|---|
 | `LOG_LEVEL` | `.env` | `INFO` | Every service, the frontend included. Everything at or above it reaches Grafana |
-| `LOG_DIR` | `compose.yaml` | unset on the host | Where the JSON file goes. Unset means stdout only |
+| `LOG_DIR` | `.env`, set over in `compose.yaml` | `logs` on the host, `/var/log/qa` in a container | Where the JSON file goes. Unset means stdout only |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
 
 `service.name` is not a setting. Each process passes its own name to
@@ -243,10 +270,15 @@ Things that are true, are not bugs, and have surprised somebody.
 - **Nothing is deleted until `make logs-retention` has run once.** That is the
   state the stack ships in, deliberately.
 - **`make logs-retention` never deletes a file.** It ages the data stream.
-  The volume is `make logs-prune`, and until that runs every container the
-  stack has ever recreated still has its log file on it.
-- **A `make` target logs to the terminal and nowhere else.** `LOG_DIR` is
-  unset on the host, so a host drain leaves no line in Grafana.
+  The files are `make logs-prune`, and until that runs every container the
+  stack has ever recreated, and every host command ever run, still has its
+  log file on disk.
+- **A host command leaves a file per invocation.** `make parse-status` takes
+  a second and writes `parsing-<host>-<pid>.log` for it. That is the price
+  of a name no two writers share; `make logs-prune` is the sweep.
+- **`LOG_DIR` unset means stdout only.** That is what a process given
+  neither `.env` nor compose gets — a bare `python -m …` in a shell that
+  sourced nothing, and pytest.
 - **Editing `filebeat.yml` without `setup.template.overwrite` changes
   nothing.** Filebeat leaves an existing template alone.
 - **A new bound field needs adding to `append_fields`.** Otherwise it arrives

@@ -136,6 +136,7 @@ full table is in
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `LOG_LEVEL` | `.env` | `INFO` | Every service, the frontend included. Everything at or above it reaches Grafana |
+| `LOG_DIR` | `.env` | `logs` | Where a process writes the JSON lines the shipper reads. The host's directory; compose sets `/var/log/qa` over it per container, and filebeat reads both. Unset means stdout only |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
 | `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets, the experiments and the gate verdicts go. The same service the line above sends spans to, read the other way. Compose sets the container's address over this name, as it does for the collector |
 | `PHOENIX_CONTAINER_BASE_URL` | `.env` | `http://phoenix:6006` | What compose sets there. Read by compose only — a process reads `PHOENIX_BASE_URL` wherever it runs |

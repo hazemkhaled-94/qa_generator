@@ -38,10 +38,10 @@ x-logging: &logging
 
 # All services.
 #
-# LOG_DIR is a path inside the container rather than a deployment choice, so
-# it is here and not in .env: it names the shared `logs` volume that filebeat
-# reads. Set it to nothing and the process logs to stdout only, which is what
-# every host command does.
+# LOG_DIR is set over .env's, which is the host's `./logs`: it names the
+# shared `logs` volume that filebeat reads, and that path exists only in
+# here. One name for both, as with the OTLP endpoint and Phoenix's API
+# below. Set it to nothing and the process logs to stdout only.
 #
 # HF_HOME is where the Hugging Face cache goes, and it is a path inside the
 # container for the same reason. EMBEDDING_MODEL is fetched on first use -
@@ -773,9 +773,16 @@ services:
     volumes:
       - ./configs/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ./certs:/usr/share/filebeat/certs:ro
-      # Read-only: this reads the pipeline's logs and must not be able to
-      # delete or rotate what the processes writing them are managing.
+      # Read-only, both of them: this reads the pipeline's logs and must not
+      # be able to delete or rotate what the processes writing them are
+      # managing. `make logs-prune` is what deletes one.
       - logs:/var/log/qa:ro
+      # The same lines from a process that ran on the HOST - a make target,
+      # `dagster dev`, anything by hand. A bind mount rather than the volume
+      # above, because a named volume is inside the podman machine on macOS
+      # and a host process cannot write to it. Created by `make up`, so the
+      # engine does not create it as root and lock the writer out.
+      - ./logs:/var/log/qa-host:ro
       # The registry, so a restart resumes where it left off rather than
       # shipping every line in every file again.
       - filebeat_data:/usr/share/filebeat/data

@@ -26,7 +26,20 @@ SOURCES := backend frontend telemetry orchestration review evaluation tests
 # `make topics TOPIC_PASSES=20` used to run with the file's value and say
 # nothing.
 OVERRIDE = $(if $(MAKEOVERRIDES),&& export $(MAKEOVERRIDES),)
-LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE)
+
+# The provider's credentials, for whichever host command calls a model.
+# Optional and absent for a plain Ollama, which needs none - hence the test
+# rather than a plain `.`, which would stop every target on a clone that has
+# no such file.
+#
+# Here rather than beside each model-calling target because compose hands
+# this file to the three services that call a model and the host was given
+# it nowhere: `make extract` against a hosted provider read backend.env and
+# .env, found no key in either, and failed to authenticate.
+PROVIDER = { [ ! -f ./configs/env/provider.env ] || . ./configs/env/provider.env; }
+
+LOADENV = set -a && . ./configs/env/backend.env && $(PROVIDER) && . ./.env \
+          && set +a $(OVERRIDE)
 
 # The same, for a tool with a tuning file of its own:
 #
@@ -37,7 +50,7 @@ LOADENV = set -a && . ./configs/env/backend.env && . ./.env && set +a $(OVERRIDE
 # `set +a` a sourced file's values are set in the shell and not exported,
 # so the process below saw none of them and stopped naming the first.
 WITH = set -a && . ./configs/env/backend.env && . ./configs/env/$(1) && \
-       . ./.env && set +a $(OVERRIDE)
+       $(PROVIDER) && . ./.env && set +a $(OVERRIDE)
 
 # Narrows a stage target to one item instead of the whole queue, mirroring
 # the route's /{scope}/{value} segment:
@@ -55,8 +68,53 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
        $(if $(PASSAGE),--only passage=$(PASSAGE),\
        $(if $(TOPIC),--only topic=$(TOPIC))))
 
-.PHONY: dev install up down down-volumes logs logs-frontend logs-api \
-        logs-shipper logs-retention logs-orchestration \
+# ── Help ───────────────────────────────────────────────────────────────────
+
+# Listed before anything runs, because `make` on its own used to install
+# dependencies and start nine containers.
+.DEFAULT_GOAL := help
+
+# Every target there is, grouped, with what each one does.
+#
+# Read out of this file rather than written out again here: the section
+# banner a target sits below is its group, and the first sentence of the
+# comment above it is its description. A target cannot be added without
+# appearing, and a description cannot drift from the target it names.
+#
+# Colour only when a terminal is reading, so `make help | grep` is clean.
+help:
+	@if [ -t 1 ]; then b=$$(printf '\033[1m'); c=$$(printf '\033[36m'); r=$$(printf '\033[0m'); fi; \
+	printf '%sQ&A Reference Dataset Generator%s\n\n' "$$b" "$$r"; \
+	printf '  usage:      make <target> [VAR=value]\n'; \
+	printf '  first run:  %smake setup%s, then %smake doctor%s, then %smake dev%s\n' \
+	  "$$c" "$$r" "$$c" "$$r" "$$c" "$$r"; \
+	printf '  detail:     docs/make.md, docs/configuration.md\n'; \
+	awk -v b="$$b" -v c="$$c" -v r="$$r" ' \
+	  function reset() { p = ""; done = 0 } \
+	  /^# / && index($$0, "──") { s = $$0; gsub(/[─#]/, "", s); \
+	    sub(/^ +/, "", s); sub(/ +$$/, "", s); reset(); next } \
+	  /^#/ { \
+	    line = $$0; sub(/^# ?/, "", line); \
+	    if (line ~ /^[ \t]*$$/) { done = (p != ""); next } \
+	    if (!done) p = (p == "" ? line : p " " line); \
+	    next \
+	  } \
+	  /^[a-z][a-zA-Z0-9_-]*:/ { \
+	    t = $$1; sub(/:.*/, "", t); \
+	    if (p != "") { \
+	      if (match(p, /\. /)) p = substr(p, 1, RSTART); \
+	      if (length(p) > 66) p = substr(p, 1, 63) "..."; \
+	      if (s != shown) { printf "\n%s%s%s\n", b, s, r; shown = s } \
+	      printf "  %s%-20s%s %s\n", c, t, r, p \
+	    } \
+	    reset(); next \
+	  } \
+	  { reset() } \
+	' $(MAKEFILE_LIST)
+
+.PHONY: help setup doctor \
+        dev install up down down-volumes logs logs-frontend logs-api \
+        logs-shipper logs-retention logs-prune logs-dir logs-orchestration \
         prune spend spend-by-shape \
         schema schema-reset schema-status schema-down schema-stamp migration \
         parse parse-status parse-start parse-stop parse-retry parse-rerun \
@@ -74,7 +132,8 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         documents delete delete-derived \
         archive archive-purge \
         test test-fast test-unit test-integration test-e2e test-smoke \
-        test-eval test-coverage check typecheck audit lint lint-imports deps \
+        test-eval test-coverage test-perf mutation \
+        check typecheck audit lint lint-imports deps \
         eval-phrasing second-opinion \
         format lock \
         certs dagster-dev \
@@ -86,8 +145,89 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
 
+# The assignments in .env, which is where a placeholder counts. The file's
+# own first line says to replace every change_me_* value and is not one.
+ASSIGNED = grep -E '^[A-Z][A-Z0-9_]*=' .env
+
+# Write the two configuration files a clone does not come with, and fill in
+# every password. Safe to run twice: it replaces the placeholders and
+# nothing else, so a file already edited by hand keeps what it says.
+#
+# One secret per distinct placeholder, replaced everywhere it appears -
+# which is what keeps APP_DB_PASSWORD and the password inside DATABASE_URL
+# the same string without this needing to know that they are related.
+#
+# Longest placeholder first, because `change_me_phoenix` is a prefix of
+# `change_me_phoenix_ui_password` and replacing the short one first would
+# leave the long one half rewritten.
+#
+# Hex is lower-case and a digit is appended, which is what
+# PHOENIX_ADMIN_SECRET requires of the deployment: 32 characters or more,
+# with a digit and a lower-case letter.
+setup:
+	@test -f .env || { cp .env.example .env; echo "wrote .env"; }
+	@test -f configs/env/provider.env || { \
+	  cp configs/env/provider.env.example configs/env/provider.env; \
+	  echo "wrote configs/env/provider.env"; }
+	@for token in $$($(ASSIGNED) | grep -oE 'change_me_[a-z0-9_]*' | sort -u \
+	                 | awk '{ print length, $$0 }' | sort -rn | cut -d' ' -f2-); do \
+	  secret="$$(openssl rand -hex 24)1"; \
+	  sed -i.bak "s|$$token|$$secret|g" .env && rm -f .env.bak; \
+	  echo "generated $$token"; \
+	done
+	@echo
+	@echo "Now name the model in .env (LLM_MODEL, LLM_BASE_URL) and put"
+	@echo "whatever credentials it needs in configs/env/provider.env."
+	@echo "Then: make doctor"
+
+# What a first run gets wrong, before a corpus pays for it.
+#
+# Every check runs and the failures are counted, rather than stopping at the
+# first: somebody setting this up wants the whole list, not one item of it
+# six times.
+#
+# The last check is a real call to the configured model, which is the one
+# thing no amount of reading the files can tell you. An unknown model id, a
+# wrong address and a rejected credential all fail at the first call, and
+# without this that call is the first passage of a real run.
+doctor:
+	@fail=0; \
+	say() { printf '  %-8s %s\n' "$$1" "$$2"; }; \
+	command -v $(CONTAINER) >/dev/null && say ok "$(CONTAINER)" \
+	  || { say MISSING "$(CONTAINER) - install it, or set CONTAINER= and COMPOSE="; fail=1; }; \
+	command -v poetry >/dev/null && say ok "poetry" \
+	  || { say MISSING "poetry - https://python-poetry.org/docs/#installation"; fail=1; }; \
+	if test -f configs/env/provider.env; then say ok "configs/env/provider.env"; \
+	  else say "-" "no configs/env/provider.env, which a plain Ollama does not need"; fi; \
+	if ! test -f .env; then say MISSING ".env - run: make setup"; \
+	  echo; echo "Fix the above, then run make doctor again."; exit 1; fi; \
+	say ok ".env"; \
+	if $(ASSIGNED) | grep -q change_me; then \
+	  say FAIL "$$($(ASSIGNED) | grep -c change_me) placeholder password(s) left - run: make setup"; fail=1; \
+	  else say ok "no placeholder passwords"; fi; \
+	$(LOADENV); \
+	if printf '%s' "$$PHOENIX_ADMIN_SECRET" | grep -qE '^.{32,}$$' \
+	   && printf '%s' "$$PHOENIX_ADMIN_SECRET" | grep -q '[0-9]' \
+	   && printf '%s' "$$PHOENIX_ADMIN_SECRET" | grep -q '[a-z]'; then \
+	  say ok "PHOENIX_ADMIN_SECRET"; \
+	  else say FAIL "PHOENIX_ADMIN_SECRET needs 32+ characters, a digit and a lower-case letter"; fail=1; fi; \
+	case "$$LLM_BASE_URL" in \
+	  *localhost*|*127.0.0.1*) \
+	    if test -n "$$LLM_CONTAINER_URL$$OLLAMA_CONTAINER_URL"; then \
+	      say ok "the containers' view of the model"; \
+	    else \
+	      say FAIL "LLM_BASE_URL is host-local and neither LLM_CONTAINER_URL nor OLLAMA_CONTAINER_URL is set, so a worker would call itself"; \
+	      fail=1; fi;; \
+	  *) say ok "LLM_BASE_URL is not host-local";; \
+	esac; \
+	echo; echo "Asking $$LLM_MODEL one question..."; \
+	PYTHONPATH=backend poetry run python -m llm.check || fail=1; \
+	echo; \
+	if test $$fail -eq 0; then echo "Ready. Next: make dev"; \
+	  else echo "Fix the above, then run make doctor again."; exit 1; fi
+
 # Install dependencies, start every service, and create the schema.
-dev: install certs
+dev: install certs logs-dir
 	$(COMPOSE) up -d
 	@echo "Waiting for PostgreSQL..."
 	@$(LOADENV) && \
@@ -103,6 +243,7 @@ dev: install certs
 # from an index: a 504 there fails the whole install, and did.
 SPACY_MODELS := de_core_news_md en_core_web_md
 
+# Install the Python dependencies and the spaCy pipelines.
 install:
 	poetry install --with llm,nlp,data,storage,api,pipeline,viz,observability,dev
 	@for model in $(SPACY_MODELS); do \
@@ -118,9 +259,19 @@ install:
 
 # ── Services ───────────────────────────────────────────────────────────────
 
-up: certs
+# The directory a host command writes its JSON log lines to, which compose
+# bind-mounts into the shipper read-only. Made here rather than left to the
+# container engine: a missing bind-mount source is created by the engine
+# itself, which can leave it owned by root, and then the host process the
+# directory exists for cannot write to it.
+logs-dir:
+	@mkdir -p logs
+
+# Start every service, generating the certificates first if they are missing.
+up: certs logs-dir
 	$(COMPOSE) up -d
 
+# Stop every service. The volumes are kept.
 down:
 	$(COMPOSE) down
 	@$(MAKE) --no-print-directory prune
@@ -150,6 +301,7 @@ down-volumes:
 logs:
 	$(COMPOSE) logs -f
 
+# The Streamlit application's log.
 logs-frontend:
 	$(COMPOSE) logs -f streamlit
 
@@ -188,6 +340,9 @@ logs-orchestration:
 #
 #     make logs-retention LOGS_RETENTION_DAYS=90
 LOGS_RETENTION_DAYS ?= 30
+# Age the shipped logs out after LOGS_RETENTION_DAYS. Until this has run,
+# nothing is deleted.
+#
 # Run through `sh -c`, with the credential read from the container's own
 # environment rather than passed in, so it stays out of the process list
 # and out of make's echo of the command.
@@ -206,6 +361,33 @@ logs-retention:
 	  echo "$$answer"; \
 	  case "$$answer" in *\"acknowledged\":true*) ;; *) exit 1;; esac'
 	@echo "qa-logs is kept for $(LOGS_RETENTION_DAYS) days."
+
+# The other half of the retention, and the one `logs-retention` cannot do.
+# That target ages what Elasticsearch holds; this ages the FILES the shipper
+# read them out of, and nothing else does.
+#
+# Each process writes {service}-{host}-{pid}.log, because the WRITER is what
+# the name has to be unique per: two processes rotating one file take each
+# other's lines with them. The cost is a file per container and a file per
+# host run, and nothing else deletes one. `RotatingFileHandler` only rotates
+# the file its own live process owns, filebeat mounts both directories
+# read-only on purpose, and filebeat's `ignore_older` and `clean_inactive`
+# age its REGISTRY and not the disk. The volume had reached 78 files and
+# 110 MB before this target existed.
+#
+# Both places a line is written: the volume, through the api, which is the
+# one container that mounts it writable, and ./logs on the host, which make
+# can delete from itself. Deletes by mtime, so a file a live process is
+# still appending to is never old enough to take.
+#
+#     make logs-prune LOGS_KEEP_DAYS=7
+LOGS_KEEP_DAYS ?= 30
+# Delete the log files no process has written to for LOGS_KEEP_DAYS.
+logs-prune:
+	@{ $(COMPOSE) exec -T api sh -c \
+	     'find /var/log/qa -type f -mtime +$(LOGS_KEEP_DAYS) -print -delete'; \
+	   find logs -type f -mtime +$(LOGS_KEEP_DAYS) -print -delete 2>/dev/null; \
+	 } | wc -l | xargs printf '%s file(s) deleted.\n'
 
 # ── Database ───────────────────────────────────────────────────────────────
 #
@@ -554,14 +736,27 @@ questions-diff:
 	@test -n "$(RUNS)" || { echo 'usage: make questions-diff RUNS="<older> <newer>"'; exit 2; }
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.runs $(RUNS)
 
-# What the models have cost, read off the logs the client already writes.
-# Every call logs its tokens and its price - litellm prices the response
+# What the models have cost, read off a CAPTURED log - the text one a drain
+# wrote to a terminal, as `make questions ... | tee run.log` leaves behind.
+# Every call logs its tokens and its price; litellm prices the response
 # rather than this counting it, because the provider is the only thing that
 # knows what it billed for. A self-hosted model has no published price and
 # logs no cost at all, which is the truth about it rather than a zero.
 #
-#   make spend                 everything the log holds
-#   make spend SINCE=2026-09-18  from a date
+# LOG is required, and that is the fix for what these used to do. They
+# defaulted to /var/log/qa/*.log, which is a path inside the containers and
+# not on the host they run on - and holds JSON, which the pattern below
+# cannot match anyway. Both printed "no priced calls in the log", which
+# reads as "the pipeline cost nothing" rather than "I read nothing".
+#
+# For the LIVE numbers, neither of these: Grafana's Pipeline throughput
+# dashboard sums llm.cost_usd off Elasticsearch, and Phoenix has the same
+# figures per span, per run. What these two have that neither does is a log
+# from a run that is over, on a machine with no stack up - which is what the
+# measurements in evaluation/README.md were taken from.
+#
+#   make spend LOG=run.log
+#   make spend LOG=run.log SINCE=2026-09-18
 # The same log, split by which model answered and what it was asked for.
 #
 # The shape is the Pydantic class the call had to return, and every stage
@@ -572,14 +767,15 @@ questions-diff:
 # moving one of them to another model.
 #
 #   make spend-by-shape LOG=run.log
-#   make spend-by-shape SINCE=2026-09-21
+#   make spend-by-shape LOG=run.log SINCE=2026-09-21
 #
 # Ordered by call count, because the shape at the top is the one worth
 # moving somewhere cheaper.
 spend-by-shape:
+	@test -n "$(LOG)" || { echo 'usage: make spend-by-shape LOG=<a captured log> [SINCE=<date>]'; exit 2; }
 	@printf '%-24s %-18s %8s %12s %12s %10s\n' \
 	   MODEL SHAPE CALLS 'TOKENS IN' 'TOKENS OUT' COST
-	@cat $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	@cat $(LOG) \
 	 | $(if $(SINCE),grep "$(SINCE)",cat) \
 	 | grep -hoE '[^ ]+ answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
 	 | sed -E 's/^([^ ]+) answered (_[A-Za-z]+) in [0-9.]+s \(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3 \4 \5/' \
@@ -588,7 +784,7 @@ spend-by-shape:
 	     END {for (k in n) {split(k,p," "); \
 	       printf "%-24s %-18s %8d %12d %12d %9.2f\n", p[1],p[2],n[k],i[k],o[k],c[k]}}' \
 	 | sort -k3 -rn
-	@cat $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	@cat $(LOG) \
 	 | $(if $(SINCE),grep "$(SINCE)",cat) \
 	 | grep -hoE 'answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
 	 | sed -E 's/.*\(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3/' \
@@ -596,9 +792,11 @@ spend-by-shape:
 	 | awk '{i+=$$1; o+=$$2; c+=$$3; n++} END {if (n==0) {print "\nno priced calls in the log"; exit} \
 	     printf "%-24s %-18s %8d %12d %12d %9.2f\n", "", "TOTAL", n, i, o, c}'
 
+# What the models have cost in total, over the same log.
 spend:
+	@test -n "$(LOG)" || { echo 'usage: make spend LOG=<a captured log> [SINCE=<date>]'; exit 2; }
 	@grep -hoE '^[0-9T:-]+ .*answered _[A-Za-z]+ in [0-9.]+s \([0-9,]+ in, [0-9,]+ out, \$$[0-9.]+\)' \
-	   $(if $(LOG),$(LOG),/var/log/qa/*.log) 2>/dev/null \
+	   $(LOG) \
 	 | $(if $(SINCE),grep "^$(SINCE)",cat) \
 	 | sed -E 's/.*\(([0-9,]+) in, ([0-9,]+) out, \$$([0-9.]+)\)/\1 \2 \3/' \
 	 | tr -d ',' \
@@ -717,20 +915,27 @@ archive-purge:
 # integration layers, which start a Postgres and a SeaweedFS of their own
 # and are skipped where no container engine answers. Configuration lives in
 # [tool.pytest.ini_options] in pyproject.toml.
+#
+# The order is shuffled every run, and the seed is printed at the top. A
+# failure that only happens in one order is a test depending on another,
+# and `-p randomly --randomly-seed=<n>` reproduces it.
 test:
-	poetry run pytest -m "not smoke and not eval"
+	poetry run pytest -m "not smoke and not eval and not perf"
 
 # Without the slow ones: no spaCy pipelines, no pyright, no containers.
+# Over every core, which the unit layer can be: it shares no container.
 test-fast:
-	poetry run pytest -m "not nlp and not types and not integration"
+	poetry run pytest -n auto -m "not nlp and not types and not integration and not perf"
 
 # The layers on their own, for working on one of them.
 test-unit:
-	poetry run pytest -m "not integration and not smoke and not eval"
+	poetry run pytest -n auto -m "not integration and not smoke and not eval and not perf"
 
+# Everything needing a Postgres and a SeaweedFS, short of end to end.
 test-integration:
 	poetry run pytest -m "integration and not e2e"
 
+# One corpus, every stage, against a stack of its own.
 test-e2e:
 	poetry run pytest -m e2e
 
@@ -745,10 +950,39 @@ test-smoke:
 test-eval:
 	$(LOADENV) && poetry run pytest -m eval -s
 
+# Branch coverage over every package a deployment runs, both layers
+# combined. Combined because neither covers the other's half: the
+# repositories are the integration layer's and the gates are the unit
+# layer's, so a threshold against either alone is against the wrong number.
+#
+# What it is measured over, what is left out and the floor it has to clear
+# are [tool.coverage.*] in pyproject.toml.
+# --cov-fail-under=0 on each half: the floor is against the combination,
+# and enforced per run it fails the first one for not being the second.
 test-coverage:
-	poetry run pytest -m "not smoke and not eval" \
-	  --cov=backend --cov=telemetry --cov-report=term-missing:skip-covered
+	poetry run coverage erase
+	poetry run pytest -m "not integration and not smoke and not eval and not perf" \
+	  --cov --cov-append --cov-report= --cov-fail-under=0
+	poetry run pytest -m integration --cov --cov-append --cov-report= --cov-fail-under=0
+	poetry run coverage report
 
+# Times the ceilings the code names in a comment: the combination search in
+# `adds_up`, the release draw, the composition report. Never a gate - a
+# budget on a shared runner measures the runner.
+test-perf:
+	poetry run pytest -m perf
+
+# Whether the tests would notice a gate changing. Line coverage says the
+# line ran; this changes it and asks whether anything fails.
+#
+# Which modules and which layers are [tool.mutmut] in pyproject.toml.
+# Hours, so nightly rather than per change; `mutmut browse` reads the
+# survivors afterwards.
+mutation:
+	poetry run mutmut run
+	poetry run mutmut results
+
+# Everything that gates. Another name for `test`.
 check: test
 
 # ── Static checks ──────────────────────────────────────────────────────────
@@ -800,6 +1034,7 @@ lint-imports:
 deps:
 	poetry run deptry .
 
+# Fix what ruff can fix, then format every source directory.
 format:
 	poetry run ruff check --fix $(SOURCES)
 	poetry run ruff format $(SOURCES)
@@ -886,9 +1121,11 @@ EVAL = $(call WITH,evaluation.env) && \
        PYTHONPATH=backend poetry run python -m evaluation.run
 EVAL_DATASET ?= extraction-golden
 
+# Put the golden cases in Phoenix, as a new dataset version.
 eval-upload:
 	$(EVAL) --upload $(EVAL_DATASET)
 
+# Run the served model against them and record the scores in Phoenix.
 eval-score:
 	$(EVAL) --score $(EVAL_DATASET)
 
@@ -941,18 +1178,23 @@ second-opinion:
 REVIEW = $(call WITH,review.env) && \
          PYTHONPATH=backend poetry run python -m review.run
 
+# What is in Argilla now, and how much of it has been submitted.
 review-status:
 	$(REVIEW) --status
 
+# Push a sample of facts, spread over the checker's verdicts.
 review-push-facts:
 	$(REVIEW) --push facts
 
+# Write the submitted fact verdicts back to the database.
 review-pull-facts:
 	$(REVIEW) --pull facts
 
+# Push each topic's name and whether it is a subject.
 review-push-topics:
 	$(REVIEW) --push topic-labels
 
+# Write the submitted topic labels back to the database.
 review-pull-topics:
 	$(REVIEW) --pull topic-labels
 
@@ -963,6 +1205,7 @@ review-pull-topics:
 review-push-questions:
 	$(REVIEW) --push questions $(if $(IDS),--ids $(IDS))
 
+# Write the submitted question judgements back to the database.
 review-pull-questions:
 	$(REVIEW) --pull questions
 

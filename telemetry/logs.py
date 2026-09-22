@@ -43,8 +43,9 @@ _NOISY = ("botocore", "boto3", "urllib3", "watchdog", "sqlalchemy.engine")
 #: root handler and print in their own format.
 _OPINIONATED = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
-#: Where the JSON lines go, if anywhere. Unset - which is every host command -
-#: means stdout only.
+#: Where the JSON lines go, if anywhere. A container's own path from
+#: compose, the bind-mounted host directory from .env, and unset - which is
+#: any process given neither - means stdout only.
 _LOG_DIR = "LOG_DIR"
 
 #: One file may reach this before it rotates, and this many rotations are
@@ -228,9 +229,14 @@ def _stream() -> logging.Handler:
 def _file(service_name: str) -> logging.Handler | None:
     """Builds the handler the shipper reads, or None if there is nowhere.
 
-    One file per service per container. The hostname is in the name because
-    a scaled stage runs several containers on one volume, and two processes
-    rotating one file take each other's lines with them.
+    One file per PROCESS: the writer is what the name has to be unique per,
+    because two processes rotating one file take each other's lines with
+    them. A scaled stage is several containers over one volume, and the
+    host directory is one machine over many runs, so neither the service
+    nor the host alone is enough - `extraction-3f15a9823823-1.log` beside
+    `extraction-hazems-mac-48213.log`.
+
+    The cost is a file per run, and `make logs-prune` is what sweeps them.
 
     Never raises: an unwritable directory costs the shipped copy, and the
     line still reaches stdout. That is reported rather than swallowed - the
@@ -242,7 +248,8 @@ def _file(service_name: str) -> logging.Handler | None:
     try:
         Path(directory).mkdir(parents=True, exist_ok=True)
         handler = logging.handlers.RotatingFileHandler(
-            Path(directory) / f"{service_name}-{socket.gethostname()}.log",
+            Path(directory)
+            / f"{service_name}-{socket.gethostname()}-{os.getpid()}.log",
             maxBytes=_MAX_BYTES,
             backupCount=_BACKUPS,
             encoding="utf-8",

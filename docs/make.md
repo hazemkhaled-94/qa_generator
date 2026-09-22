@@ -372,8 +372,9 @@ and a check per stage, which survives the terminal closing.
   different things: the first takes the volumes, the second takes the rows.
 - **`make lock` needs the container engine, not compose.** Compose has no
   equivalent of `--target`.
-- **A `make` target logs to the terminal and nowhere else.** `LOG_DIR` is
-  unset on the host, so a host drain leaves no line in Grafana.
+- **A `make` target's lines reach Grafana too.** `LOG_DIR` names `./logs` on
+  the host, which filebeat reads alongside the volume. `host.name` is what
+  separates a host run from a container.
 - **`make spend` takes no live reading.** `LOG=` is required and names a
   captured text log. Grafana and Phoenix are where a running pipeline's cost
   is.

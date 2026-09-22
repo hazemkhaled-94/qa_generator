@@ -233,6 +233,10 @@ configs/env/provider.env
 # `make topics-visualise` output
 /topics/
 
+# What a host command writes its JSON log lines to, and what compose
+# bind-mounts into the shipper. Made by `make up`.
+/logs/
+
 # macOS
 .DS_Store
 

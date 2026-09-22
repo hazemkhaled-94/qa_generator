@@ -9,5 +9,6 @@ __pycache__/
 
 certs/
 configs/
+logs/
 poetry.lock
 .env

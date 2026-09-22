@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import sys
 import threading
 from datetime import datetime
@@ -96,20 +97,27 @@ def test_a_record_renders_as_one_line() -> None:
 
 
 def test_no_log_dir_means_no_file_handler(monkeypatch) -> None:
-    """Unset is every host command."""
+    """A process given neither .env nor compose, which includes pytest."""
     monkeypatch.delenv("LOG_DIR", raising=False)
     assert _file("extraction") is None
 
 
-def test_a_writable_log_dir_is_created_and_named_per_container(
+def test_a_writable_log_dir_is_created_and_named_per_process(
     monkeypatch, tmp_path
 ) -> None:
-    """A scaled stage runs several writers over one volume."""
+    """Two writers over one directory must not share a file.
+
+    A scaled stage is several containers over one volume, and `./logs` is
+    one machine over many runs — so the host alone is not enough and the
+    pid is what finishes the name. Two processes rotating one file take
+    each other's lines with them.
+    """
     monkeypatch.setenv("LOG_DIR", str(tmp_path / "nested"))
 
     handler = _file("extraction")
     assert handler is not None, "a writable LOG_DIR must give a handler"
     assert handler.baseFilename.startswith(f"{tmp_path / 'nested'}/extraction-")
+    assert handler.baseFilename.endswith(f"-{os.getpid()}.log"), handler.baseFilename
     handler.close()
 
 

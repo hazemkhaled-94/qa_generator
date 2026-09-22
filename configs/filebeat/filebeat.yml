@@ -1,6 +1,16 @@
-# Reads the JSON lines the api, the five workers, the frontend and the
-# orchestrator write to the shared `logs` volume, and puts each one in
-# Elasticsearch.
+# Reads the JSON lines this project's processes write and puts each one in
+# Elasticsearch. Two places, because a stage runs in two:
+#
+#   /var/log/qa       the `logs` volume - the api, the five workers, the
+#                     frontend and the orchestrator
+#   /var/log/qa-host  ./logs in the repository, bind-mounted - a `make`
+#                     target, `dagster dev`, anything run by hand
+#
+# One input over both. The line is the same line either way: same ECS
+# fields, same `trace.id`, same `stage`. What says which is which is
+# `host.name` - a container id on one side and a machine name on the
+# other - so a dashboard groups them together by default and can separate
+# them when somebody asks.
 #
 # Only this project's own processes. The infrastructure containers - Postgres,
 # SeaweedFS, Redis, Elasticsearch itself - keep the json-file driver and are
@@ -19,6 +29,7 @@ filebeat.inputs:
     enabled: true
     paths:
       - /var/log/qa/*.log
+      - /var/log/qa-host/*.log
     parsers:
       # One JSON object per line, merged into the event root rather than
       # nested under a key. overwrite_keys is what lets the line's own
@@ -29,9 +40,13 @@ filebeat.inputs:
           overwrite_keys: true
           expand_keys: true
           add_error_key: true
-    # A scaled stage writes one file per container and those files stop being
-    # written when it goes. Long enough that a stopped worker's last lines are
-    # still picked up on the next start.
+    # One file per process, and a file stops being written the moment that
+    # process ends - which for a `make` target is seconds. Long enough that
+    # a stopped worker's last lines, and a host command run while the stack
+    # was down, are both still picked up on the next start.
+    #
+    # These age the REGISTRY, not the disk. `make logs-prune` is what
+    # deletes a file.
     ignore_older: 72h
     clean_inactive: 96h
 
