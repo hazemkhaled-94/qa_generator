@@ -71,14 +71,14 @@ make install
 make doctor
 ```
 
+`install` fetches the dependencies and the spaCy pipelines named in
+`NLP_MODELS`. Those are also baked into the backend image, because the
+runtime does not download them.
+
 `doctor` checks the tools, the configuration and then **asks the model one
 question**, which is the only way to find out that a model id is wrong, an
 address is unreachable or a credential is stale. Without it the first thing
 to discover any of those is the first passage of a real run, hours in.
-
-This installs the dependencies and downloads the spaCy pipelines named in
-`NLP_MODELS`. They are also baked into the backend image, because the runtime
-has no network.
 
 `EMBEDDING_MODEL` is not baked in. One image serves the API and all five
 workers, and its weights are 2.2 GB that four of those processes never load.
@@ -189,7 +189,7 @@ Each service documents itself, beside its code.
 | [`orchestration/`](orchestration/README.md) | Dagster: one asset per stage. Delete it and the pipeline is unchanged |
 | [`review/`](review/README.md) | Argilla: where a person overrules a model |
 | [`evaluation/`](evaluation/README.md) | Phoenix: scoring a served model against the golden cases |
-| [`tests/`](tests/README.md) | Ten layers, and what each needs |
+| [`tests/`](tests/README.md) | Eleven layers, and what each needs |
 | [`configs/`](configs/README.md) | Service configuration and init scripts |
 | [`docs/architecture.md`](docs/architecture.md) | The four graphs: the pipeline, the queue, the imports, the containers |
 | [`docs/configuration.md`](docs/configuration.md) | Every setting worth changing |
