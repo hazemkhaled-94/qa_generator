@@ -90,3 +90,66 @@ def test_the_models_and_the_migrations_agree(engine) -> None:
         difference = compare_metadata(context, Base.metadata)
 
     assert not difference, "\n".join(str(item) for item in difference)
+
+
+def test_every_enum_check_matches_its_model(engine) -> None:
+    """A CHECK that has fallen behind its enum, which autogenerate cannot see.
+
+    `test_the_models_and_the_migrations_agree` above runs
+    `compare_metadata`, and that compares tables, columns, indexes and
+    foreign keys. **It does not compare CHECK constraints.** So a member
+    added to a StrEnum widens the constraint the model declares, no
+    revision is generated for it, and nothing fails - until a long-lived
+    database meets a gate that was added late and Postgres refuses the row.
+
+    That is not hypothetical. `restates_question` and `answer_incomplete`
+    reached `QuestionRejection` and the checker without reaching
+    `questions_rejected_reason_valid`, and the first run to fire either one
+    failed the topic with an IntegrityError instead of storing a verdict.
+
+    Read off the MIGRATED database rather than off the models, because the
+    models are the side that is right by construction.
+    """
+    import re
+
+    from sqlalchemy import text
+
+    from database.qa_generator import Base
+
+    def members(sql: str) -> set[str]:
+        """The literals one CHECK allows."""
+        return set(re.findall(r"'([a-z_0-9]+)'", sql))
+
+    declared = {
+        constraint.name: members(str(constraint.sqltext))
+        for table in Base.metadata.tables.values()
+        for constraint in table.constraints
+        if type(constraint).__name__ == "CheckConstraint"
+        and len(members(str(constraint.sqltext))) >= 2
+    }
+    assert declared, "no enum-backed CHECK constraints found on the models"
+
+    with engine.connect() as connection:
+        built = {
+            name: members(ddl)
+            for name, ddl in connection.execute(
+                text(
+                    "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE contype = 'c' AND connamespace = 'public'::regnamespace"
+                )
+            ).all()
+        }
+
+    drifted = {
+        name: sorted(values - built[name])
+        for name, values in declared.items()
+        if name in built and values - built[name]
+    }
+
+    assert not drifted, (
+        "the database refuses values the models allow, and autogenerate will "
+        "not write the revision for you:\n"
+        + "\n".join(
+            f"  {name} is missing {missing}" for name, missing in drifted.items()
+        )
+    )
