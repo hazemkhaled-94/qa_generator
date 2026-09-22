@@ -139,6 +139,25 @@ class Settings:
     #: How much of a list or an explanation has to come back for the verifier
     #: to be agreeing with it.
     answer_overlap: float
+    #: How much of what the verifier recovered the target has to account for
+    #: before the target is read as an incomplete key. The same recovery as
+    #: `answer_overlap`, read the other way round. 0 turns the reading off.
+    answer_coverage: float
+    #: How much of a passage may be the names of people before it is read as
+    #: a credits page and never asked about. 0 turns the reading off.
+    party_density: float
+    #: How much a candidate fact must have in common with the head of its
+    #: sample before a second passage is offered at all. 0 offers one
+    #: whatever it holds, which is what every run so far has done.
+    #:
+    #: Off by default, and the sweep is why. Over 1,853 accepted
+    #: multi-passage questions, a floor of 0.84 would have narrowed 37% of
+    #: them while only 46% of those read as welded, and the weld rate fell
+    #: from 34.8% to 24.3%. There is no knee: the score of the pair a writer
+    #: actually used barely separates the welds from the sound questions.
+    #: The mechanism is here to be tuned against a corpus, not because a
+    #: threshold is known.
+    meets_floor: float
     #: How much of what an unanswerable question is about has to occur in the
     #: material it was drawn from. Below it the question is off topic: any
     #: chatbot declines one about something the corpus never mentions.
@@ -279,6 +298,9 @@ class Settings:
             answer_chars=_bounds("QUESTIONS_ANSWER_CHARS", source),
             explanation_chars=_span("QUESTIONS_EXPLANATION_CHARS", source),
             answer_overlap=decimal("QUESTIONS_ANSWER_OVERLAP", source),
+            answer_coverage=decimal("QUESTIONS_ANSWER_COVERAGE", source),
+            party_density=decimal("QUESTIONS_PARTY_DENSITY", source),
+            meets_floor=decimal("QUESTIONS_MEETS_FLOOR", source),
             off_topic_overlap=decimal("QUESTIONS_OFF_TOPIC_OVERLAP", source),
             elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES", source),
             long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS", source),

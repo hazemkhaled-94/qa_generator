@@ -16,6 +16,8 @@ from sqlalchemy import (
     ARRAY,
     Select,
     Text,
+    and_,
+    case,
     cast,
     distinct,
     func,
@@ -45,6 +47,7 @@ from question_generation.models import (
     StoredQuestion,
 )
 from question_generation.queue import IS_TOPIC
+from question_generation.types import CHECKED
 
 #: Which columns the search box looks in, by the name the API accepts.
 SEARCH_FIELDS = {
@@ -733,6 +736,20 @@ class QuestionCatalog(Repository):
             func.count()
             .filter(Question.difficulty == Question.planned_difficulty)
             .label("planned_met"),
+            # How much of `cognitive_level` is a measurement. The level is
+            # derived from the type, and only a few types have a label a
+            # rule settles; the rest declare one nothing checked.
+            func.count(
+                case(
+                    (
+                        and_(
+                            Question.status == QuestionStatus.ACCEPTED,
+                            Question.question_type.in_(tuple(CHECKED)),
+                        ),
+                        1,
+                    )
+                )
+            ).label("levels_checked"),
             func.coalesce(func.avg(Question.answer_chars), 0.0).label("answer"),
             func.coalesce(func.avg(func.length(Question.question_text)), 0.0).label(
                 "chars"
@@ -807,6 +824,7 @@ class QuestionCatalog(Repository):
             answer_form=spread["answer_form"],
             planned_difficulty=spread["planned_difficulty"],
             planned_met=row.planned_met,
+            cognitive_level_checked=row.levels_checked,
             passages_total=reach.passages_total,
             passages_with_facts=reach.passages_with_facts,
             passages_asked=reach.passages_asked,

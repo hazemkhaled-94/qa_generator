@@ -621,6 +621,11 @@ class QuestionQuality:
     #: spread. A set that is all `recall` is a lookup benchmark however many
     #: of its questions reach two documents.
     cognitive_level: dict[str, int]
+    #: How many of the accepted questions carry a level a rule settled. The
+    #: level is derived from the type, and most types declare one nothing
+    #: checks - so this is what says how much of the column is a
+    #: measurement. An exam blueprint reads it to know which rows to trust.
+    cognitive_level_checked: int
     #: Questions whose band is the one the plan asked for.
     planned_met: int
     #: How much of the corpus the accepted questions actually reach.

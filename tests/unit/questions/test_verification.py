@@ -22,12 +22,17 @@ from question_generation.gates import (
     agrees,
     anchored,
     asks_for_an_agent,
+    compares,
     enumerates,
     explains,
     fitting,
+    incomplete,
     moves_on,
+    names_parties,
     near_verdict,
     on_topic,
+    periods,
+    restates,
     same_material,
     structural,
 )
@@ -2118,3 +2123,136 @@ def test_a_turn_resting_on_nothing_is_left_to_the_orphan_trigger() -> None:
     """A measurement with nothing to measure is not evidence."""
     assert same_material(cited=(), parent=(8,))
     assert same_material(cited=(8,), parent=())
+
+
+# ── The answer that only says the question again ───────────────────────────
+
+
+def test_an_answer_adding_no_content_word_restates_the_question() -> None:
+    """3.3% of one run's accepted answers read like this."""
+    assert restates(
+        "Wofür sind statische Analysen bei statischen Wartbarkeitstests geeignet?",
+        "für statische Wartbarkeitstests",
+        "de",
+    )
+
+
+def test_an_answer_that_adds_something_does_not_restate() -> None:
+    """The gate is full containment, not a share."""
+    assert not restates(
+        "Why does a request have to be confirmed in writing?",
+        "so that the agreed response time can be evidenced later",
+        "en",
+    )
+
+
+def test_an_answer_asserting_a_number_is_exempt() -> None:
+    """`content` drops numerals, so the answer would score as contained.
+
+    `zwei` IS the answer, and a value carrying a figure is the most
+    scoreable kind there is. The exemption took the catch from 167 answers
+    to 121 and every one it dropped was a number.
+    """
+    assert not restates(
+        "In wie viele Kategorien werden Schlüsselwörter eingeteilt?",
+        "zwei Kategorien",
+        "de",
+    )
+
+
+# ── The key that names less than the passages gave ─────────────────────────
+
+
+def test_a_key_naming_one_of_many_is_incomplete() -> None:
+    """The `mit Entwicklern` case, read off the recovery already paid for."""
+    assert incomplete(
+        recovered=(
+            "developers, architects, operations engineers, product owners, "
+            "local support, technical experts and the service desk"
+        ),
+        target="developers",
+        language="en",
+        form=AnswerForm.LIST,
+    )
+
+
+def test_a_key_naming_most_of_what_came_back_is_complete() -> None:
+    """A verifier is wordier than a key, and that alone is not a fault."""
+    assert not incomplete(
+        recovered="by phone, through the web form and by email",
+        target="by phone, through the web form and by email",
+        language="en",
+        form=AnswerForm.LIST,
+    )
+
+
+@pytest.mark.parametrize("form", [AnswerForm.VALUE, AnswerForm.EXPLANATION])
+def test_only_a_list_claims_to_name_a_set(form: str) -> None:
+    """A value is short because its answer is one thing."""
+    assert not incomplete(
+        recovered=(
+            "developers, architects, operations engineers, product owners, "
+            "local support, technical experts and the service desk"
+        ),
+        target="developers",
+        language="en",
+        form=form,
+    )
+
+
+# ── Two more types a rule can settle ───────────────────────────────────────
+
+
+def test_a_comparison_naming_one_thing_is_refused() -> None:
+    """`Wie unterscheiden sich die beschriebenen Umgebungen?` compares nothing."""
+    assert not compares(
+        "Wie unterscheiden sich die beschriebenen Umgebungen?",
+        "eine Zielumgebung",
+        "de",
+    )
+
+
+def test_a_comparison_naming_both_sides_passes() -> None:
+    """Both in the question, both in the answer."""
+    assert compares(
+        "How do the reply times for standard and urgent requests differ?",
+        "48 hours for a standard request and 4 hours for an urgent one",
+        "en",
+    )
+
+
+def test_a_temporal_answer_needs_two_periods() -> None:
+    """`How did it change from 2024 to 2025?` is answered with both years."""
+    assert periods("from 72 hours in 2024 to 48 hours in 2025", "en")
+    assert not periods("72 hours", "en")
+
+
+def test_a_count_is_not_a_period() -> None:
+    """Two units are not two periods; a quantity is a unit too."""
+    assert not periods("40 people and 25 people", "en")
+
+
+# ── The corpus's other furniture ───────────────────────────────────────────
+
+
+def test_a_page_of_names_is_read_as_a_credits_page() -> None:
+    """Acknowledgements: median PER density 0.794 over 20 of them."""
+    assert names_parties(
+        "Graham Bath, Judy McKay, Tauhida Parveen, Mike Smith, Erik van "
+        "Veenendaal, Rex Black, Kari Kakkonen, Leo van der Aalst",
+        "en",
+    )
+
+
+def test_subject_matter_is_not_a_credits_page() -> None:
+    """Median PER density of everything else was 0.000."""
+    assert not names_parties(
+        "A standard support request is answered within 48 hours on working "
+        "days, and an urgent request within four hours of being raised.",
+        "en",
+    )
+
+
+def test_a_density_of_zero_turns_the_reading_off() -> None:
+    """The default, so a caller that says nothing gets every passage."""
+    assert not names_parties("Graham Bath, Judy McKay, Rex Black", "en", 0.0)

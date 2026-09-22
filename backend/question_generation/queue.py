@@ -290,6 +290,10 @@ class QuestionQueue(RowQueue):
         so a caller that says nothing gets every passage: this excludes
         material, and a default that quietly dropped some would be the
         wrong way round.
+
+        The OTHER furniture reading, `names_parties`, is not here: it needs a
+        tagger, and a catalogue the api holds must not import the module that
+        loads one. The service applies it to what this returns.
         """
         super().__init__(lease)
         self._kinds = kinds

@@ -106,6 +106,7 @@ def build_service(
             bounds=settings.answer_chars,
             explanation_chars=settings.explanation_chars,
             overlap=settings.answer_overlap,
+            coverage=settings.answer_coverage,
             long_answer_chars=settings.long_answer_chars,
             elsewhere=catalog.elsewhere,
             elsewhere_passages=settings.elsewhere_passages,

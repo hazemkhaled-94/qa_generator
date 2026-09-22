@@ -70,6 +70,15 @@ Rules, all of them mandatory:
   are filler that makes a question read like a form. Ask "Which criteria ...",
   never "Which specific criteria ...". Say the thing plainly.
 
+- VARY HOW YOU OPEN. A kind of question has more than one opening and real
+  askers use all of them: a reason is asked as "Why ...", "What is the reason
+  ...", "What makes ... necessary"; a comparison as "How do ... differ",
+  "What sets ... apart", "Which of ... is". Where a type below shows two
+  worked examples, they open differently ON PURPOSE - take the variety, not
+  just the first one. A set in which nine of ten questions of a kind open
+  with the same word tests whether a chatbot handles that word, not whether
+  it can find an answer.
+
 - NEVER PUT THE ANSWER IN THE QUESTION, or the word the answer is a kind of.
 
 - ONE question, ending in a question mark. One thing asked.
@@ -421,6 +430,18 @@ Worked example. Facts:
                     days does not consume its four hours until the next
                     working day begins."
          facts:    [1, 2]
+
+  A second, opening differently:
+
+  RIGHT  question: "What has to be true for a support request to get the
+                    four-hour reply time?"
+         answer:   "it is marked urgent, and the time runs on working days only"
+         explanation: "Both conditions have to hold. The request has to carry
+                    the urgent marking, and the four hours are counted in
+                    working days, so one raised on a Friday evening does not
+                    start consuming them until the Monday. Without the
+                    marking the ordinary time applies instead."
+         facts:    [1, 2]
 """,
     ),
     TypeSpec(
@@ -448,6 +469,19 @@ Worked example. Facts:
                     fixes the agreed time at the moment it is agreed, which is
                     what makes the commitment enforceable rather than merely
                     stated."
+         facts:    [1]
+
+  A second, opening differently. Both are good questions; 92% of one measured
+  run opened with the first word above, which is a set testing one word.
+
+  RIGHT  question: "What makes a written confirmation necessary for a
+                    support request?"
+         answer:   "it is what evidences the agreed response time later"
+         explanation: "The requirement exists so that the agreed time can be
+                    evidenced. Without a written record a disputed response
+                    time comes down to what two people remember, and the
+                    commitment cannot be held to. The confirmation fixes it
+                    in writing at the point it is agreed."
          facts:    [1]
 """,
     ),
@@ -529,6 +563,18 @@ Worked example. Facts:
                     handled the same working day or over the following two.
                     Both figures are times to answer, so the two are directly
                     comparable."
+         facts:    [1, 2]
+
+  A second, opening differently:
+
+  RIGHT  question: "What sets the reply time for an urgent support request
+                    apart from a standard one?"
+         answer:   "4 hours rather than 48"
+         explanation: "An urgent request is answered within 4 hours where a
+                    standard one has 48. The difference is what marking a
+                    request urgent buys: the same working day rather than the
+                    following two. Both are times to answer rather than times
+                    to resolve, so they measure the same thing."
          facts:    [1, 2]
 """,
     ),
@@ -678,12 +724,53 @@ Worked example. Facts:
                     material never mentions scanners; the case is settled by
                     reading the stated rule onto it."
          facts:    [1, 2]
+
+  A second, putting the case without opening on a conditional:
+
+  RIGHT  question: "A delivery van breaks down and the depot stops loading.
+                    How much time is allowed to answer the request that is
+                    raised?"
+         answer:   "4 hours"
+         explanation: "A request counts as urgent when it stops work at a
+                    site, and a depot that cannot load has stopped work. So
+                    the urgent commitment applies and the answer is due
+                    within 4 hours rather than the standard 48. Nothing in
+                    the material mentions vans or depots - the case is
+                    settled by applying the stated rule to it."
+         facts:    [1, 2]
 """,
     ),
 )
 
 #: Every type, by name.
 SPECS: dict[str, TypeSpec] = {spec.name: spec for spec in _SPECS}
+
+#: The types whose label a RULE settles, so a level derived from one is a
+#: measurement rather than a name somebody wrote down.
+#:
+#: `cognitive_level` is derived from the type, and the type was unchecked
+#: when the column was added: 208 of 244 accepted `entity` questions named
+#: no party, which is the definition of the type. So the level inherited
+#: whatever the label got wrong, and an exam blueprint reading the column
+#: could not tell which rows to trust.
+#:
+#: Four of them now. `entity` and `enumeration` face a structural gate each;
+#: `implication` and `application` are the derived types, whose entailment
+#: and arithmetic checks ARE the reading that they reason rather than look
+#: up. The other eight declare a level nothing has checked - `reason`,
+#: `consequence` and `condition` have no structural signature and no model
+#: is asked for one again. `/questions/quality` reports the share, so the
+#: column says how much of itself is measured.
+CHECKED: frozenset[str] = frozenset(
+    {
+        QuestionType.ENTITY,
+        QuestionType.ENUMERATION,
+        QuestionType.COMPARISON,
+        QuestionType.TEMPORAL,
+        QuestionType.IMPLICATION,
+        QuestionType.APPLICATION,
+    }
+)
 
 
 def spec(name: str | None) -> TypeSpec:

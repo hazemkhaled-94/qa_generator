@@ -27,6 +27,7 @@ _GATES = {
     "answer_too_long": "The answer is within the ceiling its form is held to.",
     "wrong_form": "A value names a thing, an explanation explains one.",
     "wrong_type": "An entity question asks after a party, an enumeration a set.",
+    "restates_question": "The answer adds a content word the question did not have.",
     "explanation_unusable": "The long answer reads, rests on the passages, and "
     "says more than the key.",
     "asks_nothing_new": "A follow-up reaches a fact the question before it did not.",
@@ -38,6 +39,7 @@ _GATES = {
     "compound": "The question uses one interrogative, so it asks one thing.",
     "unanchored": "Somebody who never read the passage could tell what is asked.",
     "not_recoverable": "A second model got the answer out of the cited passages.",
+    "answer_incomplete": "The answer names most of what that model found there.",
     "answerable_elsewhere": "No passage it leaves uncited answers it either.",
     "source_changed": "Every fact the question rests on still passes its checks.",
 }

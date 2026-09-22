@@ -52,6 +52,7 @@ from nlp.analysis import content, pointing
 from nlp.embedding import Embedder, cosine
 from question_generation.gates import (
     BOUNDS,
+    COVERAGE,
     ENTAILMENT_OVERLAP,
     EXPLANATION_CHARS,
     NAMES_SOMETHING,
@@ -64,11 +65,15 @@ from question_generation.gates import (
     asks_for_an_agent,
     asserted,
     cites_source,
+    compares,
     enumerates,
     explains,
+    incomplete,
     moves_on,
     near_verdict,
     on_topic,
+    periods,
+    restates,
     same_material,
     structural,
     subject,
@@ -98,6 +103,7 @@ class QuestionChecker:
         bounds: Mapping[str, tuple[int, int]] | None = None,
         explanation_chars: tuple[int, int] = EXPLANATION_CHARS,
         overlap: float = OVERLAP,
+        coverage: float = COVERAGE,
         long_answer_chars: int = LONG_ANSWER_CHARS,
         elsewhere=None,
         elsewhere_passages: int = 0,
@@ -139,6 +145,7 @@ class QuestionChecker:
         self._bounds = dict(bounds or BOUNDS)
         self._explanation_chars = explanation_chars
         self._overlap = overlap
+        self._coverage = coverage
         self._long_answer_chars = long_answer_chars
         self._threshold = threshold
         self._elsewhere = elsewhere
@@ -275,6 +282,38 @@ class QuestionChecker:
                 (
                     "it was planned as an enumeration and its answer holds one "
                     "thing, so there is no set behind it"
+                ),
+            )
+
+        if candidate.spec.name == QuestionType.COMPARISON and not compares(
+            candidate.question_text, target, language
+        ):
+            return (
+                QuestionRejection.WRONG_TYPE,
+                (
+                    "it was planned as a comparison and either names one thing "
+                    "or answers with one side, so there is nothing compared"
+                ),
+            )
+
+        if candidate.spec.name == QuestionType.TEMPORAL and not periods(
+            target, language
+        ):
+            return (
+                QuestionRejection.WRONG_TYPE,
+                (
+                    "it was planned as a temporal question and its answer "
+                    "carries fewer than two periods, so nothing changed in it"
+                ),
+            )
+
+        if restates(candidate.question_text, target, language):
+            return (
+                QuestionRejection.RESTATES_QUESTION,
+                (
+                    "its answer adds no content word the question did not "
+                    "already carry, so echoing the question back scores full "
+                    "marks"
                 ),
             )
 
@@ -500,6 +539,26 @@ class QuestionChecker:
                     (
                         f"the verifier recovered {read.recovered!r} where the "
                         f"target answer is {target!r}"
+                    ),
+                )
+            # The same recovery read the other way. `agrees` asks whether
+            # everything the target asserts came back; this asks whether
+            # the target is most of what did. A key naming one of seven
+            # parties agrees with the passage and still marks a chatbot
+            # that names all seven wrong.
+            if incomplete(
+                read.recovered,
+                target,
+                candidate.group.language,
+                form,
+                self._coverage,
+            ):
+                return (
+                    QuestionRejection.ANSWER_INCOMPLETE,
+                    (
+                        f"the target answer {target!r} names much less than "
+                        f"the verifier found in the same passages, "
+                        f"{read.recovered!r}"
                     ),
                 )
             return None

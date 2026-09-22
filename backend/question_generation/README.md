@@ -155,12 +155,32 @@ It is not, for two reasons:
   side. The low weld rate is what narrowing looks like after the fact, not
   evidence that a condensed fact prevents a weld.
 
-What would reach it is a **floor on `meets`**: where the best fact the second
-passage can offer does not meet the head above some share, offer one passage
-instead of two. The writer is currently told to narrow in that case and the
-34% is how often it does not. Not implemented — it needs a setting, and a
-floor set too high makes every question single-passage, which is the band
-problem this module started with.
+**`QUESTIONS_MEETS_FLOOR` is the floor that would reach it, and it is off.**
+Where the best fact the second passage can offer does not meet the head above
+that share, one passage is offered instead of two — the span rules already
+tell the writer to narrow and the 34% is how often it does not, so this
+narrows for it. The mechanism is in [`selection.py`](selection.py); the
+default is `0`, and the sweep is why.
+
+Swept over 1,853 accepted multi-passage questions, by the score of the fact
+pair the writer actually used:
+
+| Floor | Narrowed | Of those, welded | Weld rate left |
+|---|---|---|---|
+| 0.80 | 5.0% | 55.4% | 31.1% |
+| 0.84 | 37.3% | 45.7% | 24.3% |
+| 0.88 | 75.8% | 39.0% | 11.1% |
+
+**There is no knee.** At 0.84 it throws away a third of every multi-passage
+question to remove a minority of welds, and set high enough to matter it
+makes the set single-passage, which is the band problem this module started
+with. The score of the pair a writer used barely separates the welds from the
+sound questions, and a coordination reading of the question itself was tried
+too — only 4% of questions carry a coordinated noun pair at all, so there is
+nothing to build a gate on.
+
+So the lever exists and is not pulled. Raise it only with a measurement
+beside it.
 
 **The corpus's own furniture is never offered.** A publisher puts the same
 copyright notice, contents page, accreditation clause and revision table in
@@ -205,10 +225,26 @@ twin in another document, and by how many of each kind the filter caught:
 | **Acknowledgements** | 20 | 0.932 | **2** |
 
 So *"Welches Unternehmen wird für die initiale Übersetzung des Lehrplans
-gedankt?"* → `T-Systems International GmbH` still gets written. What would
-read it is that the passage is mostly `PER` entities and carries no subject
-noun at all, which spaCy already marks and which needs no word list either.
-Not implemented.
+gedankt?"* → `T-Systems International GmbH` still got written. What reads it
+is **`QUESTIONS_PARTY_DENSITY`**: the share of a passage's alphabetic tokens
+that spaCy tags `PER`. Acknowledgements are not alike in their words, they are
+alike in being a list of names and almost nothing else.
+
+| | Median | p90 | Above 0.25 |
+|---|---|---|---|
+| Acknowledgements (20) | **0.794** | 0.944 | **65%** |
+| Everything else (250) | 0.000 | 0.031 | **none** |
+
+A floor of 0.15 reaches 75% of them and starts costing 1% of the others,
+which is the trade the setting is for. `PER` and not `ORG`: a corpus names
+organisations throughout its subject matter — ISTQB, ISO and IEEE are all
+`ORG` here — so counting those would read a standards discussion as a credits
+page. The cost is the acknowledgement that thanks a company rather than a
+person, which this misses.
+
+It runs in [`service.py`](service.py) and not in the queue, because it needs
+a tagger and a catalogue the api holds must not import the module that loads
+one. Read once per distinct passage rather than once per fact.
 
 **And do not read a page number as furniture.** Counting the questions
 resting on a document's first or last twelve pages gives 20.6%, which is
@@ -225,8 +261,16 @@ which is the point of measuring repetition rather than position.
 
 One shared rule block holds what is true of every question — do not name the
 source, name the subject, one question, the language of the facts — and each
-kind adds what it asks for, what its answer looks like, and one worked
-example. Two prompts for one rule is how the two come to disagree.
+kind adds what it asks for, what its answer looks like, and one or two worked
+examples. Two prompts for one rule is how the two come to disagree.
+
+**Two examples where a kind came out monotonous, opening differently.** 92% of
+accepted `reason` questions opened with the same word, 68% of `application`,
+66% of `comparison` and 59% of `condition` — a set that predictable measures
+whether a chatbot handles one stem rather than whether it can find an answer.
+The second example is what moves it: an instruction to vary the opening is in
+`READS` too, but the examples are what a model copies, which the explanation
+column proved when changing the rule alone did nothing.
 
 Each call returns **two answers**, and they are not one answer written
 twice. `target_answer` is the key a chatbot is scored against; the
@@ -405,6 +449,26 @@ spread, which is the number that says whether a set is a retrieval benchmark
 or a reasoning one: a set that is all `recall` is a lookup benchmark however
 many of its questions reach two documents.
 
+**It also reports `cognitive_level_checked`, and that is the number to read
+before trusting the column.** The level is derived from the type, and only
+six of the thirteen types have a label a rule settles — `entity` and
+`enumeration` by a structural gate each, `comparison` and `temporal` by one
+more, `implication` and `application` because their entailment and arithmetic
+checks *are* the reading that they reason rather than look up. The other seven
+declare a level nothing has checked. `reason`, `consequence` and `condition`
+have no structural signature and no model is asked for one again, so the
+honest thing is to say how much of the column is measured rather than to
+imply all of it is. An exam blueprint reads that share to know which rows to
+trust.
+
+**A type the corpus has no questions of should be weighted 0.** `entity` asks
+who does or decides something, and a corpus describing processes rather than
+actors has few: 43 of 73 `entity` slots in one run were refused as
+`wrong_type` because the writer kept producing factoids in them. The slots
+are better spent on types the material supports, which is what
+`QUESTIONS_TYPE_MIX=...,entity:0,...` does. That is a property of a corpus
+and not of the type.
+
 The column is NULL on every question written before it existed, and
 **deliberately not backfilled** from `question_type`: a kind's level can
 change, and a column filled in afterwards would say a row was judged when
@@ -460,7 +524,8 @@ behind it.
 | `answer_too_short` | is scored against an answer below its form's floor | nothing |
 | `answer_too_long` | answers past its form's ceiling — a value answered with a paragraph | nothing |
 | `wrong_form` | answers in the wrong shape: a value describing an action, an explanation explaining nothing | nothing |
-| `wrong_type` | is not the kind it was planned as, where a rule can say so: an `entity` asking after no party, an `enumeration` answered with one thing | nothing |
+| `wrong_type` | is not the kind it was planned as, where a rule can say so: an `entity` asking after no party, an `enumeration` answered with one thing, a `comparison` naming one side, a `temporal` answer carrying one period | nothing |
+| `restates_question` | is answered with nothing the question did not already carry, so echoing the question back scores full marks | nothing |
 | `explanation_unusable` | carries a long answer that is the wrong length, asserts a figure the passages do not, or only restates the key | nothing |
 | `asks_nothing_new` | is a follow-up citing nothing the question it follows did not | nothing |
 | `off_thread` | is a follow-up resting on no passage the turn before it used | nothing |
@@ -471,6 +536,7 @@ behind it.
 | `compound` | asks two things, so half an answer is neither right nor wrong | nothing |
 | `unanchored` | nobody could have asked without the passage in front of them: it names too little, or it points at something only the passage holds | nothing, or one question-only call |
 | `not_recoverable` | cites evidence its own answer is not in | the round trip |
+| `answer_incomplete` | has a key naming far less than the verifier found in the same passages — one of seven parties | the same round trip |
 | `answerable_elsewhere` | was written to have no answer and a passage it does not cite answers it | a lemma probe and a second call |
 | `source_changed` | rests on a fact that no longer passes its own checks | nothing |
 
@@ -655,11 +721,17 @@ and is the same one in ten on a re-run. An unanswerable question is always
 planned `easy` and from one passage: it is written by moving one fact out of
 reach, so a second passage has nothing to do with it.
 
-Attempted, not held: they now face two gates of their own, and those gates
-bite. Over 3,131 questions, 0.10 produced 239 attempts and 101 accepted — 4.9%
-of the accepted set, because 93 went as `answerable_after_all`. Set this above
-the share the release is meant to hold and read the outcome off
-`make questions-balance`.
+Attempted, not held: they face three gates of their own, and those gates
+bite. Measured over one run, **0.10 produced 79 attempts and 18 accepted — a
+22.8% survival rate, and 4.4% of the accepted set** against a release ceiling
+of 10%. The refusals were 31 `answerable_after_all`, 13
+`answerable_elsewhere` and 11 `off_topic`.
+
+So the share has to be **three to four times the share the release is meant
+to hold**, and the default is now `0.30` rather than `0.10`. Over-setting it
+is safe: `QUESTIONS_RELEASE_UNANSWERABLE` is a ceiling, so the balancer caps
+what actually lands and the cost of aiming high is calls rather than a skewed
+release. Read the outcome off `make questions-balance`.
 
 Three gates exist only for these, and each closes a different hole:
 
@@ -933,13 +1005,16 @@ make questions-balance          # draw the balanced release
 | `QUESTIONS_FACT_KINDS` | `atomic,summary,outline,bridge` | Which kinds of fact a question may be written from |
 | `QUESTIONS_FACT_SAMPLE` | 3 | How many of a topic's facts are offered per call, divided between the passages the sample holds |
 | `QUESTIONS_SAMPLES_PER_PASSAGE` | 3 | How many times one passage is dealt before the stride moves on |
-| `QUESTIONS_TYPE_MIX` | thirteen kinds, weight 1 each | Which kinds are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
+| `QUESTIONS_TYPE_MIX` | eleven kinds, weight 1 each; `entity` and `temporal` 0 | Which kinds are written and in what proportion, as `kind:weight`. A weight of 0, or a name left out, is never written |
 | `QUESTIONS_DIFFICULTY_MIX` | `easy:2,medium:3,hard:3` | Which bands the plan aims for. A request for a shape of sample; the band itself stays derived |
 | `QUESTIONS_ANSWER_CHARS` | `value:1:80,list:3:300,explanation:20:600` | The shortest and longest target answer per form, as `form:min:max` |
+| `QUESTIONS_ANSWER_COVERAGE` | 0.4 | How much of what the verifier found in the passages the target answer has to account for. Below it the target is an incomplete key rather than a wrong one. Lists only; `0` turns the reading off |
+| `QUESTIONS_PARTY_DENSITY` | 0.25 | How much of a passage may be the names of people before it is read as a credits page and never asked about. The furniture the repetition reading cannot see. `0` turns it off |
+| `QUESTIONS_MEETS_FLOOR` | 0 | How much a candidate fact must have in common with the head of its sample before a second passage is offered at all. **Off**: the sweep found no threshold that removes the welds without throwing away sound questions |
 | `QUESTIONS_EXPLANATION_CHARS` | `150:900` | Shortest and longest `answer_explanation`, as `min:max`. One pair for every form: the target is what changes shape, not the reading of it. The floor is the half that matters |
 | `QUESTIONS_BOILERPLATE_COSINE` | 0.95 | How alike a passage must be to one in **another** document before it is read as the corpus's furniture and never asked about. `0` turns the reading off, and a corpus of one document excludes nothing |
 | `QUESTIONS_ANSWER_OVERLAP` | 0.6 | How much of a list or an explanation has to come back for the verifier to have recovered it. Numbers are always exact |
-| `QUESTIONS_UNANSWERABLE_SHARE` | 0.10 | What share of questions are written to have no answer in the corpus |
+| `QUESTIONS_UNANSWERABLE_SHARE` | 0.30 | What share of questions are **attempted** with no answer in the corpus. Three to four times the share a release should hold, because 22.8% of them survive their own gates. Over-setting is safe — `QUESTIONS_RELEASE_UNANSWERABLE` is a ceiling |
 | `QUESTIONS_OFF_TOPIC_OVERLAP` | 0.3 | Below this share of shared lemmas, an unanswerable question is about nothing the material covers |
 | `QUESTIONS_ELSEWHERE_PASSAGES` | 4 | How many uncited passages the `answerable_elsewhere` probe reads |
 | `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of the accepted, answerable roots get a thread. It was a share of the plan's slots, which realised as this times the acceptance rate - 0.5 gave 37% |

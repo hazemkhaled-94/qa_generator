@@ -867,6 +867,131 @@ def enumerates(answer: str, language: str | None) -> bool:
     return len(phrases(answer, language)) >= _ENUMERATED
 
 
+def restates(question: str, answer: str, language: str | None) -> bool:
+    """Whether the answer adds no content word the question did not have.
+
+    `Wofür sind statische Analysen bei statischen Wartbarkeitstests
+    geeignet?` answered `für statische Wartbarkeitstests` has asked nothing:
+    every word of the answer was in the question, so a chatbot that echoes
+    the question back scores full marks. Measured over 3,535 accepted
+    answers, 3.3% read like that.
+
+    Full containment, not a share. There IS no gate here for "the question
+    is its own fact rearranged" and that is deliberate - it was written
+    twice, measured against 61 rows, and both formulations refused `Wie hoch
+    war die Arbeitslosenquote im August 2025?` answered `6,4 Prozent`, which
+    is as good as a benchmark question gets. For a single atomic fact a good
+    question IS the fact minus its answer. This is the narrower thing: not
+    that the answer came from the question's subject, but that it adds
+    nothing to it at all.
+
+    An answer carrying a NUMBER is exempt, and that exemption is what makes
+    the gate usable. `content` drops numerals, so `In wie viele Kategorien
+    werden Schlüsselwörter eingeteilt?` answered `zwei Kategorien` scores as
+    fully contained - the answer is `zwei` and the measure cannot see it.
+    Those are the most unambiguously scoreable answers there are, which is
+    the same finding the value floor in QUESTIONS_ANSWER_CHARS rests on. The
+    exemption took the catch from 167 answers to 121 and every one it
+    dropped was a number.
+
+    Read off the `NUM` part of speech and not off `claim().units`, because
+    the units reading rests on `like_num` and that is not the same feature
+    in two languages: `de_core_news_md` tags `zwei` as `NUM` with
+    `like_num` FALSE, where `en_core_web_md` gives `two` both. A gate
+    exempting only what `units` collects therefore fired on German numerals
+    and not on English ones - in a corpus that is German. `NUM` is a
+    Universal Dependencies part of speech, so every tagset marks it, which
+    is the same argument `PronType=Dem` rests on in `phrasing`.
+    """
+    said = content(answer, language)
+    if not said:
+        return False
+    read = pipeline(language)(answer)
+    if any(token.pos_ == "NUM" or token.like_num for token in read):
+        return False
+    return said <= content(question, language)
+
+
+#: How much of what the verifier independently recovered may be missing from
+#: the target before the target is read as an incomplete key.
+#: QUESTIONS_ANSWER_COVERAGE is where it is set.
+COVERAGE = 0.4
+
+
+def incomplete(
+    recovered: str,
+    target: str,
+    language: str | None,
+    form: str = AnswerForm.VALUE,
+    coverage: float = COVERAGE,
+) -> bool:
+    """Whether the key names much less than the verifier found in the passages.
+
+    `agrees` reads one direction: every lemma the target asserts has to come
+    back. Nothing read the other, and that is how `Mit wem arbeiten Technical
+    Test Analysten zusammen?` was accepted with the key `mit Entwicklern`
+    where the passage lists developers, architects, operations engineers,
+    product owners, local support, technical experts and the service desk.
+    The key is not wrong. It is a seventh of the answer, and a chatbot
+    answering all seven is marked down for it.
+
+    So the reverse: where the verifier, reading only the cited passages,
+    wrote back far more than the target holds, the target is the thing at
+    fault. Free - it reads the recovery `agrees` was already given.
+
+    A `list` only. A `value` is short because its answer is one thing, and an
+    `explanation` is prose whose length says nothing about how much it
+    covers; only a list claims to name a set, and only a list can name a
+    seventh of one.
+
+    Unproven, like `unanchored` was: the recovery is free prose and a
+    verifier is wordier than a key, so this may be measuring register rather
+    than coverage. It is set where only a large gap fires, and it can only
+    ever lose a question - which is the safe direction, because the failure
+    it exists for puts a question in the benchmark that marks a correct
+    chatbot wrong.
+    """
+    if form != AnswerForm.LIST or coverage <= 0:
+        return False
+    wanted, got = content(target, language), content(recovered, language)
+    if not got or len(got) <= len(wanted):
+        return False
+    return len(wanted & got) / len(got) < coverage
+
+
+def compares(question: str, answer: str, language: str | None) -> bool:
+    """Whether a `comparison` names two things and answers with two sides.
+
+    The type asks how two named things differ, so both have to be in the
+    question - its own directive says "name both in the question" - and the
+    answer has to carry both sides. `Wie unterscheiden sich die beschriebenen
+    Umgebungen bei Installierbarkeitstests?` answered `eine Zielumgebung und
+    bestimmte Umgebungen` names nothing and compares nothing.
+
+    Counted on noun phrases, the same reading `enumerates` uses, because a
+    comparison is punctuated differently in every language and `A und B`,
+    `A gegenüber B` and `A, B` are one shape to a phrase count.
+    """
+    return len(phrases(question, language)) >= 2 and len(phrases(answer, language)) >= 2
+
+
+def periods(answer: str, language: str | None) -> bool:
+    """Whether a `temporal` answer carries the two periods it compares.
+
+    `How did the reply time change from 2024 to 2025?` is answered with both
+    years or it has not said what changed. Read off the units extraction
+    already collects, narrowed to the ones that look like a year or a date:
+    a count is a unit too and two counts are not two periods.
+    """
+    found = [unit for unit in claim(answer, language).units if _DATED.search(unit)]
+    return len(found) >= 2
+
+
+#: A year, or a number that could be a day or a month beside one. What
+#: separates a period from a quantity in a list of units.
+_DATED = re.compile(r"(1[89]|20)\d{2}|^\d{1,2}[./]\d{1,2}")
+
+
 def moves_on(cited: Sequence[int], root: Sequence[int]) -> bool:
     """Whether a follow-up reaches a fact the question before it did not.
 
@@ -907,6 +1032,56 @@ def same_material(cited: Sequence[int], parent: Sequence[int]) -> bool:
     if not cited or not parent:
         return True
     return bool(set(cited) & set(parent))
+
+
+#: How much of a passage may be the names of people before it is read as a
+#: list of parties rather than as subject matter.
+#: QUESTIONS_PARTY_DENSITY is where it is set.
+PARTY_DENSITY = 0.25
+
+
+def names_parties(
+    text: str, language: str | None, floor: float = PARTY_DENSITY
+) -> bool:
+    """Whether this passage is mostly the names of people.
+
+    The acknowledgements, which are the furniture the repetition reading
+    cannot see: every document thanks DIFFERENT people, so the section is
+    structurally identical and lexically different and no cross-document
+    similarity catches it. `Welches Unternehmen wird für die initiale
+    Übersetzung des Lehrplans gedankt?` is what comes out of one.
+
+    What they share is not their wording but their shape - they are a list
+    of names and almost nothing else. Measured as the share of a passage's
+    alphabetic tokens that spaCy reads as `PER`:
+
+        acknowledgements   median 0.794, 65% above this floor
+        everything else    median 0.000, p90 0.031, NONE above it
+
+    Over 20 acknowledgements and 250 passages drawn from the rest. A floor
+    of 0.15 reaches 75% of them and starts costing 1% of the others, which
+    is the trade this setting is for.
+
+    `PER` and not `ORG`. A corpus names organisations throughout its subject
+    matter - ISTQB, ISO and IEEE are all `ORG` here - so counting those
+    would read a standards discussion as a credits page. The cost is the
+    acknowledgement that thanks a company rather than a person, which this
+    misses.
+    """
+    if floor <= 0 or not text.strip():
+        return False
+    read = pipeline(language)(text)
+    words = sum(1 for token in read if token.is_alpha)
+    if not words:
+        return False
+    named = sum(
+        1
+        for entity in read.ents
+        if entity.label_ in ("PER", "PERSON")
+        for token in entity
+        if token.is_alpha
+    )
+    return named / words > floor
 
 
 #: How much of what a question asks ABOUT has to occur in the passages

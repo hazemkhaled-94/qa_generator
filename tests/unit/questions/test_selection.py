@@ -780,3 +780,52 @@ def test_a_passage_with_no_condensed_fact_is_offered_unchanged() -> None:
     facts = [source(n, passage_id=1, kind=FactKind.ATOMIC) for n in (1, 2, 3)]
 
     assert condensed_first(facts) == facts
+
+
+# ── The floor under a second passage ───────────────────────────────────────
+
+
+def test_no_floor_offers_a_second_passage_whatever_it_holds() -> None:
+    """The default, and what every run so far has done."""
+    deal = Deal(facts_of(1, "a") + facts_of(2, "b"), wanted=2, size=4, floor=0.0)
+
+    offered = deal.sample(Shape.CROSS)
+
+    assert offered is not None
+    assert len(offered.resting) == 2
+
+
+def test_a_floor_nothing_clears_narrows_to_one_passage() -> None:
+    """The weld, narrowed for the writer instead of asked of it.
+
+    The facts here share no vocabulary and carry no vectors, so `meets`
+    scores the pair 0 and no floor above it can be cleared.
+    """
+    deal = Deal(
+        facts_of(1, "a", statement="The device weighs 4 kg.")
+        + facts_of(2, "b", statement="Quarterly dividends resumed in Lisbon."),
+        wanted=2,
+        size=4,
+        floor=0.5,
+    )
+
+    offered = deal.sample(Shape.CROSS)
+
+    assert offered is not None
+    assert len(offered.resting) == 1, "a pair with nothing in common was offered"
+
+
+def test_a_floor_a_related_passage_clears_still_offers_two() -> None:
+    """The floor must not simply make every question single-passage."""
+    shared = "The device weighs 4 kg and ships from the plant."
+    deal = Deal(
+        facts_of(1, "a", statement=shared) + facts_of(2, "b", statement=shared),
+        wanted=2,
+        size=4,
+        floor=0.5,
+    )
+
+    offered = deal.sample(Shape.CROSS)
+
+    assert offered is not None
+    assert len(offered.resting) == 2

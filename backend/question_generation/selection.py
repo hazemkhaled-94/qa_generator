@@ -309,8 +309,16 @@ class Deal:
         rounds: int = 1,
         reranker=None,
         rerank_depth: int = 8,
+        floor: float = 0.0,
     ) -> None:
-        """Deals one topic's facts, strided over the whole of it."""
+        """Deals one topic's facts, strided over the whole of it.
+
+        `floor` is QUESTIONS_MEETS_FLOOR: how much the second passage's best
+        fact must have in common with the head before a second passage is
+        offered at all. 0 offers one whatever it holds, which is what every
+        run so far has done - see the sweep beside the setting for why the
+        default is not a number.
+        """
         self._order = strided(interleaved(by_passage(facts)), wanted)
         self._bridges = interleaved(by_passage(bridges))
         #: Every passage this topic can offer, by id. `widen` reaches a
@@ -325,6 +333,7 @@ class Deal:
         self._spent: set[int] = set()
         self._reranker = reranker
         self._rerank_depth = max(rerank_depth, 2)
+        self._floor = floor
 
     @property
     def passages(self) -> int:
@@ -357,7 +366,33 @@ class Deal:
             return self._group([head], condensed=condensed)
 
         partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
+        if partner and not self._clears(head, partner):
+            # Nothing in the second passage meets the first well enough to
+            # be worth offering. The span rules already tell the writer to
+            # narrow in this case and 34% of the time it does not; this
+            # narrows for it, and the question bands as the single-passage
+            # question it actually is.
+            partner = None
         return self._group([head, partner] if partner else [head], condensed=condensed)
+
+    def _clears(self, head: list[SourceFact], partner: list[SourceFact]) -> bool:
+        """Whether the partner holds a fact close enough to the head to offer.
+
+        Read off the BEST the partner can do rather than its average: one
+        fact meeting the head is what a question spans, which is the same
+        reading `meets` makes of a sample already part-chosen.
+
+        Abstains where either side has nothing left, because a measurement
+        with nothing to measure is not evidence - the same bargain
+        `on_topic` and `about` make.
+        """
+        if self._floor <= 0:
+            return True
+        offered = self._left(head)[:1]
+        candidates = self._left(partner)
+        if not offered or not candidates:
+            return True
+        return max(meets(offered, one) for one in candidates) >= self._floor
 
     def widen(self, group: FactGroup, more: int = 1) -> FactGroup:
         """The same sample with unspent facts of the same passages added.

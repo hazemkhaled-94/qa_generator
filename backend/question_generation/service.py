@@ -17,12 +17,13 @@ from question_generation.balance import choose, composition, largest, quota_of
 from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
 from question_generation.config import Settings
-from question_generation.gates import near_verdict, structural
+from question_generation.gates import names_parties, near_verdict, structural
 from question_generation.generation import QuestionWriter
 from question_generation.models import (
     CheckedQuestion,
     FactGroup,
     JudgedQuestion,
+    SourceFact,
     TopicToCover,
     criteria_of,
 )
@@ -449,18 +450,19 @@ class QuestionGenerationService(StageService):
             current.set_attribute("questions.skipped", "not in coverage")
             return []
 
-        facts = self._repository.facts(topic.id)
+        facts = self._subjects(self._repository.facts(topic.id))
         if not facts:
             current.set_attribute("questions.skipped", "no facts left to ask about")
             return []
 
         deal = Deal(
             facts,
-            self._repository.bridging(topic.id),
+            self._subjects(self._repository.bridging(topic.id)),
             wanted=self._settings.per_topic,
             size=self._settings.sample_size,
             rounds=self._settings.samples_per_passage,
             reranker=self._reranker,
+            floor=self._settings.meets_floor,
         )
         planned = plans(
             wanted=self._settings.per_topic,
@@ -519,6 +521,34 @@ class QuestionGenerationService(StageService):
             threads.append(thread)
         current.set_attribute("questions.samples", written)
         return threads
+
+    def _subjects(self, facts: list[SourceFact]) -> list[SourceFact]:
+        """The facts whose passage is about a subject rather than about people.
+
+        The credits page, which the repetition reading cannot see: every
+        document thanks DIFFERENT people, so the section is identical in
+        shape and different in words. `names_parties` reads what it is made
+        of instead.
+
+        Here and not in the queue, because it needs a tagger and a
+        catalogue the api holds must not import the module that loads one.
+        Read once per distinct passage rather than once per fact: a passage
+        carries five or six facts and the reading is the same for all of
+        them.
+        """
+        if self._settings.party_density <= 0:
+            return facts
+        seen: dict[int, bool] = {}
+        kept = []
+        for fact in facts:
+            anchor = fact.anchor
+            if anchor.id not in seen:
+                seen[anchor.id] = names_parties(
+                    anchor.text, anchor.language, self._settings.party_density
+                )
+            if not seen[anchor.id]:
+                kept.append(fact)
+        return kept
 
     def _attempt(
         self, sample: FactGroup, plan: Plan, accepted: list[CheckedQuestion]

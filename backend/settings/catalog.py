@@ -503,6 +503,42 @@ SETTINGS: tuple[Setting, ...] = (
         "is refused as already asked.",
     ),
     Setting(
+        name="QUESTIONS_ANSWER_COVERAGE",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How much of what the verifier found in the passages the target "
+        "answer has to account for. Below it the target is an incomplete key "
+        "rather than a wrong one - one of seven parties named. Lists only, "
+        "and 0 turns the reading off.",
+    ),
+    Setting(
+        name="QUESTIONS_PARTY_DENSITY",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How much of a passage may be the names of people before it is "
+        "read as a credits page and never asked about. The furniture the "
+        "repetition reading cannot see, because every document thanks "
+        "different people. 0 turns the reading off.",
+    ),
+    Setting(
+        name="QUESTIONS_MEETS_FLOOR",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="How much a candidate fact must have in common with the head of "
+        "its sample before a second passage is offered at all. 0 offers one "
+        "whatever it holds. Off by default: the sweep found no threshold "
+        "that removes the welds without throwing away sound questions.",
+    ),
+    Setting(
         name="QUESTIONS_BOILERPLATE_COSINE",
         service="questions",
         kind="decimal",

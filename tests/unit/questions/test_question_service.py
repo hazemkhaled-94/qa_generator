@@ -41,6 +41,9 @@ SETTINGS = Settings(
     retries=0,
     answer_chars={"value": (1, 80), "list": (3, 300), "explanation": (20, 600)},
     explanation_chars=(150, 900),
+    answer_coverage=0.0,
+    party_density=0.0,
+    meets_floor=0.0,
     answer_overlap=0.6,
     off_topic_overlap=0.3,
     elsewhere_passages=0,
@@ -796,3 +799,40 @@ def test_the_follow_up_share_is_a_share_of_the_ACCEPTED_roots() -> None:
     # A share of 1.0 means EVERY accepted root, whatever the rejections
     # between them did to the slot numbering.
     assert len(followed) == len(accepted_roots)
+
+
+# ── The credits page, which is not a subject ───────────────────────────────
+
+
+def test_a_passage_of_names_is_never_asked_about() -> None:
+    """The furniture the repetition reading cannot see.
+
+    Every document thanks DIFFERENT people, so an acknowledgements section
+    is identical in shape and different in words and no cross-document
+    similarity reaches it. `names_parties` reads what it is made of.
+    """
+    credits = "Graham Bath, Judy McKay, Tauhida Parveen, Rex Black, Mike Smith"
+    facts = [
+        source(1, passage_id=1, passage_text=credits, language="en"),
+        source(2, passage_id=2, language="en"),
+    ]
+    settings = replace(SETTINGS, party_density=0.25)
+    service, queue = build(topic(), facts, settings=settings)
+
+    service.process_next()
+
+    asked = {fact for written in queue.written for fact in written.fact_ids}
+    assert 1 not in asked, "a question was written about the credits page"
+
+
+def test_a_density_of_zero_asks_about_every_passage() -> None:
+    """The default, so nothing is excluded unless a deployment says so."""
+    credits = "Graham Bath, Judy McKay, Tauhida Parveen, Rex Black, Mike Smith"
+    facts = [source(1, passage_id=1, passage_text=credits, language="en")]
+    service, queue = build(
+        topic(), facts, settings=replace(SETTINGS, party_density=0.0)
+    )
+
+    service.process_next()
+
+    assert queue.written, "nothing was written at all"
