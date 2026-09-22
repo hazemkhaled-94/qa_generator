@@ -108,6 +108,13 @@ objects first, row last.
 returns `chunk_status` to `new`. Both objects stay, so the next run rebuilds
 the passages without paying to parse again.
 
+Neither destroys anything. The rows are copied into `archived_rows` by the
+AFTER DELETE trigger on each table — which is the only way to catch what a
+cascade and an orphan trigger take — and the objects are **moved** to the
+`archive` bucket rather than deleted. `make archive-purge` is the second
+deletion, and the only one that is final. See
+[`archive/`](../archive/README.md).
+
 ## Tools, and where each is used
 
 | Tool | Where | Why this one |

@@ -71,6 +71,7 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-rerun questions-reverify questions-balance \
         documents delete delete-derived \
+        archive archive-purge \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage check typecheck audit lint format lock \
         certs dagster-dev \
@@ -440,7 +441,8 @@ topics-visualise:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --visualise
 
 # Delete every topic and membership. Passages, facts and questions stay.
-# Irreversible for any label a person assigned: nothing else stores one.
+# A label a person assigned is stored nowhere else, and the archived row is
+# now the only copy of one.
 topics-delete:
 	@echo "WARNING: this deletes every topic, and any label on one. Ctrl-C within 5s to abort."
 	@sleep 5
@@ -623,7 +625,9 @@ documents:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --list
 
 # Delete a document, its file, its converted form and everything derived from
-# it. Irreversible. The upload record in ingest_events is kept.
+# it. The rows are archived and the objects are moved to the `archive` bucket,
+# so `make archive-purge` is what makes it final. The upload record in
+# ingest_events is kept.
 #   make delete SHA=<sha256>
 delete:
 	@[ -n "$(SHA)" ] || { echo "usage: make delete SHA=<sha256>"; exit 2; }
@@ -631,7 +635,8 @@ delete:
 
 # Empty the corpus: every document, every file, every converted form, and
 # with them by cascade every passage, membership, fact and question. Then the
-# topics, which are none of those. Irreversible.
+# topics, which are none of those. All of it is archived on the way out; see
+# `make archive`.
 #
 # Two commands and not one because `topics` has no foreign key to a document:
 # a fit is over the corpus rather than over a file, so deleting every document
@@ -655,6 +660,33 @@ wipe:
 delete-derived:
 	@[ -n "$(SHA)" ] || { echo "usage: make delete-derived SHA=<sha256>"; exit 2; }
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --delete-derived $(SHA)
+
+# ── Archive ────────────────────────────────────────────────────────────────
+#
+# Every deletion above is the first of two. An AFTER DELETE trigger on every
+# table copies the row into `archived_rows` as it goes - which catches the
+# cascades and the orphan triggers, where most of the deleting actually
+# happens - and the removal paths move the objects into the `archive` bucket
+# instead of dropping them. Nothing reads any of it; it is there so the
+# second deletion is a separate decision.
+
+# What is held, by table, with its age and what it costs.
+archive:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m archive.run --status
+
+# The second deletion. This one is final.
+#
+#   make archive-purge TABLE=questions    one table's rows
+#   make archive-purge DAYS=30            everything archived before then
+#   make archive-purge ALL=1              the whole thing, objects included
+#
+# TABLE is about rows, so it leaves the bucket alone: an archived upload
+# belongs to no table. DAYS and ALL take the objects too.
+archive-purge:
+	@[ -n "$(TABLE)$(DAYS)$(ALL)" ] || { echo "usage: make archive-purge [TABLE=<table>] [DAYS=<n>] [ALL=1]"; exit 2; }
+	@[ -z "$(ALL)" ] || { echo "WARNING: this deletes the whole archive, rows and objects. Ctrl-C within 5s to abort."; sleep 5; }
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m archive.run --purge \
+	   $(if $(TABLE),--table $(TABLE)) $(if $(DAYS),--older-than $(DAYS)) $(if $(ALL),--all)
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 

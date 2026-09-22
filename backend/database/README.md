@@ -43,7 +43,7 @@ A fact or a question reaches its topics by **joining through its passages** —
 `fact_passages` → `passage_topics` — rather than holding a topic of its own,
 so no two rows can disagree about which topic a passage is in.
 
-### Cascades, and the one trigger
+### Cascades, and the triggers
 
 Deleting a document takes everything derived from it: its passages, their
 topic memberships, the facts on them, and — through a trigger on
@@ -62,6 +62,24 @@ document, because a fit is over the corpus rather than over a file. Deleting
 every document leaves the topics standing, describing passages that are gone.
 Nothing is broken by that — the next fit replaces every row — but it is why
 `make wipe` runs both in order.
+
+### Nothing is deleted without a copy
+
+Every table carries an `AFTER DELETE ... FOR EACH ROW` trigger that writes
+the row into [`archived_rows`](qa_generator/archived_rows.py) as
+`to_jsonb(OLD) - 'embedding'`. One shared function, because `to_jsonb` names
+no column.
+
+A trigger and not the services, for the reason the paragraphs above describe:
+one `make delete` reaches six tables, and only the first row of it passes
+through any Python. The cascades, the orphan triggers, a re-chunk, a
+re-extraction and a statement typed into Adminer are all archived the same
+way.
+
+It is not a soft delete. There is no `deleted_at` on any table, no predicate
+for a repository to remember, and the live tables still lose the row.
+`make archive-purge` is what finishes a deletion; see
+[`archive/`](../archive/README.md).
 
 ## Extensions
 
@@ -95,9 +113,8 @@ make schema-stamp                          # adopt a database that already holds
 **Read the generated revision before applying it.** Autogenerate compares
 tables, columns, indexes and constraints; it does not see a trigger, a data
 backfill, or anything that has to happen in a particular order. Both such
-cases in this history are written out by hand: the one trigger, in the initial
-revision, and the deletion of every fact in the revision that changed what a
-citation is.
+cases in this history are written out by hand: every trigger, and the deletion
+of every fact in the revision that changed what a citation is.
 
 Every revision is reversible, and
 `tests/integration/database/test_migration_rollback.py` applies and takes back

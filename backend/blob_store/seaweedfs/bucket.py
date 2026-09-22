@@ -133,7 +133,7 @@ class Bucket:
         try:
             return client.get_object(Bucket=self.name, Key=key)["Body"].read()
         except client.exceptions.ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in _ABSENT:
+            if self._absent(exc):
                 return None
             raise
 
@@ -154,11 +154,16 @@ class Bucket:
         try:
             client.head_object(Bucket=self.name, Key=key)
         except client.exceptions.ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in _ABSENT:
+            if self._absent(exc):
                 return False
             raise
         client.delete_object(Bucket=self.name, Key=key)
         return True
+
+    @staticmethod
+    def _absent(exc: Any) -> bool:
+        """Whether a client error means there was no such object."""
+        return exc.response.get("Error", {}).get("Code") in _ABSENT
 
     def count(self) -> int:
         """Counts the objects in the bucket.

@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
-from api.dependencies import export_bucket, topic_catalog, topics_queue
+from api.dependencies import (
+    archive_bucket,
+    export_bucket,
+    topic_catalog,
+    topics_queue,
+)
 from api.errors import ApiError, ErrorBody
 from api.routes.stage import StageAction, StageStatus, answered, status_of
 from topic_modelling.models import StoredTopic, TopicFit, TopicRemoval
@@ -142,8 +147,13 @@ def delete() -> TopicRemoval:
 
     Passages, facts and questions stay. Labels a person assigned go with the
     topics. Any queued fit goes too.
+
+    The rows land in `archived_rows` and the figures in the archive bucket,
+    so a fit that took an hour is recoverable until it is purged.
     """
     removed = topic_catalog.delete_all()
     for language in removed.languages:
-        export_bucket.remove(export_bucket.topic_visualisation_key(language))
+        archive_bucket.take(
+            export_bucket.name, export_bucket.topic_visualisation_key(language)
+        )
     return removed

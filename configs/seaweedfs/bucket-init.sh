@@ -18,6 +18,8 @@ shell() { printf '%s\n' "$@" | weed shell -master="$MASTER"; }
 #   documents   source of truth.   Never expires. Erasure-coding candidate.
 #   parsed      Docling output.    Regenerable from documents.
 #   export      Generated reports. Regenerable from the database.
+#   archive     Deleted objects.   Never expires: a TTL here would finish the
+#               deletion the archive exists to postpone.
 #
 # Adding a bucket: append its name to S3_BUCKETS in .env and restart.
 
@@ -70,6 +72,15 @@ echo "buckets ready: ${S3_BUCKETS}"
 #   exception; they are a random draw and cannot be regenerated.
 #
 #     shell "s3.bucket.quota -name export -op=set -sizeMB=20480"
+#
+#
+# ARCHIVE — what a deletion took
+#
+#   The same durability as documents, because it holds the same bytes: an
+#   archived upload is the only remaining copy of it. No TTL and no quota —
+#   a TTL would complete the deletion this bucket exists to postpone, and a
+#   full quota would make the next deletion fail rather than the next
+#   `make archive-purge` happen. It is bounded by purging it instead.
 
 # ── S3 object metadata contract ────────────────────────────────────────────
 #

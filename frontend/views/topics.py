@@ -302,7 +302,8 @@ def _removal(client, has_topics: bool) -> None:
     chosen = stage.removal(
         "topics",
         "Removes every topic at once. There is no per-topic delete: a topic "
-        "is one column of a model fitted jointly. Cannot be undone.",
+        "is one column of a model fitted jointly. The rows are archived "
+        "rather than destroyed, and nothing here puts them back.",
         {
             "all": (
                 "Delete all topics",

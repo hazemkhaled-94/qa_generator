@@ -6,13 +6,20 @@ One of the three packages that build a connection — the others are
 [`database/`](../database/README.md) and [`nlp/`](../nlp/README.md). A service
 asks for a bucket; it never builds a client or learns a credential.
 
-## The three buckets
+## The four buckets
 
 | Bucket | Key | Holds | Expires |
 |---|---|---|---|
 | `documents` | `{sha[0:2]}/{sha[2:4]}/{sha}.pdf` | The uploaded bytes, exactly as they arrived | never |
 | `parsed` | `{sha[0:2]}/{sha[2:4]}/{sha}.json` | The converter's complete output | never |
 | `export` | `topics/{language}.html` | Each language's pyLDAvis figure | replaced by the next fit |
+| `archive` | `{origin}/{the key it had}` | What a deletion took out of the other three | `make archive-purge` |
+
+`archive` is the only one written by a **deletion**. `ArchiveBucket.take`
+copies an object across and then deletes the original — in that order, so a
+failure between the two leaves it in both places rather than in neither. The
+key keeps the bucket it came out of as a prefix, so being kept does not lose
+where it was. See [`archive/`](../archive/README.md).
 
 A key is **derived in code and never stored**. A document's identity is the
 SHA-256 of its bytes, so the key is a pure function of the digest and the

@@ -462,7 +462,7 @@ def test_a_second_run_of_a_finished_stage_does_nothing(pipeline) -> None:
 
 def test_dropping_the_derived_data_lets_the_run_repeat(pipeline, engine) -> None:
     """Chunking returns to the queue without re-parsing."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.seaweedfs import ArchiveBucket, DocumentsBucket, ParsedBucket
     from ingestion.removal import RemovalService
 
     sha = _run(pipeline)
@@ -472,6 +472,7 @@ def test_dropping_the_derived_data_lets_the_run_repeat(pipeline, engine) -> None
         repository=DocumentRepository(),
         store=DocumentsBucket(),
         parsed=ParsedBucket(),
+        archive=ArchiveBucket(),
     ).delete_derived(sha)
     assert counts(engine)["passages"] == 0
 

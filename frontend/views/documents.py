@@ -148,7 +148,8 @@ def _removal(client, document: dict, name: str, sha: str) -> None:
     """Offers the two deletions, each behind its own confirmation."""
     chosen = stage.removal(
         "documents",
-        "Acts on this document only. Cannot be undone.",
+        "Acts on this document only. The rows and the file are archived "
+        "rather than destroyed, and nothing here puts them back.",
         {
             "derived": (
                 "Delete passages and facts",

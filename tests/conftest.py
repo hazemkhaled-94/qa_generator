@@ -154,11 +154,14 @@ def database(postgres: str, engine, monkeypatch) -> Iterator[None]:
         yield
     finally:
         with engine.begin() as connection:
+            # TRUNCATE fires no row-level trigger, so naming archived_rows
+            # here empties the archive rather than filling it from the nine
+            # tables above.
             connection.execute(
                 text(
                     "TRUNCATE documents, ingest_events, passages, facts, "
                     "questions, question_facts, passage_topics, topics, "
-                    "service_settings "
+                    "service_settings, archived_rows "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -243,7 +246,7 @@ def s3(runtime) -> Iterator[dict[str, str]]:
 
 #: What S3_BUCKETS names, which configs/seaweedfs/bucket-init.sh creates at
 #: start-up. Nothing in the application creates a bucket.
-BUCKETS = ("documents", "parsed", "export")
+BUCKETS = ("documents", "parsed", "export", "archive")
 
 
 @pytest.fixture

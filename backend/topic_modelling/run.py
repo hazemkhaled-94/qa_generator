@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import telemetry
-from blob_store.seaweedfs import ExportBucket
+from blob_store.seaweedfs import ArchiveBucket, ExportBucket
 from database.qa_generator import engine
 from settings import decimal
 from settings.store import snapshot
@@ -77,13 +77,13 @@ def main(argv: list[str] | None = None) -> int:
         # reports the languages whose figure is now orphaned and this read that
         # list and dropped it, so the command left two pyLDAvis pages in the
         # export bucket describing topics that no longer existed.
-        bucket = ExportBucket()
+        bucket, archive = ExportBucket(), ArchiveBucket()
         figures = sum(
-            bucket.remove(bucket.topic_visualisation_key(language))
+            archive.take(bucket.name, bucket.topic_visualisation_key(language))
             for language in removed.languages
         )
         log.info(
-            "deleted %d topic(s), %d membership(s) and %d figure(s); %d label(s) lost",
+            "archived %d topic(s), %d membership(s) and %d figure(s); %d label(s) lost",
             removed.topics,
             removed.memberships,
             figures,

@@ -6,7 +6,7 @@ import logging
 
 from ingestion.models import Removal
 from ingestion.repository import DocumentRepository
-from ingestion.stores import DocumentStore, ParsedStore
+from ingestion.stores import ArchiveStore, DocumentStore, ParsedStore
 
 log = logging.getLogger(__name__)
 
@@ -16,6 +16,11 @@ class RemovalService:
 
     Nothing is atomic across two stores, so the order is fixed: the objects
     go first and the row last.
+
+    Nothing is destroyed. The objects are moved to the archive bucket and
+    the rows are copied into `archived_rows` by the trigger on each table,
+    so this is the first of two deletions and `make archive-purge` is the
+    second.
     """
 
     def __init__(
@@ -24,6 +29,7 @@ class RemovalService:
         repository: DocumentRepository,
         store: DocumentStore,
         parsed: ParsedStore,
+        archive: ArchiveStore,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -31,10 +37,12 @@ class RemovalService:
             repository: Where the document and passage rows are.
             store: Where the uploaded file is.
             parsed: Where the converted document is.
+            archive: Where both of those go instead of being deleted.
         """
         self._repository = repository
         self._store = store
         self._parsed = parsed
+        self._archive = archive
 
     def delete(self, sha256: str) -> Removal | None:
         """Removes a document completely: its rows, its file, its parsed form.
@@ -49,12 +57,16 @@ class RemovalService:
         if media_type is None:
             return None
 
-        file_gone = self._store.remove(self._store.key_for(sha256, media_type))
-        parsed_gone = self._parsed.remove(self._parsed.key_for(sha256))
+        file_gone = self._archive.take(
+            self._store.name, self._store.key_for(sha256, media_type)
+        )
+        parsed_gone = self._archive.take(
+            self._parsed.name, self._parsed.key_for(sha256)
+        )
         passages = self._repository.delete(sha256)
 
         log.info(
-            "deleted %s: %d passage(s), file=%s parsed=%s",
+            "deleted %s: %d passage(s) archived, file=%s parsed=%s",
             sha256,
             passages,
             file_gone,

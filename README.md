@@ -18,7 +18,10 @@ worked example is deliberately about nothing in particular, because an example
 drawn from the corpus at hand teaches the model to expect it. German and
 English are the two languages configured, in `NLP_MODELS` — one list, naming
 both the pipeline each language is read with and the languages the detector
-may answer with.
+may answer with. Adding a third is a handful of edits rather than a setting:
+[`backend/nlp/`](backend/nlp/README.md#adding-a-language) is the list of them,
+including the two readings a language has to support and the one that raises
+without it.
 
 ## Prerequisites
 
@@ -142,8 +145,9 @@ Each service documents itself, beside its code.
 
 | | |
 |---|---|
-| [`backend/database/`](backend/database/README.md) | The schema, the migrations and the one trigger |
-| [`backend/blob_store/`](backend/blob_store/README.md) | The three buckets |
+| [`backend/database/`](backend/database/README.md) | The schema, the migrations and the triggers |
+| [`backend/blob_store/`](backend/blob_store/README.md) | The four buckets |
+| [`backend/archive/`](backend/archive/README.md) | What a deletion left behind, and the second deletion |
 | [`backend/nlp/`](backend/nlp/README.md) | Sentences, claims, vocabulary and language |
 | [`backend/llm/`](backend/llm/README.md) | The served model |
 | [`backend/settings/`](backend/settings/README.md) | Configuration, and what a change stales |

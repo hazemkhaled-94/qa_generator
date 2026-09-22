@@ -17,6 +17,7 @@ _COUNTS = {
     ("object_store", "documents"): "Objects holding uploaded files.",
     ("object_store", "parsed"): "Objects holding converted documents.",
     ("object_store", "export"): "Objects holding datasets and reports.",
+    ("object_store", "archive"): "Objects a deletion moved rather than dropped.",
     ("ingestion", "documents"): "Documents in the catalogue.",
     ("ingestion", "upload_attempts"): "Uploads recorded, accepted and refused.",
     ("chunking", "passages"): "Passages chunking has produced.",

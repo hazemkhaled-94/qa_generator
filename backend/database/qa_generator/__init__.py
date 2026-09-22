@@ -4,6 +4,7 @@ Importing this package registers every model on ``Base.metadata``, which is
 what Alembic compares the live schema against.
 """
 
+from database.qa_generator.archived_rows import ArchivedRow
 from database.qa_generator.base import Base
 from database.qa_generator.documents import Document
 from database.qa_generator.engine import engine, sessions
@@ -37,6 +38,7 @@ from database.qa_generator.topics import Topic
 
 __all__ = [
     "AnswerForm",
+    "ArchivedRow",
     "Base",
     "CognitiveLevel",
     "Derivation",

@@ -41,7 +41,7 @@ def test_the_object_store_names_and_measures_its_buckets(service) -> None:
     store = service.snapshot()["object_store"]
 
     assert store.ok
-    assert set(store.metrics) == {"documents", "parsed", "export"}
+    assert set(store.metrics) == {"documents", "parsed", "export", "archive"}
     assert all(count == 0 for count in store.metrics.values()), store.metrics
 
 

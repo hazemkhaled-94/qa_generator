@@ -222,6 +222,8 @@ def chunk_of(text: str, items: tuple = (), headings: tuple[str, ...] = ()) -> An
 class MemoryDocuments:
     """The documents bucket, held in memory."""
 
+    name = "documents"
+
     def __init__(self) -> None:
         """Starts empty, refusing nothing."""
         self.objects: dict[str, bytes] = {}
@@ -261,6 +263,8 @@ class MemoryDocuments:
 class MemoryParsed:
     """The parsed bucket, held in memory."""
 
+    name = "parsed"
+
     def __init__(self) -> None:
         """Starts empty, refusing nothing."""
         self.objects: dict[str, bytes] = {}
@@ -295,6 +299,23 @@ class MemoryParsed:
         """Deletes an object, reporting whether one was there."""
         self.removed.append(key)
         return self.objects.pop(key, None) is not None
+
+
+class MemoryArchive:
+    """The archive bucket, held in memory, over the buckets it takes from."""
+
+    def __init__(self, **origins: dict[str, bytes]) -> None:
+        """Wires the archive over the object dict of each named bucket."""
+        self.origins = origins
+        self.objects: dict[str, bytes] = {}
+
+    def take(self, origin: str, key: str) -> bool:
+        """Moves an object out of `origin`, reporting whether one was there."""
+        data = self.origins[origin].pop(key, None)
+        if data is None:
+            return False
+        self.objects[f"{origin}/{key}"] = data
+        return True
 
 
 class DocumentRows:
@@ -496,6 +517,9 @@ class RemovalDriver:
         self.rows = DocumentRows()
         self.store = MemoryDocuments()
         self.parsed = MemoryParsed()
+        self.archive = MemoryArchive(
+            documents=self.store.objects, parsed=self.parsed.objects
+        )
         for sha in held:
             self.rows.documents[sha] = {
                 "media_type": "application/pdf",
@@ -510,6 +534,7 @@ class RemovalDriver:
             repository=self.rows,  # pyright: ignore[reportArgumentType]
             store=self.store,  # pyright: ignore[reportArgumentType]
             parsed=self.parsed,  # pyright: ignore[reportArgumentType]
+            archive=self.archive,
         )
 
     def delete(self, sha256: str):

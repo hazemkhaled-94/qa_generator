@@ -138,12 +138,30 @@ with a reason in it.
 
 ## Deleting things
 
-All irreversible:
-
 ```bash
 make delete SHA=<sha256>          # a document and everything from it
 make delete-derived SHA=<sha256>  # only its passages and facts
 make wipe                         # every document, then the topics
+make topics-delete                # every topic, membership and figure
+```
+
+Each of those is the **first of two deletions**. An AFTER DELETE trigger on
+every table copies the row into `archived_rows`, and the removal paths move
+the objects into the `archive` bucket instead of dropping them:
+
+```bash
+make archive                      # what is held, by table, with its age
+make archive-purge DAYS=30        # the second deletion. This one is final
+```
+
+Nothing purges itself, so the archive grows — on ordinary runs too, because a
+re-extraction and a re-chunk delete what they replace. `make archive` is how
+you see it. See [`backend/archive/`](../backend/archive/README.md).
+
+These two are still irreversible, and archive nothing — `TRUNCATE` and a
+dropped volume fire no row trigger:
+
+```bash
 make down-volumes                 # the containers' data, all of it
 make schema-reset                 # every table, rebuilt from the revisions
 ```

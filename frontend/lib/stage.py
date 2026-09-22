@@ -243,8 +243,8 @@ def removal(
 
     `buttons` maps a name to its label, its tooltip and the sentence the
     confirmation asks. The first click only arms the choice; a second,
-    separately labelled one is what this returns, because none of it can be
-    undone.
+    separately labelled one is what this returns, because nothing here puts
+    any of it back - the archive a deletion writes is read from the host.
 
     `subject` is what is being deleted, so arming a deletion on one item and
     then picking another disarms it.

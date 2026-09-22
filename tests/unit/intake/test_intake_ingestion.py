@@ -291,11 +291,25 @@ def test_deleting_a_document_removes_every_trace_of_it() -> None:
     assert not driver.holds_parsed(SHA)
 
 
+def test_the_objects_are_archived_rather_than_deleted() -> None:
+    """The file leaves its bucket and is still readable in the archive."""
+    driver = RemovalDriver(held=(SHA,))
+
+    driver.delete(SHA)
+
+    assert sorted(driver.archive.objects) == [
+        f"documents/{driver.store.key_for(SHA, 'application/pdf')}",
+        f"parsed/{driver.parsed.key_for(SHA)}",
+    ]
+    assert driver.store.removed == [], "the bucket's own delete would not have kept it"
+
+
 def test_deleting_an_unknown_document_answers_nothing_and_touches_no_store() -> None:
     """The digest is looked up before it becomes an object key."""
     driver = RemovalDriver()
 
     assert driver.delete(SHA) is None
+    assert driver.archive.objects == {}
     assert driver.store.removed == []
     assert driver.parsed.removed == []
 

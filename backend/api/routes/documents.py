@@ -106,7 +106,9 @@ def document_file(sha256: str) -> Response:
 def delete_document(sha256: str) -> Removal:
     """Deletes a document, its file, its converted form and its derived rows.
 
-    Irreversible. The upload record in ingest_events survives.
+    Archived on the way out: the rows into `archived_rows` and the objects
+    into the archive bucket, until `make archive-purge` takes them. The
+    upload record in ingest_events survives here regardless.
 
     Raises:
         ApiError: 400 `invalid_digest` if it is not a digest, 404

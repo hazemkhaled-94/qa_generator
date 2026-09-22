@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import telemetry
 from api.status import Counter, StatusService
-from blob_store.seaweedfs import ExportBucket
+from blob_store.seaweedfs import ArchiveBucket, ExportBucket
 from database.qa_generator import engine
 from extraction.repository import FactCatalog, PassageQueue
 from ingestion.config import Settings
@@ -54,6 +54,9 @@ question_catalog = QuestionCatalog()
 
 #: Generated artefacts a route serves back, such as the topic visualisations.
 export_bucket = ExportBucket()
+
+#: Where a deleted object goes instead of being deleted.
+archive_bucket = ArchiveBucket()
 
 #: One instance per service the API fronts.
 ingest_service = build_service(settings)

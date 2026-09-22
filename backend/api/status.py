@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import inspect
 
 from blob_store.seaweedfs import (
+    ArchiveBucket,
     Bucket,
     DocumentsBucket,
     ExportBucket,
@@ -25,6 +26,7 @@ _REQUIRED_BUCKETS: tuple[type[Bucket], ...] = (
     DocumentsBucket,
     ParsedBucket,
     ExportBucket,
+    ArchiveBucket,
 )
 
 
