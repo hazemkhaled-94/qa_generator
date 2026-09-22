@@ -42,6 +42,20 @@ def parser() -> argparse.ArgumentParser:
         choices=experiments.NAMES,
         help="run the model against an uploaded set and record the scores",
     )
+    group.add_argument(
+        "--second-opinion",
+        metavar="RUN",
+        dest="run_id",
+        help="put one run's accepted answers to an independent judge and "
+        "report where it disagrees with the gates. Never a verdict: the "
+        "output is a queue for review.",
+    )
+    built.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="how many answers --second-opinion judges. One model call each.",
+    )
     return built
 
 
@@ -59,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.configure("evaluation")
 
     settings = Settings.load()
+    if args.run_id:
+        return _second_opinion(args.run_id, args.limit)
+
     if args.upload:
         experiments.upload(args.upload, settings)
         return 0
@@ -70,6 +87,32 @@ def main(argv: list[str] | None = None) -> int:
         # says what measures it instead.
         log.error("%s", refused)
         return 2
+    return 0
+
+
+def _second_opinion(run: str, limit: int | None) -> int:
+    """Judges one run's accepted answers and prints the disagreements.
+
+    Asks the VERIFIER's model rather than the writer's, for the reason the
+    verifier is a second model at all: a model marking its own work agrees
+    with itself.
+    """
+    from evaluation import second_opinion
+    from llm.config import Settings as ModelSettings
+    from question_generation.config import Settings as QuestionSettings
+
+    model = ModelSettings.load()
+    questions = QuestionSettings.load()
+    asked = model.overridden(questions.verifier_model).model
+
+    try:
+        judged = second_opinion.judge(run, asked, limit or second_opinion.SAMPLE)
+    except RuntimeError as empty:
+        log.error("%s", empty)
+        return 2
+
+    for line in second_opinion.report(judged):
+        log.info("%s", line)
     return 0
 
 

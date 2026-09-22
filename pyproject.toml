@@ -26,23 +26,29 @@ llm = [
     # Entra ID tokens for an azure/* model. litellm imports it on that path.
     "azure-identity>=1.19.0,<2.0.0",
     "pydantic>=2.13.4,<3.0.0",
-    "pydantic-settings>=2.15.0,<3.0.0",
     "tenacity>=9.1.4,<10.0.0",
-    "python-dotenv>=1.2.3,<2.0.0",
 ]
 
 nlp = [
     "gensim>=4.4.0,<5.0.0",
     "spacy>=3.8.16,<4.0.0",
-    "ftfy>=6.3.1,<7.0.0",
     "lingua-language-detector>=2.2.0,<3.0.0",
-    "rapidfuzz>=3.14.5,<4.0.0",
     "docling>=2.121.0,<3.0.0",
     "pymupdf>=1.28.2,<2.0.0",
     # Also transitive through docling. Named because question_generation
     # imports it directly for EMBEDDING_MODEL, and a package somebody else
     # pins is a package somebody else may drop.
     "transformers>=5.0.0,<6.0.0",
+    # The mean-pool-then-normalise `nlp/embedding.py` used to write out by
+    # hand, and the tokenizer window it used to read off the config. One
+    # model both stages compare text in.
+    # 6.0 renamed `get_sentence_embedding_dimension`, which the width guard
+    # reads, so the floor is that rather than 5.
+    "sentence-transformers>=6.0.0,<7.0.0",
+    # Imported directly by the chunker and the parser, which read a Docling
+    # document's own types rather than the converter's. Transitive through
+    # docling; named for the reason transformers is.
+    "docling-core>=2.0.0,<3.0.0",
     # Transitive through docling, named here so the source below can be
     # attached to it. See that block.
     "torch",
@@ -51,11 +57,6 @@ nlp = [
 
 data = [
     "numpy>=2.5.2,<3.0.0",
-    "scipy>=1.18.1,<2.0.0",
-    "scikit-learn>=1.9.0,<2.0.0",
-    "statsmodels>=0.14.6,<1.0.0",
-    "pandas>=2.0.0,<3.0.0",
-    "pandera>=0.32.1,<1.0.0",
 ]
 
 storage = [
@@ -63,8 +64,10 @@ storage = [
     "alembic>=1.16.0,<2.0.0",
     "psycopg[binary]>=3.3.4,<4.0.0",
     "pgvector>=0.5.0,<0.6.0",
-    "duckdb>=1.5.5,<2.0.0",
     "boto3>=1.43.78,<2.0.0",
+    # The S3 error types the bucket client catches by class. Transitive
+    # through boto3, named for the reason transformers is.
+    "botocore>=1.43.78,<2.0.0",
 ]
 
 api = [
@@ -82,10 +85,8 @@ pipeline = [
 ]
 
 viz = [
-    "matplotlib>=3.11.1,<4.0.0",
     "pyldavis>=3.4.1,<4.0.0",
     "streamlit[pdf]>=1.62.0,<2.0.0",
-    "openpyxl>=3.1.5,<4.0.0",
 ]
 
 observability = [
@@ -109,6 +110,15 @@ observability = [
     "openinference-instrumentation-litellm (>=0.1.45,<0.2.0)",
     "argilla>=2.8.0,<3.0.0",
     "arize-phoenix-client (>=3.5.0,<4.0.0)",
+    # The judge scaffolding `phrasing.py` writes out per judgement: a prompt,
+    # a classification, retries and concurrency. Used in evaluation/ only, as
+    # a SECOND opinion recorded beside the checker's verdict and never as a
+    # gate - see evaluation/README.md on why a model's answers cannot gate.
+    "arize-phoenix-evals (>=2.0.0,<3.0.0)",
+    # `evaluate_dataframe` takes and returns one, so second_opinion.py builds
+    # it directly. Transitive through the evals package; named for the reason
+    # transformers is - a package somebody else pins is one they may drop.
+    "pandas>=2.0.0,<4.0.0",
 ]
 
 dev = [
@@ -119,6 +129,94 @@ dev = [
     "pyright (>=1.1.400,<2.0.0)",
     "testcontainers[postgres] (>=4.0.0,<5.0.0)",
     "pip-audit (>=2.7.0,<3.0.0)",
+    # A declared dependency nothing imports. Five were found the first time
+    # this ran - pandera, rapidfuzz, scipy, statsmodels and ftfy - and one of
+    # them was also in backend/api/requirements.txt, so it shipped.
+    "deptry (>=0.23.0,<1.0.0)",
+    # The two architecture rules the root README states, as contracts rather
+    # than as prose. See .importlinter.
+    "import-linter (>=2.0,<3.0)",
+    # Generates the contract cases from the committed openapi.json.
+    "schemathesis (>=4.0.0,<5.0.0)",
+]
+
+
+# Every group but `dev` holds requirements the deployment runs on. Naming
+# them is not optional: the `[tool.poetry.source]` block below - which exists
+# only to point torch at the CPU index - puts deptry in Poetry mode, and in
+# that mode every PEP 735 group is read as development-only. Unnamed, the
+# runtime imports all report as DEP004 and the unused runtime declarations
+# report as nothing at all, which is the half worth having.
+[tool.deptry]
+non_dev_dependency_groups = [
+    "llm",
+    "nlp",
+    "data",
+    "storage",
+    "api",
+    "pipeline",
+    "viz",
+    "observability",
+]
+known_first_party = [
+    "api",
+    "archive",
+    "blob_store",
+    "database",
+    "drivers",
+    "evaluation",
+    "extraction",
+    "factories",
+    "ingestion",
+    "lib",
+    "llm",
+    "nlp",
+    "orchestration",
+    "pages",
+    "preprocessing",
+    "question_generation",
+    "review",
+    "seed",
+    "settings",
+    "stages",
+    "telemetry",
+    "topic_modelling",
+    "views",
+]
+
+[tool.deptry.per_rule_ignores]
+# DEP002: declared and never imported, and right to be. Everything not on
+# this list that deptry reported has been deleted rather than excused.
+DEP002 = [
+    # A command line and a server, not an import: `dagster dev` reads
+    # orchestration/definitions.py, the webserver serves it, and
+    # dagster-postgres is named in orchestration/requirements.txt as the
+    # storage the run reads and writes through its own configuration.
+    "dagster-webserver",
+    "dagster-dg-cli",
+    "dagster-postgres",
+    # uvicorn runs the api as a process; the api never imports it.
+    "uvicorn",
+    # FastAPI parses a multipart upload through it and imports it itself.
+    # Absent, `POST /documents` fails at request time rather than at start-up.
+    "python-multipart",
+    # litellm imports it on the azure/* path, by name, at call time.
+    "azure-identity",
+    # The wheels the CPU index serves. torch arrives through docling and
+    # torchvision through torch; both are named so the source below can be
+    # attached to them.
+    "torch",
+    "torchvision",
+    # SQLAlchemy dials out through psycopg's binary build; nothing imports it.
+    "psycopg",
+    # The tools the Makefile and CI shell out to.
+    "pytest-cov",
+    "ruff",
+    "pyright",
+    "pip-audit",
+    "deptry",
+    "import-linter",
+    "schemathesis",
 ]
 
 

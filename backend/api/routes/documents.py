@@ -7,10 +7,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from fastapi import APIRouter, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Request, Response, UploadFile
 
 from api.dependencies import ingest_service, ingesting, removal_service
 from api.errors import ApiError, ErrorBody
+from api.params import Limit, Offset, SearchText
 from database.qa_generator import Outcome
 from ingestion.models import (
     DocumentName,
@@ -53,10 +54,10 @@ class DocumentPage:
 
 @router.get("/documents")
 def list_documents(
-    q: str | None = Query(default=None, max_length=200),
+    q: SearchText = None,
     parse_status: ParseStatus | None = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: Limit = 50,
+    offset: Offset = 0,
 ) -> DocumentPage:
     """Lists stored documents and where each has reached in the pipeline."""
     total, rows = ingest_service.documents(q, limit, offset, parse_status)

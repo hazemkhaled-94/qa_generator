@@ -53,6 +53,13 @@ def parser() -> argparse.ArgumentParser:
     group.add_argument(
         "--status", action="store_true", help="report how much has been reviewed"
     )
+    built.add_argument(
+        "--ids",
+        metavar="ID,ID",
+        help="push exactly these question ids instead of a sample. What "
+        "`make second-opinion` prints, so a disagreement between the gates "
+        "and an independent judge reaches somebody who can settle it.",
+    )
     return built
 
 
@@ -82,10 +89,31 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.push:
-        push(args.push, settings, catalogs)
+        push(args.push, settings, catalogs, _ids(args.ids, args.push))
     else:
         pull(args.pull, settings, catalogs)
     return 0
+
+
+def _ids(named: str | None, dataset: str) -> list[int] | None:
+    """The question ids a command named, or None for a sample.
+
+    Raises:
+        SystemExit: If they are not numbers, or the set has no queue behind
+            it. A typo here would otherwise push a sample and look like it
+            worked.
+    """
+    if not named:
+        return None
+    if dataset != datasets.QUESTIONS:
+        raise SystemExit(
+            f"--ids names questions to push and {dataset} is not that set; "
+            f"the other two are sampled."
+        )
+    try:
+        return [int(one) for one in named.replace(",", " ").split()]
+    except ValueError:
+        raise SystemExit(f"--ids takes question ids; {named!r} is not a list") from None
 
 
 if __name__ == "__main__":

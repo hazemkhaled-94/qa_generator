@@ -13,26 +13,28 @@ which is the failure this shape exists to prevent.
 
 The model is named by a setting rather than written here. Which encoder reads
 German best is a deployment's measurement to make and to re-make, and this
-module has no opinion beyond the label order it reads off the model's own
-config.
+module has no opinion beyond the labels it reads off the model's own answer.
+
+The forward pass and the softmax used to be written out, and the output read
+by INDEX against a table built from `id2label`. `transformers`' own
+text-classification pipeline hands back the label names, so there are no
+indices to get the wrong way round; what is left here is the one thing the
+pipeline does not do, which is insist that the labels name an NLI head.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
-
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from typing import Any, cast
 
 from nlp.windows import window
 
 log = logging.getLogger(__name__)
 
 #: The three things an NLI model can say about a premise and a hypothesis.
-#: Read off the model's own `id2label` rather than assumed: the order differs
-#: between checkpoints, and assuming it silently inverts every verdict.
 ENTAILMENT = "entailment"
 NEUTRAL = "neutral"
 CONTRADICTION = "contradiction"
@@ -42,42 +44,6 @@ CONTRADICTION = "contradiction"
 #: address it", and both are refusals here, so the distinction costs this
 #: caller nothing - see `Verdict.contradiction`.
 NOT_ENTAILMENT = "not_entailment"
-
-
-def positions(config, model_name: str) -> dict[str, int]:
-    """Where each label sits in one checkpoint's output.
-
-    Read off the checkpoint's own `id2label` rather than assumed: the order
-    differs between checkpoints - mDeBERTa-xnli runs entailment/neutral/
-    contradiction and bart-mnli the other way round - and a hard-coded order
-    inverts every verdict on half the models anybody would configure, while
-    still returning three plausible probabilities.
-
-    Two heads are accepted and both are wanted. A three-way NLI model names
-    all of entailment/neutral/contradiction; a zero-shot head - such as
-    bge-m3-zeroshot-v2.0, whose 8,194-token window is the reason to want it,
-    since a premise here is a passage already sized to 512 - names
-    entailment and not_entailment only. Either is enough, because the only
-    thing a gate asks is how sure the model is of entailment.
-
-    Raises:
-        ValueError: If the checkpoint names neither, which means it is not
-            an NLI model and would otherwise be read by position.
-    """
-    names = {
-        index: str(label).lower()
-        for index, label in getattr(config, "id2label", {}).items()
-    }
-    at = {label: index for index, label in names.items()}
-    if ENTAILMENT not in at or not ({NEUTRAL, NOT_ENTAILMENT} & set(at)):
-        raise ValueError(
-            f"{model_name!r} labels its outputs {sorted(names.values())}, which "
-            f"names neither a three-way NLI head "
-            f"({ENTAILMENT}/{NEUTRAL}/{CONTRADICTION}) nor a two-way one "
-            f"({ENTAILMENT}/{NOT_ENTAILMENT}). This asks one about a premise "
-            f"and a hypothesis."
-        )
-    return at
 
 
 @dataclass(frozen=True)
@@ -120,28 +86,48 @@ class Verdict:
         return self.entailment >= threshold
 
 
-def verdict(row, at: dict[str, int]) -> Verdict:
-    """One row of probabilities, under whichever head produced it.
+def verdict(scores: Mapping[str, float], model_name: str) -> Verdict:
+    """One pair's probabilities, under whichever head produced them.
+
+    Two heads are accepted and both are wanted. A three-way NLI model names
+    all of entailment/neutral/contradiction; a zero-shot head - such as
+    bge-m3-zeroshot-v2.0, whose 8,194-token window is the reason to want it,
+    since a premise here is a passage already sized to 512 - names
+    entailment and not_entailment only. Either is enough, because the only
+    thing a gate asks is how sure the model is of entailment.
 
     Args:
-        row: The softmaxed logits of one pair.
-        at: Where each label sits, as `positions` read it.
+        scores: One probability per label, as the model named them.
+        model_name: What to call the checkpoint when refusing it.
 
     Returns:
         The verdict. A two-way head reports everything that is not
         entailment as neutral rather than splitting it, because the model
         did not split it.
+
+    Raises:
+        ValueError: If the labels name neither head, which means it is not
+            an NLI model. Worth raising rather than scoring: a sentiment
+            checkpoint answers every pair fluently and means nothing by it.
     """
-    entailment = float(row[at[ENTAILMENT]])
+    at = {str(label).lower(): float(score) for label, score in scores.items()}
+    if ENTAILMENT not in at or not ({NEUTRAL, NOT_ENTAILMENT} & set(at)):
+        raise ValueError(
+            f"{model_name!r} labels its outputs {sorted(at)}, which "
+            f"names neither a three-way NLI head "
+            f"({ENTAILMENT}/{NEUTRAL}/{CONTRADICTION}) nor a two-way one "
+            f"({ENTAILMENT}/{NOT_ENTAILMENT}). This asks one about a premise "
+            f"and a hypothesis."
+        )
     if NEUTRAL in at:
         return Verdict(
-            entailment=entailment,
-            neutral=float(row[at[NEUTRAL]]),
-            contradiction=float(row[at[CONTRADICTION]]),
+            entailment=at[ENTAILMENT],
+            neutral=at[NEUTRAL],
+            contradiction=at.get(CONTRADICTION, 0.0),
         )
     return Verdict(
-        entailment=entailment,
-        neutral=float(row[at[NOT_ENTAILMENT]]),
+        entailment=at[ENTAILMENT],
+        neutral=at[NOT_ENTAILMENT],
         contradiction=0.0,
     )
 
@@ -161,18 +147,18 @@ class Entailment:
 
     @cached_property
     def _loaded(self):
-        """The tokenizer, the model, and where each label sits in its output."""
-        log.info("loading %s", self._model_name)
-        tokenizer = AutoTokenizer.from_pretrained(self._model_name)
-        model = AutoModelForSequenceClassification.from_pretrained(self._model_name)
-        model.eval()
-        self._max_tokens = window(tokenizer, self._max_tokens)
+        """The classification pipeline, held to the window the model has."""
+        from transformers import pipeline
 
-        # Read off the checkpoint. mDeBERTa-xnli orders them
-        # entailment/neutral/contradiction and bart-mnli the other way round;
-        # a hard-coded order inverts every verdict on half the models anybody
-        # would configure, and inverts them silently.
-        return tokenizer, model, positions(model.config, self._model_name)
+        log.info("loading %s", self._model_name)
+        built = pipeline(
+            "text-classification",
+            model=self._model_name,
+            top_k=None,
+            function_to_apply="softmax",
+        )
+        self._max_tokens = window(built.tokenizer, self._max_tokens)
+        return built
 
     @property
     def model(self) -> str:
@@ -202,15 +188,25 @@ class Entailment:
         """
         if not pairs:
             return []
-        tokenizer, model, at = self._loaded
-        tokens = tokenizer(
-            [premise for premise, _ in pairs],
-            [hypothesis for _, hypothesis in pairs],
-            max_length=self._max_tokens,
+        judged = self._loaded(
+            [
+                {"text": premise, "text_pair": hypothesis}
+                for premise, hypothesis in pairs
+            ],
             truncation=True,
-            padding=True,
-            return_tensors="pt",
+            max_length=self._max_tokens,
+            batch_size=len(pairs),
         )
-        with torch.no_grad():
-            scores = torch.softmax(model(**tokens).logits, dim=-1)
-        return [verdict(row, at) for row in scores]
+        # The pipeline is annotated loosely - it returns a different shape
+        # per task - so the rows are read through `dict` rather than
+        # indexed straight into a comprehension a checker cannot follow.
+        read: list[Verdict] = []
+        for scored in judged:
+            rows = cast("list[dict[str, Any]]", scored)
+            read.append(
+                verdict(
+                    {str(one["label"]): float(one["score"]) for one in rows},
+                    self._model_name,
+                )
+            )
+        return read

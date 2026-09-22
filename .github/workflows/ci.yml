@@ -40,6 +40,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - run: make lint
+      # Named as their own steps rather than left to tests/static, so a
+      # broken contract or a dead dependency reads as itself in the job
+      # summary instead of as one failing test among six hundred.
+      - run: make lint-imports
+      - run: make deps
       - run: poetry run pytest tests/static
 
   # Everything that needs neither a container nor a served model: the unit

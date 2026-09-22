@@ -58,15 +58,24 @@ def working(
         yield current
 
 
-def configure(service_name: str, level: str | None = None) -> None:
+def configure(
+    service_name: str, level: str | None = None, run: str | None = None
+) -> None:
     """Configures logging and tracing for this process.
 
     Call once, as early as possible: anything logged beforehand uses
     Python's default handler and carries no trace id.
+
+    `run` names the Phoenix project this process's spans are filed under.
+    A stage passes `settings.runs.run_id()`; the api and the frontend pass
+    nothing, because neither produces a run and a project per API process
+    would be a project per restart.
     """
     # Order matters: the shared format references the trace fields, and
     # tracing logs while setting itself up.
     logs.add_trace_fields()
     logs.configure(service_name, level)
-    traces.configure(service_name)
-    logging.getLogger(__name__).info("telemetry configured for %s", service_name)
+    traces.configure(service_name, run)
+    logging.getLogger(__name__).info(
+        "telemetry configured for %s%s", service_name, f", run {run}" if run else ""
+    )

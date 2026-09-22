@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query
 
 from api.dependencies import passage_catalog
 from api.errors import ApiError, ErrorBody
+from api.params import DocumentFilter, Limit, Offset, RowId, SearchText
 from preprocessing.chunking.models import PassageDetail, StoredPassage
 
 router = APIRouter(tags=["passages"])
@@ -29,12 +30,12 @@ class PassagePage:
 
 @router.get("/passages")
 def passages(
-    document: str | None = None,
-    q: str | None = Query(default=None, max_length=200),
+    document: DocumentFilter = None,
+    q: SearchText = None,
     field: SearchField = "text",
     block_type: str | None = Query(default=None, max_length=60),
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: Limit = 50,
+    offset: Offset = 0,
 ) -> PassagePage:
     """Lists stored passages."""
     total, rows = passage_catalog.page(document, limit, offset, q, block_type, field)
@@ -50,7 +51,7 @@ def passage_types() -> list[str]:
 
 
 @router.get("/passages/{passage_id}", responses={404: {"model": ErrorBody}})
-def passage(passage_id: int) -> PassageDetail:
+def passage(passage_id: RowId) -> PassageDetail:
     """Reads one passage in full, its cell grids and sentences included.
 
     The listing carries counts rather than the grids, because a page of fifty

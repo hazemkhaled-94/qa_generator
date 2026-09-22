@@ -122,6 +122,35 @@ The Makefile re-applies command-line overrides after sourcing the files,
 because sourcing would otherwise overwrite them — which is why
 `make topics TOPIC_PASSES=20` once ran with the file's value and said nothing.
 
+## A version is not a run
+
+`settings_version` names a **configuration**: a digest of the stored
+overrides, `environment` when nothing is overridden. It answers "what was
+this row produced under".
+
+It cannot answer "which run produced it". Run a stage twice without
+touching a setting and both sets of rows carry the same version — which is
+the position anybody comparing two runs is in, because an A/B usually
+changes a model and nothing stored.
+
+So [`runs.py`](runs.py) names the run, and `facts`, `questions` and
+`topics` each carry a `run_id` beside their `settings_version`:
+
+```bash
+make questions RUN_ID=b-gemma4-12b      # name it
+make questions                          # or let it mint a uuid
+make questions-runs                     # what there is
+make questions-diff RUNS="a b"          # the two, gate by gate
+```
+
+Per **process**, not per drain. A `--watch` worker drains whenever
+something arrives, and an id per drain would be thousands of them in a week
+and as many Phoenix projects; one worker lifetime is one run.
+
+Unlike the version, it is not threaded through the factories. A version can
+change while a process runs — that is what `reloading` in `stages/cli.py`
+watches for — and a run cannot, so a cached function is the whole of it.
+
 ## Tools, and where each is used
 
 | Tool | Where | Why this one |

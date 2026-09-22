@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from api.dependencies import fact_catalog
+from api.params import DocumentFilter, Limit, Offset, RowId, SearchText
 from extraction.models import FactQuality, StoredFact
 
 router = APIRouter(tags=["facts"])
@@ -39,13 +40,13 @@ class FactSources:
 
 @router.get("/facts")
 def facts(
-    document: str | None = None,
-    q: str | None = Query(default=None, max_length=200),
+    document: DocumentFilter = None,
+    q: SearchText = None,
     field: SearchField = "both",
     method: Method | None = None,
     kind: Kind | None = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: Limit = 50,
+    offset: Offset = 0,
 ) -> FactPage:
     """Lists stored facts, including those that failed a check."""
     total, rows = fact_catalog.page(document, limit, offset, q, method, field, kind)
@@ -54,8 +55,8 @@ def facts(
 
 @router.get("/facts/quality")
 def quality(
-    document: str | None = None,
-    q: str | None = Query(default=None, max_length=200),
+    document: DocumentFilter = None,
+    q: SearchText = None,
     field: SearchField = "both",
     method: Method | None = None,
     kind: Kind | None = None,
@@ -70,7 +71,7 @@ def quality(
 
 
 @router.get("/facts/{fact_id}/passages")
-def passages(fact_id: int) -> FactSources:
+def passages(fact_id: RowId) -> FactSources:
     """Lists the passages one fact rests on, in the order the model saw them.
 
     The same passages /facts carries on every row, addressable on their own.

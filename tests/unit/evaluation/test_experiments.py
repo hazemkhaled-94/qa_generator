@@ -129,3 +129,81 @@ def test_the_cases_are_data_and_cost_nothing_to_read() -> None:
     }
 
     assert not heavy, f"evaluation/cases.py imports {', '.join(sorted(heavy))}"
+
+
+# ── The phrasing judgements, and the floor each is read against ───────────
+
+
+def test_the_constant_floor_is_what_ignoring_the_input_scores() -> None:
+    """The number a phrasing score is only meaningful beside.
+
+    `self_contained` measured 84.2% against a constant-answer floor of
+    78.9% - one case in nineteen - which is the measured version of a
+    judgement that fired zero times in 3,131 questions.
+    """
+    field = "self_contained"
+    floor = experiments._constant(field)
+    answer = experiments._majority(field)
+
+    scored = [floor({}, {field: one[field]}) for one in cases.PHRASING]
+
+    assert sum(scored) / len(scored) == pytest.approx(
+        sum(bool(one[field]) == answer for one in cases.PHRASING) / len(cases.PHRASING)
+    )
+
+
+def test_the_floor_is_computed_from_the_cases_not_written_down() -> None:
+    """Adding a case has to move the floor, or it goes stale silently."""
+    majority = experiments._majority("names_its_source")
+    said = [bool(one["names_its_source"]) for one in cases.PHRASING]
+
+    assert majority == (sum(said) * 2 >= len(said))
+
+
+def test_a_judgement_is_scored_against_its_label() -> None:
+    """1 for agreeing, 0 for not."""
+    scored = experiments._judged("names_its_source")
+
+    assert scored({"names_its_source": True}, {"names_its_source": True}) == 1.0
+    assert scored({"names_its_source": False}, {"names_its_source": True}) == 0.0
+
+
+def test_an_abstention_is_not_a_wrong_answer() -> None:
+    """None is a judgement nobody made, and must not reject a question.
+
+    Scored 0 on the judgement - it did not agree - and separately counted
+    by `_answered`, so a run where the model was unreachable reads as that
+    rather than as a run where the judge got everything wrong.
+    """
+    scored = experiments._judged("self_contained")
+
+    assert scored({"self_contained": None}, {"self_contained": True}) == 0.0
+    assert (
+        experiments._answered({"names_its_source": True, "self_contained": None}, {})
+        == 0.5
+    )
+    assert (
+        experiments._answered({"names_its_source": None, "self_contained": None}, {})
+        == 0.0
+    )
+
+
+def test_every_phrasing_case_carries_both_labels() -> None:
+    """Both labels are present on every case.
+
+    The dataset is built from these keys, so a missing one is a KeyError at
+    upload time rather than at authoring time.
+    """
+    for one in cases.PHRASING:
+        assert isinstance(one["names_its_source"], bool), one["name"]
+        assert isinstance(one["self_contained"], bool), one["name"]
+        assert one["language"], one["name"]
+
+
+def test_the_phrasing_set_is_uploaded_with_its_labels_held_back() -> None:
+    """A task that could read the answer would score itself."""
+    inputs, outputs = experiments._examples(experiments.PHRASING)
+
+    assert len(inputs) == len(outputs) == len(cases.PHRASING)
+    assert set(inputs[0]) == {"question", "language"}
+    assert set(outputs[0]) == {"names_its_source", "self_contained", "name"}

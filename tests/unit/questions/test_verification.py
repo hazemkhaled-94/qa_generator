@@ -1874,56 +1874,6 @@ def test_a_follow_up_may_point_at_the_conversation() -> None:
     assert result.rejected_reason != QuestionRejection.UNANCHORED
 
 
-def test_the_elsewhere_probe_is_reordered_before_the_one_call_it_gets() -> None:
-    """This gate spends one call on whichever passages it is handed.
-
-    What it is looking for is the single passage that answers a question
-    written to have no answer, so putting that one first is the difference
-    between finding it and paying for the call anyway.
-    """
-
-    class Ordering:
-        """Puts the last candidate first, and remembers being asked."""
-
-        def __init__(self) -> None:
-            self.asked = 0
-
-        def ordered(self, query: str, documents, instruction: str = ""):
-            self.asked += 1
-            return [(len(documents) - 1, 1.0)] + [
-                (position, 0.0) for position in range(len(documents) - 1)
-            ]
-
-    recording = Recording(recovers=None)
-    reranker = Ordering()
-    seen: list[list[str]] = []
-
-    def elsewhere(lemmas, language, skip, limit, embedding=None):
-        """Two candidates, the answering one last."""
-        return ["Nothing relevant here.", "The device weighs 4 kg."]
-
-    def read(question, passages, thread=()):
-        seen.append(list(passages))
-        return Reading(recovered=None)
-
-    recording.read = read  # type: ignore[method-assign]
-    checker = QuestionChecker(
-        embedder=recording,
-        verifier=recording,
-        nearest=lambda embedding: None,
-        threshold=0.93,
-        phrasing=recording,
-        elsewhere=elsewhere,
-        elsewhere_passages=2,
-        reranker=reranker,
-    )
-
-    checker.check(candidate(target_answer=None, answerable=False))
-
-    assert reranker.asked == 1
-    assert seen[-1][0] == "The device weighs 4 kg.", "the probe's order survived"
-
-
 def test_a_reader_finding_nothing_elsewhere_saves_the_call() -> None:
     """The gate fired 8 times in 3,131, so nearly every call confirms nothing.
 

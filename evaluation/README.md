@@ -16,18 +16,71 @@ can be compared by more than their scrollback.
 make eval-upload                                 # the cases become a Phoenix dataset
 make eval-score                                  # score the model, and record it
 make eval-score EVAL_RUN_NAME=extraction-prompt-v7
+make eval-phrasing                               # the two phrasing judgements, against their floor
+make second-opinion RUN=<run id>                 # an independent judge, and where it disagrees
 ```
 
 Underneath:
 
 ```bash
-python -m evaluation.run --upload extraction
-python -m evaluation.run --score extraction
+python -m evaluation.run --upload extraction-golden
+python -m evaluation.run --score extraction-golden
+python -m evaluation.run --second-opinion <run id> --limit 50
 ```
 
-The two are mutually exclusive and one is required. Results are at
+The three are mutually exclusive and one is required. Results are at
 <http://localhost:6006>, signed in as `admin@localhost` with
 `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD`.
+
+## Comparing two runs
+
+The tables further down this file were typed by hand off two terminals.
+They are queries now.
+
+```bash
+make questions-runs                              # which runs there are
+make questions-diff RUNS="a-gpt-4.1 b-gemma4-12b"
+```
+
+Two things made that possible, and neither is in this package:
+
+- **`questions.run_id`**, from [`settings/runs.py`](../backend/settings/runs.py).
+  `settings_version` names a *configuration*, so two runs under one
+  configuration were indistinguishable — which is every A/B where only the
+  model moved. `RUN_ID=<name>` names a run; unset mints a uuid.
+- **`archived_rows`**. `questions-rerun` deletes what it replaces, so
+  producing run B used to destroy run A. The A/B below says so outright:
+  *"the first run's questions were deleted so the second was offered
+  exactly what the first saw."* The diff reads live rows **and** archived
+  ones, so a run deleted an hour ago still answers.
+
+Each run's spans also go to a Phoenix project of their own,
+`<stage>-<run id>`, which is the half SQL cannot answer: the gate counts
+are columns, and the calls, tokens, latency and spend are in the spans.
+
+## A second opinion, which is a queue and not a verdict
+
+`make second-opinion RUN=<id>` puts a run's **accepted** answers to an
+independent judge — `phoenix.evals`' hallucination classifier, through
+litellm, against `QUESTIONS_VERIFIER_MODEL` — and prints where it disagrees
+with the gates.
+
+It settles nothing, by the same argument as everything else here. What it
+produces is a list of ids worth a person's time, which
+[`review/`](../review/README.md) takes directly:
+
+```bash
+make review-push-questions IDS=12,34,56
+```
+
+Only one direction is reported. A question the gates kept and the judge
+calls unsupported is either a gate that let something through or a judge
+that is wrong; a question the gates *rejected* and the judge calls factual
+is usually neither, because `leaks_source` and `compound` say nothing about
+whether the answer is in the passages.
+
+This is the one place in the repository where an LLM judge is the right
+tool, and the reason is that its output is a queue rather than a column.
 
 ## What makes two runs comparable
 
@@ -49,17 +102,35 @@ Not by an LLM judge. The checker is what decides whether a fact is kept in
 production, so a golden set scored by anything else measures something this
 pipeline does not use.
 
-## Only the extraction set is scored
+## Two of the three sets are scored
 
 That is a decision rather than a gap.
 
 | Set | Why |
 |---|---|
 | `extraction` | Its numbers are **pure measurement**, asserted against nothing, which is what is worth comparing between two prompts |
+| `phrasing` | The same, and each judgement is scored **beside the floor a judge that ignores its input reaches** — see below |
 | `questions` | Already **asserts** — the recoverable cases must pass and the rest must be stopped — so it is a gate that fails a pull request rather than a trend that draws a line |
 
 The questions set is uploaded anyway, so the cases are browsable and an
 experiment can be run against them from the Phoenix UI.
+
+### The floor is scored with the score
+
+`make eval-phrasing` records four numbers, not two: `names_its_source` and
+`self_contained`, and a `_floor` for each. The floor is what a judge that
+answers the same thing every time would score on the same cases.
+
+That column is the whole reason this set is scored here rather than
+printed. The baseline below reads `self_contained` at 84.2% — which looks
+like competence until the floor beside it says **78.9%**, one case in
+nineteen. It is computed from `cases.py` rather than written down, so
+adding a case moves it instead of leaving a stale number in a docstring.
+
+A fifth, `answered`, counts how much was judged at all: `names_its_source`
+abstains where no rule settles it and no model answered, and an abstention
+is not a wrong answer. Without it, a run where the model was unreachable
+reads as a run where the judge got everything wrong.
 
 ## Never a gate
 
@@ -362,7 +433,9 @@ Selection reranks up to eight candidates per wide sample: ~2,300 samples ×
 hours, for a gate that fired 8 times in 3,131 questions. And it changes **no
 Azure call count at all** — reordering is its whole effect.
 
-`RERANKER_MODEL` stays empty.
+`RERANKER_MODEL` is gone, and so is `nlp/reranking.py`. The setting was
+empty and was always going to be; the numbers above are what is worth
+keeping, and they are here.
 
 ### Answer equivalence does not rescue the QA route
 
@@ -503,7 +576,8 @@ medium and hard, which is what limits the draw.
 | File | Holds |
 |---|---|
 | [`cases.py`](cases.py) | The golden cases, and nothing that runs them. Read by this package **and** by `tests/eval/` |
-| [`experiments.py`](experiments.py) | Scoring the cases into Phoenix |
+| [`experiments.py`](experiments.py) | Scoring the cases into Phoenix, and the floor each score is read against |
+| [`second_opinion.py`](second_opinion.py) | An independent judge over one run, and the disagreements it found |
 | [`config.py`](config.py) | Where Phoenix is |
 | [`run.py`](run.py) | The command line |
 
@@ -514,8 +588,13 @@ pytest layer and the Phoenix layer without either importing the other.
 
 | Tool | Where | Why this one |
 |---|---|---|
-| **arize-phoenix** | [`experiments.py`](experiments.py) | Versioned datasets and experiment history, in the same service that already collects the traces |
+| **arize-phoenix-client** | [`experiments.py`](experiments.py) | Versioned datasets and experiment history, in the same service that already collects the traces |
+| **arize-phoenix-evals** | [`second_opinion.py`](second_opinion.py) | A tested hallucination template, a constrained answer, retries and concurrency — which is what `phrasing.py` hand-rolls per judgement. Used for the queue only, never for a verdict |
 | The pipeline's own checker | [`experiments.py`](experiments.py) | The evaluator. Anything else would measure something production does not use |
+
+Neither Phoenix package is in any image. Both run on the host, like
+`review/`'s Argilla client and for the same reason: a worker has no
+business holding a judge.
 
 Phoenix is the same service `OTEL_CONTAINER_ENDPOINT` sends spans to, read the
 other way round.
@@ -564,3 +643,11 @@ Things that are true, are not bugs, and have surprised somebody.
   static makes two runs of two models look like one experiment.
 - **Changing `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` after first boot does
   nothing.** It is applied once, when Phoenix creates the admin user.
+- **A phrasing score without its floor means nothing.** `make eval-phrasing`
+  records both; reading one column is how 84.2% looked like competence.
+- **`make second-opinion` needs the passages, so it cannot read a deleted
+  run.** The gate counts can — `make questions-diff` reads the archive —
+  but the judge needs the text the answer rests on, and that is gone.
+- **Rows written before this commit have `run_id` NULL** and cannot be told
+  apart. Nothing is backfilled, because inventing a name for them would
+  make two runs look like one.

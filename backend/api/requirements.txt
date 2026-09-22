@@ -19,7 +19,6 @@ instructor>=1.15.4,<2.0.0
 # Entra ID tokens for an azure/* model. litellm imports it on that path.
 azure-identity>=1.19.0,<2.0.0
 tenacity>=9.1.4,<10.0.0
-rapidfuzz>=3.14.5,<4.0.0
 # Topic modelling: the factorisation, and the figure a fit draws of it.
 # spaCy splits a passage into the sentences a fact cites, reads the statements
 # the model writes, and builds the vocabulary the fit runs over; its pipelines
@@ -32,6 +31,14 @@ spacy>=3.8.16,<4.0.0
 # directly declares it - a transitive pin is somebody else's to change.
 # EMBEDDING_MODEL's weights are not in the image; see the `models` volume.
 transformers>=5.0.0,<6.0.0
+# Loads EMBEDDING_MODEL and pools it the way its own config says to, which
+# nlp/embedding.py used to do by hand. 6.0 renamed the width accessor the
+# guard there reads.
+sentence-transformers>=6.0.0,<7.0.0
+# Read directly by the chunker and the parser, and by the bucket client:
+# both arrive transitively, and a transitive pin is somebody else's to drop.
+docling-core>=2.0.0,<3.0.0
+botocore>=1.43.78,<2.0.0
 opentelemetry-sdk>=1.44.0,<2.0.0
 opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0
 opentelemetry-instrumentation-fastapi>=0.65b0

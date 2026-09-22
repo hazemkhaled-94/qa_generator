@@ -168,6 +168,16 @@ class Fact(Base):
         "it, including the shares the checks held this fact to. NULL for a fact "
         "written before a setting could be changed without a restart.",
     )
+    run_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="Which RUN produced this row, as `settings.runs.run_id` "
+        "named it: RUN_ID where a caller set one, and a uuid otherwise. "
+        "settings_version beside it names the CONFIGURATION, and two runs "
+        "under one configuration carry the same version - so comparing a "
+        "change against the run before it needs this column and cannot be "
+        "done with that one. NULL for a row written before runs were named.",
+    )
     statement_predicates: Mapped[int] = mapped_column(
         Integer,
         server_default="0",

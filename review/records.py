@@ -16,6 +16,7 @@ is what facts.rejection_code and questions.difficulty were for.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -110,13 +111,29 @@ class ReviewRepository(Repository):
                 rows += [FactRow(*one) for one in found]
         return rows
 
-    def questions(self, sample: int) -> list[QuestionRow]:
+    def questions(
+        self, sample: int, ids: Sequence[int] | None = None
+    ) -> list[QuestionRow]:
         """Draws a sample of questions, spread over difficulty and verdict.
 
         Both, because they are the two things a reviewer is judging at
         once: whether the gate was right, and whether a question the band
         calls hard is actually hard.
+
+        `ids` replaces the sampling with exactly those rows, in id order.
+        That is how a queue somebody else built gets reviewed - the
+        disagreements `evaluation.second_opinion` found, where the gates
+        kept a question and an independent judge says the passages do not
+        support its answer. A stratified sample cannot find those: they are
+        spread over every band and every verdict and are rare in all of
+        them, which is exactly the shape a proportional draw misses.
         """
+        if ids:
+            with self._session() as session:
+                found = session.execute(
+                    select(Question).where(Question.id.in_(ids)).order_by(Question.id)
+                ).scalars()
+                return [self._question(one) for one in found]
         with self._session() as session:
             groups = session.execute(
                 select(Question.difficulty, Question.rejected_reason).group_by(
@@ -139,22 +156,24 @@ class ReviewRepository(Repository):
                     .order_by(func.random())
                     .limit(each)
                 ).scalars()
-                rows += [
-                    QuestionRow(
-                        id=one.id,
-                        question_text=one.question_text,
-                        target_answer=one.target_answer,
-                        answerable=one.answerable,
-                        difficulty=one.difficulty,
-                        question_type=one.question_type,
-                        language=one.language,
-                        status=one.status,
-                        rejected_reason=one.rejected_reason,
-                        facts=[link.fact.statement for link in one.fact_links],
-                    )
-                    for one in found
-                ]
+                rows += [self._question(one) for one in found]
         return rows
+
+    @staticmethod
+    def _question(one) -> QuestionRow:
+        """One stored question, as a reviewer is shown it."""
+        return QuestionRow(
+            id=one.id,
+            question_text=one.question_text,
+            target_answer=one.target_answer,
+            answerable=one.answerable,
+            difficulty=one.difficulty,
+            question_type=one.question_type,
+            language=one.language,
+            status=one.status,
+            rejected_reason=one.rejected_reason,
+            facts=[link.fact.statement for link in one.fact_links],
+        )
 
     def review_facts(self, verdicts: list[tuple[int, str]]) -> int:
         """Records what a person decided about some facts.

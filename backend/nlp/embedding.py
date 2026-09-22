@@ -12,14 +12,20 @@ this package's, as building an engine is database's.
 The model is EMBEDDING_MODEL, which is also the tokenizer chunking sizes a
 passage by. One name for both, so nothing is measured in a space the corpus
 was never put in.
+
+The pooling used to be written out here - mean over the attention mask, then
+L2. That is what `sentence-transformers` is, and it reads the checkpoint's
+own `1_Pooling` config rather than assuming the mean: a model trained to be
+read off its CLS token was being averaged.
 """
 
 from __future__ import annotations
 
 import logging
 
-import torch
-from transformers import AutoModel, AutoTokenizer
+from sentence_transformers import SentenceTransformer
+
+from nlp.windows import window
 
 log = logging.getLogger(__name__)
 
@@ -45,12 +51,13 @@ class Embedder:
                 that have to hold it.
         """
         log.info("loading %s", model_name)
-        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = AutoModel.from_pretrained(model_name)
-        self._model.eval()
-        self._max_tokens = max_tokens
+        self._model = SentenceTransformer(model_name)
+        # The ceiling a deployment asked for, held to what the checkpoint
+        # can actually read - the same reading `nlp.entailment` and `nlp.qa`
+        # make of ENCODER_MAX_TOKENS.
+        self._model.max_seq_length = window(self._model.tokenizer, max_tokens)
 
-        width = int(self._model.config.hidden_size)
+        width = self._model.get_embedding_dimension()
         if width != WIDTH:
             raise ValueError(
                 f"EMBEDDING_MODEL={model_name!r} is {width} wide and the "
@@ -59,36 +66,26 @@ class Embedder:
             )
 
     def embed(self, text: str) -> list[float]:
-        """Returns one text's unit vector.
-
-        Mean-pooled over the tokens the attention mask keeps, then normalised
-        to length 1, which is what makes pgvector's cosine distance a
-        subtraction rather than a division.
-        """
+        """Returns one text's unit vector."""
         return self.embed_all([text])[0]
 
     def embed_all(self, texts: list[str]) -> list[list[float]]:
         """Returns one unit vector per text, in one pass over the model.
 
         A batch, because the per-call cost is the forward pass and a passage's
-        facts are embedded together. Padding is to the longest in the batch,
-        so a short text costs little beside a long one.
+        facts are embedded together.
+
+        Normalised to length 1, which is what makes pgvector's cosine
+        distance a subtraction rather than a division, and what lets
+        :func:`cosine` be a dot product.
         """
         if not texts:
             return []
-        tokens = self._tokenizer(
+        return self._model.encode(
             [_PREFIX + text for text in texts],
-            max_length=self._max_tokens,
-            truncation=True,
-            padding=True,
-            return_tensors="pt",
-        )
-        with torch.no_grad():
-            hidden = self._model(**tokens).last_hidden_state
-
-        mask = tokens["attention_mask"].unsqueeze(-1)
-        pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
-        return torch.nn.functional.normalize(pooled, p=2, dim=1).tolist()
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        ).tolist()
 
 
 def cosine(left: list[float], right: list[float]) -> float:

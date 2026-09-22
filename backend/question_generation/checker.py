@@ -115,7 +115,6 @@ class QuestionChecker:
         about_overlap: float = ENTAILMENT_OVERLAP,
         extractive=None,
         extractive_confidence: float = 0.9,
-        reranker=None,
     ) -> None:
         """Initialises the checker with its collaborators.
 
@@ -158,7 +157,6 @@ class QuestionChecker:
         self._about_overlap = about_overlap
         self._extractive = extractive
         self._extractive_confidence = extractive_confidence
-        self._reranker = reranker
 
     def check(
         self, candidate: Candidate, seen: Sequence[CheckedQuestion] = ()
@@ -717,7 +715,6 @@ class QuestionChecker:
         )
         if not passages:
             return None
-        passages = self._reranked(candidate.question_text, passages)
         if not self._answered_elsewhere(candidate, passages):
             return None
         read = self._verifier.read(candidate.question_text, passages, candidate.thread)
@@ -766,26 +763,6 @@ class QuestionChecker:
             )
             return False
         return True
-
-    def _reranked(self, question: str, passages: Sequence[str]) -> list[str]:
-        """The probe's candidates in the order a cross-encoder puts them.
-
-        The probe compares two directions, because that is what an index can
-        serve. A cross-encoder reads the question and the passage together,
-        which is a better ordering and cannot be indexed - so it runs over
-        the handful the probe already narrowed to and never over the corpus.
-
-        It matters here more than the ordering usually does. This gate spends
-        ONE call on whichever passages it is handed, and what it is looking
-        for is the single passage that answers a question written to have no
-        answer. Putting that one first is the difference between finding it
-        and paying for the call anyway.
-        """
-        found = list(passages)
-        if self._reranker is None or len(found) < 2:
-            return found
-        ordered = self._reranker.ordered(question, found)
-        return [found[position] for position, _ in ordered]
 
     def _near(
         self, embedding: list[float], seen: Sequence[CheckedQuestion]

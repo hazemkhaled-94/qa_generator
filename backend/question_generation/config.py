@@ -213,9 +213,6 @@ class Settings:
     #: verifier for every question. Not an LLM_MODEL either.
     answer_model: str | None = None
     answer_confidence: float = 0.9
-    #: A local cross-encoder that reorders a probe's candidates, or None
-    #: to keep the order the probe gave them in.
-    reranker_model: str | None = None
     #: The longest pair either encoder reads, in tokens.
     encoder_max_tokens: int = 512
 
@@ -326,7 +323,6 @@ class Settings:
             entailment_model=optional("NLI_MODEL", source),
             entailment_threshold=decimal("NLI_ENTAILMENT_THRESHOLD", source),
             entailment_overlap=decimal("QUESTIONS_ENTAILMENT_OVERLAP", source),
-            reranker_model=optional("RERANKER_MODEL", source),
             encoder_max_tokens=integer("ENCODER_MAX_TOKENS", source),
             answer_model=optional("QA_MODEL", source),
             answer_confidence=decimal("QA_ANSWER_CONFIDENCE", source),

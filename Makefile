@@ -70,10 +70,13 @@ ONLY = $(if $(SHA),--only document=$(SHA),\
         settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-rerun questions-reverify questions-balance \
+        questions-runs questions-diff \
         documents delete delete-derived \
         archive archive-purge \
         test test-fast test-unit test-integration test-e2e test-smoke \
-        test-eval test-coverage check typecheck audit lint format lock \
+        test-eval test-coverage check typecheck audit lint lint-imports deps \
+        eval-phrasing second-opinion \
+        format lock \
         certs dagster-dev \
         review-status review-push-facts review-pull-facts \
         review-push-topics review-pull-topics \
@@ -531,6 +534,26 @@ questions-reverify:
 questions-balance:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
 
+# Which runs there are, newest first, and how many questions each wrote.
+# A run is named by RUN_ID where one was given and by a uuid otherwise; see
+# backend/settings/runs.py. A run marked (deleted) has had its questions
+# removed and is being read out of archived_rows.
+questions-runs:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.runs --list
+
+# Two runs side by side, on the gate that stopped each question. Ordered by
+# how much the two disagree, because that is the question being asked.
+#
+#   make questions-diff RUNS="a-gpt-4.1 b-gemma4-12b"
+#
+# Reads the live questions AND the archived ones, which is what makes an A/B
+# possible at all: `questions-rerun` deletes what it replaces, so before the
+# archive existed, producing run B destroyed run A. Nothing here gates - a
+# model's answers move between two runs at the same temperature.
+questions-diff:
+	@test -n "$(RUNS)" || { echo 'usage: make questions-diff RUNS="<older> <newer>"'; exit 2; }
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.runs $(RUNS)
+
 # What the models have cost, read off the logs the client already writes.
 # Every call logs its tokens and its price - litellm prices the response
 # rather than this counting it, because the provider is the only thing that
@@ -759,6 +782,24 @@ lint:
 	poetry run ruff check $(SOURCES)
 	poetry run ruff format --check $(SOURCES)
 
+# The two architecture rules the root README states. Configuration, and the
+# reasoning, live in .importlinter.
+#
+# PYTHONPATH=backend because the image puts each backend package at the top
+# level: `extraction` is the name a container resolves, not
+# `backend.extraction`, and contracts written against the other name would
+# pass by matching nothing. tests/static/test_import_contracts.py runs this
+# same check under `make test`.
+lint-imports:
+	PYTHONPATH=backend:. poetry run lint-imports --verbose
+
+# A declared dependency nothing imports, an import nothing declares, and a
+# package reached only through somebody else's. Configuration is
+# [tool.deptry] in pyproject.toml, which is also where each deliberate
+# exception is argued for.
+deps:
+	poetry run deptry .
+
 format:
 	poetry run ruff check --fix $(SOURCES)
 	poetry run ruff format $(SOURCES)
@@ -851,6 +892,36 @@ eval-upload:
 eval-score:
 	$(EVAL) --score $(EVAL_DATASET)
 
+# The two phrasing judgements, each against the floor a judge that ignores
+# its input reaches. That floor is the point: `self_contained` scored 84.2%
+# against a constant-answer 78.9% - one case in nineteen - which is the
+# measured version of a judgement that fired zero times in 3,131 questions.
+#
+#     make eval-phrasing                       # upload, then score
+#     make eval-phrasing EVAL_RUN_NAME=gemma4-12b
+#
+# Scores QUESTIONS_PHRASING_MODEL, which is the model the pipeline asks, so
+# swapping a 31B for a 12B and running this again is what decides it.
+eval-phrasing:
+	$(EVAL) --upload phrasing-golden
+	$(EVAL) --score phrasing-golden
+
+# An independent judge over one run's ACCEPTED answers, and the
+# disagreements it found. Never a verdict - the checker decides what is
+# kept, and this is measured at chance on German in evaluation/README.md.
+# What it produces is a queue: a question the gates kept and a judge calls
+# unsupported is either a gate that let something through or a judge that
+# is wrong, and only a person settles which.
+#
+#     make second-opinion RUN=<run id>          # 200 answers
+#     make second-opinion RUN=<run id> LIMIT=50
+#
+# It prints the ids. Push them with:
+#     make review-push-questions IDS=12,34,56
+second-opinion:
+	@test -n "$(RUN)" || { echo 'usage: make second-opinion RUN=<run id>  (make questions-runs lists them)'; exit 2; }
+	$(EVAL) --second-opinion $(RUN) $(if $(LIMIT),--limit $(LIMIT))
+
 # ── Review ─────────────────────────────────────────────────────────────────
 #
 # Human review of what the models decided, through Argilla. Three things
@@ -885,8 +956,12 @@ review-push-topics:
 review-pull-topics:
 	$(REVIEW) --pull topic-labels
 
+# A stratified sample, or exactly the ids IDS names - which is how the
+# disagreements `make second-opinion` found reach a reviewer. A sample
+# cannot find those: they are rare in every band and every verdict, which
+# is the shape a proportional draw misses.
 review-push-questions:
-	$(REVIEW) --push questions
+	$(REVIEW) --push questions $(if $(IDS),--ids $(IDS))
 
 review-pull-questions:
 	$(REVIEW) --pull questions

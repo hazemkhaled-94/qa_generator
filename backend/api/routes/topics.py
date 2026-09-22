@@ -19,6 +19,7 @@ from api.dependencies import (
     topics_queue,
 )
 from api.errors import ApiError, ErrorBody
+from api.params import RowId
 from api.routes.stage import StageAction, StageStatus, answered, status_of
 from topic_modelling.models import StoredTopic, TopicFit, TopicRemoval
 
@@ -62,7 +63,7 @@ def topics() -> list[StoredTopic]:
 
 
 @router.patch("/{topic_id}", responses={404: {"model": ErrorBody}})
-def describe(topic_id: int, description: TopicDescription) -> StoredTopic:
+def describe(topic_id: RowId, description: TopicDescription) -> StoredTopic:
     """Names a topic, or takes it out of coverage reporting."""
     described = topic_catalog.describe(
         topic_id,

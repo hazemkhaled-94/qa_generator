@@ -27,10 +27,11 @@ from evaluation.config import Settings
 
 log = logging.getLogger(__name__)
 
-#: The two datasets, by the name the CLI takes.
+#: The three datasets, by the name the CLI takes.
 EXTRACTION = "extraction-golden"
 QUESTIONS = "questions-golden"
-NAMES = (EXTRACTION, QUESTIONS)
+PHRASING = "phrasing-golden"
+NAMES = (EXTRACTION, QUESTIONS, PHRASING)
 
 
 def _client(settings: Settings):
@@ -61,6 +62,21 @@ def _examples(name: str) -> tuple[list[dict], list[dict]]:
                 for one in cases.EXTRACTION
             ],
             [{"claims": one["claims"]} for one in cases.EXTRACTION],
+        )
+    if name == PHRASING:
+        return (
+            [
+                {"question": one["question"], "language": one["language"]}
+                for one in cases.PHRASING
+            ],
+            [
+                {
+                    "names_its_source": one["names_its_source"],
+                    "self_contained": one["self_contained"],
+                    "name": one["name"],
+                }
+                for one in cases.PHRASING
+            ],
         )
     return (
         [
@@ -164,6 +180,108 @@ def _precision(output: dict, expected: dict) -> float:
     return output["validated"] / proposed if proposed else 0.0
 
 
+def _majority(field: str) -> bool:
+    """Whichever answer is commonest for one judgement across the cases.
+
+    What a judge that ignores its input would say to score best. Computed
+    off the cases rather than written down, so adding a case moves the
+    floor with it instead of leaving a stale number in a docstring.
+    """
+    said = [bool(one[field]) for one in cases.PHRASING]
+    return sum(said) * 2 >= len(said)
+
+
+def _constant(field: str):
+    """An evaluator scoring what a judge that never reads its input gets.
+
+    The number every phrasing score has to be read against, and the reason
+    it is here rather than in a README: `self_contained` measured 84.2%
+    against a constant-answer floor of 78.9%, which is one case in
+    nineteen, and that is the measured version of a judgement that fired
+    zero times in 3,131 questions. A score without this beside it looks
+    like competence.
+
+    Phoenix averages an evaluator over the set, so returning 1 or 0 per
+    case gives the floor as a percentage in the same column as the real
+    score.
+    """
+    answer = _majority(field)
+
+    def evaluator(output: dict, expected: dict) -> float:
+        """Whether always answering `answer` would be right here."""
+        del output
+        return float(bool(expected[field]) == answer)
+
+    evaluator.__name__ = f"{field}_constant_floor"
+    return evaluator
+
+
+def _judged(field: str):
+    """An evaluator scoring one phrasing judgement against its label."""
+
+    def evaluator(output: dict, expected: dict) -> float:
+        """1 when the pipeline agreed with the label, 0 when it did not."""
+        said = output.get(field)
+        return float(said is not None and bool(said) == bool(expected[field]))
+
+    evaluator.__name__ = field
+    return evaluator
+
+
+def _answered(output: dict, expected: dict) -> float:
+    """What share of the judgements were answered at all.
+
+    `names_its_source` abstains where no rule settles it and no model
+    could be reached, and an abstention is not a wrong answer - it is a
+    question nobody answered, which must not reject a question. Scored
+    separately so a run where the model was unreachable reads as that
+    rather than as a run where the judge got everything wrong.
+    """
+    del expected
+    return (
+        float(
+            sum(
+                output.get(one) is not None
+                for one in ("names_its_source", "self_contained")
+            )
+        )
+        / 2
+    )
+
+
+def _phrasing_task(judge):
+    """Builds the task that reads one question, for the experiment.
+
+    The real path and not a reimplementation of it: `gates.cites_source`
+    settles what a pattern settles and only the residue reaches the model,
+    `nlp.pointing` finds the pointing words and the model rules on whether
+    they land. That is what `checker._phrasing` does, and scoring anything
+    else would measure something production does not run.
+    """
+    from nlp.analysis import pointing
+    from question_generation.gates import cites_source
+
+    def task(input: dict) -> dict:
+        """Judges one question's phrasing, rules first."""
+        question, language = input["question"], input["language"]
+        ruled = cites_source(question, language)
+        source = ruled if ruled is not None else judge.names_its_source(question)
+
+        pointers = pointing(question, language)
+        # No pointing word is not an unanswered question: there is nothing
+        # for a pointer to fail to land on, so the question stands on its
+        # own by construction and the model is never asked.
+        contained = True if not pointers else judge.self_contained(question, pointers)
+        return {
+            "names_its_source": source,
+            "self_contained": contained,
+            "settled_by_rule": ruled is not None,
+            "pointers": list(pointers),
+        }
+
+    return task
+
+
 def run(name: str, settings: Settings) -> str:
     """Runs one experiment and returns where to read it.
 
@@ -185,6 +303,9 @@ def run(name: str, settings: Settings) -> str:
         NotImplementedError: For any set with no task, naming what does
             measure it instead.
     """
+    if name == PHRASING:
+        return _phrasing(settings)
+
     if name != EXTRACTION:
         raise NotImplementedError(
             f"{name} is uploaded but not scored here: its cases are a gate "
@@ -222,6 +343,65 @@ def run(name: str, settings: Settings) -> str:
         dataset_id=dataset.id, experiment_id=_id_of(experiment)
     )
     log.info("%s: recorded at %s", name, url)
+    return url
+
+
+def _phrasing(settings: Settings) -> str:
+    """Scores the two phrasing judgements, each against a constant floor.
+
+    A measurement and not a gate, like extraction's and unlike the
+    questions set. The numbers it produces are the ones in
+    `evaluation/README.md`'s baseline table, which were read off a
+    terminal and typed in by hand: the split by language, the 15/19 and
+    the 16/19, and the constant-answer floor that showed `self_contained`
+    was not reading its input.
+
+    Scored against QUESTIONS_PHRASING_MODEL, which is the model the
+    pipeline actually asks, so swapping a 31B for a 12B and re-running
+    this is the measurement that decides it.
+    """
+    from llm.client import Client as ModelClient
+    from llm.config import Settings as ModelSettings
+    from question_generation.config import Settings as QuestionSettings
+    from question_generation.phrasing import PROMPT_VERSION, PhrasingJudge
+
+    model = ModelSettings.load()
+    questions = QuestionSettings.load()
+    asked = model.overridden(questions.phrasing_model or questions.verifier_model)
+    log.info("scoring %s against %s", PHRASING, asked.model)
+
+    client = _client(settings)
+    dataset = client.datasets.get_dataset(dataset=PHRASING)
+    experiment = client.experiments.run_experiment(
+        dataset=dataset,
+        task=_phrasing_task(PhrasingJudge(ModelClient(asked))),
+        evaluators={
+            "names_its_source": _judged("names_its_source"),
+            "self_contained": _judged("self_contained"),
+            # Both floors, so neither score is read without the number it
+            # has to beat sitting in the next column.
+            "names_its_source_floor": _constant("names_its_source"),
+            "self_contained_floor": _constant("self_contained"),
+            "answered": _answered,
+        },
+        experiment_name=settings.run_name or f"phrasing-{asked.model}",
+        experiment_description=(
+            f"{asked.model} at temperature {asked.temperature}, on the "
+            f"residue the rules do not settle. Prompt version "
+            f"{PROMPT_VERSION}."
+        ),
+        experiment_metadata={
+            "model": asked.model,
+            "temperature": asked.temperature,
+            "prompt_version": PROMPT_VERSION,
+            "names_its_source_floor": _majority("names_its_source"),
+            "self_contained_floor": _majority("self_contained"),
+        },
+    )
+    url = client.experiments.get_experiment_url(
+        dataset_id=dataset.id, experiment_id=_id_of(experiment)
+    )
+    log.info("%s: recorded at %s", PHRASING, url)
     return url
 
 

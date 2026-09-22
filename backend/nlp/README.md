@@ -32,11 +32,25 @@ thing it replaces is a prompt that asked a served model for four judgements
 at once and confused them — see
 [question generation](../question_generation/README.md#what-that-one-call-was-carrying-and-where-those-judgements-went).
 
-Two kinds of head are accepted and the label order is read off the
-checkpoint's own `id2label`, never assumed: a three-way NLI model naming
+Two kinds of head are accepted and each score is read off the **label the
+model put beside it**, never off a position: a three-way NLI model naming
 entailment/neutral/contradiction, and a two-way zero-shot head naming
 entailment/not_entailment. Assuming an order silently inverts every verdict
-on half the models anybody would configure.
+on half the models anybody would configure, and mDeBERTa-xnli and bart-mnli
+are ordered opposite ways round.
+
+The forward pass, the softmax and a table built from `id2label` used to be
+written out here. `transformers`' own text-classification pipeline hands
+back the label names, so there are no indices to get the wrong way round;
+what is left is the one thing the pipeline does not do, which is refuse a
+checkpoint whose labels are not an NLI model's. A sentiment head scores
+every pair fluently and means nothing by it.
+
+[`embedding.py`](embedding.py) is `sentence-transformers` for the same
+reason. The mean-pool-then-normalise it used to spell out is what that
+library is, and it reads the checkpoint's own `1_Pooling` config rather
+than assuming the mean — a model trained to be read off its CLS token was
+being averaged.
 
 The two-way heads are wanted rather than tolerated. `bge-m3-zeroshot-v2.0`
 reads **8,194 tokens** where `mDeBERTa-v3-base-xnli` reads 512, and a premise

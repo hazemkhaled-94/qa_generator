@@ -33,14 +33,43 @@ _INSTRUMENTORS = (
 _llm_instrumented = False
 
 
-def configure(service_name: str) -> None:
+#: What Phoenix reads a span's project off. An OpenInference resource
+#: attribute rather than an OTel one - Phoenix files a span under this and
+#: falls back to `default` when it is absent, which is where every span in
+#: this deployment has gone so far.
+#:
+#: Read off the package rather than written as a string, because it is
+#: their name for their own concept; the fallback is the literal, for a
+#: process that has the exporter and not the semantic conventions.
+try:  # pragma: no cover - present wherever the instrumentor is
+    from openinference.semconv.resource import ResourceAttributes
+
+    PROJECT = ResourceAttributes.PROJECT_NAME
+except ImportError:  # pragma: no cover
+    PROJECT = "openinference.project.name"
+
+
+def configure(service_name: str, run: str | None = None) -> None:
     """Sets up the tracer provider and instruments what is installed.
 
     Exports over OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set, and
     otherwise records spans without sending them. Credentials come from
     OTEL_EXPORTER_OTLP_HEADERS and are read by the exporter itself.
+
+    `run` puts this process's spans in a Phoenix project of their own. What
+    that buys is the half SQL cannot answer: the gate counts are columns and
+    can be grouped by `questions.run_id`, but the call count, the token
+    count, the latency and the spend are in the spans, and Phoenix compares
+    two projects of those directly. Absent - which is every process that is
+    not a stage - the spans go where they always went.
     """
-    provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+    attributes = {"service.name": service_name}
+    if run:
+        # Named for the service too, so one run of the whole pipeline is
+        # five projects that sort together rather than one heap in which
+        # extraction's calls and question generation's are indistinguishable.
+        attributes[PROJECT] = f"{service_name}-{run}"
+    provider = TracerProvider(resource=Resource.create(attributes))
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if endpoint:

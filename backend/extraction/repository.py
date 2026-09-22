@@ -43,6 +43,7 @@ from extraction.models import (
     Twin,
 )
 from nlp.models import Sentence
+from settings.runs import run_id
 from stages import Columns, RowQueue
 
 #: The next passage to read. This stage's own column and nothing else: it
@@ -389,6 +390,7 @@ def _row(fact: CheckedFact, version: str | None = None) -> dict:
     """Turns one checked fact into the columns the facts table holds."""
     return {
         "settings_version": version,
+        "run_id": run_id(),
         "kind": fact.kind,
         "statement": fact.statement,
         "evidence_text": fact.evidence_text,

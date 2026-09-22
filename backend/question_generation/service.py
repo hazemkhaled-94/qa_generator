@@ -20,6 +20,7 @@ from question_generation.config import Settings
 from question_generation.gates import names_parties, near_verdict, structural
 from question_generation.generation import QuestionWriter
 from question_generation.models import (
+    Candidate,
     CheckedQuestion,
     FactGroup,
     JudgedQuestion,
@@ -29,8 +30,10 @@ from question_generation.models import (
 )
 from question_generation.planning import Plan, plans
 from question_generation.queue import QuestionQueue
+from question_generation.runs import ACCEPTED
 from question_generation.selection import Deal, spread
 from question_generation.types import SPECS, spec
+from settings.runs import run_id
 from stages import StageService
 from telemetry import tracer, working
 
@@ -376,7 +379,6 @@ class QuestionGenerationService(StageService):
         writer: QuestionWriter,
         checker: QuestionChecker,
         settings: Settings,
-        reranker=None,
     ) -> None:
         """Initialises the service with its collaborators."""
         super().__init__(repository)
@@ -384,7 +386,6 @@ class QuestionGenerationService(StageService):
         self._writer = writer
         self._checker = checker
         self._settings = settings
-        self._reranker = reranker
 
     def process_next(self) -> int | None:
         """Writes the questions for one queued topic and stores them."""
@@ -461,7 +462,6 @@ class QuestionGenerationService(StageService):
             wanted=self._settings.per_topic,
             size=self._settings.sample_size,
             rounds=self._settings.samples_per_passage,
-            reranker=self._reranker,
             floor=self._settings.meets_floor,
         )
         planned = plans(
@@ -550,6 +550,54 @@ class QuestionGenerationService(StageService):
                 kept.append(fact)
         return kept
 
+    def _checked(
+        self, candidate: Candidate, accepted: list[CheckedQuestion]
+    ) -> CheckedQuestion:
+        """Puts one candidate through the gates, inside a span of its own.
+
+        The verdict was in two places and neither could be queried: a column
+        in Postgres, and a line in the log. Postgres answers how many of
+        each gate fired - `question_generation.runs` is that query - and it
+        cannot answer what a gate COST, because the calls, the tokens and
+        the latency are in the spans.
+
+        A span per question is what joins the two. The model calls this
+        check makes are its children, so a run's `leaks_source` rejections
+        carry the price of the calls they wasted, and Phoenix groups on the
+        attributes below without anything being logged twice.
+
+        Cheap: a question costs one to three model calls, each already a
+        span, so this adds a third of what is there rather than doubling it.
+
+        The verdict goes on as ATTRIBUTES rather than through Phoenix's
+        evaluations API, and the reason is the image. `arize-phoenix-client`
+        is a host-side dependency - `evaluation/` and `review/` both run on
+        the host, and no worker carries either - so reaching that API from
+        here would put a Phoenix client in all five workers to record
+        something an attribute already carries.
+        """
+        with span.start_as_current_span("check_question") as current:
+            checked = self._checker.check(candidate, accepted)
+            current.set_attribute("run.id", run_id())
+            # The gate that stopped it, or `accepted`. One attribute rather
+            # than a boolean and a nullable code, because what every query
+            # here groups on is "what became of it".
+            current.set_attribute("question.gate", checked.rejected_reason or ACCEPTED)
+            current.set_attribute("question.accepted", checked.accepted)
+            current.set_attribute("question.answerable", checked.answerable)
+            current.set_attribute("question.language", checked.language)
+            current.set_attribute("question.follows", checked.follows)
+            for name, value in (
+                ("question.type", checked.question_type),
+                ("question.form", checked.answer_form),
+                ("question.difficulty", checked.criteria.difficulty),
+                ("question.planned_difficulty", checked.planned_difficulty),
+                ("question.cognitive_level", checked.cognitive_level),
+            ):
+                if value:
+                    current.set_attribute(name, value)
+            return checked
+
     def _attempt(
         self, sample: FactGroup, plan: Plan, accepted: list[CheckedQuestion]
     ) -> list[CheckedQuestion]:
@@ -568,14 +616,14 @@ class QuestionGenerationService(StageService):
         # Checked against what this run has accepted as well as what the
         # database holds: nothing is stored until the topic is finished, so
         # without it a topic would happily write the same question twice.
-        drafts = [self._checker.check(self._writer.write(sample, plan), accepted)]
+        drafts = [self._checked(self._writer.write(sample, plan), accepted)]
         for _ in range(self._settings.retries):
             note = again(drafts[-1], plan)
             if note is None:
                 break
             log.info("asking again for %r: %s", drafts[-1].question_text, note)
             drafts.append(
-                self._checker.check(self._writer.write(sample, plan, note), accepted)
+                self._checked(self._writer.write(sample, plan, note), accepted)
             )
         best = max(range(len(drafts)), key=lambda one: (drafts[one].accepted, one))
         drafts.append(drafts.pop(best))
@@ -641,7 +689,7 @@ class QuestionGenerationService(StageService):
                 root_facts=cited,
                 parent_passages=previous,
             )
-            checked = self._checker.check(candidate, accepted)
+            checked = self._checked(candidate, accepted)
             written.append(checked)
             if not checked.accepted:
                 break

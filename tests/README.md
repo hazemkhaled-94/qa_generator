@@ -18,11 +18,11 @@ make test-coverage  # the gating layers, with a coverage report
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, the frontend's gate list, and pyright at zero | nothing |
+| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, the frontend's gate list, the two import contracts, and pyright at zero | nothing |
 | [`unit/`](unit/) | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
 | [`property/`](property/) | Invariants over generated input, with hypothesis | spaCy, for some |
 | [`regression/`](regression/) | The verdicts the checks have always reached, pinned as a table | spaCy |
-| [`contract/`](contract/) | The OpenAPI surface, the paths the frontend builds, and the refusals each route declares | a container |
+| [`contract/`](contract/) | The OpenAPI surface, the paths the frontend builds, the refusals each route declares, and **generated calls against every read route** checked back against the document | a container |
 | [`integration/`](integration/) | The database, the object store and the HTTP surface, against the images compose runs | a container |
 | [`e2e/`](e2e/) | One document through every stage in this process, with the converter and the model stood in for | a container |
 | [`frontend/`](frontend/) | Each Streamlit page against a scripted backend | nothing |
@@ -43,6 +43,45 @@ silently never runs.
 | `e2e` | Drives the whole pipeline in this process |
 | `smoke` | Builds images and reads the compose file |
 | `eval` | Scores a real served model; **never gates** |
+
+## Two checks that are a tool rather than a test
+
+Both run in `make test` through a thin wrapper in `static/`, and both have
+a target of their own that prints the finding itself rather than a pytest
+assertion:
+
+| | Runs | Covers |
+|---|---|---|
+| `make lint-imports` | import-linter, over [`.importlinter`](../.importlinter) | The two architecture rules the root README states: a stage sits above what it shares, and **no backend service imports another**. Both were prose until now |
+| `make deps` | deptry | A declared dependency nothing imports, an import nothing declares, and a package reached only through somebody else's. It found twelve of the first on its first run |
+
+`.importlinter` does **not** replace
+[`static/test_api_stays_light.py`](static/test_api_stays_light.py), and
+cannot: grimp counts an import inside a function body, and deferring a
+heavy import into one is exactly how the topic service keeps pyLDAvis out
+of the api. That distinction is the whole of what the api's weight rests
+on, so the two checks live side by side.
+
+## Generated calls, and what they found
+
+[`contract/test_openapi_conformance.py`](contract/test_openapi_conformance.py)
+reads the published document and sends calls derived from it, checking each
+answer back against what was promised. Four checks only — a 5xx, an
+undeclared status, a body that does not match its schema, and a media type
+that does not. `unsupported_method` is off: `POST /questions/{action}` is a
+real route, so a POST to `/questions/quality` genuinely matches it and is
+refused 422, and leaving that check on failed 30 of 33 operations on it.
+
+It earned its place on the first run, finding two classes of real defect
+that are now fixed in [`backend/api/params.py`](../backend/api/params.py):
+
+- an **id or an offset above `bigint`** reached PostgreSQL and came back
+  500 — `GET /passages/9223372036854775808`, and `?offset=` the same;
+- a **NUL byte in a search term** reached psycopg, which refuses one, and
+  came back 500 — `?q=%00`.
+
+Both are now 422 from FastAPI's own validation, which every route already
+declares.
 
 ## Containers
 

@@ -159,6 +159,18 @@ what each leaves alone and why.
 |---|---|
 | `make questions-balance` | Draw the balanced release out of what was accepted |
 | `make questions-reverify` | Re-check stored questions; no model is called |
+| `make questions-runs` | Which runs there are, newest first |
+| `make questions-diff` | Two runs side by side, on the gate that stopped each |
+
+```bash
+make questions RUN_ID=b-gemma4-12b            # name a run
+make questions-diff RUNS="a-gpt-4.1 b-gemma4-12b"
+```
+
+`questions-diff` reads the live questions **and** the archived ones, which
+is what makes an A/B possible: `questions-rerun` deletes what it replaces,
+so producing run B used to destroy run A. A run listed `(deleted)` is being
+read out of `archived_rows`.
 
 ## Documents
 
@@ -214,12 +226,20 @@ order.
 | `make review-push-topics` / `review-pull-topics` | The same, for topic labels |
 | `make review-push-questions` / `review-pull-questions` | The same, for questions |
 | `make review-status` | How much has been looked at |
+| `make review-push-questions IDS=…` | Push exactly those question ids instead of a sample |
 | `make eval-upload` | Put the golden cases in Phoenix |
 | `make eval-score` | Score the served model against them, and record it |
+| `make eval-phrasing` | Score the two phrasing judgements, each against its floor |
+| `make second-opinion` | An independent judge over one run, and where it disagrees |
 
 ```bash
 make eval-score EVAL_RUN_NAME=extraction-prompt-v7
+make second-opinion RUN=<run id> LIMIT=50
+make review-push-questions IDS=12,34,56       # what it printed
 ```
+
+`second-opinion` settles nothing — a model's answers move between two runs
+at the same temperature. What it produces is a queue for a person.
 
 ## Tests and checks
 
@@ -238,6 +258,8 @@ make eval-score EVAL_RUN_NAME=extraction-prompt-v7
 | `make format` | Apply every fix ruff can make |
 | `make typecheck` | pyright, at zero |
 | `make audit` | Known advisories against the two locks |
+| `make lint-imports` | The two architecture rules, as import-linter contracts |
+| `make deps` | A declared dependency nothing imports, and an import nothing declares |
 | `make lock` | Rewrite `backend/api/requirements.lock` |
 
 `lint`, `format` and `typecheck` all cover `backend`, `frontend`, `telemetry`,

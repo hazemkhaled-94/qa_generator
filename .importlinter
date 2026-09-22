@@ -1,0 +1,79 @@
+# The two architecture rules the root README states, as contracts.
+#
+# Both were prose until now. "No backend service imports another" and "a
+# service package re-exports nothing" are the reasons litellm, Docling,
+# gensim and spaCy stay out of the api process, and nothing checked either:
+# one `from question_generation.service import ...` in the extraction
+# service would have been a normal-looking edit that quietly welded two
+# stages together.
+#
+# Run with `make lint-imports`, which puts backend/ on the path the way the
+# image does - each backend package sits at the top level in the container,
+# so `extraction` and not `backend.extraction` is the name that resolves.
+#
+# This does NOT replace tests/static/test_api_stays_light.py, and cannot.
+# grimp reads every import including the ones inside a function body, and
+# deferring a heavy import into a function is exactly how the topic service
+# keeps pyLDAvis and how extraction/run.py keeps the embedder out of a
+# process that may never need it. A contract here cannot tell a deferred
+# import from one that runs at import time, and that distinction is the
+# whole of what the api's weight depends on.
+
+[importlinter]
+root_packages =
+    api
+    archive
+    blob_store
+    database
+    extraction
+    ingestion
+    llm
+    nlp
+    preprocessing
+    question_generation
+    settings
+    stages
+    telemetry
+    topic_modelling
+include_external_packages = False
+
+
+[importlinter:contract:layers]
+name = A stage sits above what it shares and below nothing but the api
+type = layers
+layers =
+    api
+    extraction | ingestion | preprocessing | question_generation | topic_modelling | archive
+    stages
+    llm | nlp | blob_store
+    settings
+    database
+    telemetry
+containers =
+exhaustive = False
+# The one upward edge, and it is deliberate. `settings/changes.py` refuses a
+# write that would stop a service parsing its own settings, which it can only
+# check by calling that service's own `Settings.load`. It imports the
+# `config` submodule of each and nothing else - never a service, never a
+# repository - which is why this list is exactly six names long and why a
+# seventh should be argued for rather than added.
+ignore_imports =
+    settings.changes -> extraction.config
+    settings.changes -> ingestion.config
+    settings.changes -> llm.config
+    settings.changes -> preprocessing.chunking.config
+    settings.changes -> preprocessing.parsing.config
+    settings.changes -> question_generation.config
+    settings.changes -> topic_modelling.config
+
+
+[importlinter:contract:stages-are-independent]
+name = No backend service imports another
+type = independence
+modules =
+    extraction
+    ingestion
+    preprocessing.chunking
+    preprocessing.parsing
+    question_generation
+    topic_modelling

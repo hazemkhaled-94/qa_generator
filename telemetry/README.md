@@ -92,6 +92,28 @@ API continues.
 `trace.id` on every log line is what joins the two: a slow extraction is a
 span in Phoenix and a set of lines in Grafana, found from either end.
 
+### A project per run
+
+A stage passes `settings.runs.run_id()` to `configure`, which sets
+`openinference.project.name` on the resource — the attribute Phoenix files
+a span under. One run of one stage is then one project, `<stage>-<run id>`,
+and two runs compare directly on the thing the database does not hold: the
+call count, the tokens, the latency and the spend.
+
+Named with the service as well as the run, so one pass over the pipeline is
+five projects that sort together rather than one heap in which extraction's
+calls and question generation's cannot be told apart.
+
+The api and the frontend pass nothing and keep the default project. Neither
+produces a run, and a project per API process is a project per restart.
+
+Question generation also opens a span per question, carrying the gate that
+stopped it. The model calls that question made are its children, so a run's
+`leaks_source` rejections carry the price of the calls they wasted. The
+verdict goes on as attributes rather than through Phoenix's evaluations
+API, because no image carries a Phoenix client and recording an attribute
+needs none.
+
 ## Tools, and where each is used
 
 | Tool | Where | Why this one |

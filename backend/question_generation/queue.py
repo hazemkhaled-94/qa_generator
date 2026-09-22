@@ -33,6 +33,7 @@ from question_generation.models import (
     SourcePassage,
     TopicToCover,
 )
+from settings.runs import run_id
 from stages import Columns, RowQueue
 
 #: A topic rather than a request to refit. `topics` carries both queues, and
@@ -460,6 +461,7 @@ class QuestionQueue(RowQueue):
                             rejected_reason=question.rejected_reason,
                             status_changed_at=func.now(),
                             settings_version=self._version,
+                            run_id=run_id(),
                             follows_id=follows,
                             thread_position=position,
                         )

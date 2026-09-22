@@ -45,6 +45,20 @@ python -m review.run --status
 
 The three are mutually exclusive and one is required.
 
+## Reviewing a queue somebody else built
+
+```bash
+make review-push-questions IDS=12,34,56
+```
+
+Exactly those rows instead of a sample. What produces the list is
+`make second-opinion RUN=<id>`: the questions the gates **kept** and an
+independent judge calls unsupported. Which of the two is wrong is not
+decidable from a terminal, which is what this package is for.
+
+A stratified sample cannot find them. They are rare in every band and every
+verdict, which is the shape a proportional draw misses.
+
 ## Why the samples are stratified
 
 **Over the verdicts, not in id order.** A review answers "is the checker

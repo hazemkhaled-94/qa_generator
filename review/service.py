@@ -13,6 +13,7 @@ thinking rather than a decision.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -72,8 +73,18 @@ def _dataset(client: rg.Argilla, settings: Settings, name: str) -> rg.Dataset:
     ).create()
 
 
-def push(name: str, settings: Settings, catalogs: Catalogs) -> int:
+def push(
+    name: str,
+    settings: Settings,
+    catalogs: Catalogs,
+    ids: Sequence[int] | None = None,
+) -> int:
     """Puts a sample of one kind of row in front of a reviewer.
+
+    `ids` names exactly which questions to push instead of sampling, which
+    is how a queue built elsewhere - `evaluation.second_opinion`'s
+    disagreements - reaches a reviewer. Questions only; the other two sets
+    have no such queue behind them.
 
     Returns:
         How many records were written.
@@ -88,7 +99,7 @@ def push(name: str, settings: Settings, catalogs: Catalogs) -> int:
     elif name == datasets.QUESTIONS:
         records = [
             datasets.question_record(one)
-            for one in catalogs.facts.questions(settings.sample)
+            for one in catalogs.facts.questions(settings.sample, ids)
         ]
     else:
         # Every topic, not a sample. A corpus has dozens, not thousands,

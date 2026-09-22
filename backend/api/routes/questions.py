@@ -13,11 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from fastapi import Query
 from pydantic import BaseModel
 
 from api.dependencies import question_catalog, questions_queue
 from api.errors import ApiError, ErrorBody
+from api.params import DocumentFilter, Limit, Offset, RowId, SearchText, TopicId
 from api.routes.stage import stage_router
 from database.qa_generator import QuestionStatus
 from question_generation.config import Settings as QuestionSettings
@@ -110,9 +110,9 @@ class QuestionVerdict(BaseModel):
 
 @router.get("")
 def questions(
-    document: str | None = None,
-    topic: int | None = None,
-    q: str | None = Query(default=None, max_length=200),
+    document: DocumentFilter = None,
+    topic: TopicId = None,
+    q: SearchText = None,
     field: SearchField = "both",
     status: Decision | None = None,
     answerable: bool | None = None,
@@ -125,8 +125,8 @@ def questions(
     cognitive_level: CognitiveLevel | None = None,
     answer_form: AnswerForm | None = None,
     follows: bool | None = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
+    limit: Limit = 50,
+    offset: Offset = 0,
 ) -> QuestionPage:
     """Lists generated questions, including those a gate rejected.
 
@@ -184,9 +184,9 @@ def plan() -> GenerationPlan:
 
 @router.get("/quality")
 def quality(
-    document: str | None = None,
-    topic: int | None = None,
-    q: str | None = Query(default=None, max_length=200),
+    document: DocumentFilter = None,
+    topic: TopicId = None,
+    q: SearchText = None,
     field: SearchField = "both",
     status: Decision | None = None,
     answerable: bool | None = None,
@@ -227,7 +227,7 @@ def quality(
 
 
 @router.get("/{question_id}", responses={404: {"model": ErrorBody}})
-def question(question_id: int) -> QuestionDetail:
+def question(question_id: RowId) -> QuestionDetail:
     """Reads one question with the facts it was written from.
 
     Raises:
@@ -240,7 +240,7 @@ def question(question_id: int) -> QuestionDetail:
 
 
 @router.patch("/{question_id}", responses={404: {"model": ErrorBody}})
-def decide(question_id: int, verdict: QuestionVerdict) -> StoredQuestion:
+def decide(question_id: RowId, verdict: QuestionVerdict) -> StoredQuestion:
     """Accepts or rejects one question.
 
     A rejected question keeps its row whoever rejected it: the share that

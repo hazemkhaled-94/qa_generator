@@ -17,6 +17,7 @@ from typing import Any
 import telemetry
 from database.qa_generator import engine
 from settings import decimal
+from settings.runs import run_id
 from stages.queue import StageQueue, Unnarrowable
 from stages.service import StageService
 from stages.worker import watch
@@ -132,7 +133,11 @@ def queue_main(
     actions = {**_ACTIONS, **{flag: help for flag, (help, _, _) in extra.items()}}
     args = parser(module, actions).parse_args(argv)
 
-    telemetry.configure(name)
+    # Named with the run, so this drain's spans are a Phoenix project of
+    # their own and two runs compare on calls, tokens, latency and spend -
+    # which the rows carry none of. `run_id` is a uuid unless RUN_ID names
+    # one; see settings/runs.py.
+    telemetry.configure(name, run=run_id())
     telemetry.trace_engine(engine())
 
     def act(run):

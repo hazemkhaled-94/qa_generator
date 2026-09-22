@@ -19,6 +19,7 @@ from database.qa_generator import (
 )
 from database.qa_generator.passage_topics import DOMINANT as _DOMINANT
 from database.qa_generator.repository import Repository
+from settings.runs import run_id
 from stages import Columns, StageQueue
 from topic_modelling.models import (
     FittedTopic,
@@ -257,6 +258,7 @@ class TopicQueue(StageQueue):
                     "corpus_vocabulary": fitting.vocabulary,
                     "passages_without_topics": fitting.without_topics,
                     "settings_version": self._version,
+                    "run_id": run_id(),
                 }
                 for fitting in fittings
                 for topic in fitting.topics
