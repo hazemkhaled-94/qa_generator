@@ -124,6 +124,44 @@ the facts have no single honest question between them, ask about one of them
 and cite only that. `difficulty` is read off what it cited, so a question that
 took the narrower option bands as what it actually is.
 
+**A reading is offered the condensed facts first, a value the single claims.**
+`QUESTIONS_FACT_SAMPLE` is spent per passage, so at a cap of 2 over two
+passages each side offers exactly **one** fact — and rank order makes that one
+atomic. A `summary` or an `outline` is 5 to 6 times longer and carries four
+predicates where an atomic claim carries one, so a type whose answer is a
+reading is offered those first. A `value` is not: a factoid, an entity and an
+aggregation want the claim carrying the number, which is what `ranked` already
+puts first inside a kind.
+
+No setting. The form already says which a type is, and a second dial saying it
+again is a way for the two to disagree.
+
+**This was aimed at the weld and does not reach it.** Recorded because the
+measurement is the useful part. 34% of multi-passage questions rest on a pair
+of passages no more alike than a well-ranked random draw, and questions that
+cited a condensed fact welded far less often — 19.7% against 35.8% for an
+`explanation`, 32.0% against 40.6% for a `list`. So offering those first
+looked like the lever.
+
+It is not, for two reasons:
+
+- **The supply does not change, only the order.** A passage is dealt
+  `QUESTIONS_SAMPLES_PER_PASSAGE` times and never with a fact twice, so over
+  its deals every fact it holds is offered either way. Measured over this
+  corpus, the share of offered facts that are condensed moves from 25.6% to
+  27.8% — the same facts, paired differently.
+- **The correlation is the wrong way round.** A condensed fact often makes a
+  question answerable from ONE passage, so the writer narrows and cites one
+  side. The low weld rate is what narrowing looks like after the fact, not
+  evidence that a condensed fact prevents a weld.
+
+What would reach it is a **floor on `meets`**: where the best fact the second
+passage can offer does not meet the head above some share, offer one passage
+instead of two. The writer is currently told to narrow in that case and the
+34% is how often it does not. Not implemented — it needs a setting, and a
+floor set too high makes every question single-passage, which is the band
+problem this module started with.
+
 **The corpus's own furniture is never offered.** A publisher puts the same
 copyright notice, contents page, accreditation clause and revision table in
 every document it issues. Each is real text, a fact extracts from it
@@ -133,8 +171,9 @@ wrong with it except that nobody wants to know:
 > *"Welche Errata enthalten wörtliche Verbesserungen, für die die
 > D.A.CH-Arbeitsgruppe den Reviewern dankt?"* → `3.1.1 und 3.1.2`
 
-Measured on one corpus of eight documents, **25% of a balanced release
-rested on exactly this**. So it is excluded before a question is written
+Measured on one corpus of eight documents, **14.1% of the accepted
+questions rested on a passage that recurs in another document, and the
+filter took that to 2.5%**. So it is excluded before a question is written
 rather than gated after.
 
 What it is read by is **repetition, not vocabulary**. A list of section
@@ -150,6 +189,35 @@ Nothing about a language, a domain or a section name is assumed. Three ways
 it abstains, each correct rather than missing: a corpus of one document has
 nothing to repeat into, a passage with no embedding cannot be compared, and
 a threshold of `0` turns the reading off.
+
+### What this reading does not catch
+
+**Acknowledgements.** They are the clearest furniture there is and the
+filter mostly misses them, because every syllabus thanks **different
+people**: the section is structurally identical and lexically different, so
+it falls below the threshold. Measured by mean similarity to its nearest
+twin in another document, and by how many of each kind the filter caught:
+
+| | Passages | Mean twin | Caught |
+|---|---|---|---|
+| Learning-objective traceability matrices | 65 | 0.957 | **52** |
+| Copyright and changelog | 28 | 0.937 | 9 |
+| **Acknowledgements** | 20 | 0.932 | **2** |
+
+So *"Welches Unternehmen wird für die initiale Übersetzung des Lehrplans
+gedankt?"* → `T-Systems International GmbH` still gets written. What would
+read it is that the passage is mostly `PER` entities and carries no subject
+noun at all, which spaCy already marks and which needs no word list either.
+Not implemented.
+
+**And do not read a page number as furniture.** Counting the questions
+resting on a document's first or last twelve pages gives 20.6%, which is
+the figure this section first claimed and it is an over-count: in this
+corpus that range holds `Anhang B — KI-spezifische und andere Begriffe`, a
+**glossary**, and a glossary is subject matter. Some of the best questions
+in the set come out of it — the integrity level a failure probability falls
+in, whose data the GDPR covers. The repetition reading leaves those alone,
+which is the point of measuring repetition rather than position.
 
 ### Step 3 — Write one question
 

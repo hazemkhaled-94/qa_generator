@@ -75,8 +75,9 @@ def repeated_across_documents(threshold: float):
     learning-objective preamble. Every one of those is real text, a fact
     extracts from it cleanly, and a question written about it passes every
     gate here - because nothing is wrong with it except that nobody wants
-    to know. Measured over one corpus of eight documents, 25% of a balanced
-    release rested on exactly this.
+    to know. Measured over one corpus of eight documents, 14.1% of the
+    accepted questions rested on a passage recurring in another document,
+    and this reading took that to 2.5%.
 
     What separates furniture from subject matter is not a word. A list of
     section names is a different list per corpus, and a list of words is
@@ -88,6 +89,14 @@ def repeated_across_documents(threshold: float):
     Measured against the same corpus: of the 234 passages with a
     cross-document twin above 0.95, 71% sat in a document's first or last
     twelve pages, against 17% of everything else.
+
+    What it does NOT catch is acknowledgements, which are the clearest
+    furniture there is. Every document thanks different people, so the
+    section is structurally identical and lexically different: of 20 such
+    passages this caught 2, against 52 of 65 traceability matrices. What
+    would read one is that it is mostly PER entities and carries no subject
+    noun, and lowering the threshold is not it - below this the glossary
+    goes too, and a glossary is subject matter.
 
     Three ways this abstains, all of them correct rather than missing:
     a corpus of one document has no other document to repeat into, a

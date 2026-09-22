@@ -7,7 +7,12 @@ from typing import ClassVar
 
 from opentelemetry.trace import Span
 
-from database.qa_generator import Difficulty, QuestionRejection, QuestionStatus
+from database.qa_generator import (
+    AnswerForm,
+    Difficulty,
+    QuestionRejection,
+    QuestionStatus,
+)
 from question_generation.balance import choose, composition, largest, quota_of
 from question_generation.catalog import QuestionCatalog
 from question_generation.checker import QuestionChecker
@@ -473,7 +478,12 @@ class QuestionGenerationService(StageService):
         #: a follow-up joins as soon as it is kept.
         roots = 0
         for plan in planned:
-            sample = deal.sample(plan.shape)
+            # A reading is written from a passage condensed, a value from
+            # the claim carrying the number. Which facts are offered first
+            # follows from that, and it is what the weld responds to.
+            sample = deal.sample(
+                plan.shape, condensed=plan.spec.form != AnswerForm.VALUE
+            )
             if sample is None:
                 # The topic ran out of passages before the plan ran out of
                 # slots. Everything it had has been asked about once.

@@ -184,6 +184,40 @@ def closest(
 #: shape every prompt here assumes; the rest as EXTRACTION_KINDS writes them.
 _KINDS = (FactKind.ATOMIC, FactKind.SUMMARY, FactKind.OUTLINE, FactKind.BRIDGE)
 
+#: The kinds that stand in for a whole passage rather than one sentence of
+#: it. Extraction calls them condensed, and holds them to a check of that
+#: name.
+CONDENSED = (FactKind.SUMMARY, FactKind.OUTLINE)
+
+
+def condensed_first(facts: Sequence[SourceFact]) -> list[SourceFact]:
+    """The same facts with the ones standing in for a whole passage first.
+
+    What a sample is reordered by when the answer is not a bare value. A
+    condensed fact is 5 to 6 times longer than an atomic claim and carries
+    four predicates where one carries a single predicate, so a type whose
+    answer is a reading of a passage is offered those before the single
+    sentences. A `value` is not: a factoid, an entity and an aggregation
+    want the fact carrying a number, which is what `ranked` already puts
+    first within a kind.
+
+    Stable within each half, so `ranked`'s orderings survive: units first
+    inside a kind, and the kinds interleaved.
+
+    This was written to reduce the weld and it does not, which is worth
+    knowing before it is reached for again. Questions citing a condensed
+    fact weld far less - 19.7% against 35.8% for an `explanation` - but the
+    correlation runs the other way: a condensed fact often answers the
+    question from ONE passage, so the writer narrows and cites one side,
+    and the low rate is what narrowing looks like afterwards. And the
+    ordering cannot change the supply anyway: a passage is dealt `rounds`
+    times and never with a fact twice, so every fact it holds is offered
+    either way. Measured over this corpus the condensed share of offered
+    facts moves 25.6% to 27.8%. See the README for the floor on `meets`
+    that would reach it.
+    """
+    return sorted(facts, key=lambda one: one.kind not in CONDENSED)
+
 
 def ranked(facts: Iterable[SourceFact]) -> list[SourceFact]:
     """One passage's facts, its kinds interleaved and each kind's best first.
@@ -297,13 +331,20 @@ class Deal:
         """How many passages are left to offer."""
         return sum(1 for passage in self._order if not self._taken(passage))
 
-    def sample(self, shape: str = Shape.SINGLE) -> FactGroup | None:
+    def sample(
+        self, shape: str = Shape.SINGLE, condensed: bool = False
+    ) -> FactGroup | None:
         """The next sample of the shape asked for, or None when none is left.
 
         A shape the topic cannot supply falls back to a narrower one rather
         than yielding nothing: a topic sitting in one document has no
         cross-document question in it, and refusing to write anything about it
         would leave the subject uncovered.
+
+        `condensed` offers the facts standing in for a whole passage ahead of
+        the single claims - see `condensed_first`. Set from the answer form
+        the plan asked for, because a value wants the claim carrying a number
+        and a reading wants the paragraph.
         """
         head = self._next()
         if head is None:
@@ -313,10 +354,10 @@ class Deal:
             # alone: it satisfies a wide shape by itself, and pairing it with
             # a second passage would put the sample over the budget and make
             # what the question is about impossible to read off.
-            return self._group([head])
+            return self._group([head], condensed=condensed)
 
         partner = self._bridge(head) if shape == Shape.BRIDGE else self._cross(head)
-        return self._group([head, partner] if partner else [head])
+        return self._group([head, partner] if partner else [head], condensed=condensed)
 
     def widen(self, group: FactGroup, more: int = 1) -> FactGroup:
         """The same sample with unspent facts of the same passages added.
@@ -476,7 +517,9 @@ class Deal:
             ),
         )
 
-    def _group(self, passages: list[list[SourceFact]]) -> FactGroup:
+    def _group(
+        self, passages: list[list[SourceFact]], condensed: bool = False
+    ) -> FactGroup:
         """Counts a round against these passages and offers unspent facts.
 
         The cap is divided between the passages rather than applied to the
@@ -506,7 +549,10 @@ class Deal:
         for passage in passages:
             pid = passage[0].passage_id
             self._offered[pid] = self._offered.get(pid, 0) + 1
-            facts.extend(closest(facts, self._left(passage), each))
+            left = self._left(passage)
+            facts.extend(
+                closest(facts, condensed_first(left) if condensed else left, each)
+            )
         for fact in facts:
             self._spent.add(fact.id)
             for one in fact.passages:

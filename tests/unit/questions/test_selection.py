@@ -26,6 +26,7 @@ from question_generation.selection import (
     Deal,
     Shape,
     by_passage,
+    condensed_first,
     meets,
     overlap,
     ranked,
@@ -722,3 +723,60 @@ def test_a_widened_fact_is_spent_and_never_dealt_again() -> None:
     later = deal.sample()
 
     assert later is None or not (taken & {fact.id for fact in later.facts})
+
+
+# ── Which shape of fact a form is offered first ────────────────────────────
+
+
+def test_a_reading_is_offered_the_condensed_facts_first() -> None:
+    """Aimed at the weld, and the sample size is why it works.
+
+    At a cap of two over two passages each side offers ONE fact, and rank
+    order makes that one atomic - so a cross-document sample was two single
+    claims from two passages, which is the pair that has nothing between it.
+    """
+    facts = [
+        source(1, passage_id=1, kind=FactKind.ATOMIC),
+        source(2, passage_id=1, kind=FactKind.SUMMARY),
+        source(3, passage_id=1, kind=FactKind.OUTLINE),
+    ]
+    deal = Deal(facts, wanted=1, size=1)
+
+    offered = deal.sample(condensed=True)
+
+    assert offered is not None
+    assert offered.facts[0].kind in (FactKind.SUMMARY, FactKind.OUTLINE)
+
+
+def test_a_value_is_still_offered_the_single_claims_first() -> None:
+    """A factoid wants the fact carrying the number, not a paragraph."""
+    facts = [
+        source(1, passage_id=1, kind=FactKind.SUMMARY),
+        source(2, passage_id=1, kind=FactKind.ATOMIC),
+    ]
+    deal = Deal(facts, wanted=1, size=1)
+
+    offered = deal.sample(condensed=False)
+
+    assert offered is not None
+    assert offered.facts[0].kind == FactKind.ATOMIC
+
+
+def test_reordering_keeps_the_order_ranked_put_each_half_in() -> None:
+    """`ranked` puts the facts carrying units first; that has to survive."""
+    facts = [
+        source(1, passage_id=1, kind=FactKind.ATOMIC),
+        source(2, passage_id=1, kind=FactKind.SUMMARY),
+        source(3, passage_id=1, kind=FactKind.SUMMARY, units=("4 kg",)),
+    ]
+
+    moved = condensed_first(ranked(facts))
+
+    assert [one.id for one in moved] == [3, 2, 1]
+
+
+def test_a_passage_with_no_condensed_fact_is_offered_unchanged() -> None:
+    """Most passages are mostly atomic, and none of them is refused for it."""
+    facts = [source(n, passage_id=1, kind=FactKind.ATOMIC) for n in (1, 2, 3)]
+
+    assert condensed_first(facts) == facts
