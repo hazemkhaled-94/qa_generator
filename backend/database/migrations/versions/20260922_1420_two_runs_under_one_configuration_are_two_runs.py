@@ -16,9 +16,11 @@ So one more column on each of the three tables a stage writes, filled from
 `settings.runs.run_id`: RUN_ID where a caller set one and a uuid otherwise.
 Indexed, because every query this exists for groups on it.
 
-Nothing is backfilled and nothing could be. The rows already stored were
-produced by runs that had no name, and inventing one for them would make
-two runs look like one.
+Nothing is backfilled HERE, and the claim this file used to make - that
+nothing could be - was wrong. The rows already stored do carry which run
+wrote them, in `created_at`: a run is hours of continuous writing with
+hours of nothing either side. The revision after this one recovers them,
+and says how it was checked.
 
 Revision ID: 7a3f2c9e4b18
 Revises: d511a6ee5767

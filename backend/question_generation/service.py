@@ -36,6 +36,7 @@ from question_generation.types import SPECS, spec
 from settings.runs import run_id
 from stages import StageService
 from telemetry import tracer, working
+from telemetry.evaluations import Evaluations, Verdict, current_span_id
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -386,6 +387,10 @@ class QuestionGenerationService(StageService):
         self._writer = writer
         self._checker = checker
         self._settings = settings
+        # Held for the life of the service rather than per topic: the
+        # client is one HTTP connection and the batch spans topics, so a
+        # topic writing nine questions does not cost a call of its own.
+        self._evaluations = Evaluations()
 
     def process_next(self) -> int | None:
         """Writes the questions for one queued topic and stores them."""
@@ -409,6 +414,10 @@ class QuestionGenerationService(StageService):
                 accepted = sum(1 for one in written if one.accepted)
                 followups = sum(1 for one in written if one.follows)
                 self._done(current)
+                # Whatever is under the batch size, now that the topic is
+                # finished. Without it the last topic of every run is the
+                # one missing from Phoenix.
+                self._evaluations.flush()
                 current.set_attribute("questions.written", stored)
                 current.set_attribute("questions.accepted", accepted)
                 current.set_attribute("questions.followups", followups)
@@ -569,12 +578,13 @@ class QuestionGenerationService(StageService):
         Cheap: a question costs one to three model calls, each already a
         span, so this adds a third of what is there rather than doubling it.
 
-        The verdict goes on as ATTRIBUTES rather than through Phoenix's
-        evaluations API, and the reason is the image. `arize-phoenix-client`
-        is a host-side dependency - `evaluation/` and `review/` both run on
-        the host, and no worker carries either - so reaching that API from
-        here would put a Phoenix client in all five workers to record
-        something an attribute already carries.
+        The verdict is recorded TWICE and the two are not redundant. An
+        attribute is what a span is filtered and grouped by; an annotation
+        is what Phoenix shows in its Evaluations view, with a label, a
+        score and the reason, comparable across two projects without a
+        query. Phoenix does not know an arbitrary attribute is a
+        judgement, and the annotation cannot be filtered on in the trace
+        view, so each does the half the other cannot.
         """
         with span.start_as_current_span("check_question") as current:
             checked = self._checker.check(candidate, accepted)
@@ -596,7 +606,45 @@ class QuestionGenerationService(StageService):
             ):
                 if value:
                     current.set_attribute(name, value)
+
+            # And as an annotation, which is the Evaluations view. CODE and
+            # not LLM: a gate is a rule reading a parse, and the phrasing
+            # judgements that are a model's opinion are the ones posted as
+            # LLM. The score is 1 or 0, so a project's mean over this
+            # annotation IS its acceptance rate.
+            span_id = current_span_id()
+            if span_id:
+                self._evaluations.record(
+                    Verdict(
+                        span_id=span_id,
+                        name="gate",
+                        label=checked.rejected_reason or ACCEPTED,
+                        score=float(checked.accepted),
+                        explanation=self._why(checked),
+                        metadata={
+                            "run_id": run_id(),
+                            "language": checked.language,
+                            "answerable": checked.answerable,
+                            "question_type": checked.question_type or "",
+                        },
+                    )
+                )
             return checked
+
+    @staticmethod
+    def _why(checked: CheckedQuestion) -> str:
+        """What to show a reader beside the verdict.
+
+        The question itself for an accepted one - there is no reason to
+        give, and a blank explanation column is worse than the thing it
+        was reached about. The gate's own wording is not carried on
+        `CheckedQuestion`: it is logged where it is decided and stored as
+        a code, and re-deriving it here would be a second copy of every
+        gate's sentence.
+        """
+        if checked.accepted:
+            return checked.question_text
+        return f"{checked.rejected_reason}: {checked.question_text}"
 
     def _attempt(
         self, sample: FactGroup, plan: Plan, accepted: list[CheckedQuestion]

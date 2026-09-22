@@ -39,6 +39,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
 antlr4-python3-runtime==4.9.3
 anyio==4.15.1
+arize-phoenix-client==3.5.0
 asgiref==3.12.1
 attrs==26.1.0
 azure-core==1.41.0
@@ -126,6 +127,8 @@ openpyxl==3.1.5
 opentelemetry-api==1.44.0
 opentelemetry-exporter-otlp-proto-common==1.44.0
 opentelemetry-exporter-otlp-proto-grpc==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-exporter-otlp==1.44.0
 opentelemetry-instrumentation-asgi==0.65b0
 opentelemetry-instrumentation-botocore==0.65b0
 opentelemetry-instrumentation-fastapi==0.65b0

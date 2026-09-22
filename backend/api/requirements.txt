@@ -49,3 +49,10 @@ opentelemetry-instrumentation-botocore>=0.65b0
 # Imported by llm/client.py, which already imports litellm, and not by
 # telemetry: the api runs telemetry too and must load neither.
 openinference-instrumentation-litellm>=0.1.45,<0.2.0
+# The CLIENT, not the server: Phoenix itself is a container, and the server
+# package carries its own web app, database layer and sqlean build for
+# three hundred megabytes installed. This is what a worker posts a gate
+# verdict through - `telemetry.evaluations`. The api never imports it, and
+# tests/static/test_api_stays_light.py has nothing to say about it either
+# way: it is a HTTP client, not a model.
+arize-phoenix-client>=3.5.0,<4.0.0
