@@ -3,6 +3,54 @@
 Every target, grouped. `make` is the only entry point a person needs: it
 sources the same configuration the containers read, so one value reaches both.
 
+## Finding one
+
+```bash
+make help            # or just `make`
+make help | grep -i topic
+```
+
+`help` reads this Makefile: a target's group is the section banner it sits
+below and its description is the first sentence of the comment above it.
+Nothing is written down twice, so the list cannot fall behind the targets —
+which is the difference between it and this page, which can.
+
+This page is the long form: what a target is *for*, what it costs, and what
+it is safe to run twice.
+
+## First run
+
+| Target | Does |
+|---|---|
+| `make setup` | Write `.env` and `configs/env/provider.env`, and generate a password for every placeholder |
+| `make install` | The Python dependencies and the spaCy pipelines |
+| `make doctor` | Check the tools and the configuration, then ask the model one question |
+| `make dev` | Certificates, every service, and the schema |
+
+`setup` is safe to run twice: it replaces `change_me_*` placeholders and
+nothing else, so a file already edited by hand keeps what it says. It gives
+one secret per distinct placeholder and substitutes it everywhere that
+placeholder appears, which is what keeps `APP_DB_PASSWORD` and the password
+inside `DATABASE_URL` the same string.
+
+`doctor` ends with a real call to the configured model. An unknown model id,
+an unreachable address and a rejected or expired credential all fail at the
+first call, and without this that call is the first passage of a real run:
+
+```text
+  ok       podman
+  ok       poetry
+  ok       .env
+  ok       no placeholder passwords
+  ok       PHOENIX_ADMIN_SECRET
+  ok       LLM_BASE_URL is not host-local
+
+Asking azure/gpt-5.4 one question...
+```
+
+Every check runs and the failures are counted rather than stopping at the
+first, because somebody setting this up wants the whole list.
+
 ## The short list
 
 Six targets cover the common paths. Each is several of the ones below in the

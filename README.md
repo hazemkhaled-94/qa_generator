@@ -39,21 +39,42 @@ the Makefile.
 
 ```bash
 git clone <repository-url> qa_generator && cd qa_generator
-cp .env.example .env
+make setup
 ```
 
-That copies the credentials, ports and addresses. How the pipeline behaves is
-in `configs/env/`, which comes with the clone and needs no copying.
+`setup` writes the two files a clone does not come with — `.env` for the
+credentials, ports and addresses, and `configs/env/provider.env` for whatever
+credentials your model provider wants — and generates a password for every
+`change_me_*` placeholder, including the two with constraints. It is safe to
+run twice: it replaces placeholders and nothing else. How the pipeline
+*behaves* is in `configs/env/backend.env`, which comes with the clone.
 
-Edit `.env` and replace every `change_me_*` value. Two have constraints:
-`PHOENIX_ADMIN_SECRET` needs at least 32 characters including a digit and a
-lower-case letter, and `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is applied
-only when Phoenix first creates its admin user — changing it afterwards means
-dropping the `phoenix` database.
+Two generated values are worth knowing where to find. `PHOENIX_ADMIN_SECRET`
+is what the services authenticate their traces with, and
+`PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is what you log into Phoenix with —
+it is applied only when Phoenix first creates its admin user, so changing it
+afterwards means dropping the `phoenix` database. Both are in `.env`.
+
+Then name the model. `LLM_MODEL` in `.env` is a
+[litellm](https://docs.litellm.ai/docs/providers) identifier whose prefix
+picks the provider, and that is the whole of changing provider:
+
+```ini
+LLM_MODEL=ollama_chat/gemma4:31b       # a local Ollama, no credentials
+LLM_MODEL=openai/gpt-4o                # OPENAI_API_KEY in provider.env
+LLM_MODEL=anthropic/claude-sonnet-4-5  # ANTHROPIC_API_KEY
+LLM_MODEL=azure/<deployment>           # a key, or Entra ID
+```
 
 ```bash
 make install
+make doctor
 ```
+
+`doctor` checks the tools, the configuration and then **asks the model one
+question**, which is the only way to find out that a model id is wrong, an
+address is unreachable or a credential is stale. Without it the first thing
+to discover any of those is the first passage of a real run, hours in.
 
 This installs the dependencies and downloads the spaCy pipelines named in
 `NLP_MODELS`. They are also baked into the backend image, because the runtime
@@ -77,6 +98,14 @@ Once it reports ready, the frontend is at <http://localhost:8501> and the API
 docs at <http://localhost:8000/docs>. The other six services — Phoenix,
 Grafana, Argilla, Adminer, Dagster and the object store — are listed in
 [docs/operations.md](docs/operations.md).
+
+```bash
+make help        # every target there is, grouped, with what each one does
+make services    # which containers are up, and where to open them
+```
+
+`make` on its own prints that first list. It is read out of the Makefile
+rather than written down twice, so it cannot fall behind the targets.
 
 ## Example 1 — a corpus, through the pipeline
 
@@ -162,6 +191,7 @@ Each service documents itself, beside its code.
 | [`evaluation/`](evaluation/README.md) | Phoenix: scoring a served model against the golden cases |
 | [`tests/`](tests/README.md) | Ten layers, and what each needs |
 | [`configs/`](configs/README.md) | Service configuration and init scripts |
+| [`docs/architecture.md`](docs/architecture.md) | The four graphs: the pipeline, the queue, the imports, the containers |
 | [`docs/configuration.md`](docs/configuration.md) | Every setting worth changing |
 | [`docs/operations.md`](docs/operations.md) | Scaling, dashboards, and the things that go wrong |
 

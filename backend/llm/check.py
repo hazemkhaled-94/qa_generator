@@ -1,0 +1,85 @@
+"""Whether the configured model answers, asked before a corpus finds out.
+
+An unknown model id, an unreachable address, a missing credential and a
+structured mode the provider will not accept all fail the same way: at the
+first call, which on a real run is hours in and a queue of failed rows
+behind it. This is that first call, made once and on purpose.
+
+    python -m llm.check
+
+Wrapped by `make doctor`. It asks for the smallest structured answer there
+is, so what it proves is the whole path a stage depends on - the address
+resolves, the credential is accepted, the model exists, and it can return
+an object rather than prose.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import replace
+
+import litellm
+from pydantic import BaseModel, Field
+
+import telemetry
+from llm.client import Client
+from llm.config import Settings
+
+log = logging.getLogger(__name__)
+
+#: Silenced for the length of this check. Each writes a refusal whole - the
+#: client with its traceback, instructor once per attempt, azure-identity
+#: with every credential it tried - which is what a worker's log wants and
+#: not what somebody running a first check does. The refusal is reported
+#: here instead, in one line.
+QUIET = ("llm.client", "LiteLLM", "instructor", "azure.identity")
+
+#: Long enough for a cold local model to load, short enough that a wrong
+#: address is a failure rather than a wait. LLM_TIMEOUT_SECONDS is the
+#: pipeline's patience with a 473 s passage and is not this.
+TIMEOUT_SECONDS = 90.0
+
+
+class Reachable(BaseModel):
+    """The smallest structured answer a provider can be asked for."""
+
+    ok: bool = Field(description="true")
+
+
+def main() -> int:
+    """Asks the configured model one question.
+
+    Returns:
+        The process exit code: 0 if the model answered in shape.
+    """
+    telemetry.configure("doctor")
+    for noisy in QUIET:
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+    litellm.suppress_debug_info = True
+
+    settings = Settings.load()
+    log.info("model    %s", settings.model)
+    log.info("address  %s", settings.base_url or "(the provider's own)")
+    log.info("mode     %s", settings.structured_mode)
+
+    # One attempt: a doctor reports what happened rather than working around
+    # it, and the backoff would hide an address that is simply wrong.
+    once = replace(
+        settings, timeout_seconds=TIMEOUT_SECONDS, max_attempts=1, num_ctx=None
+    )
+    try:
+        answer = Client(once).answer(
+            system="You answer with a JSON object and nothing else.",
+            user="Set ok to true.",
+            shape=Reachable,
+        )
+    except Exception as refusal:  # noqa: BLE001 - a doctor reports any of them
+        log.error("the model did not answer: %s: %s", type(refusal).__name__, refusal)
+        return 1
+
+    log.info("the model answered in shape: ok=%s", answer.ok)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

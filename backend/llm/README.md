@@ -71,8 +71,19 @@ LLM_MODEL=azure/gpt-4o                 # Entra ID tokens, via azure-identity
 LLM_MODEL=bedrock/anthropic.claude-... # AWS_ACCESS_KEY_ID and friends
 ```
 
-`provider.env` is read by the three services that call a model and by nothing
-else. It is optional and absent for a plain Ollama.
+`provider.env` is written by `make setup` from
+[`provider.env.example`](../../configs/env/provider.env.example), which lists
+the variables each provider wants. It is optional and absent for a plain
+Ollama, which needs none of it.
+
+Compose hands it to the three services that call a model and to nothing else.
+The Makefile sources it too, for a host command that calls one — `make
+extract` against a hosted provider used to read `backend.env` and `.env`,
+find no key in either, and fail to authenticate.
+
+`make doctor` asks the configured model one question, which is how a wrong
+id, an unreachable address or a stale credential is found before a run pays
+for it.
 
 The one thing that does **not** move when you change providers is
 `EMBEDDING_MODEL`, which runs locally in the worker whatever `LLM_MODEL` names.
@@ -149,4 +160,6 @@ Things that are true, are not bugs, and have surprised somebody.
   The worker warns on every start, and the verdicts are logged instead of
   applied.
 - **An unknown model id fails at the first call, not at start-up.** Nothing
-  here validates the id against the provider before work is claimed.
+  here validates the id against the provider before work is claimed, because
+  the only way to validate one is to call it. `make doctor` is that call,
+  made deliberately and once, and it is not run for you.
