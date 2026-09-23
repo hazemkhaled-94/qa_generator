@@ -2281,3 +2281,74 @@ def test_the_gate_only_an_unanswerable_question_faces_is_not_claimed() -> None:
 
     assert "off_topic" not in answerable.gates_ran
     assert "off_topic" in unanswerable.gates_ran
+
+
+# ── What Phoenix is told about each gate ───────────────────────────────────
+
+
+def _verdicts(checked):
+    """The annotations one judged question produces, by name."""
+    from question_generation.service import QuestionGenerationService
+
+    built = QuestionGenerationService.__new__(QuestionGenerationService)
+    return {one.name: one for one in built._verdicts("0123456789abcdef", checked)}
+
+
+def test_each_gate_that_ran_is_its_own_annotation() -> None:
+    """One column per gate, so its mean over a project IS its pass rate."""
+    accepted = build(Recording(recovers="4 kg")).check(candidate())
+
+    named = _verdicts(accepted)
+
+    assert named["gate"].label == "accepted"
+    assert named["gate 1: structural"].label == "passed"
+    assert named["gate 6: round_trip"].label == "passed"
+    assert all(one.score == 1.0 for one in named.values())
+
+
+def test_the_gate_that_stopped_it_is_the_one_scored_zero() -> None:
+    """The last that ran is the one that refused, which is what `check` gives."""
+    refused = build(Recording()).check(candidate(question_text="   "))
+
+    named = _verdicts(refused)
+
+    assert named["gate 1: structural"].label == "refused"
+    assert named["gate 1: structural"].score == 0.0
+    assert named["gate 1: structural"].explanation
+    assert named["gate"].label == QuestionRejection.MALFORMED
+
+
+def test_a_gate_that_never_ran_is_absent_rather_than_scored() -> None:
+    """Its mean is over the questions that REACHED it.
+
+    Scoring an unreached gate either way would be untrue, and would move
+    a rate nobody changed: a run refusing everything at the first rule
+    would read as a round trip that passed everything.
+    """
+    named = _verdicts(build(Recording()).check(candidate(question_text="   ")))
+
+    assert "gate 6: round_trip" not in named
+    assert "gate 5: phrasing" not in named
+
+
+def test_the_position_orders_them_as_the_pipeline_runs_them() -> None:
+    """Phoenix sorts its columns by name, and the gates are not alphabetical."""
+    named = _verdicts(build(Recording(recovers="4 kg")).check(candidate()))
+    gates = sorted(name for name in named if name != "gate")
+
+    assert gates == [
+        "gate 1: structural",
+        "gate 3: kind_and_thread",
+        "gate 4: near_duplicate",
+        "gate 5: phrasing",
+        "gate 6: round_trip",
+    ]
+
+
+def test_every_verdict_carries_what_a_run_is_compared_on() -> None:
+    """A gate's rate is only comparable within a run and a prompt."""
+    named = _verdicts(build(Recording(recovers="4 kg")).check(candidate()))
+
+    for one in named.values():
+        assert one.metadata["run_id"]
+        assert one.metadata["prompt_version"]

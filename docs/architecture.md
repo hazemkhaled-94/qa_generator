@@ -230,7 +230,7 @@ what belongs to another.
 | Logs | process → the `logs` volume in a container, `./logs` on the host (JSON, ECS fields) → Filebeat → Elasticsearch | Grafana, `make logs` |
 | Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
 | Cost and tokens | on the span, and on the log line beside it | Phoenix per run; Grafana's throughput dashboard over time; `make spend LOG=` over a captured log |
-| Gate verdicts | the row in Postgres, an attribute on the span, an annotation in Phoenix | the Questions page; Phoenix's Evaluations view |
+| Gate verdicts | the row in Postgres, an attribute on the span, and one annotation per gate that read it | the Questions page; Phoenix's Evaluations view, a column per gate |
 | Prompts | composed in the source, recorded to the `prompts` table by the stage that sends them, and on each span as the text it sent | the Questions page; `GET /prompts`; Phoenix after `make prompts-publish` |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
 | Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |

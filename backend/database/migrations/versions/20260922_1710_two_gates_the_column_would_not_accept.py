@@ -63,7 +63,9 @@ AFTER = (
 )
 
 #: What it held before, which is the same list without the two.
-BEFORE = tuple(one for one in AFTER if one not in ("restates_question", "answer_incomplete"))
+BEFORE = tuple(
+    one for one in AFTER if one not in ("restates_question", "answer_incomplete")
+)
 
 
 def _check(values: tuple[str, ...]) -> str:

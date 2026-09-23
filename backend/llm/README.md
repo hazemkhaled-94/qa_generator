@@ -94,31 +94,55 @@ for it.
 The one thing that does **not** move when you change providers is
 `EMBEDDING_MODEL`, which runs locally in the worker whatever `LLM_MODEL` names.
 
-### Entra ID, and why a stage is run from the host
+### When the containers call a different model from the host
 
-Two-factor happens when a token is **issued**, not when it is used. So a
-container never does the 2FA itself — it is either given an identity that
-has none, or lent the result of a 2FA somebody already did.
+Some credentials exist only where a person is. An interactive cloud login,
+a key in a login keychain, a token minted by hand — a container has none of
+them, and a provider that needs one is a provider the workers cannot use
+while the host can.
 
-| Where it runs | Credential | 2FA |
-|---|---|---|
-| A container, anywhere | A **service principal**: tenant, client, secret | None. An app identity is not a user |
-| A container on Azure | Managed or workload identity | None. Nothing to set |
-| **The host** | `az login`, found by `DefaultAzureCredential` | Once, in a browser, and the CLI keeps the refresh token |
-| A container, lent the host's | `AZURE_OPENAI_AD_TOKEN`, minted host-side | Once, and again every hour when it expires |
+`LLM_CONTAINER_MODEL` is that split, and it mirrors `LLM_CONTAINER_URL`
+exactly: the same setting, as the containers see it. Unset, they call what
+the host calls, which is the ordinary case.
 
-The third row is why `make extract`, `make topics` and `make questions` are
-run from the host against an Entra ID deployment: they inherit the `az login`
-session, and the Makefile sources `provider.env` for them. A container could
-use that session too, but only by being handed both halves — bind-mount
-`~/.azure` *and* put the `az` CLI in the image, because `AzureCliCredential`
-works by shelling out to it. The image carries no az, so the host is the
-path that works today.
+```ini
+LLM_MODEL=<what the host calls>                     # .env
+LLM_CONTAINER_MODEL=ollama_chat/gemma4:12b          # what the containers call
+QUESTIONS_VERIFIER_CONTAINER_MODEL=ollama_chat/granite4.2:8b
+```
 
-The fourth row is the one that goes stale. `make doctor` reads the token's
-`exp` before it calls anything, because an expired token is taken in
-preference to a working credential and the provider's refusal names four
-possible causes without saying which.
+The verifier follows it, because a verifier the containers cannot reach is
+a run of ungated questions. The address follows it too: with
+`LLM_CONTAINER_URL` unset a container reads `OLLAMA_CONTAINER_URL`.
+
+Both halves drain the **same queues at once** — claiming is
+`FOR UPDATE SKIP LOCKED`, so a topic is taken by exactly one of them. That
+is worth having for throughput, and it is **not an A/B**: the two cover
+different rows, so a difference between them is partly which rows each
+happened to take. Comparing two models is `RUN_ID` over the *same* rows;
+see [settings](../settings/README.md#a-version-is-not-a-run).
+
+### A worker proves the model before it claims anything
+
+`before_work` in [`check.py`](check.py) is the preflight
+`stages.cli.queue_main` runs for the three stages that call a model. It
+asks for one trivial structured answer, and the process stops with a single
+line and a non-zero exit if it does not come.
+
+Before the watch loop, deliberately. That loop logs an exception and polls
+again, which is right for a drain that failed and wrong for a deployment
+that can never work: a worker with no usable credential would otherwise
+claim a row every poll and fail it, emptying the queue into `failed` while
+the container reported itself up.
+
+```text
+questions will not start: ollama_chat/no-such-model:1b at
+http://host.docker.internal:11434 did not answer: ... model not found
+```
+
+Nothing in it names a provider. Whatever authenticates a stage
+authenticates the check, because it is the same client making the same
+kind of call.
 
 ## Cost and latency
 
@@ -164,6 +188,8 @@ abandoned.
 | `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for. Unset takes its default |
 | `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob |
 | `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a self-hosted model is served, for a stage naming `ollama_chat/…` while the shared model is somewhere else. The address follows the provider |
+| `LLM_CONTAINER_MODEL` | `.env` | unset | `LLM_MODEL` as the containers see it. Unset means the same as the host's, which is the ordinary case |
+| `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | unset | The verifier as the containers see it. Follows `LLM_CONTAINER_MODEL`, because a verifier they cannot reach is a run of ungated questions |
 | `EXTRACTION_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only |
 | `TOPIC_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | The same, for topic naming |
 | `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | One judgement on a smaller model. Neither reads a passage the way the stage's own model does |

@@ -88,6 +88,35 @@ from question_generation.verifier import Reading, Verifier
 
 log = logging.getLogger(__name__)
 
+#: Every gate, in the order `check` applies them, cheapest first. What
+#: `CheckedQuestion.gates_ran` is a subset of, and in this order.
+#:
+#: Two are conditional and their position is still fixed: `off_topic` runs
+#: only for an unanswerable question, `round_trip` only for what reaches
+#: it. So a sequence cannot be derived from the verdict, but a POSITION can
+#: be given to a name.
+#:
+#: The position is what orders them in Phoenix, where each gate is a column
+#: of the Evaluations view and columns sort by name. `gate 5: phrasing`
+#: sorts where the gate runs; `phrasing` would sort beside
+#: `near_duplicate`, which is three gates earlier.
+GATES = (
+    "structural",
+    "off_topic",
+    "kind_and_thread",
+    "near_duplicate",
+    "phrasing",
+    "round_trip",
+)
+
+#: What one gate's verdict is called where it is shown beside the others.
+PASSED, REFUSED = "passed", "refused"
+
+
+def annotation(gate: str) -> str:
+    """What one gate is called in Phoenix's Evaluations view."""
+    return f"gate {GATES.index(gate) + 1}: {gate}"
+
 
 class QuestionChecker:
     """Puts one candidate through every gate, cheapest first."""

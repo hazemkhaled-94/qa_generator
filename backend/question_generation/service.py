@@ -16,7 +16,12 @@ from database.qa_generator import (
 )
 from question_generation.balance import choose, composition, largest, quota_of
 from question_generation.catalog import QuestionCatalog
-from question_generation.checker import QuestionChecker
+from question_generation.checker import (
+    PASSED,
+    REFUSED,
+    QuestionChecker,
+    annotation,
+)
 from question_generation.config import Settings
 from question_generation.gates import names_parties, near_verdict, structural
 from question_generation.generation import QuestionWriter
@@ -632,24 +637,63 @@ class QuestionGenerationService(StageService):
             # annotation IS its acceptance rate.
             span_id = current_span_id()
             if span_id:
-                self._evaluations.record(
-                    Verdict(
-                        span_id=span_id,
-                        name="gate",
-                        label=checked.rejected_reason or ACCEPTED,
-                        score=float(checked.accepted),
-                        explanation=self._why(checked),
-                        metadata={
-                            "run_id": run_id(),
-                            "language": checked.language,
-                            "answerable": checked.answerable,
-                            "question_type": checked.question_type or "",
-                            "gates_ran": ",".join(checked.gates_ran),
-                            "prompt_version": PROMPT_VERSION,
-                        },
-                    )
-                )
+                self._evaluations.record(*self._verdicts(span_id, checked))
             return checked
+
+    def _verdicts(self, span_id: str, checked: CheckedQuestion) -> list[Verdict]:
+        """One verdict for the question, and one for each gate that read it.
+
+        The summary says what became of it. The per-gate ones are what
+        make the Evaluations view a table of the pipeline rather than one
+        column: each gate is its own annotation, so its mean over a
+        project IS its pass rate, and two runs compare gate by gate
+        without a query.
+
+        Only the gates that RAN. A question refused at `structural` never
+        reached the round trip, and scoring it there as passed or failed
+        would both be untrue - the absence is the fact. Which is also why
+        the count is not fixed: a gate's mean is over the questions that
+        reached it.
+
+        The last gate that ran is the one that refused it, if anything
+        did. That is what `check` guarantees by returning on the first
+        failure, and it is the only reason a code can be turned back into
+        a gate.
+        """
+        about = {
+            "run_id": run_id(),
+            "language": checked.language,
+            "answerable": checked.answerable,
+            "question_type": checked.question_type or "",
+            "prompt_version": PROMPT_VERSION,
+        }
+        verdicts = [
+            Verdict(
+                span_id=span_id,
+                name="gate",
+                label=checked.rejected_reason or ACCEPTED,
+                score=float(checked.accepted),
+                explanation=self._why(checked),
+                metadata=about | {"gates_ran": ",".join(checked.gates_ran)},
+            )
+        ]
+        for position, gate in enumerate(checked.gates_ran, 1):
+            stopped = not checked.accepted and gate == checked.gates_ran[-1]
+            verdicts.append(
+                Verdict(
+                    span_id=span_id,
+                    name=annotation(gate),
+                    label=REFUSED if stopped else PASSED,
+                    score=0.0 if stopped else 1.0,
+                    # Only where it refused. A gate that let a question
+                    # through has no reason to give, and the question's
+                    # own text under every gate it passed is six copies
+                    # of one string.
+                    explanation=self._why(checked) if stopped else "",
+                    metadata=about | {"position": position},
+                )
+            )
+        return verdicts
 
     @staticmethod
     def _why(checked: CheckedQuestion) -> str:

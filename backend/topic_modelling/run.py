@@ -14,6 +14,7 @@ from pathlib import Path
 import telemetry
 from blob_store.seaweedfs import ArchiveBucket, ExportBucket
 from database.qa_generator import engine
+from llm.check import before_work
 from settings import decimal
 from settings.runs import run_id
 from settings.store import snapshot
@@ -107,6 +108,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.discover:
         log.info("queued topic fit %d", service.request())
+
+    # As `stages/cli.queue_main` does for the other four. Only when a model
+    # is configured: this stage names topics with one where it has one, and
+    # falls back to their terms where it does not, so an absent model is a
+    # choice and an unanswering one is a fit that would fail on every label.
+    if (naming := Settings.load(snapshot()[0]).model) is not None:
+        before_work(naming)
 
     if not args.watch:
         service.drain()

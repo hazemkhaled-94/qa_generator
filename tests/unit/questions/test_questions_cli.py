@@ -89,11 +89,20 @@ class Driver:
         self.rechecked: list = []
         self.balanced: list = []
         self.watched: list[float] = []
+        #: The models the preflight was asked to prove, in order. Replaced
+        #: because the real one calls them, and a unit test serves nothing.
+        self.proved: list[str] = []
+        self.refuse: Exception | None = None
 
         def build():
             """Counts the builds and hands back the recording service."""
             self.built += 1
             return self.service
+
+        # Model identity, which compose gives a worker and .env gives the
+        # host. conftest loads configs/env/backend.env, which carries the
+        # rest of the model settings and deliberately not this one.
+        monkeypatch.setenv("LLM_MODEL", "ollama_chat/test-model")
 
         # The settings the command reads, without the database they are
         # stored in. Settings.load is still the real one.
@@ -110,6 +119,14 @@ class Driver:
         monkeypatch.setattr(
             module, "balance", lambda catalog, settings, within: self._balance(within)
         )
+
+        def proving(*models):
+            """Records what was asked, and refuses when the test says to."""
+            self.proved.extend(one.model for one in models)
+            if self.refuse is not None:
+                raise self.refuse
+
+        monkeypatch.setattr(module, "before_work", proving)
         monkeypatch.setattr(cli.telemetry, "configure", lambda *_, **__: None)
         monkeypatch.setattr(cli.telemetry, "trace_engine", lambda *_: None)
         monkeypatch.setattr(cli, "engine", lambda: None)
@@ -174,6 +191,31 @@ def test_watch_keeps_draining_instead_of_returning(cli) -> None:
     assert cli.watched, "the watch loop was never entered"
 
 
+def test_both_models_are_proved_before_anything_is_claimed(cli) -> None:
+    """The verifier as well as the writer.
+
+    A run whose verifier will not answer is a run of ungated questions,
+    which is worse than no run at all.
+    """
+    assert cli.run("--watch") == 0
+    assert len(cli.proved) == 2, "the writer and the verifier"
+
+
+def test_a_model_that_will_not_answer_stops_the_worker(cli) -> None:
+    """The container exits instead of claiming a topic it cannot finish.
+
+    `stages.worker.watch` logs an exception and polls again, which is right
+    for a drain that failed and wrong for a deployment that can never work:
+    a worker with no usable credential would claim a topic every poll and
+    fail it, emptying the queue into `failed` while reporting itself up.
+    """
+    cli.refuse = RuntimeError("no credential")
+
+    assert cli.run("--watch") == 1, "a refused preflight is a non-zero exit"
+    assert not cli.watched, "the watch loop must not be entered"
+    assert cli.queue.calls == [], "nothing was claimed"
+
+
 def test_two_actions_in_one_command_are_refused(cli) -> None:
     """They are mutually exclusive, so the parser rejects the pair."""
     with pytest.raises(SystemExit):
@@ -235,6 +277,9 @@ def test_the_queue_is_built_with_the_lease_this_stage_derives(monkeypatch) -> No
         held.update(kwargs)
         return Queue(**kwargs)
 
+    # As the fixture above does: the lease is derived from the model
+    # settings, and this one is the deployment's rather than backend.env's.
+    monkeypatch.setenv("LLM_MODEL", "ollama_chat/test-model")
     monkeypatch.setattr(module, "snapshot", lambda: (dict(os.environ), "test-settings"))
     monkeypatch.setattr(module, "QuestionQueue", queue)
     monkeypatch.setattr(module, "build_service", lambda *_: Service())

@@ -10,7 +10,7 @@ Once `make dev` reports ready:
 |---|---|---|
 | Frontend | <http://localhost:8501> | Run each stage, browse what it produced, view system status |
 | API | <http://localhost:8000/docs> | OpenAPI documentation |
-| Phoenix | <http://localhost:6006> | Traces, and the golden-set experiments — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
+| Phoenix | <http://localhost:6006> | Traces, gate verdicts, prompts, golden-set experiments, and the playground — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
 | Grafana | <http://localhost:3001> | Logs and pipeline dashboards — `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` |
 | Argilla | <http://localhost:6900> | Review what the models decided — `ARGILLA_USERNAME` / `ARGILLA_PASSWORD` |
 | Adminer | <http://localhost:9001> | Database browser |
@@ -75,6 +75,29 @@ make spend LOG=run.log SINCE=2026-09-19
 
 `LOG` is required. There is no default: the shipped files are JSON inside a
 container, and the pattern this reads is the text one a terminal saw.
+
+## Replaying a call in the Phoenix playground
+
+Open any `completion` span in Phoenix and replay it: the prompt as it was
+sent, against a model you pick. That is "what would another model have said
+about this question" one click from the trace, instead of a run of
+`make second-opinion`.
+
+**Against Ollama, and only Ollama.** Every other provider Phoenix offers
+wants an API key; Ollama wants none, which is why `credentialsSet` is
+already true for it. This deployment's hosted model authenticates through
+an interactive `az login` that leaves a token in `~/.azure`, and a
+container has no way to read it — the same wall a worker hits, and the
+reason `LLM_CONTAINER_MODEL` exists.
+
+Wired by two lines on the `phoenix` service: `OLLAMA_BASE_URL` set to
+`OLLAMA_CONTAINER_URL`, the container's view of the host, and an
+`extra_hosts` entry so `host.docker.internal` resolves there at all. With
+`OLLAMA_CONTAINER_URL` unset, Phoenix falls back to `localhost:11434`,
+which inside that container is Phoenix.
+
+`make prompts-publish` is what makes a prompt selectable there rather than
+pasted in.
 
 ## Dashboards
 

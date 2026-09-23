@@ -81,15 +81,22 @@ x-store-env: &store-env
 # Read by the stages that call one, and by the api, which calls no model and
 # serves these as settings.
 x-model-env: &model-env
-  LLM_MODEL: ${LLM_MODEL}
+  # The containers' model, which is not always the host's. A credential
+  # that only exists on the host - an interactive cloud login, a key in a
+  # keychain - is one a container cannot use, and the deployment that
+  # follows is a served model here and a local one in the containers.
+  # Unset means they are the same, which is the ordinary case.
+  LLM_MODEL: ${LLM_CONTAINER_MODEL-${LLM_MODEL}}
   # Container's view of the model, not the host's.
   LLM_BASE_URL: ${LLM_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
   # Where a stage overriding the model with a self-hosted one should send
   # it. The container's view again, not the host's.
   OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL-}
   # The second model, which checks what the first wrote. Optional, and its
-  # absence means something: the writer then marks its own work.
-  QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_MODEL:-}
+  # absence means something: the writer then marks its own work. It follows
+  # the model above, because a verifier the containers cannot reach is a
+  # run of ungated questions.
+  QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_CONTAINER_MODEL-${QUESTIONS_VERIFIER_MODEL:-}}
 
 # Whatever env vars the configured provider needs, credentials included:
 # ANTHROPIC_API_KEY or GEMINI_API_KEY for a hosted one, AZURE_TENANT_ID and
@@ -635,11 +642,33 @@ services:
       PHOENIX_ADMIN_SECRET: ${PHOENIX_ADMIN_SECRET}
       PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD: ${PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD}
       PHOENIX_SECRET: ${PHOENIX_SECRET}
+      # What the PLAYGROUND calls. Phoenix replays a span there - the
+      # prompt as it was sent, against a model of your choosing - which is
+      # what turns a refused question into "what would another model have
+      # said", one click from the trace instead of a run of
+      # `make second-opinion`.
+      #
+      # Ollama and not the hosted model, and that is a constraint rather
+      # than a preference: this deployment authenticates to Azure with an
+      # interactive `az login`, which leaves a token in ~/.azure that a
+      # container has no way to read. Every other provider Phoenix offers
+      # wants an API key; Ollama is the one that wants none, and
+      # `credentialsSet` is already true for it.
+      #
+      # The address is the container's view of the host, so this is
+      # OLLAMA_CONTAINER_URL and not OLLAMA_BASE_URL - the same pair the
+      # workers read. Unset leaves Phoenix's default of localhost:11434,
+      # which inside this container is Phoenix.
+      OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL-}
     volumes:
       - phoenix_data:/mnt/data
     ports:
       - "${PHOENIX_PORT}:6006"
       - "${PHOENIX_GRPC_PORT}:4317"
+    # Without it host.docker.internal resolves to nothing here. The
+    # workers already have it, for the same model.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres: { condition: service_healthy }
     networks: [global]

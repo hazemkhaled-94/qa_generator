@@ -180,6 +180,40 @@ a query.
 `annotator_kind` separates them: a gate is **CODE**, and the three phrasing
 judgements, which are a model's opinion, are **LLM**.
 
+### One annotation per gate, not one per question
+
+A question produces a **summary** — `gate`, labelled with whatever stopped
+it or `accepted` — and then **one annotation per gate that read it**, named
+`gate 1: structural` through `gate 6: round_trip`:
+
+| Annotation | On an accepted question | On one refused at phrasing |
+|---|---|---|
+| `gate` | `accepted`, 1.0 | `leaks_source`, 0.0 |
+| `gate 1: structural` | `passed`, 1.0 | `passed`, 1.0 |
+| `gate 4: near_duplicate` | `passed`, 1.0 | `passed`, 1.0 |
+| `gate 5: phrasing` | `passed`, 1.0 | **`refused`, 0.0** |
+| `gate 6: round_trip` | `passed`, 1.0 | *absent* |
+
+That is what makes the Evaluations view a table of the pipeline rather than
+one column: a gate's mean over a project **is** its pass rate, and two runs
+compare gate by gate with nobody writing a query.
+
+Only the gates that **ran**. A question refused at `structural` never
+reached the round trip, and scoring it there either way would be untrue —
+the absence is the fact, and a gate's rate is over the questions that
+reached it. Scoring an unreached gate as passed would make a run that
+refused everything at the first rule read as a round trip that passed
+everything.
+
+The number is the gate's fixed **position**, not its order in that
+question: Phoenix sorts its columns by name, and `phrasing` alone would
+sort beside `near_duplicate`, three gates earlier. `off_topic` is 2 whether
+or not it ran, which for an answerable question it never does.
+
+The last gate that ran is the one that refused it, where anything did.
+That is what `check` guarantees by returning on the first failure, and it
+is the only reason a rejection code can be turned back into a gate.
+
 Best-effort, like the exporter: a Phoenix that is down costs the annotation
 and not the run, and warns once rather than once per batch.
 
