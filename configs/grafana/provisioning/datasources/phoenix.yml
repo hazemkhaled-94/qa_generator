@@ -1,0 +1,28 @@
+# Phoenix's own database, as Grafana reads it. The same postgres server the
+# Pipeline datasource points at, a different database.
+#
+# What it serves is the half `Pipeline` cannot: the call count, the tokens,
+# the latency and the spend are in the spans, and the gate counts are rows.
+# A run is `questions.run_id` on one side and a project named
+# `<stage>-<run id>` on the other, which is what the run page joins on.
+#
+# Read-only, as the same role that reads the application database.
+# configs/postgres/init.sh is what grants it.
+
+apiVersion: 1
+
+datasources:
+  - name: Phoenix
+    uid: qa-phoenix
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: ${GRAFANA_DB_USER}
+    database: ${PHOENIX_DB_NAME}
+    editable: false
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1800
+      timescaledb: false
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}

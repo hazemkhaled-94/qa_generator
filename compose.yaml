@@ -852,6 +852,7 @@ services:
       # of their own in a file that is in git.
       ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
       APP_DB_NAME: ${APP_DB_NAME}
+      PHOENIX_DB_NAME: ${PHOENIX_DB_NAME}
       GRAFANA_DB_USER: ${GRAFANA_DB_USER}
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
     volumes:

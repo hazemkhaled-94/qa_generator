@@ -146,6 +146,14 @@ class Evaluations:
         self._held: list[dict[str, Any]] = []
         self._client: Any = None
         self._broken = False
+        if not self._base_url:
+            # The one failure with no other symptom: an unreachable Phoenix
+            # warns from flush, and no address at all warned from nowhere.
+            log.warning(
+                "%s is unset, so gate verdicts stay in the database and this "
+                "run records no annotations in Phoenix",
+                ENDPOINT,
+            )
 
     @property
     def enabled(self) -> bool:

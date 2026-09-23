@@ -1,0 +1,270 @@
+{
+  "uid": "qa-pipeline-runs",
+  "title": "Run",
+  "description": "One run, from all three stores at once. A run is `RUN_ID`: it is `questions.run_id` on the rows, and a Phoenix project named `<stage>-<run id>` on the spans. The rows say what the run produced and which gate stopped the rest; the spans say what it cost to produce. Pick a run at the top. The logs panel is the exception and is scoped by the time range rather than by the run, because `run.id` is not a log field.",
+  "tags": ["qa_generator"],
+  "editable": true,
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "refresh": "",
+  "time": { "from": "now-7d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "run",
+        "label": "Run",
+        "type": "query",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+        "query": "SELECT run_id AS \"__text\", run_id AS \"__value\" FROM questions WHERE run_id IS NOT NULL GROUP BY run_id ORDER BY max(created_at) DESC",
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 0
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+        "query": "{\"find\": \"terms\", \"field\": \"service.name\", \"size\": 20}",
+        "includeAll": true,
+        "multi": true,
+        "allValue": "*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "What the run produced",
+      "description": "Counted off the rows, which is where the truth about them is. Only live rows: a rerun deletes what it replaces, and a deleted run answers `make questions-diff` and not this.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "accepted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "accepted %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+          "rawSql": "SELECT count(*) AS \"written\",\n       count(*) FILTER (WHERE status = 'accepted') AS \"accepted\",\n       round(100.0 * count(*) FILTER (WHERE status = 'accepted') / nullif(count(*), 0), 1) AS \"accepted %\",\n       count(DISTINCT topic_scope) AS \"topics\"\nFROM questions\nWHERE run_id = '$run'"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "What the run cost",
+      "description": "The half SQL cannot answer. Every model call the run made, from its Phoenix projects. Spend is zero for a locally served model, which is the point of moving a judgement onto one.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "spend" },
+            "properties": [
+              { "id": "unit", "value": "currencyUSD" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95 call" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+          "rawSql": "SELECT count(*) AS \"calls\",\n       sum(s.llm_token_count_prompt) AS \"tokens in\",\n       sum(s.llm_token_count_completion) AS \"tokens out\",\n       round(coalesce(sum(c.total_cost), 0)::numeric, 2) AS \"spend\",\n       round((percentile_cont(0.95) WITHIN GROUP (\n           ORDER BY extract(epoch FROM s.end_time - s.start_time)) * 1000)::numeric) AS \"p95 call\"\nFROM projects p\nJOIN traces t ON t.project_rowid = p.id\nJOIN spans  s ON s.trace_rowid = t.id\nLEFT JOIN span_costs c ON c.span_rowid = s.id\nWHERE s.span_kind = 'LLM' AND p.name LIKE '%-$run'"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "bargauge",
+      "title": "Where the questions went",
+      "description": "Every gate that refused something, and `accepted`. The last gate that ran is the one that refused it, because the checker returns on the first failure.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "color": { "mode": "continuous-BlYlRd" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "accepted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "legend": { "showLegend": false, "displayMode": "list" },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
+          "rawSql": "SELECT coalesce(rejected_reason, status) AS gate, count(*) AS questions\nFROM questions\nWHERE run_id = '$run'\nGROUP BY 1\nORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "What the calls were for",
+      "description": "The Pydantic shape each call asked for, which is what `tag.tags` carries. This is the query `make spend-by-shape` reads log prose to answer. Empty for a run made before the shape was put on the span.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "spend" },
+            "properties": [{ "id": "unit", "value": "currencyUSD" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "mean" },
+            "properties": [{ "id": "unit", "value": "ms" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "calls" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "calls", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+          "rawSql": "SELECT btrim(replace(coalesce(\n           s.attributes->'tag'->>'tags', '[\"untagged\"]'), '_', ' '), '[]\" ') AS shape,\n       s.attributes->'llm'->>'model_name' AS model,\n       count(*) AS calls,\n       round(coalesce(sum(c.total_cost), 0)::numeric, 4) AS spend,\n       round(avg(extract(epoch FROM s.end_time - s.start_time) * 1000)::numeric) AS mean\nFROM projects p\nJOIN traces t ON t.project_rowid = p.id\nJOIN spans  s ON s.trace_rowid = t.id\nLEFT JOIN span_costs c ON c.span_rowid = s.id\nWHERE s.span_kind = 'LLM' AND p.name LIKE '%-$run'\nGROUP BY 1, 2\nORDER BY calls DESC"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Its Phoenix projects",
+      "description": "One per stage that ran under this id, with the span count and the window it covers. A run of the whole pipeline is several rows; one restarting worker used to be thousands.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": []
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "spans", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+          "rawSql": "SELECT p.name AS project,\n       count(s.id) AS spans,\n       count(*) FILTER (WHERE s.status_code = 'ERROR') AS errors,\n       min(s.start_time) AS started,\n       max(s.end_time) AS ended\nFROM projects p\nJOIN traces t ON t.project_rowid = p.id\nJOIN spans  s ON s.trace_rowid = t.id\nWHERE p.name LIKE '%-$run'\nGROUP BY p.name\nORDER BY spans DESC"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Gate verdicts recorded in Phoenix",
+      "description": "The annotations behind Phoenix's Evaluations view, which is the half that is easy to lose: they are best-effort, and one refusal disables them for the rest of the run. Empty here against a non-empty panel on the left means the run produced questions and recorded no verdicts.",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "mean score" },
+            "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-text" } }]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "annotation", "desc": false }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
+          "rawSql": "SELECT a.name AS annotation,\n       a.annotator_kind AS kind,\n       count(*) AS scored,\n       round(avg(a.score)::numeric, 3) AS \"mean score\"\nFROM span_annotations a\nJOIN spans   s ON a.span_rowid = s.id\nJOIN traces  t ON s.trace_rowid = t.id\nJOIN projects p ON t.project_rowid = p.id\nWHERE p.name LIKE '%-$run'\nGROUP BY 1, 2\nORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Errors and warnings",
+      "description": "Scoped by the dashboard time range and the service, NOT by the run: `run.id` is not a shipped log field, so set the range to the run's window from the projects panel above. A line's `trace.id` opens its span in Phoenix.",
+      "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 24 },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
+          "query": "service.name:($service) AND log.level:(error OR critical OR warning)",
+          "metrics": [{ "id": "1", "type": "logs", "settings": { "limit": "500" } }],
+          "bucketAggs": [],
+          "timeField": "@timestamp"
+        }
+      ]
+    }
+  ]
+}

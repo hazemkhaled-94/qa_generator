@@ -102,8 +102,15 @@ SQL
 
 # ── Phoenix database ───────────────────────────────────────────────────────
 
+# Grafana reads it too, for the run page that puts a run's spans beside its
+# rows. Phoenix owns this schema, so the default privilege is for its role.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$PHOENIX_DB_NAME" <<-SQL
     GRANT ALL ON SCHEMA public TO ${PHOENIX_DB_USER};
+    GRANT CONNECT ON DATABASE ${PHOENIX_DB_NAME} TO ${GRAFANA_DB_USER};
+    GRANT USAGE ON SCHEMA public TO ${GRAFANA_DB_USER};
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${GRAFANA_DB_USER};
+    ALTER DEFAULT PRIVILEGES FOR ROLE ${PHOENIX_DB_USER} IN SCHEMA public
+        GRANT SELECT ON TABLES TO ${GRAFANA_DB_USER};
 SQL
 
 # ── Dagster database ───────────────────────────────────────────────────────

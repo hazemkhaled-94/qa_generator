@@ -245,6 +245,7 @@ pinned version.
 | `LOG_LEVEL` | `.env` | `INFO` | Every service, the frontend included. Everything at or above it reaches Grafana |
 | `LOG_DIR` | `.env`, set over in `compose.yaml` | `logs` on the host, `/var/log/qa` in a container | Where the JSON file goes. Unset means stdout only |
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
+| `TRACE_DATABASE` | unset | off | A span per SQL statement and per pool connect |
 
 `service.name` is not a setting. Each process passes its own name to
 `telemetry.configure(...)` — `"api"`, `"orchestration"`, or the stage's name
@@ -335,6 +336,12 @@ Things that are true, are not bugs, and have surprised somebody.
   The files are `make logs-prune`, and until that runs every container the
   stack has ever recreated, and every host command ever run, still has its
   log file on disk.
+- **`/health` and every `/status` route produce no span.** `EXCLUDED_URLS`
+  in [`traces.py`](traces.py). They are polled continuously and were 193k
+  spans; the logs still carry them.
+- **SQL statements produce no span unless `TRACE_DATABASE` is set.** A
+  `connect` per pooled checkout and a span per statement were 2.8M spans
+  against 47k model calls.
 - **A host command leaves a file per invocation.** `make parse-status` takes
   a second and writes `parsing-<host>-<pid>.log` for it. That is the price
   of a name no two writers share; `make logs-prune` is the sweep.

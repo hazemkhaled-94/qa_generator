@@ -34,6 +34,17 @@ _INSTRUMENTORS = (
 #: instrumentor warns when applied twice, and two stages build two clients.
 _llm_instrumented = False
 
+#: Set to trace every SQL statement and every pool connect. Off by default:
+#: they were 2.8M of 3.9M spans, against 47k model calls.
+TRACE_DATABASE = "TRACE_DATABASE"
+
+#: Accepted spellings of true, as `settings/env.py` spells them.
+_TRUE = frozenset({"1", "true", "yes", "on"})
+
+#: Request paths that produce no span. Matched anywhere in the URL, so one
+#: entry covers `/status` and `/{scope}/{value}/status` alike.
+EXCLUDED_URLS = "health,status"
+
 
 #: What Phoenix reads a span's project off. An OpenInference resource
 #: attribute rather than an OTel one - Phoenix files a span under this and
@@ -181,8 +192,11 @@ def tracer(name: str) -> trace.Tracer:
 def trace_engine(engine: Engine) -> None:
     """Traces every statement issued through one SQLAlchemy engine.
 
-    Does nothing if the instrumentation is not installed.
+    Does nothing unless TRACE_DATABASE is set, and nothing if the
+    instrumentation is not installed.
     """
+    if os.getenv(TRACE_DATABASE, "").lower() not in _TRUE:
+        return
     try:
         from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
     except ImportError:
@@ -200,12 +214,14 @@ def trace_app(app: FastAPI) -> None:
     Attaches to the instance, so ordering does not matter: the global
     instrumentor replaces `fastapi.FastAPI` and does nothing for a module
     that imported the name first.
+
+    The paths in EXCLUDED_URLS produce no span.
     """
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     except ImportError:
         return
     try:
-        FastAPIInstrumentor.instrument_app(app)
+        FastAPIInstrumentor.instrument_app(app, excluded_urls=EXCLUDED_URLS)
     except Exception as exc:  # noqa: BLE001
         log.warning("could not instrument the application: %s", exc)

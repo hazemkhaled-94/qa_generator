@@ -31,6 +31,11 @@ for line in TUNING.read_text().splitlines():
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/x")
 
+# A test run exports no spans and posts no annotations, whatever the shell
+# that launched it had sourced.
+for _unset in ("OTEL_EXPORTER_OTLP_ENDPOINT", "PHOENIX_BASE_URL"):
+    os.environ.pop(_unset, None)
+
 
 def _hypothesis() -> None:
     """Registers the two example budgets and selects one.
