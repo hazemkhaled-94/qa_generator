@@ -1,7 +1,7 @@
 {
   "uid": "qa-pipeline-runs",
   "title": "Run",
-  "description": "One run, from all three stores at once. A run is `RUN_ID`: it is `questions.run_id` on the rows, and a Phoenix project named `<stage>-<run id>` on the spans. The rows say what the run produced and which gate stopped the rest; the spans say what it cost to produce. Pick a run at the top. The logs panel is the exception and is scoped by the time range rather than by the run, because `run.id` is not a log field.",
+  "description": "One run, from all three stores at once. A run is `RUN_ID`, and it is spelled the same in each: `questions.run_id` on the rows, a Phoenix project named `<stage>-<run id>` on the spans, `run.id` on every log line. The rows say what the run produced and which gate stopped the rest; the spans say what the logic did and what it cost; the logs say literally everything else. Pick a run at the top.",
   "tags": ["qa_generator"],
   "editable": true,
   "schemaVersion": 39,
@@ -33,6 +33,16 @@
         "current": { "text": "All", "value": "$__all" },
         "refresh": 2,
         "sort": 1
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "custom",
+        "query": "debug,info,warning,error,critical",
+        "includeAll": true,
+        "multi": true,
+        "allValue": "*",
+        "current": { "text": "All", "value": "$__all" }
       }
     ]
   },
@@ -241,8 +251,8 @@
     {
       "id": 7,
       "type": "logs",
-      "title": "Errors and warnings",
-      "description": "Scoped by the dashboard time range and the service, NOT by the run: `run.id` is not a shipped log field, so set the range to the run's window from the projects panel above. A line's `trace.id` opens its span in Phoenix.",
+      "title": "Every line this run wrote",
+      "description": "The run's own lines, across every process it crossed, at every level. This is the other half of the separation: Phoenix holds what the logic did, and this holds everything — the HTTP, the SQL, the object store, the retries. A line's `trace.id` opens its span in Phoenix.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
       "gridPos": { "h": 11, "w": 24, "x": 0, "y": 24 },
       "options": {
@@ -259,8 +269,8 @@
         {
           "refId": "A",
           "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-          "query": "service.name:($service) AND log.level:(error OR critical OR warning)",
-          "metrics": [{ "id": "1", "type": "logs", "settings": { "limit": "500" } }],
+          "query": "run.id:\"$run\" AND service.name:($service) AND log.level:($level)",
+          "metrics": [{ "id": "1", "type": "logs", "settings": { "limit": "1000" } }],
           "bucketAggs": [],
           "timeField": "@timestamp"
         }

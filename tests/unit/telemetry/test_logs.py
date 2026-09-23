@@ -55,6 +55,32 @@ def test_the_ecs_fields_are_named_and_filled(line: dict) -> None:
     assert line["trace.id"] == "0" * 32, line["trace.id"]
 
 
+def test_the_run_is_on_every_line_a_run_writes(line: dict) -> None:
+    """`run.id`, which is what reads one run's lines across five processes.
+
+    The same value Phoenix names its project after, so a run found in one
+    store is findable in the other.
+    """
+    record = logging.LogRecord(
+        name="extraction.service",
+        level=logging.INFO,
+        pathname="extraction/service.py",
+        lineno=1,
+        msg="working",
+        args=(),
+        exc_info=None,
+    )
+    record.otelTraceID = "0" * 32
+    record.otelSpanID = "0" * 16
+
+    written = json.loads(JsonFormatter("extraction", "full-20260922").format(record))
+
+    assert written["run.id"] == "full-20260922"
+    # Present and empty for a process that is not a run, rather than absent:
+    # one shape of line, and a panel filtering on it finds nothing to show.
+    assert line["run.id"] == ""
+
+
 def test_a_callers_own_fields_survive(line: dict) -> None:
     """What was passed as extra= is carried beside the rest."""
     assert line["passage_id"] == 41

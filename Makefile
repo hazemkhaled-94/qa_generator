@@ -212,14 +212,17 @@ doctor:
 	   && printf '%s' "$$PHOENIX_ADMIN_SECRET" | grep -q '[a-z]'; then \
 	  say ok "PHOENIX_ADMIN_SECRET"; \
 	  else say FAIL "PHOENIX_ADMIN_SECRET needs 32+ characters, a digit and a lower-case letter"; fail=1; fi; \
-	their_model="$${LLM_CONTAINER_MODEL:-$$LLM_MODEL}"; \
-	their_url="$${LLM_CONTAINER_URL:-$$OLLAMA_CONTAINER_URL}"; \
-	if test -z "$$their_url"; then \
-	  say FAIL "the containers have no address for the model: set LLM_CONTAINER_URL, or OLLAMA_CONTAINER_URL for a local one"; fail=1; \
-	elif test -z "$$LLM_CONTAINER_URL" && case "$$their_model" in ollama*) false;; *) true;; esac; then \
-	  say FAIL "the containers would call $$their_model at $$their_url, which is the Ollama fallback - set LLM_CONTAINER_URL"; fail=1; \
+	if test -z "$$OLLAMA_CONTAINER_URL"; then \
+	  say FAIL "OLLAMA_CONTAINER_URL is unset, and it is the only address a container may call"; fail=1; \
+	elif test -z "$$LLM_CONTAINER_MODEL"; then \
+	  say FAIL "LLM_CONTAINER_MODEL is unset: containers run Ollama and never inherit the host's model"; fail=1; \
+	elif case "$$LLM_CONTAINER_MODEL" in ollama*) false;; *) true;; esac; then \
+	  say FAIL "LLM_CONTAINER_MODEL is $$LLM_CONTAINER_MODEL; containers reach Ollama only"; fail=1; \
+	elif test -n "$$QUESTIONS_VERIFIER_CONTAINER_MODEL" && \
+	     case "$$QUESTIONS_VERIFIER_CONTAINER_MODEL" in ollama*) false;; *) true;; esac; then \
+	  say FAIL "QUESTIONS_VERIFIER_CONTAINER_MODEL is $$QUESTIONS_VERIFIER_CONTAINER_MODEL; containers reach Ollama only"; fail=1; \
 	else \
-	  say ok "containers call $$their_model at $$their_url"; \
+	  say ok "containers call $$LLM_CONTAINER_MODEL at $$OLLAMA_CONTAINER_URL"; \
 	fi; \
 	echo; echo "Asking $$LLM_MODEL one question, as the host calls it..."; \
 	PYTHONPATH=backend poetry run python -m llm.check || fail=1; \

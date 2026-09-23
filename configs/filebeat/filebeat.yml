@@ -99,6 +99,11 @@ setup.template.overwrite: true
 # `http.request.method` and `http.response.status_code` are ECS and are
 # mapped by the template Filebeat installs.
 setup.template.append_fields:
+  # Which run wrote the line. Empty for a process that is not one - the
+  # api, the frontend, the orchestrator, a make target. The same value
+  # Phoenix names its project after, which is what joins the two stores.
+  - name: run.id
+    type: keyword
   # Which stage wrote the line. The one field every dashboard groups on.
   - name: stage
     type: keyword

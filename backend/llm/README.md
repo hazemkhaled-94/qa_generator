@@ -94,26 +94,34 @@ for it.
 The one thing that does **not** move when you change providers is
 `EMBEDDING_MODEL`, which runs locally in the worker whatever `LLM_MODEL` names.
 
-### When the containers call a different model from the host
+### The containers call Ollama, and only Ollama
 
 Some credentials exist only where a person is. An interactive cloud login,
 a key in a login keychain, a token minted by hand — a container has none of
 them, and a provider that needs one is a provider the workers cannot use
 while the host can.
 
-`LLM_CONTAINER_MODEL` is that split, and it mirrors `LLM_CONTAINER_URL`
-exactly: the same setting, as the containers see it. Unset, they call what
-the host calls, which is the ordinary case.
+So they do not try. **A container reaches Ollama and nothing else**, and
+that is a rule rather than a default:
 
 ```ini
 LLM_MODEL=<what the host calls>                     # .env
 LLM_CONTAINER_MODEL=ollama_chat/gemma4:12b          # what the containers call
 QUESTIONS_VERIFIER_CONTAINER_MODEL=ollama_chat/granite4.2:8b
+OLLAMA_CONTAINER_URL=http://host.docker.internal:11434
 ```
 
-The verifier follows it, because a verifier the containers cannot reach is
-a run of ungated questions. The address follows it too: with
-`LLM_CONTAINER_URL` unset a container reads `OLLAMA_CONTAINER_URL`.
+`LLM_CONTAINER_MODEL` and `OLLAMA_CONTAINER_URL` are **required** for the
+containers — `compose.yaml` fails to start without them rather than
+falling back to `LLM_MODEL`. That fallback is exactly how a container
+created before `LLM_CONTAINER_MODEL` existed kept a hosted model it had no
+credential for, and spent **2,019 restarts** failing to authenticate: a
+compose variable is resolved when a container is *created*, so a `.env`
+edit reaches a running stack only through `up --force-recreate`.
+
+There is no `LLM_CONTAINER_URL`. A container's address is Ollama's,
+because there is nowhere else it may send a prompt. `make doctor` refuses
+a container model that is not an `ollama*` one.
 
 Both halves drain the **same queues at once** — claiming is
 `FOR UPDATE SKIP LOCKED`, so a topic is taken by exactly one of them. That

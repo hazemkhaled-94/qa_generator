@@ -131,10 +131,11 @@ class _Bound(logging.Filter):
 class JsonFormatter(logging.Formatter):
     """Renders one record as a single JSON object, in ECS field names."""
 
-    def __init__(self, service_name: str) -> None:
-        """Initialises the formatter with the name every line is tagged with."""
+    def __init__(self, service_name: str, run: str | None = None) -> None:
+        """Initialises the formatter with what every line is tagged with."""
         super().__init__()
         self._service = service_name
+        self._run = run or ""
         self._host = socket.gethostname()
 
     def format(self, record: logging.LogRecord) -> str:
@@ -158,6 +159,9 @@ class JsonFormatter(logging.Formatter):
             "log.origin.function": record.funcName,
             "trace.id": getattr(record, "otelTraceID", ""),
             "span.id": getattr(record, "otelSpanID", ""),
+            # Empty for a process that is not a run: the api, the frontend,
+            # the orchestrator and every host command.
+            "run.id": self._run,
         }
 
         if record.exc_info and record.exc_info[0] is not None:
@@ -185,7 +189,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(fields, ensure_ascii=False, default=str)
 
 
-def configure(service_name: str, level: str | None = None) -> None:
+def configure(
+    service_name: str, level: str | None = None, run: str | None = None
+) -> None:
     """Installs the shared handlers on the root logger, replacing any others.
 
     Quietens the libraries that log per operation and takes the loggers that
@@ -194,9 +200,12 @@ def configure(service_name: str, level: str | None = None) -> None:
 
     A JSON file handler is added when LOG_DIR names a writable directory,
     which is how a container is run and a host command is not.
+
+    `run` goes on every shipped line as `run.id`, so one run's lines can be
+    read together across the five processes it crosses.
     """
     handlers: list[logging.Handler] = [_stream()]
-    shipped = _file(service_name)
+    shipped = _file(service_name, run)
     if shipped is not None:
         handlers.append(shipped)
 
@@ -226,7 +235,7 @@ def _stream() -> logging.Handler:
     return handler
 
 
-def _file(service_name: str) -> logging.Handler | None:
+def _file(service_name: str, run: str | None = None) -> logging.Handler | None:
     """Builds the handler the shipper reads, or None if there is nowhere.
 
     One file per PROCESS: the writer is what the name has to be unique per,
@@ -263,7 +272,7 @@ def _file(service_name: str) -> logging.Handler | None:
             exc,
         )
         return None
-    handler.setFormatter(JsonFormatter(service_name))
+    handler.setFormatter(JsonFormatter(service_name, run))
     return handler
 
 

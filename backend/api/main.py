@@ -8,15 +8,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-import telemetry
 from api import errors
 from api.routes import ROUTERS
 
 app = FastAPI(title="qa_generator API")
-
-# Attached to the instance, after it exists, so a caller's trace continues
-# here rather than a new one beginning.
-telemetry.trace_app(app)
 
 errors.install(app)
 

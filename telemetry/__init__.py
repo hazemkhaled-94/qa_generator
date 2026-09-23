@@ -28,7 +28,6 @@ from telemetry.logs import bind
 from telemetry.traces import (
     asking,
     instrument_llm,
-    trace_app,
     trace_engine,
     tracer,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "bind",
     "configure",
     "instrument_llm",
-    "trace_app",
     "trace_engine",
     "tracer",
     "working",
@@ -73,15 +71,20 @@ def configure(
     Call once, as early as possible: anything logged beforehand uses
     Python's default handler and carries no trace id.
 
-    `run` names the Phoenix project this process's spans are filed under.
-    A stage passes `settings.runs.run_id()`; the api and the frontend pass
-    nothing, because neither produces a run and a project per API process
-    would be a project per restart.
+    `run` is what separates the two stores. It names the Phoenix project
+    this process's spans are filed under AND decides whether there are
+    spans to file: a stage passes `settings.runs.run_id()` and exports; the
+    api, the frontend, the orchestrator and every host command pass nothing
+    and export nothing, because none of them is the logic Phoenix holds.
+
+    The logs take it either way. `run.id` is on every line a stage writes,
+    which is what lets Grafana show one run's lines across five processes
+    and Phoenix's project name find the same run from the other side.
     """
     # Order matters: the shared format references the trace fields, and
     # tracing logs while setting itself up.
     logs.add_trace_fields()
-    logs.configure(service_name, level)
+    logs.configure(service_name, level, run)
     traces.configure(service_name, run)
     logging.getLogger(__name__).info(
         "telemetry configured for %s%s", service_name, f", run {run}" if run else ""

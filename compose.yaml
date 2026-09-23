@@ -81,22 +81,18 @@ x-store-env: &store-env
 # Read by the stages that call one, and by the api, which calls no model and
 # serves these as settings.
 x-model-env: &model-env
-  # The containers' model, which is not always the host's. A credential
-  # that only exists on the host - an interactive cloud login, a key in a
-  # keychain - is one a container cannot use, and the deployment that
-  # follows is a served model here and a local one in the containers.
-  # Unset means they are the same, which is the ordinary case.
-  LLM_MODEL: ${LLM_CONTAINER_MODEL-${LLM_MODEL}}
-  # Container's view of the model, not the host's.
-  LLM_BASE_URL: ${LLM_CONTAINER_URL-${OLLAMA_CONTAINER_URL}}
-  # Where a stage overriding the model with a self-hosted one should send
-  # it. The container's view again, not the host's.
-  OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL-}
+  # The containers' model. Ollama, always: a container holds no cloud
+  # credential and must never reach a hosted provider. The host's
+  # LLM_MODEL is deliberately not a fallback - inheriting it is how a
+  # stale container spent 2,019 restarts failing to authenticate to Azure.
+  LLM_MODEL: ${LLM_CONTAINER_MODEL:?containers run Ollama; name the model}
+  # Ollama's address, as a container sees it. Not the host's, and not
+  # overridable: there is nowhere else a container may send a prompt.
+  LLM_BASE_URL: ${OLLAMA_CONTAINER_URL:?containers need Ollama's address}
+  OLLAMA_BASE_URL: ${OLLAMA_CONTAINER_URL}
   # The second model, which checks what the first wrote. Optional, and its
-  # absence means something: the writer then marks its own work. It follows
-  # the model above, because a verifier the containers cannot reach is a
-  # run of ungated questions.
-  QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_CONTAINER_MODEL-${QUESTIONS_VERIFIER_MODEL:-}}
+  # absence means something: the writer then marks its own work.
+  QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_CONTAINER_MODEL-}
 
 # Whatever env vars the configured provider needs, credentials included:
 # ANTHROPIC_API_KEY or GEMINI_API_KEY for a hosted one, AZURE_TENANT_ID and

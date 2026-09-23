@@ -300,6 +300,19 @@
       ]
     }
   },
+  "/prompts": {
+    "get": {
+      "parameters": [
+        "name",
+        "service",
+        "version"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
   "/questions": {
     "get": {
       "parameters": [

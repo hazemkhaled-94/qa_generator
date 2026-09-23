@@ -6,6 +6,37 @@ One configuration, and **every process calls it before it does anything
 else** — the API, the five workers, the frontend, the orchestrator and the
 host commands alike.
 
+## Which store holds what
+
+Four tools, and each answers a question the others cannot. The line
+between the first two is the one this package draws:
+
+| Tool | Holds | Does not hold |
+|---|---|---|
+| **Phoenix** | The **logic**: what a stage was asked, what the model answered, which gate read it, the prompt, the parameters, the tokens, the spend | Services. No HTTP, no SQL, no object store, no frontend |
+| **Grafana** | **Everything, literally.** Every line every process writes, per service, joined to its trace | — |
+| **Argilla** | The **artefacts**, for a person to judge | |
+| **Dagster** | The **workflow**: what ran, what it produced, for whom, in what order | |
+
+Phoenix does not see services; it sees their inputs and outputs. A request
+the frontend made, a statement the API issued and a file a worker fetched
+are the system working, and the system is what the logs are for.
+
+Two rules in [`traces.py`](traces.py) keep that line:
+
+- **Only a run exports.** `configure(name, run=...)` builds an exporter
+  only when `run` is given. A stage passes `settings.runs.run_id()`; the
+  api, the frontend, the orchestrator and every host command pass nothing
+  and send nothing. That is also why there is no project per API restart.
+- **Only the logic is instrumented.** litellm, and the spans the stages
+  open themselves. No requests, no botocore, no FastAPI — and the database
+  only behind `TRACE_DATABASE`, for as long as somebody is reading it.
+
+`RUN_ID` is spelled the same in all three stores, which is what lets one
+run be followed across them: `questions.run_id` on the rows, a project
+named `<stage>-<run id>` in Phoenix, `run.id` on every log line. The
+**Run** dashboard is those three joined on one page.
+
 ## Logs
 
 Each record is rendered **twice**: as a line of text on stdout, which is what
@@ -34,7 +65,7 @@ line for a person reading the Documents page, not the whole story.
 [Elasticsearch's own template](https://www.elastic.co/guide/en/ecs/current/index.html)
 already maps as keywords, so Grafana can group on them out of the box.
 `trace.id` is on every line too, which is what ties a log line to its span in
-Phoenix.
+Phoenix, and `run.id` is what ties it to the run that wrote it.
 
 ### What a line says it was working on
 
@@ -108,16 +139,12 @@ root — and then the host process it exists for cannot write to it.
 
 ## Traces
 
-OpenTelemetry, to Phoenix. A span per unit of work, annotated with the same
-names the log fields use.
-
-The API attaches tracing to the app instance **after it exists**, so a
-caller's trace continues there rather than a new one beginning. The
-orchestrator installs the same configuration, so its spans join the trace the
-API continues.
+OpenTelemetry, to Phoenix. A span per unit of work of the **logic**,
+annotated with the same names the log fields use.
 
 `trace.id` on every log line is what joins the two: a slow extraction is a
 span in Phoenix and a set of lines in Grafana, found from either end.
+`run.id` joins them a level up — the whole run, rather than one call.
 
 ### A project per run
 
@@ -131,8 +158,10 @@ Named with the service as well as the run, so one pass over the pipeline is
 five projects that sort together rather than one heap in which extraction's
 calls and question generation's cannot be told apart.
 
-The api and the frontend pass nothing and keep the default project. Neither
-produces a run, and a project per API process is a project per restart.
+The api, the frontend, the orchestrator and every host command pass
+nothing — and **that is what turns their exporter off**, rather than
+filing them under `default`. None of them is the logic Phoenix holds, and
+a project per API process would be a project per restart.
 
 Question generation also opens a span per question, carrying the gate that
 stopped it **and every gate that read it** — `question.gates_ran`, in order.
@@ -336,12 +365,17 @@ Things that are true, are not bugs, and have surprised somebody.
   The files are `make logs-prune`, and until that runs every container the
   stack has ever recreated, and every host command ever run, still has its
   log file on disk.
-- **`/health` and every `/status` route produce no span.** `EXCLUDED_URLS`
-  in [`traces.py`](traces.py). They are polled continuously and were 193k
-  spans; the logs still carry them.
+- **The api and the frontend produce no span at all.** Not a quieter
+  project — no exporter. They were 3.86M spans of which 1.2% were model
+  calls. What they did is in the logs, in full.
+- **An HTTP call and an S3 GET produce no span.** Neither instrumentor is
+  applied any more; they were ~200k spans of a worker fetching a file.
 - **SQL statements produce no span unless `TRACE_DATABASE` is set.** A
   `connect` per pooled checkout and a span per statement were 2.8M spans
-  against 47k model calls.
+  against 47k model calls. The one deliberate hole in the rule above, for
+  as long as somebody is reading it.
+- **`run.id` is empty on a line a run did not write.** Present and empty
+  rather than absent, so there is one shape of line.
 - **A host command leaves a file per invocation.** `make parse-status` takes
   a second and writes `parsing-<host>-<pid>.log` for it. That is the price
   of a name no two writers share; `make logs-prune` is the sweep.

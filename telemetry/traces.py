@@ -1,4 +1,20 @@
-"""OpenTelemetry tracing configuration."""
+"""OpenTelemetry tracing configuration.
+
+Phoenix holds the LOGIC and nothing else: what a stage was asked, what a
+model answered, which gate read it and what that cost. It does not hold
+services. An HTTP request, a SQL statement, an S3 GET and a page the
+frontend rendered are the system working, and the system is what the logs
+are for - every one of them is in Elasticsearch, per service, in Grafana.
+
+Two rules keep that line, and both are here:
+
+- **Only a run exports.** A process that names a run is running the
+  pipeline; one that does not is a service, a host command or a query, and
+  it builds a provider that records and sends nothing.
+- **Only the logic is instrumented.** The model client, and the spans the
+  stages open themselves. No HTTP client, no request handler, no object
+  store, and the database only when somebody asks for it by name.
+"""
 
 from __future__ import annotations
 
@@ -15,35 +31,23 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 if TYPE_CHECKING:
     # Behind TYPE_CHECKING: this package is shared with the frontend, which
-    # installs neither FastAPI nor SQLAlchemy.
-    from fastapi import FastAPI
+    # does not install SQLAlchemy.
     from sqlalchemy.engine import Engine
 
 log = logging.getLogger(__name__)
-
-#: Applied only for libraries the process has, so one call serves every
-#: process. SQLAlchemy and FastAPI are separate: both attach to an instance.
-#:
-#: litellm is deliberately not here; see :func:`instrument_llm`.
-_INSTRUMENTORS = (
-    ("opentelemetry.instrumentation.requests", "RequestsInstrumentor"),
-    ("opentelemetry.instrumentation.botocore", "BotocoreInstrumentor"),
-)
 
 #: Whether the model client has been instrumented in this process. The
 #: instrumentor warns when applied twice, and two stages build two clients.
 _llm_instrumented = False
 
-#: Set to trace every SQL statement and every pool connect. Off by default:
-#: they were 2.8M of 3.9M spans, against 47k model calls.
+#: Set to put a span on every SQL statement and every pool connect. Off by
+#: default, and the one exception to the rule above: a statement is the
+#: system, not the logic, and belongs in Phoenix only while somebody is
+#: reading it. They were 2.8M of 3.9M spans.
 TRACE_DATABASE = "TRACE_DATABASE"
 
 #: Accepted spellings of true, as `settings/env.py` spells them.
 _TRUE = frozenset({"1", "true", "yes", "on"})
-
-#: Request paths that produce no span. Matched anywhere in the URL, so one
-#: entry covers `/status` and `/{scope}/{value}/status` alike.
-EXCLUDED_URLS = "health,status"
 
 
 #: What Phoenix reads a span's project off. An OpenInference resource
@@ -63,18 +67,21 @@ except ImportError:  # pragma: no cover
 
 
 def configure(service_name: str, run: str | None = None) -> None:
-    """Sets up the tracer provider and instruments what is installed.
+    """Sets up the tracer provider, and exports only for a run.
 
-    Exports over OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set, and
-    otherwise records spans without sending them. Credentials come from
+    `run` does two things, and they are the same thing said twice: it puts
+    this process's spans in a Phoenix project of their own,
+    `<service>-<run>`, and it is what decides there is an exporter at all.
+    A process that names no run is a service, a host command or a query
+    against the database - none of them the logic Phoenix is for - and it
+    gets a provider that records and sends nothing.
+
+    That is the whole separation. Phoenix answers "what did this run
+    produce, and what did it cost"; the logs answer everything else, for
+    every process, run or no run.
+
+    Exports to OTEL_EXPORTER_OTLP_ENDPOINT. Credentials come from
     OTEL_EXPORTER_OTLP_HEADERS and are read by the exporter itself.
-
-    `run` puts this process's spans in a Phoenix project of their own. What
-    that buys is the half SQL cannot answer: the gate counts are columns and
-    can be grouped by `questions.run_id`, but the call count, the token
-    count, the latency and the spend are in the spans, and Phoenix compares
-    two projects of those directly. Absent - which is every process that is
-    not a stage - the spans go where they always went.
     """
     attributes = {"service.name": service_name}
     if run:
@@ -84,7 +91,7 @@ def configure(service_name: str, run: str | None = None) -> None:
         attributes[PROJECT] = f"{service_name}-{run}"
     provider = TracerProvider(resource=Resource.create(attributes))
 
-    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") if run else None
     if endpoint:
         try:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
@@ -98,20 +105,6 @@ def configure(service_name: str, run: str | None = None) -> None:
             log.warning("tracing export disabled: %s: %s", type(exc).__name__, exc)
 
     trace.set_tracer_provider(provider)
-    _instrument()
-
-
-def _instrument() -> None:
-    """Applies every instrumentor whose library is importable."""
-    for module_name, class_name in _INSTRUMENTORS:
-        try:
-            module = __import__(module_name, fromlist=[class_name])
-        except ImportError:
-            continue
-        try:
-            getattr(module, class_name)().instrument()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("could not instrument %s: %s", class_name, exc)
 
 
 def instrument_llm() -> None:
@@ -207,21 +200,3 @@ def trace_engine(engine: Engine) -> None:
         log.warning("could not instrument the database engine: %s", exc)
 
 
-def trace_app(app: FastAPI) -> None:
-    """Traces every request handled by one FastAPI application.
-
-    Continues the caller's trace from the incoming traceparent header.
-    Attaches to the instance, so ordering does not matter: the global
-    instrumentor replaces `fastapi.FastAPI` and does nothing for a module
-    that imported the name first.
-
-    The paths in EXCLUDED_URLS produce no span.
-    """
-    try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    except ImportError:
-        return
-    try:
-        FastAPIInstrumentor.instrument_app(app, excluded_urls=EXCLUDED_URLS)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("could not instrument the application: %s", exc)
