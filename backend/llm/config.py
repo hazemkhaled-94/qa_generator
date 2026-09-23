@@ -8,9 +8,23 @@ from datetime import timedelta
 from settings import Source, decimal, integer, optional, required
 
 #: The context window a self-hosted model is asked for when the deployment
-#: names none. Five times the longest prompt this pipeline sends, and small
-#: enough that a runtime can hold more than one request at once.
-WINDOW = 8192
+#: names none.
+#:
+#: Measured over 9,334 priced calls: the widest was 4,308 tokens of prompt
+#: and answer together, p99 was 3,716, and the median 1,132. So this is
+#: about half as much again as anything this pipeline has ever sent.
+#:
+#: Not smaller, and the margin is the reason. A prompt over the window is
+#: TRUNCATED rather than refused - the answer comes back looking fine and
+#: rests on a passage the model never saw - so the cost of being too small
+#: is silent and the cost of being too large is some cache. `Client.answer`
+#: warns when a call comes within `_NEAR_WINDOW` of it, which is what makes
+#: the first half of that sentence survivable.
+#:
+#: Smaller buys nothing measurable here: three concurrent requests at this
+#: window overlapped on the machine this was written on, 5.2s of wall
+#: against 12.6s of work, so the runtime is already serving more than one.
+WINDOW = 6144
 
 
 def _provider(model: str) -> str:

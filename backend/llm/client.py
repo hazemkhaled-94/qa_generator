@@ -25,6 +25,11 @@ from llm.config import Settings
 
 log = logging.getLogger(__name__)
 
+#: How much of the context window a prompt may use before the call is
+#: worth a warning. Four fifths, which on the default window is a
+#: thousand tokens of room - one more passage, or a longer thread.
+_NEAR_WINDOW = 0.8
+
 #: Failures worth another attempt here. An authentication failure, an unknown
 #: model or a malformed schema is none of these and is raised at once.
 #:
@@ -205,6 +210,7 @@ class Client:
 
         elapsed = self._since(started)
         spent = spend(completion)
+        self._warn_if_near_the_window(spent, shape)
         log.info(
             "%s answered %s in %.1fs%s",
             self._settings.model,
@@ -214,6 +220,32 @@ class Client:
             extra=about | {"llm.duration_ms": elapsed} | spent,
         )
         return answered
+
+    def _warn_if_near_the_window(self, spent: dict, shape: type[Shape]) -> None:
+        """Says so when a prompt came close to the context window.
+
+        A runtime given a prompt longer than its window TRUNCATES it. The
+        answer comes back well-formed and confidently wrong, resting on a
+        passage the model was never shown, and nothing anywhere reports
+        it - not the response, not the gates, not the row. The one signal
+        available is how close the prompt got, and this is it.
+
+        Only where a window was asked for, which is a self-hosted model:
+        a hosted provider sizes its own and refuses the parameter.
+        """
+        window = self._settings.window
+        used = spent.get("llm.tokens.input")
+        if not window or not used or used < window * _NEAR_WINDOW:
+            return
+        log.warning(
+            "%s: %s used %s of a %s-token window. A prompt over it is "
+            "TRUNCATED and answered anyway, so raise LLM_NUM_CTX before "
+            "this reaches it.",
+            self._settings.model,
+            shape.__name__,
+            f"{used:,}",
+            f"{window:,}",
+        )
 
     @staticmethod
     def _since(started: float) -> int:

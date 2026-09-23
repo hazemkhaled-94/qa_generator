@@ -56,9 +56,15 @@ def rate_limited() -> Exception:
     )
 
 
-def answered(shape):
-    """What `_ask` hands back: the parsed answer and the response it came in."""
-    return shape(), None
+def answered(shape, prompt: int | None = None):
+    """What `_ask` hands back: the parsed answer and the response it came in.
+
+    `prompt` puts a usage on the response, for the checks that read how
+    many tokens a call spent.
+    """
+    if prompt is None:
+        return shape(), None
+    return shape(), Response(Usage(prompt_tokens=prompt, completion_tokens=8))
 
 
 def permanent() -> Exception:
@@ -218,7 +224,14 @@ def test_a_self_hosted_model_is_given_a_window_it_can_serve() -> None:
     gigabytes of cache for a prompt of 1,441 and one request served at a
     time - so a worker holding a call blocked every other process.
     """
-    assert sent(num_ctx=None, model="ollama_chat/gemma4:12b")["num_ctx"] == 8192
+    from llm.config import WINDOW
+
+    given = sent(num_ctx=None, model="ollama_chat/gemma4:12b")["num_ctx"]
+
+    assert given == WINDOW
+    # Above anything the pipeline has been measured sending, which is what
+    # keeps a prompt from being truncated and answered anyway.
+    assert given > 4308
 
 
 def test_the_reasoning_effort_reaches_the_runtime_when_one_is_set() -> None:
@@ -412,3 +425,51 @@ def test_the_span_is_told_the_same_two_things(monkeypatch) -> None:
 
     assert seen["tag.tags"] == ["Shape"]
     assert seen["llm.prompt_template.version"] == "8"
+
+
+def test_a_prompt_near_the_window_is_reported(monkeypatch, caplog) -> None:
+    """Truncation is the one failure here that reports itself nowhere.
+
+    A runtime given more than its window silently drops the front of the
+    prompt and answers anyway, so the answer rests on a passage the model
+    never saw. How close the prompt got is the only signal there is.
+    """
+    monkeypatch.setattr(
+        Client, "_ask", lambda self, system, user, shape: answered(shape, prompt=5000)
+    )
+
+    with caplog.at_level("WARNING"):
+        Client(settings(num_ctx=6144, model="ollama_chat/gemma4:12b")).answer(
+            system="s", user="u", shape=Shape
+        )
+
+    assert "TRUNCATED" in caplog.text
+    assert "5,000" in caplog.text and "6,144" in caplog.text
+
+
+def test_a_prompt_well_inside_the_window_says_nothing(monkeypatch, caplog) -> None:
+    """A warning on every call is a warning nobody reads."""
+    monkeypatch.setattr(
+        Client, "_ask", lambda self, system, user, shape: answered(shape, prompt=1441)
+    )
+
+    with caplog.at_level("WARNING"):
+        Client(settings(num_ctx=6144, model="ollama_chat/gemma4:12b")).answer(
+            system="s", user="u", shape=Shape
+        )
+
+    assert "TRUNCATED" not in caplog.text
+
+
+def test_a_hosted_model_is_never_warned_about_a_window(monkeypatch, caplog) -> None:
+    """It sizes its own and was asked for none, so there is none to near."""
+    monkeypatch.setattr(
+        Client, "_ask", lambda self, system, user, shape: answered(shape, prompt=500000)
+    )
+
+    with caplog.at_level("WARNING"):
+        Client(settings(num_ctx=None, model="azure/gpt-4.1")).answer(
+            system="s", user="u", shape=Shape
+        )
+
+    assert "TRUNCATED" not in caplog.text
