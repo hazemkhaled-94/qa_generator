@@ -1337,3 +1337,52 @@ def test_a_question_written_with_nothing_recording_carries_no_link(
 
     assert row.trace_id is None
     assert row.span_id is None
+
+
+# ── Reclaiming a row a dead worker holds ───────────────────────────────────
+
+
+def test_neither_retry_nor_rerun_moves_a_row_a_worker_holds(corpus, engine) -> None:
+    """Which is the hole `reclaim` fills, written down so it stays filled.
+
+    `retry` takes the FAILED and `rerun` skips `in_progress` on purpose -
+    a live worker's row must not be handed to a second one. Between them
+    an interrupted topic was reachable only by its lease, which question
+    generation derives from what a topic costs: 67 days at the settings
+    this was written under.
+    """
+    corpus(topics=1)
+    QuestionQueue().start()
+    QuestionQueue().claim()
+
+    assert QuestionQueue().retry() == 0
+    assert QuestionQueue().reset() == 0
+    assert statuses(engine)["in_progress"] == 1
+
+
+def test_reclaim_returns_it_to_the_queue(corpus, engine) -> None:
+    """Without waiting out a lease nobody is going to wait out."""
+    corpus(topics=1)
+    QuestionQueue().start()
+    QuestionQueue().claim()
+
+    assert QuestionQueue().reclaim() == 1
+    assert statuses(engine)["pending"] == 1
+
+
+def test_reclaim_can_be_narrowed_to_one_topic(corpus, engine) -> None:
+    """Which is how it is run while a worker may still be up.
+
+    Nothing can tell a dead claim from a live one, so naming the row is
+    the caller saying they know which worker is gone.
+    """
+    written = corpus(topics=2)
+    QuestionQueue().start()
+    QuestionQueue().claim()
+    QuestionQueue().claim()
+    queue = QuestionQueue()
+
+    moved = queue.reclaim(queue.narrowed("topic", str(written["topics"][0])))
+
+    assert moved == 1
+    assert statuses(engine)["in_progress"] == 1

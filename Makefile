@@ -127,7 +127,8 @@ help:
         topics-retry topics-visualise \
         settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
-        questions-retry questions-rerun questions-reverify questions-balance \
+        questions-retry questions-reclaim questions-rerun questions-reverify \
+        questions-balance \
         questions-runs questions-diff \
         documents delete delete-derived \
         archive archive-purge \
@@ -685,6 +686,24 @@ questions-stop:
 # Return every failed topic to the pending queue.
 questions-retry:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --retry $(ONLY)
+
+# Return a topic a dead worker still holds, without waiting out its lease.
+#
+# The gap between `retry`, which takes the failed, and `rerun`, which skips
+# what a worker holds. An interrupted topic is `in_progress` and neither of
+# those touches it, so until this existed the only thing that moved one was
+# the lease - derived from what a topic costs, and 67 days at 120 questions
+# a topic and a 900-second timeout.
+#
+#   make questions-reclaim TOPIC=473    one topic
+#   make questions-reclaim              every one the stage holds
+#
+# NARROW IT while a worker may be up. Nothing here can tell a dead claim
+# from a live one, and handing a live worker's row to a second worker is
+# what the lease exists to prevent. Over the whole stage only when it is
+# stopped.
+questions-reclaim:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --reclaim $(ONLY)
 
 # Run this stage again over every topic, finished ones included. Cheaper than
 # it looks: facts an accepted question already rests on are skipped, so this

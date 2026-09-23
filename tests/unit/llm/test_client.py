@@ -206,9 +206,19 @@ def test_a_context_window_reaches_the_runtime_when_one_is_set() -> None:
     assert sent(num_ctx=8192)["num_ctx"] == 8192
 
 
-def test_nothing_is_sent_about_the_window_when_none_is_set() -> None:
-    """A hosted provider has no such parameter and sizes its own."""
-    assert "num_ctx" not in sent(num_ctx=None)
+def test_nothing_is_sent_about_the_window_to_a_hosted_provider() -> None:
+    """It has no such parameter and refuses a request carrying it."""
+    assert "num_ctx" not in sent(num_ctx=None, model="azure/gpt-4.1")
+
+
+def test_a_self_hosted_model_is_given_a_window_it_can_serve() -> None:
+    """Left to its own, a runtime reserves the model's advertised one.
+
+    Measured here: gemma4:12b loaded at 131,072 tokens, which is several
+    gigabytes of cache for a prompt of 1,441 and one request served at a
+    time - so a worker holding a call blocked every other process.
+    """
+    assert sent(num_ctx=None, model="ollama_chat/gemma4:12b")["num_ctx"] == 8192
 
 
 def test_the_reasoning_effort_reaches_the_runtime_when_one_is_set() -> None:

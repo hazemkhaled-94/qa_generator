@@ -245,9 +245,11 @@ class Client:
             **(
                 {"api_base": self._settings.base_url} if self._settings.base_url else {}
             ),
-            # Also omitted when unset: a hosted provider has no such parameter
-            # and sizes its own window.
-            **({"num_ctx": self._settings.num_ctx} if self._settings.num_ctx else {}),
+            # Derived per model, like the thinking below: a self-hosted
+            # runtime reserves the whole window as cache and sizes its
+            # parallelism from it, and a hosted provider refuses the
+            # parameter outright. See `Settings.window`.
+            **({"num_ctx": window} if (window := self._settings.window) else {}),
             # Derived per model rather than read straight off the setting:
             # a self-hosted one is sent `off` unless the deployment said
             # otherwise. See `Settings.thinking` for what that is worth -

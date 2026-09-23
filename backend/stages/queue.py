@@ -251,6 +251,31 @@ class StageQueue(Repository):
         """Returns every failed row to the queue, clearing its error."""
         return self._requeue(self.columns.status == Status.FAILED, within)
 
+    def reclaim(self, within: Any = None) -> int:
+        """Returns a row a dead worker still holds, without waiting it out.
+
+        The gap between `retry` and `rerun`, and the only verb that moves
+        an `in_progress` row. `retry` takes the failed, `rerun` explicitly
+        skips what a worker holds, and `stop` takes back only what has not
+        begun - so a worker killed mid-row left that row unreachable until
+        its lease ran out. Question generation's lease is derived from the
+        work a topic costs and computes to 67 days at the settings this
+        was written under, which is not a wait.
+
+        `abandon` is the automatic version and stays the normal one: it
+        sweeps on a lease, because a row a LIVE worker holds must not be
+        given to a second. This is the deliberate one, and the reason it
+        is worth having separately is that a person knows the worker is
+        gone and the lease cannot.
+
+        **Narrow it.** Nothing here can tell a dead claim from a live one,
+        so run it against a named row when a worker may still be up, and
+        over the stage only when none is. Two workers on one row is what
+        the lease exists to prevent, and this is the verb that can cause
+        it.
+        """
+        return self._requeue(self.columns.status == Status.IN_PROGRESS, within)
+
     def _requeue(self, *where: Any) -> int:
         """Moves the rows a condition selects to pending, clearing the error."""
         with self._session.begin() as session:

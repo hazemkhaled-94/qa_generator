@@ -7,6 +7,11 @@ from datetime import timedelta
 
 from settings import Source, decimal, integer, optional, required
 
+#: The context window a self-hosted model is asked for when the deployment
+#: names none. Five times the longest prompt this pipeline sends, and small
+#: enough that a runtime can hold more than one request at once.
+WINDOW = 8192
+
 
 def _provider(model: str) -> str:
     """The provider a litellm model id names, which is its prefix."""
@@ -92,6 +97,31 @@ class Settings:
         # Thinking is not decided here; see `thinking`. It follows the
         # model being called and not how that model was arrived at.
         return replace(self, **moved)
+
+    @property
+    def window(self) -> int | None:
+        """The context window to ask for, or None to let the provider size it.
+
+        A self-hosted runtime reserves the whole window as key-value cache
+        before it reads anything, so a model advertising 131,072 tokens
+        holds several gigabytes for a prompt of two thousand. It also sizes
+        its parallelism from that window: at the advertised one this
+        machine's Ollama served a single request at a time, so a worker
+        holding a call blocked every other process for the length of it.
+
+        Sized from the longest prompt a stage sends. Extraction sends one
+        passage, capped at EMBEDDING_MAX_TOKENS; question generation sends
+        up to QUESTIONS_FACT_SAMPLE facts and two passages plus the prompt,
+        measured at 1,441 tokens. `WINDOW` covers both several times over.
+
+        Derived per model for the reason `thinking` is: a hosted provider
+        has no such parameter and refuses a request carrying it, so there
+        is no one value and no way to default it in the file. LLM_NUM_CTX
+        overrides it wherever a deployment knows better.
+        """
+        if self.num_ctx:
+            return self.num_ctx
+        return WINDOW if _provider(self.model).startswith("ollama") else None
 
     @property
     def thinking(self) -> str | None:

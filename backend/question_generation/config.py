@@ -244,11 +244,21 @@ class Settings:
         This is a worst case on a worst case - every call taking its full
         timeout on every attempt, on every question of the topic - so the
         figure is days rather than hours and it grows with
-        QUESTIONS_PER_TOPIC. That is the wrong direction for the one thing
-        the lease is for: a worker killed mid-topic leaves that row
-        unclaimable until it runs out, and nothing but time moves it. The
-        remedy meanwhile is `make questions-retry`, which returns a stuck
-        topic to the queue without waiting.
+        QUESTIONS_PER_TOPIC. At 120 per topic and a 900-second timeout it
+        computes to 67 days, which is not a wait. That is the wrong
+        direction for the one thing the lease is for: a worker killed
+        mid-topic leaves that row unclaimable until it runs out.
+
+        `make questions-reclaim TOPIC=<id>` is what moves it. Not
+        `questions-retry`, which takes the FAILED, and not
+        `questions-rerun`, which skips what a worker holds - this said
+        `retry` for a while and it returned nothing, because an
+        interrupted topic is `in_progress` and neither verb touches that.
+
+        The real remedy is a smaller LLM_TIMEOUT_SECONDS. It is 900 to
+        survive a thinking model taking minutes a call; with thinking
+        derived off for a self-hosted one a call is 15 seconds, and every
+        figure here is 60 times larger than it needs to be.
         """
         return timedelta(
             seconds=call_seconds

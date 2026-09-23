@@ -30,6 +30,8 @@ _ACTIONS = {
     "start": "queue the rows never asked for",
     "stop": "take back what has not begun",
     "retry": "return failed rows to the queue",
+    "reclaim": "return a row a dead worker still holds, without waiting "
+    "out its lease. Narrow it with --only unless the stage is stopped",
     "rerun": "queue every row again, finished ones included",
 }
 
@@ -165,6 +167,7 @@ def queue_main(
         (args.start, "queued", lambda q, w: q.start(w)),
         (args.stop, "taken off the queue", lambda q, w: q.stop(w)),
         (args.retry, "returned to the queue", lambda q, w: q.retry(w)),
+        (args.reclaim, "reclaimed", lambda q, w: q.reclaim(w)),
     ):
         if chosen:
             log.info("%s: %d row(s) %s", name, act(run), verb)
