@@ -821,6 +821,12 @@ services:
       # The registry, so a restart resumes where it left off rather than
       # shipping every line in every file again.
       - filebeat_data:/usr/share/filebeat/data
+    ports:
+      # Where the infrastructure containers send their lines. Published on
+      # the host because the engine's logging driver is the engine's, not a
+      # container's: it resolves no compose service name and is not on this
+      # network.
+      - "${SYSLOG_PORT:-9000}:9000/udp"
     depends_on:
       elasticsearch: { condition: service_healthy }
       # service_started, not service_healthy: an empty named volume takes its

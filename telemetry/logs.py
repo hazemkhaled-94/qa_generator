@@ -106,6 +106,15 @@ def bind(fields: Mapping[str, Any]) -> Iterator[None]:
         _BOUND.reset(token)
 
 
+def bound() -> Mapping[str, Any]:
+    """What `bind` holds in this context, for something other than a line.
+
+    The model-call span reads it, so a call carries the work it was for in
+    the same words the log line does.
+    """
+    return _BOUND.get()
+
+
 class _Bound(logging.Filter):
     """Copies what `bind` holds onto each record on its way to a handler.
 

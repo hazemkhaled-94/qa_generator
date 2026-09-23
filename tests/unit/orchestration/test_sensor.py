@@ -101,3 +101,96 @@ def test_a_later_upload_asks_for_its_own_run(monkeypatch) -> None:
     answering(monkeypatch, new=4)
 
     assert evaluate().run_key != first
+
+
+# ── What the orchestrator did not start ────────────────────────────────────
+
+
+def _watching(monkeypatch, **per_stage: dict) -> None:
+    """Makes every stage's /status report what the test says."""
+
+    class Stub:
+        """Stands in for the backend client."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """Accepts whatever the sensor passes."""
+
+        def status(self, stage: str) -> Queue:
+            """Reports one stage's queue."""
+            rows = per_stage.get(stage, {})
+            return Queue(stage=stage, working=False, rows=rows)
+
+    monkeypatch.setattr(orchestration, "Backend", Stub)
+
+
+def test_work_nobody_asked_dagster_to_do_is_still_recorded(monkeypatch) -> None:
+    """The whole point.
+
+    A stage drained by `make extract`, by the API, by the Start button or
+    by a worker taking a queue somebody else filled is work the asset
+    graph used to call "never materialised".
+    """
+    _watching(monkeypatch, parsing={"parsed": 8, "new": 2})
+
+    result = orchestration.progress(build_sensor_context())
+
+    (event,) = result.asset_events
+    assert event.asset_key.to_user_string() == "parsed_documents"
+    assert "8 document(s) worked" == event.description
+
+
+def test_a_tick_that_finds_nothing_new_records_nothing(monkeypatch) -> None:
+    """The cursor is what keeps one finished run from being reported for ever."""
+    _watching(monkeypatch, parsing={"parsed": 8})
+    context = build_sensor_context()
+    orchestration.progress(context)
+
+    again = orchestration.progress(build_sensor_context(cursor=context.cursor))
+
+    assert isinstance(again, SkipReason)
+
+
+def test_only_the_stage_that_moved_is_reported(monkeypatch) -> None:
+    """Five stages, one of which produced something since the last tick."""
+    _watching(monkeypatch, parsing={"parsed": 8}, extraction={"extracted": 40})
+    context = build_sensor_context()
+    orchestration.progress(context)
+
+    _watching(monkeypatch, parsing={"parsed": 8}, extraction={"extracted": 51})
+    result = orchestration.progress(build_sensor_context(cursor=context.cursor))
+
+    (event,) = result.asset_events
+    assert event.asset_key.to_user_string() == "facts"
+    assert event.metadata["since the last tick"].value == 11
+
+
+def test_a_stage_that_cannot_be_reached_costs_only_itself(monkeypatch) -> None:
+    """One unreachable route must not lose the other four."""
+
+    class Stub:
+        """Answers for one stage and raises for the rest."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """Accepts whatever the sensor passes."""
+
+        def status(self, stage: str) -> Queue:
+            """Reports parsing and refuses everything else."""
+            if stage != "parsing":
+                raise ConnectionError("no route to the api")
+            return Queue(stage=stage, working=False, rows={"parsed": 3})
+
+    monkeypatch.setattr(orchestration, "Backend", Stub)
+
+    result = orchestration.progress(build_sensor_context())
+
+    assert [one.asset_key.to_user_string() for one in result.asset_events] == [
+        "parsed_documents"
+    ]
+
+
+def test_it_watches_without_being_switched_on(monkeypatch) -> None:
+    """Unlike the schedule and `arrivals`, which decide work should happen.
+
+    A watcher nobody switched on is an asset graph that is quietly wrong.
+    """
+    assert orchestration.progress.default_status.value == "RUNNING"

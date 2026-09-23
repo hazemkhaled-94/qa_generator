@@ -30,7 +30,7 @@ class _Telemetry:
     """Stands in for the telemetry module."""
 
     @staticmethod
-    def configure(name: str) -> None:
+    def configure(name: str, run: str | None = None) -> None:
         """Configures nothing."""
 
     @staticmethod

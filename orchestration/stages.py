@@ -218,3 +218,20 @@ def questions_check() -> AssetCheckResult:
             "queue": MetadataValue.json(queue.rows),
         },
     )
+
+
+#: Every stage that has an asset, as (asset name, route prefix, unit).
+#: `ROW_STAGES` plus the two that are asked for rather than started.
+ALL_STAGES = ROW_STAGES + (
+    ("topics", "topics", "fit"),
+    ("questions", "questions", "topic"),
+)
+
+#: Queue statuses that mean a row has NOT been produced yet. Everything
+#: else counts as done, which is what a materialisation reports.
+_UNDONE = ("new", "pending", "in_progress", "failed")
+
+
+def produced(rows: dict[str, int]) -> int:
+    """How many rows of a stage's queue have been worked."""
+    return sum(count for status, count in rows.items() if status not in _UNDONE)

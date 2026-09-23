@@ -54,6 +54,14 @@ def parser() -> argparse.ArgumentParser:
         "--status", action="store_true", help="report how much has been reviewed"
     )
     built.add_argument(
+        "--all",
+        action="store_true",
+        dest="everything",
+        help="push every row of that kind rather than a sample, so Argilla "
+        "holds the corpus and a reviewer filters there. One dataset per "
+        "kind either way.",
+    )
+    built.add_argument(
         "--ids",
         metavar="ID,ID",
         help="push exactly these question ids instead of a sample. What "
@@ -89,7 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.push:
-        push(args.push, settings, catalogs, _ids(args.ids, args.push))
+        push(
+            args.push,
+            settings,
+            catalogs,
+            _ids(args.ids, args.push),
+            everything=args.everything,
+        )
     else:
         pull(args.pull, settings, catalogs)
     return 0

@@ -16,15 +16,20 @@ Loaded through configs/dagster/workspace.yaml.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from dagster import (
+    AssetKey,
+    AssetMaterialization,
     AssetSelection,
     DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
+    MetadataValue,
     RunRequest,
     ScheduleDefinition,
+    SensorResult,
     SkipReason,
     define_asset_job,
     sensor,
@@ -102,6 +107,73 @@ def arrivals():
     return RunRequest(run_key=f"new-{waiting}")
 
 
+@sensor(
+    minimum_interval_seconds=30,
+    default_status=DefaultSensorStatus.RUNNING,
+    description="Records what each stage produced, whoever set it going.",
+)
+def progress(context):
+    """Reports a materialisation for work this orchestrator did not start.
+
+    Without it Dagster sees only its own runs. Every other way of setting
+    a stage going - `make extract`, POST /extraction/start, the Start
+    button, a worker draining a queue somebody filled - moved rows and
+    left the asset graph saying "never materialised", which is the one
+    reading of that graph nobody should have to qualify.
+
+    So the asset is no longer only a trigger. This watches the queues the
+    same way the assets do, through /status, and files an
+    AssetMaterialization whenever a stage's worked count has risen. What
+    Dagster then shows is the pipeline, not the subset of it Dagster ran.
+
+    The cursor holds the last count seen per stage, so a tick that finds
+    nothing new reports nothing. First tick after an empty cursor records
+    every stage that has produced anything, which is how a graph that has
+    been running for weeks without this catches up in one poll.
+
+    RUNNING rather than STOPPED, unlike the schedule and `arrivals`:
+    those two decide that work should happen, and a deployment should opt
+    into that. This one only watches, and a watcher nobody switched on is
+    a graph that is quietly wrong.
+    """
+    settings = Settings.load()
+    backend = Backend(settings.backend_url)
+    seen = json.loads(context.cursor) if context.cursor else {}
+
+    events, counted = [], {}
+    for name, stage, unit in stages.ALL_STAGES:
+        try:
+            queue = backend.status(stage)
+        except Exception as unreachable:  # noqa: BLE001 - one stage, not the tick
+            log.warning("%s: no status, so nothing recorded: %s", stage, unreachable)
+            counted[stage] = seen.get(stage, 0)
+            continue
+        done = stages.produced(queue.rows)
+        counted[stage] = done
+        # Nothing produced is nothing to report: a stage with an empty
+        # queue has not materialised, it has not run.
+        if not done or done <= seen.get(stage, 0):
+            continue
+        events.append(
+            AssetMaterialization(
+                asset_key=AssetKey(name),
+                description=f"{done} {unit}(s) worked",
+                metadata={
+                    f"{unit}s done": done,
+                    "since the last tick": done - seen.get(stage, 0),
+                    "failed": queue.failed,
+                    "queue": MetadataValue.json(queue.rows),
+                },
+            )
+        )
+
+    context.update_cursor(json.dumps(counted))
+    if not events:
+        return SkipReason("no stage has produced anything new")
+    log.info("recorded %d materialisation(s) nobody asked this to watch", len(events))
+    return SensorResult(asset_events=events)
+
+
 defs = Definitions(
     assets=[
         stages.parsed_documents,
@@ -119,5 +191,5 @@ defs = Definitions(
     ],
     jobs=[corpus],
     schedules=[nightly],
-    sensors=[arrivals],
+    sensors=[arrivals, progress],
 )

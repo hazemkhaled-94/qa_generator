@@ -14,6 +14,7 @@ import telemetry
 from database.qa_generator import engine
 from ingestion.config import Settings
 from ingestion.factory import build_removal, build_service
+from settings.runs import run_id
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
 
     settings = Settings.load()
-    telemetry.configure("ingestion")
+    telemetry.configure("ingestion", run=run_id())
     telemetry.trace_engine(engine())
 
     if args.list:

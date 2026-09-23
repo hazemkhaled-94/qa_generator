@@ -37,7 +37,9 @@ class Driver:
         monkeypatch.setattr(
             module,
             "push",
-            lambda name, settings, catalogs, ids=None: self.pushed.append((name, ids)),
+            lambda name, settings, catalogs, ids=None, everything=False: (
+                self.pushed.append((name, ids, everything))
+            ),
         )
         monkeypatch.setattr(
             module, "pull", lambda name, settings, catalogs: self.pulled.append(name)
@@ -71,7 +73,7 @@ def test_status_reads_the_counts_and_nothing_else(cli) -> None:
 def test_each_dataset_can_be_pushed(cli, name: str) -> None:
     """One per thing a model decided and a person may disagree with."""
     assert cli.run("--push", name) == 0
-    assert cli.pushed == [(name, None)]
+    assert cli.pushed == [(name, None, False)]
 
 
 @pytest.mark.parametrize("name", datasets.NAMES)
@@ -84,7 +86,7 @@ def test_each_dataset_can_be_pulled(cli, name: str) -> None:
 def test_a_named_queue_of_ids_replaces_the_sample(cli) -> None:
     """What `make second-opinion` prints reaches somebody who can settle it."""
     assert cli.run("--push", "questions", "--ids", "4,9,11") == 0
-    assert cli.pushed == [("questions", [4, 9, 11])]
+    assert cli.pushed == [("questions", [4, 9, 11], False)]
 
 
 def test_an_action_is_required(cli) -> None:
@@ -137,3 +139,14 @@ def test_every_dataset_name_is_offered_by_the_parser() -> None:
     """A set the tool cannot name is a set nobody reviews."""
     for name in datasets.NAMES:
         assert parser().parse_args(["--push", name]).push == name
+
+
+def test_all_pushes_the_corpus_rather_than_a_draw(cli) -> None:
+    """The corpus rather than a draw from it.
+
+    A sample answers "is the checker right"; the whole set answers "where
+    is the artefact I am looking for", which a draw cannot.
+    """
+    cli.run("--push", "facts", "--all")
+
+    assert cli.pushed == [("facts", None, True)]

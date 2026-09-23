@@ -112,3 +112,35 @@ def test_anything_else_is_off(monkeypatch, sqlalchemy, value):
     traces.trace_engine(object())
 
     assert sqlalchemy.calls == []
+
+
+def test_a_model_call_carries_the_work_it_was_for(monkeypatch) -> None:
+    """The stage, the passage, the topic - whatever `bind` is holding.
+
+    Without it a `completion` is reachable only through the parent span it
+    hangs under, so "every call this run made about that document" is a
+    question the trace view cannot answer and the logs can.
+    """
+    import openinference.instrumentation as oi
+
+    from telemetry import bind
+
+    seen: dict = {}
+    monkeypatch.setattr(oi, "using_attributes", lambda **kw: seen.update(kw) or _noop())
+
+    with (
+        bind({"stage": "extraction", "passage.id": 41}),
+        traces.asking("_Answered", "8"),
+    ):
+        pass
+
+    assert seen["tags"] == ["_Answered"]
+    assert seen["prompt_template_version"] == "8"
+    assert seen["metadata"] == {"stage": "extraction", "passage.id": "41"}
+
+
+def _noop():
+    """A context manager that does nothing."""
+    from contextlib import nullcontext
+
+    return nullcontext()

@@ -68,12 +68,17 @@ def _even(total: int, groups: int) -> int:
 class ReviewRepository(Repository):
     """The rows a review is drawn from, and the verdicts it produces."""
 
-    def facts(self, sample: int) -> list[FactRow]:
+    def facts(self, sample: int | None) -> list[FactRow]:
         """Draws a sample of facts, spread over the verdicts.
 
         Everything the checker rejected is grouped by its code, and what it
         accepted is one more group beside them, so a reviewer sees both the
         drops and the keeps in one sitting.
+
+        `sample` of None takes every unreviewed fact instead, which is what
+        `--all` asks for: the dataset is then the corpus rather than a draw
+        from it, and a reviewer filters in Argilla rather than trusting the
+        draw to have included what they were looking for.
         """
         with self._session() as session:
             groups = [
@@ -82,7 +87,7 @@ class ReviewRepository(Repository):
                     select(Fact.rejection_code).group_by(Fact.rejection_code)
                 )
             ]
-            each = _even(sample, len(groups))
+            each = None if sample is None else _even(sample, len(groups))
             rows: list[FactRow] = []
             for code in groups:
                 found = session.execute(
@@ -105,14 +110,14 @@ class ReviewRepository(Repository):
                     )
                     # Randomly, so two pushes are two samples rather than
                     # the same rows in the same order.
-                    .order_by(func.random())
+                    .order_by(Fact.id if each is None else func.random())
                     .limit(each)
                 ).all()
                 rows += [FactRow(*one) for one in found]
         return rows
 
     def questions(
-        self, sample: int, ids: Sequence[int] | None = None
+        self, sample: int | None, ids: Sequence[int] | None = None
     ) -> list[QuestionRow]:
         """Draws a sample of questions, spread over difficulty and verdict.
 
@@ -140,7 +145,7 @@ class ReviewRepository(Repository):
                     Question.difficulty, Question.rejected_reason
                 )
             ).all()
-            each = _even(sample, len(groups))
+            each = None if sample is None else _even(sample, len(groups))
             rows: list[QuestionRow] = []
             for difficulty, reason in groups:
                 found = session.execute(
@@ -153,7 +158,7 @@ class ReviewRepository(Repository):
                         if reason is None
                         else Question.rejected_reason == reason,
                     )
-                    .order_by(func.random())
+                    .order_by(Question.id if each is None else func.random())
                     .limit(each)
                 ).scalars()
                 rows += [self._question(one) for one in found]

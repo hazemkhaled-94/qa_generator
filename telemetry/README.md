@@ -13,10 +13,10 @@ between the first two is the one this package draws:
 
 | Tool | Holds | Does not hold |
 |---|---|---|
-| **Phoenix** | The **logic**: what a stage was asked, what the model answered, which gate read it, the prompt, the parameters, the tokens, the spend | Services. No HTTP, no SQL, no object store, no frontend |
-| **Grafana** | **Everything, literally.** Every line every process writes, per service, joined to its trace | — |
-| **Argilla** | The **artefacts**, for a person to judge | |
-| **Dagster** | The **workflow**: what ran, what it produced, for whom, in what order | |
+| **Phoenix** | The **logic**: every stage's spans, every model call with its shape, prompt version and the work it was for, and every validation - the six question gates and extraction's eleven rules - as an annotation of its own | Services. No HTTP, no SQL, no object store, no frontend |
+| **Grafana** | **Everything, literally.** Every line every process writes, per service, joined to its trace and its run | Container logs of the infrastructure, where the engine has no syslog driver; see below |
+| **Argilla** | The **artefacts**, one dataset per kind. A sample by default and the whole corpus with `make review-all` | |
+| **Dagster** | The **workflow**: what ran, what it produced, in what order - **whoever started it**, through the `progress` sensor | Row-level lineage. Assets are per stage |
 
 Phoenix does not see services; it sees their inputs and outputs. A request
 the frontend made, a statement the API issued and a file a worker fetched
@@ -31,6 +31,13 @@ Two rules in [`traces.py`](traces.py) keep that line:
 - **Only the logic is instrumented.** litellm, and the spans the stages
   open themselves. No requests, no botocore, no FastAPI — and the database
   only behind `TRACE_DATABASE`, for as long as somebody is reading it.
+
+Every model call carries what it was **for**, not only what it was: the
+stage, the passage, the topic and the run go on as metadata, read off the
+same `bind` the log line beside it uses. Every **validation** is an
+annotation — question generation's six gates and extraction's rejection
+rules alike, each its own column, so a rule's mean over a project is its
+refusal rate.
 
 `RUN_ID` is spelled the same in all three stores, which is what lets one
 run be followed across them: `questions.run_id` on the rows, a project

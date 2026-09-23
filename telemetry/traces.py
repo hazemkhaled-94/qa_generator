@@ -163,6 +163,13 @@ def asking(shape: str, version: str | None = None) -> Iterator[None]:
     instrumentor's span is the one carrying the prompt and the price, and
     a wrapper around it would be a second place for the same call.
 
+    **What the call was for** goes on as metadata, read off the same
+    binding the log line beside it carries - the stage, the passage, the
+    topic, the run. Without it a `completion` is filterable only through
+    the parent span it happens to hang under, so "every call this run made
+    about that document" is a question the trace view cannot answer and
+    the logs can. One fact said twice, again.
+
     Does nothing where openinference is not installed - the frontend and
     the orchestrator have the tracer and not the instrumentor - and
     nothing where a caller names no version, which is a prompt that has
@@ -173,7 +180,13 @@ def asking(shape: str, version: str | None = None) -> Iterator[None]:
     except ImportError:
         yield
         return
-    with using_attributes(tags=[shape], prompt_template_version=version or ""):
+    from telemetry.logs import bound
+
+    with using_attributes(
+        tags=[shape],
+        prompt_template_version=version or "",
+        metadata={key: str(value) for key, value in bound().items()},
+    ):
         yield
 
 

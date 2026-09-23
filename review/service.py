@@ -78,23 +78,32 @@ def push(
     settings: Settings,
     catalogs: Catalogs,
     ids: Sequence[int] | None = None,
+    everything: bool = False,
 ) -> int:
-    """Puts a sample of one kind of row in front of a reviewer.
+    """Puts one kind of row in front of a reviewer.
 
     `ids` names exactly which questions to push instead of sampling, which
     is how a queue built elsewhere - `evaluation.second_opinion`'s
     disagreements - reaches a reviewer. Questions only; the other two sets
     have no such queue behind them.
 
+    `everything` pushes the corpus rather than a draw from it. The two
+    answer different questions and both are worth having: a sample is
+    "is the checker right", small enough that somebody finishes it; the
+    whole set is "where is the artefact I am looking for", which a draw
+    cannot answer because the row wanted may not be in it. One dataset per
+    kind either way, so the two never mix in one place.
+
     Returns:
         How many records were written.
     """
     client = connect(settings)
     dataset = _dataset(client, settings, name)
+    draw = None if everything else settings.sample
 
     if name == datasets.FACTS:
         records = [
-            datasets.fact_record(one) for one in catalogs.facts.facts(settings.sample)
+            datasets.fact_record(one) for one in catalogs.facts.facts(draw)
         ]
     elif name == datasets.QUESTIONS:
         # `facts` skips a row already judged through `reviewed_verdict`;
@@ -104,7 +113,7 @@ def push(
         judged = set() if ids else answered(dataset)
         records = [
             datasets.question_record(one)
-            for one in catalogs.facts.questions(settings.sample, ids)
+            for one in catalogs.facts.questions(draw, ids)
             if str(one.id) not in judged
         ]
     else:

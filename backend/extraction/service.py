@@ -21,11 +21,16 @@ from extraction.repository import FactCatalog, PassageQueue
 from extraction.validation import WRITTEN, FactChecker
 from nlp.analysis import claim, normalised
 from nlp.embedding import Embedder, cosine
+from settings.runs import run_id
 from stages import StageService
 from telemetry import tracer, working
+from telemetry.evaluations import Evaluations, Verdict, current_ids
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
+
+#: What a fact that passed every rule its kind faces is labelled.
+_VALIDATED = "validated"
 
 #: How many re-judged facts to write at once.
 _REJUDGE_BATCH = 500
@@ -628,6 +633,10 @@ class ExtractionService(StageService):
         self._digest_min_chars = digest_min_chars
         self._embedder = embedder
         self._duplicate_cosine = duplicate_cosine
+        # Held for the life of the service, as question generation holds
+        # its own: the client is one connection and the batch spans
+        # passages, so a passage yielding four facts costs no call.
+        self._evaluations = Evaluations()
 
     def process_next(self) -> int | None:
         """Reads one queued passage and stores what it yielded.
@@ -656,6 +665,10 @@ class ExtractionService(StageService):
                 )
                 validated = sum(1 for fact in facts if fact.validated)
                 self._done(current)
+                # After store, so what is recorded is the verdict that
+                # survived the cap and the dedup rather than the one the
+                # checker reached before either ran.
+                self._record(passage, facts)
                 current.set_attribute("extract.facts", stored)
                 current.set_attribute("extract.validated", validated)
                 log.info(
@@ -676,6 +689,62 @@ class ExtractionService(StageService):
                 self._fail(passage.id, f"{type(exc).__name__}: {exc}", current)
                 log.exception("failed passage %d", passage.id)
         return passage.id
+
+    def _record(self, passage: PassageToExtract, facts: list[CheckedFact]) -> None:
+        """Puts every fact's verdict in Phoenix's Evaluations view.
+
+        A span of its own per fact, because an annotation is filed against
+        a span and the passage has one span for however many facts it
+        yielded. The same arrangement question generation uses for a
+        question, and for the same reason: `validation` scored 1 or 0
+        means a project's mean over it IS the validation rate, and the
+        rejection codes compare run to run without a query.
+
+        Two annotations per fact, not one. `validation` is what became of
+        it; `validation: <rule>` is the rule that refused it, so the
+        Evaluations view is a column per rule the way it is a column per
+        gate - which is the only way to see that `not_atomic` moved while
+        the total held still.
+        """
+        if not self._evaluations.enabled:
+            return
+        about = {"run_id": run_id(), "passage_id": str(passage.id)}
+        for fact in facts:
+            with span.start_as_current_span("check_fact") as current:
+                current.set_attribute("run.id", about["run_id"])
+                current.set_attribute("passage.id", passage.id)
+                current.set_attribute("fact.kind", str(fact.kind))
+                current.set_attribute("fact.validated", fact.validated)
+                current.set_attribute("fact.method", fact.extraction_method or "")
+                rule = str(fact.rejection_code) if fact.rejection_code else ""
+                if rule:
+                    current.set_attribute("fact.rejection", rule)
+                _, span_id = current_ids()
+                if not span_id:
+                    continue
+                verdicts = [
+                    Verdict(
+                        span_id=span_id,
+                        name="validation",
+                        label=rule or _VALIDATED,
+                        score=float(fact.validated),
+                        explanation=fact.validation_error or "",
+                        metadata=about | {"kind": str(fact.kind)},
+                    )
+                ]
+                if rule:
+                    verdicts.append(
+                        Verdict(
+                            span_id=span_id,
+                            name=f"validation: {rule}",
+                            label="refused",
+                            score=0.0,
+                            explanation=fact.validation_error or "",
+                            metadata=about,
+                        )
+                    )
+                self._evaluations.record(*verdicts)
+        self._evaluations.flush()
 
     def _passage(self, passage: PassageToExtract, current) -> list[CheckedFact]:
         """Reads one passage and checks everything it produced."""

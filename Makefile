@@ -1223,7 +1223,7 @@ review-status:
 
 # Push a sample of facts, spread over the checker's verdicts.
 review-push-facts:
-	$(REVIEW) --push facts
+	$(REVIEW) --push facts $(if $(ALL),--all)
 
 # Write the submitted fact verdicts back to the database.
 review-pull-facts:
@@ -1242,7 +1242,7 @@ review-pull-topics:
 # cannot find those: they are rare in every band and every verdict, which
 # is the shape a proportional draw misses.
 review-push-questions:
-	$(REVIEW) --push questions $(if $(IDS),--ids $(IDS))
+	$(REVIEW) --push questions $(if $(IDS),--ids $(IDS)) $(if $(ALL),--all)
 
 # Write the submitted question judgements back to the database.
 review-pull-questions:
@@ -1326,6 +1326,11 @@ open: services
 
 # Everything a person reviews, pushed to Argilla in one go.
 review: review-push-facts review-push-topics review-push-questions
+
+# Every artefact of every kind, each in its own dataset. Argilla then holds
+# the corpus rather than a draw from it; `make review` is the sample.
+review-all:
+	$(MAKE) review ALL=1
 	@$(LOADENV) && echo "Review at http://localhost:$$ARGILLA_PORT"
 
 # Every decision made there, pulled back into the database.

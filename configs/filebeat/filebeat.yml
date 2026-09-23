@@ -50,7 +50,51 @@ filebeat.inputs:
     ignore_older: 72h
     clean_inactive: 96h
 
+  # Everything that is not this project's own code: postgres, redis,
+  # seaweedfs, elasticsearch, phoenix, grafana, argilla, dagster. They
+  # write no JSON and know nothing of ECS, so compose points their
+  # logging driver here instead and the tag carries the container name.
+  #
+  # Over the engine's file store because that store is a different path
+  # under Docker and Podman and, on macOS, inside a virtual machine no
+  # bind mount can see. A UDP port is the one address all three share.
+  - type: syslog
+    id: qa-infrastructure
+    enabled: true
+    format: rfc3164
+    protocol.udp:
+      host: "0.0.0.0:9000"
+    fields_under_root: true
+    fields:
+      # No run wrote these, and the field must be present on every line or
+      # a panel filtering on it drops them.
+      run.id: ""
+
 processors:
+  # The container name, as `tag` on the logging driver spells it, becomes
+  # the name every other line is grouped by - reduced to the service, so
+  # `/qa_generator-postgres-1` groups beside `extraction` rather than
+  # under a name carrying the project and the replica.
+  - if:
+      has_fields: ["process.name"]
+    then:
+      - copy_fields:
+          fields:
+            - from: "process.name"
+              to: "service.name"
+          fail_on_error: false
+          ignore_missing: true
+      - replace:
+          fields:
+            - field: "service.name"
+              pattern: "^/?[a-z_]+-"
+              replacement: ""
+            - field: "service.name"
+              pattern: "-[0-9]+$"
+              replacement: ""
+          ignore_missing: true
+          fail_on_error: false
+
   # Filebeat's own version and the ECS version it claims, on every document.
   # Neither is queried and both are indexed.
   - drop_fields:
