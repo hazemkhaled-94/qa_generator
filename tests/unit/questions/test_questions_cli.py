@@ -93,6 +93,10 @@ class Driver:
         #: because the real one calls them, and a unit test serves nothing.
         self.proved: list[str] = []
         self.refuse: Exception | None = None
+        #: How many refusals are left before the preflight relents, and
+        #: what a watching worker slept between them. None means forever.
+        self.refusals: int | None = None
+        self.slept: list[float] = []
 
         def build():
             """Counts the builds and hands back the recording service."""
@@ -123,10 +127,17 @@ class Driver:
         def proving(*models):
             """Records what was asked, and refuses when the test says to."""
             self.proved.extend(one.model for one in models)
-            if self.refuse is not None:
+            if self.refuse is None:
+                return
+            if self.refusals is None or self.refusals > 0:
+                if self.refusals is not None:
+                    self.refusals -= 1
                 raise self.refuse
 
         monkeypatch.setattr(module, "before_work", proving)
+        # Recorded rather than waited out: the retry is what is under test,
+        # and the real ceiling is a minute.
+        monkeypatch.setattr(cli.time, "sleep", self.slept.append)
         monkeypatch.setattr(cli.telemetry, "configure", lambda *_, **__: None)
         monkeypatch.setattr(cli.telemetry, "trace_engine", lambda *_: None)
         monkeypatch.setattr(cli, "engine", lambda: None)
@@ -201,8 +212,8 @@ def test_both_models_are_proved_before_anything_is_claimed(cli) -> None:
     assert len(cli.proved) == 2, "the writer and the verifier"
 
 
-def test_a_model_that_will_not_answer_stops_the_worker(cli) -> None:
-    """The container exits instead of claiming a topic it cannot finish.
+def test_a_model_that_will_not_answer_stops_a_drain(cli) -> None:
+    """A one-off drain gives up, because a person holds the exit code.
 
     `stages.worker.watch` logs an exception and polls again, which is right
     for a drain that failed and wrong for a deployment that can never work:
@@ -211,9 +222,36 @@ def test_a_model_that_will_not_answer_stops_the_worker(cli) -> None:
     """
     cli.refuse = RuntimeError("no credential")
 
-    assert cli.run("--watch") == 1, "a refused preflight is a non-zero exit"
+    assert cli.run() == 1, "a refused preflight is a non-zero exit"
     assert not cli.watched, "the watch loop must not be entered"
     assert cli.queue.calls == [], "nothing was claimed"
+    assert cli.slept == [], "a drain does not wait for a model"
+
+
+def test_a_watching_worker_waits_for_its_model_rather_than_exiting(cli) -> None:
+    """The process stays, and the model coming back is enough.
+
+    Exiting costs a process, and under `restart: unless-stopped` a process
+    is a restart, a fresh `run_id` and a Phoenix project holding the one
+    call that failed. An expired credential once cost 2,019 restarts and
+    2,116 such projects.
+    """
+    cli.refuse = RuntimeError("ollama is not up yet")
+    cli.refusals = 3
+
+    assert cli.run("--watch") == 0, "the worker started once the model answered"
+    assert cli.slept == [5.0, 10.0, 20.0], "it backs off between attempts"
+    assert cli.watched, "and then watches, having claimed nothing before"
+
+
+def test_the_wait_between_attempts_has_a_ceiling(cli) -> None:
+    """A minute, so a model down overnight is not a log line every second."""
+    cli.refuse = RuntimeError("still down")
+    cli.refusals = 8
+
+    cli.run("--watch")
+
+    assert max(cli.slept) == 60.0, cli.slept
 
 
 def test_two_actions_in_one_command_are_refused(cli) -> None:

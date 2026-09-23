@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -38,6 +39,11 @@ _ACTIONS = {
 #: One operation only a single stage has, as (help, verb, run). `run` takes
 #: whatever `--only` narrowed to and returns how many rows it changed.
 Extra = tuple[str, str, Callable[[Any], int]]
+
+#: How long a watching worker waits before asking the model again, and the
+#: ceiling it doubles towards.
+_RETRY_SECONDS = 5.0
+_RETRY_CEILING = 60.0
 
 
 def parser(module: str, actions: dict[str, str]) -> argparse.ArgumentParser:
@@ -186,15 +192,8 @@ def queue_main(
     # deployment that can never work. A worker with no usable credential
     # would otherwise claim a row every poll and fail it, and the queue
     # would empty into `failed` while the container reported itself up.
-    if preflight is not None:
-        try:
-            preflight()
-        except Exception as refusal:  # noqa: BLE001 - any of them means stop
-            # One line rather than a traceback: this is a deployment that is
-            # wrong, not a bug, and the person reading `podman logs` needs
-            # the reason and not the call stack.
-            log.error("%s will not start: %s", name, refusal)
-            return 1
+    if preflight is not None and not _ready(name, preflight, args.watch):
+        return 1
 
     # After preflight, so a deployment that cannot work does not leave a
     # record of prompts it never sent. Never raises; see stages.prompts.
@@ -208,3 +207,41 @@ def queue_main(
 
     watch(reloading(name, build_service), decimal("WORKER_POLL_SECONDS"))
     return 0
+
+
+def _ready(name: str, preflight: Callable[[], None], watching: bool) -> bool:
+    """Whether the model answered, waiting for it where this is a worker.
+
+    A one-off drain gives up, because a person is holding the exit code.
+    A **watching worker waits in place** instead, and that is the whole
+    point of this function: exiting costs a process, and under
+    `restart: unless-stopped` a process is a restart, a new `run_id`, and
+    a Phoenix project holding the one call that failed. An expired
+    credential once cost 2,019 restarts and 2,116 such projects, which is
+    how a pipeline that was down for a day looked like a pipeline that had
+    run two thousand times.
+
+    Waiting also recovers by itself. A model that is down at boot and up
+    ten minutes later is the ordinary case for one served off a laptop,
+    and it needs nobody to run `make up` again.
+    """
+    delay = _RETRY_SECONDS
+    while True:
+        try:
+            preflight()
+            return True
+        except Exception as refusal:  # noqa: BLE001 - any of them means wait
+            # One line rather than a traceback: this is a deployment that is
+            # wrong, not a bug, and the person reading `podman logs` needs
+            # the reason and not the call stack.
+            if not watching:
+                log.error("%s will not start: %s", name, refusal)
+                return False
+            log.error(
+                "%s cannot reach its model, and will try again in %.0fs: %s",
+                name,
+                delay,
+                refusal,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, _RETRY_CEILING)

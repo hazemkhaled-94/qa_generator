@@ -130,12 +130,23 @@ different rows, so a difference between them is partly which rows each
 happened to take. Comparing two models is `RUN_ID` over the *same* rows;
 see [settings](../settings/README.md#a-version-is-not-a-run).
 
-### A worker proves the model before it claims anything
+### A worker proves the model before it claims anything, and waits for it
+
+A watching worker whose model will not answer **stays up and asks again**,
+backing off 5s, 10s, 20s to a minute. It claims nothing until the model
+answers, which is the original point of the preflight, and it exits only
+when it is a one-off drain with a person holding the exit code.
+
+Exiting was the bug. Under `restart: unless-stopped` a process is a
+restart, a fresh `run_id` and a Phoenix project holding the one call that
+failed - 2,019 restarts and 2,116 such projects, which made a pipeline
+that was down for a day read as one that had run two thousand times.
+Waiting also recovers by itself, which a model served off a laptop needs.
 
 `before_work` in [`check.py`](check.py) is the preflight
 `stages.cli.queue_main` runs for the three stages that call a model. It
-asks for one trivial structured answer, and the process stops with a single
-line and a non-zero exit if it does not come.
+asks for one trivial structured answer, and nothing is claimed until it
+comes.
 
 Before the watch loop, deliberately. That loop logs an exception and polls
 again, which is right for a drain that failed and wrong for a deployment
