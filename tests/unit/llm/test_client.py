@@ -221,9 +221,23 @@ def test_the_reasoning_effort_reaches_the_runtime_when_one_is_set() -> None:
     assert sent(reasoning_effort="off")["reasoning_effort"] == "off"
 
 
-def test_nothing_is_sent_about_thinking_when_none_is_set() -> None:
-    """Which leaves a model its own default."""
-    assert "reasoning_effort" not in sent(reasoning_effort=None)
+def test_a_hosted_model_is_left_its_own_default() -> None:
+    """`off` is Ollama's spelling and a hosted provider refuses it."""
+    assert "reasoning_effort" not in sent(reasoning_effort=None, model="azure/gpt-4.1")
+
+
+def test_a_self_hosted_model_is_told_not_to_think() -> None:
+    """Without it a writer call took 414.7 seconds instead of 12.6.
+
+    8,555 output tokens, of which 32,436 characters were reasoning and
+    283 were the answer. Nothing in the deployment had to ask for this:
+    every call here wants a structured answer, and a thinking model given
+    one reasons instead of answering.
+    """
+    assert (
+        sent(reasoning_effort=None, model="ollama_chat/gemma4:12b")["reasoning_effort"]
+        == "off"
+    )
 
 
 def test_the_rate_limit_retries_are_handed_to_the_runtime() -> None:

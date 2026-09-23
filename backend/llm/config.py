@@ -89,16 +89,42 @@ class Settings:
         moved: dict[str, object] = {"model": model}
         if self.ollama_base_url:
             moved["base_url"] = self.ollama_base_url
-        # And thinking goes off, unless the deployment chose otherwise.
-        # Every call in this pipeline asks for a structured answer, and a
-        # thinking model asked for one spends its window reasoning: measured
-        # here, gemma4:12b answered a single boolean in a median 19.5s and a
-        # maximum of 118s with thinking left at its default, against 3.2s
-        # with it off. `off` is Ollama's spelling and a hosted provider
-        # refuses it, which is why this cannot be one global value.
-        if self.reasoning_effort is None:
-            moved["reasoning_effort"] = "off"
+        # Thinking is not decided here; see `thinking`. It follows the
+        # model being called and not how that model was arrived at.
         return replace(self, **moved)
+
+    @property
+    def thinking(self) -> str | None:
+        """What to send as `reasoning_effort`, or None to omit it.
+
+        `off` for a **self-hosted** model the deployment has said nothing
+        about, because every call in this pipeline asks for a structured
+        answer and a thinking model asked for one spends its window
+        reasoning instead. Measured on this corpus's writer prompt against
+        gemma4:12b: 414.7 seconds and 8,555 output tokens, of which 32,436
+        characters were reasoning and 283 were the answer - against 12.6
+        seconds with thinking off, for a better question. A single boolean
+        measured the same way was a median 19.5s against 3.2s.
+
+        The PROVIDER decides it, not whether a stage overrode the model.
+        That distinction is the bug this replaced: the default used to sit
+        on the cross-provider override path, so it fired for a hosted
+        deployment naming one local model and never for a deployment whose
+        models are all local - which is what a container gets from
+        LLM_CONTAINER_MODEL. Every call in that deployment thought, and a
+        writer call timed out at LLM_TIMEOUT_SECONDS three times over.
+
+        `off` is Ollama's spelling, a hosted reasoning model wants `none`,
+        and each refuses the other's - which is why this is derived per
+        model rather than defaulted in one place. Ollama accepts it on a
+        model that does not think at all, so it costs nothing to send.
+
+        LLM_REASONING_EFFORT overrides it, including back on: a deployment
+        that wants its local model thinking sets `low` and gets it.
+        """
+        if self.reasoning_effort:
+            return self.reasoning_effort
+        return "off" if _provider(self.model).startswith("ollama") else None
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:

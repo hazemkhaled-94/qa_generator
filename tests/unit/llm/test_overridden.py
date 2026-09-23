@@ -145,7 +145,12 @@ def test_a_self_hosted_override_turns_thinking_off() -> None:
         ollama_base_url="http://localhost:11434",
     )
 
-    assert settings.overridden("ollama_chat/gemma4:12b").reasoning_effort == "off"
+    overridden = settings.overridden("ollama_chat/gemma4:12b")
+
+    assert overridden.thinking == "off"
+    # Derived, not written onto the field: what the deployment said
+    # stays what it said, and `thinking` is what a call reads.
+    assert overridden.reasoning_effort is None
 
 
 def test_a_deployment_that_chose_an_effort_keeps_it() -> None:
@@ -156,12 +161,25 @@ def test_a_deployment_that_chose_an_effort_keeps_it() -> None:
         ollama_base_url="http://localhost:11434",
     )
 
-    assert settings.overridden("ollama_chat/gemma4:12b").reasoning_effort == "low"
+    assert settings.overridden("ollama_chat/gemma4:12b").thinking == "low"
 
 
 def test_a_hosted_override_is_left_thinking_as_it_was() -> None:
     """`off` is not a value a hosted provider accepts."""
-    assert (
-        shared(reasoning_effort=None).overridden("azure/gpt-4.1").reasoning_effort
-        is None
-    )
+    assert shared(reasoning_effort=None).overridden("azure/gpt-4.1").thinking is None
+
+
+def test_a_deployment_that_is_self_hosted_throughout_turns_thinking_off() -> None:
+    """The case the old rule missed, and the reason it moved.
+
+    A container given LLM_CONTAINER_MODEL runs Ollama for everything, so
+    nothing is a cross-provider override: the writer is not overridden at
+    all and the verifier is the same provider. Both took the early return,
+    the parameter was omitted, and every call thought - a writer call ran
+    414.7 seconds and timed out at LLM_TIMEOUT_SECONDS three times over.
+    """
+    local = shared(model="ollama_chat/gemma4:12b", reasoning_effort=None)
+
+    assert local.thinking == "off"
+    assert local.overridden(None).thinking == "off"
+    assert local.overridden("ollama_chat/granite4.2:8b").thinking == "off"

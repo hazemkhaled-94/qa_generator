@@ -248,14 +248,14 @@ class Client:
             # Also omitted when unset: a hosted provider has no such parameter
             # and sizes its own window.
             **({"num_ctx": self._settings.num_ctx} if self._settings.num_ctx else {}),
-            # A thinking model asked for a structured answer spends its whole
-            # window thinking and returns nothing: one 12B model produced 7,469
-            # tokens of reasoning, hit the length limit and answered with an
-            # empty string, in 307 seconds. With thinking off the same call
-            # took 9 seconds. Ollama reads this as `think`.
+            # Derived per model rather than read straight off the setting:
+            # a self-hosted one is sent `off` unless the deployment said
+            # otherwise. See `Settings.thinking` for what that is worth -
+            # 414.7 seconds against 12.6 on this corpus's writer prompt.
+            # Ollama reads this as `think`.
             **(
-                {"reasoning_effort": self._settings.reasoning_effort}
-                if self._settings.reasoning_effort
+                {"reasoning_effort": thinking}
+                if (thinking := self._settings.thinking)
                 else {}
             ),
             temperature=self._settings.temperature,
