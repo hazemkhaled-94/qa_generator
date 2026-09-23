@@ -185,7 +185,7 @@ def database(postgres: str, engine, monkeypatch) -> Iterator[None]:
                 text(
                     "TRUNCATE documents, ingest_events, passages, facts, "
                     "questions, question_facts, passage_topics, topics, "
-                    "service_settings, archived_rows "
+                    "service_settings, prompts, archived_rows "
                     "RESTART IDENTITY CASCADE"
                 )
             )

@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 import sys
 
+from llm.check import before_work
 from llm.config import Settings as ModelSettings
+from question_generation import prompts
 from question_generation.catalog import QuestionCatalog
 from question_generation.config import Settings
 from question_generation.factory import build_service, lease, models
@@ -17,6 +19,7 @@ from question_generation.queue import QuestionQueue
 from question_generation.service import balance, reverify
 from settings.store import snapshot
 from stages.cli import queue_main
+from stages.prompts import record
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return build_service(settings, model, version)
 
+    def preflight() -> None:
+        """Proves both models answer before a topic is claimed.
+
+        The verifier as well as the writer: a run whose verifier will not
+        answer is a run of ungated questions, which is worse than no run.
+        """
+        settings, model, _ = configured()
+        before_work(*models(settings, model))
+
     def queue() -> QuestionQueue:
         """The queue, with the lease this stage's settings derive."""
         settings, model, _ = configured()
@@ -77,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
+        preflight=preflight,
+        prompts=lambda: record(prompts.SERVICE, prompts.catalogue()),
     )
 
 

@@ -30,6 +30,7 @@ from database.qa_generator.outcomes import (
 )
 from database.qa_generator.passage_topics import PassageTopic
 from database.qa_generator.passages import Passage
+from database.qa_generator.prompts import Prompt
 from database.qa_generator.question_facts import QuestionFact
 from database.qa_generator.questions import Question
 from database.qa_generator.service_settings import ServiceSetting
@@ -53,6 +54,7 @@ __all__ = [
     "Passage",
     "PassageScope",
     "PassageTopic",
+    "Prompt",
     "Question",
     "QuestionFact",
     "QuestionRejection",

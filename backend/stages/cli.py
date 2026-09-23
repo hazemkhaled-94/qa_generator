@@ -122,12 +122,24 @@ def queue_main(
     build_service: Callable[[], StageService],
     argv: list[str],
     extra: dict[str, Extra] | None = None,
+    preflight: Callable[[], None] | None = None,
+    prompts: Callable[[], int] | None = None,
 ) -> int:
     """Runs one stage's command line.
 
     The repository and the service are built only when a flag needs them, so
     `--status` costs a query and not a converter. `extra` adds the operations
     only this stage has, in the same mutually exclusive group as the rest.
+
+    `preflight` is what a stage proves before it claims anything - for the
+    three that call a model, that the model answers. It raises, and the
+    process stops with nothing taken.
+
+    `prompts` records what this stage sends, so the version on each row it
+    writes can be resolved to the text that produced it. Beside preflight
+    because both are things done once before the first claim; unlike
+    preflight it cannot fail a start, since a prompt nobody can read back
+    is worse than a run that did not happen only if the run happened.
     """
     extra = extra or {}
     actions = {**_ACTIONS, **{flag: help for flag, (help, _, _) in extra.items()}}
@@ -165,6 +177,26 @@ def queue_main(
 
     if args.rerun:
         log.info("%s: %d row(s) queued again", name, act(lambda q, w: q.reset(w)))
+
+    # Here rather than inside the loop below, which logs an exception and
+    # polls again: that is right for a drain that failed and wrong for a
+    # deployment that can never work. A worker with no usable credential
+    # would otherwise claim a row every poll and fail it, and the queue
+    # would empty into `failed` while the container reported itself up.
+    if preflight is not None:
+        try:
+            preflight()
+        except Exception as refusal:  # noqa: BLE001 - any of them means stop
+            # One line rather than a traceback: this is a deployment that is
+            # wrong, not a bug, and the person reading `podman logs` needs
+            # the reason and not the call stack.
+            log.error("%s will not start: %s", name, refusal)
+            return 1
+
+    # After preflight, so a deployment that cannot work does not leave a
+    # record of prompts it never sent. Never raises; see stages.prompts.
+    if prompts is not None:
+        prompts()
 
     if not args.watch:
         # Built once: one drain cannot outlive a change to the settings.

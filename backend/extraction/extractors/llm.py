@@ -119,6 +119,17 @@ class _Facts(BaseModel):
     )
 
 
+def composed(cap: int | None = None) -> str:
+    """This extractor's system prompt, as it is sent under one cap.
+
+    A function because two callers need the same text and neither may
+    rebuild it: the extractor, which sends it, and `extraction.prompts`,
+    which records what was sent. Written twice, a record of the uncapped
+    text under a capped run would be a record of something no model saw.
+    """
+    return _SYSTEM + _CAP.format(cap=cap) if cap else _SYSTEM
+
+
 class LlmExtractor(Extractor):
     """Reads a passage's claims one at a time with a local model.
 
@@ -140,7 +151,7 @@ class LlmExtractor(Extractor):
                 ceiling. What EXTRACTION_MIN_OTHER_SHARE works out to.
         """
         self._client = client
-        self._system = _SYSTEM + _CAP.format(cap=cap) if cap else _SYSTEM
+        self._system = composed(cap)
 
     @property
     def provenance(self) -> Provenance:

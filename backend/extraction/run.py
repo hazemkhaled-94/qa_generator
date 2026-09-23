@@ -10,14 +10,17 @@ from __future__ import annotations
 import logging
 import sys
 
+from extraction import prompts
 from extraction.config import Settings
 from extraction.factory import build_bridge, build_service
 from extraction.repository import FactCatalog, PassageQueue
 from extraction.service import bridge, embed, recap, revalidate
 from extraction.validation import FactChecker
+from llm.check import before_work
 from llm.config import Settings as ModelSettings
 from settings.store import snapshot
 from stages.cli import queue_main
+from stages.prompts import record
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
         calling = model.overridden(settings.model)
         log.info("extracting with %s at %s", calling.model, calling.base_url)
         return build_service(model, settings, version)
+
+    def preflight() -> None:
+        """Proves the model answers before a passage is claimed."""
+        model, settings, _ = configured()
+        before_work(model.overridden(settings.model))
 
     def run_bridge(within) -> int:
         """Reads every topic's passage groups for the claims they share."""
@@ -120,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
+        preflight=preflight,
+        # [1] is this stage's settings; [0] is the model's. The cap is
+        # what the atomic extractor appends to its own prompt, so without
+        # it the recorded text is one no model was given.
+        prompts=lambda: record(
+            prompts.SERVICE, prompts.catalogue(configured()[1].atomic_cap)
+        ),
     )
 
 

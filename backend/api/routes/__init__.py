@@ -6,7 +6,8 @@ topic modelling stage, which owns its routes because its trigger is a
 request rather than the stage before it; `passages` and `facts` read back
 what those stages produced; `questions` is both a stage and its output, and
 so carries both in one router; `settings` is what each of them is configured
-to do, one service per request; `system` is the platform itself.
+to do, one service per request; `prompts` is what a version of one asked
+for; `system` is the platform itself.
 """
 
 from api.routes.chunking import router as chunking_router
@@ -15,6 +16,7 @@ from api.routes.extraction import router as extraction_router
 from api.routes.facts import router as facts_router
 from api.routes.parsing import router as parsing_router
 from api.routes.passages import router as passages_router
+from api.routes.prompts import router as prompts_router
 from api.routes.questions import router as questions_router
 from api.routes.settings import router as settings_router
 from api.routes.system import router as system_router
@@ -33,6 +35,7 @@ ROUTERS = (
     facts_router,
     questions_router,
     settings_router,
+    prompts_router,
 )
 
 __all__ = [
@@ -43,6 +46,7 @@ __all__ = [
     "facts_router",
     "parsing_router",
     "passages_router",
+    "prompts_router",
     "questions_router",
     "settings_router",
     "system_router",

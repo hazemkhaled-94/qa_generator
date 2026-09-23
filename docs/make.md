@@ -304,6 +304,7 @@ order.
 | `make review-push-questions IDS=…` | Push exactly those question ids instead of a sample |
 | `make eval-upload` | Put the golden cases in Phoenix |
 | `make eval-score` | Score the served model against them, and record it |
+| `make prompts-publish` | Send the recorded prompts to Phoenix, so a span's version opens against one |
 | `make eval-phrasing` | Score the two phrasing judgements, each against its floor |
 | `make second-opinion` | An independent judge over one run, and where it disagrees |
 

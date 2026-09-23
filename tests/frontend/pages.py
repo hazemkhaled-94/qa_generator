@@ -171,6 +171,7 @@ QUESTION = {
     "cognitive_level": "recall",
     "answer_form": "value",
     "planned_difficulty": "easy",
+    "prompt_version": "8",
 }
 
 QUESTION_SOURCE = {

@@ -200,6 +200,7 @@ def _listing() -> Select:
                 Question.cognitive_level,
                 Question.answer_form,
                 Question.planned_difficulty,
+                Question.prompt_version,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
                 func.array_agg(func.distinct(Passage.doc_sha256)).label("documents"),
                 func.array_agg(func.distinct(Topic.label)).label("topics"),
@@ -246,6 +247,7 @@ def _stored(row: Any) -> StoredQuestion:
         cognitive_level=row.cognitive_level,
         answer_form=row.answer_form,
         planned_difficulty=row.planned_difficulty,
+        prompt_version=row.prompt_version,
     )
 
 

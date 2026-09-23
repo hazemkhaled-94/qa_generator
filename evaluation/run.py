@@ -50,6 +50,13 @@ def parser() -> argparse.ArgumentParser:
         "report where it disagrees with the gates. Never a verdict: the "
         "output is a queue for review.",
     )
+    group.add_argument(
+        "--publish-prompts",
+        action="store_true",
+        help="send the recorded prompts to Phoenix, so a span's "
+        "llm.prompt_template.version opens against one. Read from the "
+        "database, so a version the code has moved past goes too.",
+    )
     built.add_argument(
         "--limit",
         type=int,
@@ -73,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.configure("evaluation")
 
     settings = Settings.load()
+    if args.publish_prompts:
+        return _publish(settings)
+
     if args.run_id:
         return _second_opinion(args.run_id, args.limit)
 
@@ -87,6 +97,20 @@ def main(argv: list[str] | None = None) -> int:
         # says what measures it instead.
         log.error("%s", refused)
         return 2
+    return 0
+
+
+def _publish(settings: Settings) -> int:
+    """Sends the recorded prompts to Phoenix.
+
+    Named with the configured model, which is what Phoenix needs to offer
+    a prompt in its playground: opened there, it is replayed against the
+    model that sent it.
+    """
+    from evaluation import prompts
+    from llm.config import Settings as ModelSettings
+
+    prompts.publish(settings, ModelSettings.load().model)
     return 0
 
 

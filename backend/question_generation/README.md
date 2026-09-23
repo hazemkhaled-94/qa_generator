@@ -295,6 +295,38 @@ one passage now also carries an instruction to use both halves.
 **Where:** [`balance.py`](balance.py). See
 [The balanced release](#the-balanced-release).
 
+## Reading back the prompt that wrote a question
+
+Every question carries `prompt_version`, and three modules declare one:
+`types.PROMPT_VERSION` for the thirteen writers, `phrasing.PROMPT_VERSION`
+for the two wording judgements and `verifier.PROMPT_VERSION` for the round
+trip's four. They are bumped separately because they change for different
+reasons.
+
+A version on its own resolves to nothing, so the stage **records what it
+sends** when it starts — [`prompts.py`](prompts.py) declares it and
+`stages.prompts` writes it to the `prompts` table. Three ways to read one
+back:
+
+| Where | Shows |
+|---|---|
+| The Questions page | "The prompt that wrote this", folded under a selected question |
+| `GET /prompts?service=questions&version=8&name=factoid` | The same, as JSON |
+| Phoenix, after `make prompts-publish` | The prompt beside the traces, one Phoenix version per `PROMPT_VERSION` |
+
+The span of a call already carries the prompt it sent — filled in, with
+that call's facts in it. The table carries the **template**, and carries it
+for a version the source has moved past, which is what a span cannot: a
+Phoenix project is one run with a retention of its own, and `questions` is
+append-only.
+
+**The source is the code.** A row is a record of what was sent; editing one
+changes nothing, and the next start-up writes the source's text back over
+it. A text that moves under an unchanged version is logged at WARNING
+naming both digests — the same drift
+[`tests/static/test_prompts_pinned.py`](../../tests/static/test_prompts_pinned.py)
+fails a pull request over.
+
 ## The thirteen kinds
 
 Every one of them is a question **form**, never a subject, so the same list

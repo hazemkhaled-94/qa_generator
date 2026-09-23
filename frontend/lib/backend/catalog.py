@@ -124,6 +124,14 @@ class CatalogApi(Endpoint):
         """Fetches one question with the facts it was written from."""
         return self._request("GET", f"/questions/{question_id}").json()
 
+    def prompts(self, **filters) -> list[dict]:
+        """Fetches the recorded prompts, narrowed by service, version or name.
+
+        A list and not a page: there are a few dozen of them and they do
+        not grow with the corpus.
+        """
+        return self._request("GET", "/prompts", params=filters).json()
+
     def question_quality(self, **filters) -> dict:
         """Fetches how well generation is doing, under the same filter."""
         return self._query("/questions/quality", filters)

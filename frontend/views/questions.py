@@ -456,7 +456,52 @@ def _detail(client, question: dict) -> None:
                 column_config={"Question": st.column_config.TextColumn(width="large")},
             )
 
+        _prompt(client, question)
         _verdict(client, question)
+
+
+def _prompt(client, question: dict) -> None:
+    """Shows the prompt that wrote this question, as it was sent.
+
+    The question a person asks while reading a bad question is whether the
+    prompt caused it, and the answer used to be a git checkout: the row
+    carries a version and the text lived in the source at whatever commit
+    that version was current. It is recorded now, so a version resolves
+    here.
+
+    Folded away, because it is several thousand characters and it is not
+    what somebody came to this panel for.
+    """
+    version, kind = question.get("prompt_version"), question.get("question_type")
+    if not version:
+        st.caption(
+            "Written before the prompt version was recorded, so which prompt "
+            "wrote it is not known."
+        )
+        return
+
+    try:
+        found = client.prompts(service="questions", version=version, name=kind)
+    except Exception:  # noqa: BLE001 - the page says so and renders the rest
+        st.caption("The prompts could not be read.")
+        return
+
+    if not found:
+        st.caption(
+            f"Version {version} is on this row and no prompt is recorded under "
+            f"it. A stage records its prompts when it starts, so a version "
+            f"nothing has run since is one nothing has written down."
+        )
+        return
+
+    written = found[0]
+    with st.expander(f"The prompt that wrote this · {kind} v{version}"):
+        st.caption(
+            f"`{written['digest']}`, first recorded "
+            f"{written['first_seen_at'][:10]}. Read-only: a prompt is changed "
+            f"in the source, and what is here is the record of what was sent."
+        )
+        st.code(written["text"], language="text", wrap_lines=True)
 
 
 def _verdict(client, question: dict) -> None:

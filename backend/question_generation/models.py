@@ -563,6 +563,10 @@ class StoredQuestion:
     #: What its type asks of whoever answers it. A different axis from
     #: `difficulty`, which says how far the answer is spread.
     cognitive_level: str | None = None
+    #: The prompt version that wrote it, which the `prompts` table
+    #: resolves to the text. NULL on every question written before the
+    #: version was recorded.
+    prompt_version: str | None = None
 
 
 @dataclass(frozen=True)

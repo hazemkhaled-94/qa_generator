@@ -199,13 +199,18 @@ A worker container is not the only way to drain a queue. `make extract`,
 against the same database, and the Makefile sources the same files compose
 hands the containers, so one value reaches both.
 
-That is not only a convenience. **An Entra ID deployment is a reason to
-prefer it**: `az login` leaves a refresh token in `~/.azure`, a host process
-finds it through `DefaultAzureCredential`, and a container finds nothing
-there unless it is given both the mounted directory and an `az` binary the
-image does not carry. A container's own path to Entra ID is a service
-principal, which is an app identity with no second factor to satisfy. See
-[`backend/llm/`](../backend/llm/README.md#entra-id-and-why-a-stage-is-run-from-the-host).
+That is not only a convenience. **Some credentials exist only where a
+person is** — an interactive cloud login, a key in a login keychain — and a
+provider that needs one is a provider the containers cannot use while the
+host can. `LLM_CONTAINER_MODEL` is the split that follows: the containers
+call a model they can authenticate to, the host calls the one it can, and
+both drain the same queues at once because claiming is
+`FOR UPDATE SKIP LOCKED`. Two halves of one corpus, not an A/B — comparing
+two models means running them over the *same* rows under two `RUN_ID`s.
+
+A worker proves its model answers before it claims anything, so the half
+that cannot authenticate stops instead of failing rows. See
+[`backend/llm/`](../backend/llm/README.md#a-worker-proves-the-model-before-it-claims-anything).
 
 There is no difference in what it is watched with. `LOG_DIR` names `./logs`
 on the host and the `logs` volume in a container — one name, set over in
@@ -226,6 +231,7 @@ what belongs to another.
 | Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
 | Cost and tokens | on the span, and on the log line beside it | Phoenix per run; Grafana's throughput dashboard over time; `make spend LOG=` over a captured log |
 | Gate verdicts | the row in Postgres, an attribute on the span, an annotation in Phoenix | the Questions page; Phoenix's Evaluations view |
+| Prompts | composed in the source, recorded to the `prompts` table by the stage that sends them, and on each span as the text it sent | the Questions page; `GET /prompts`; Phoenix after `make prompts-publish` |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
 | Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |
 | Runs | which stage ran when, and whether it finished | Dagster |

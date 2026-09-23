@@ -159,6 +159,13 @@ for the same call. A caller that names no version sets none — absent means
 a prompt that has never been given one, which is not the same as version
 zero.
 
+The span carries the prompt **filled in**, with that call's passages in it.
+What a version *asked for* — the template, and for a version the code has
+moved past — is the `prompts` table; see
+[`backend/stages/prompts.py`](../backend/stages/prompts.py). A span outlives
+nothing: a Phoenix project is one run with a retention of its own, and the
+row it explains is append-only.
+
 ## Verdicts
 
 A gate verdict is written three times, and each answers something the other

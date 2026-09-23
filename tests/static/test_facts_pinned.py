@@ -142,6 +142,7 @@ MODULES = frozenset(
         "config.py",
         "factory.py",
         "models.py",
+        "prompts.py",
         "repository.py",
         "run.py",
         "service.py",

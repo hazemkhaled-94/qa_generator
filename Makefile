@@ -140,7 +140,7 @@ help:
         review-status review-push-facts review-pull-facts \
         review-push-topics review-pull-topics \
         review-push-questions review-pull-questions \
-        eval-upload eval-score \
+        eval-upload eval-score prompts-publish \
         all corpus open services review pull auto manual pipeline runs
 
 # ── Bootstrap ──────────────────────────────────────────────────────────────
@@ -211,16 +211,16 @@ doctor:
 	   && printf '%s' "$$PHOENIX_ADMIN_SECRET" | grep -q '[a-z]'; then \
 	  say ok "PHOENIX_ADMIN_SECRET"; \
 	  else say FAIL "PHOENIX_ADMIN_SECRET needs 32+ characters, a digit and a lower-case letter"; fail=1; fi; \
-	case "$$LLM_BASE_URL" in \
-	  *localhost*|*127.0.0.1*) \
-	    if test -n "$$LLM_CONTAINER_URL$$OLLAMA_CONTAINER_URL"; then \
-	      say ok "the containers' view of the model"; \
-	    else \
-	      say FAIL "LLM_BASE_URL is host-local and neither LLM_CONTAINER_URL nor OLLAMA_CONTAINER_URL is set, so a worker would call itself"; \
-	      fail=1; fi;; \
-	  *) say ok "LLM_BASE_URL is not host-local";; \
-	esac; \
-	echo; echo "Asking $$LLM_MODEL one question..."; \
+	their_model="$${LLM_CONTAINER_MODEL:-$$LLM_MODEL}"; \
+	their_url="$${LLM_CONTAINER_URL:-$$OLLAMA_CONTAINER_URL}"; \
+	if test -z "$$their_url"; then \
+	  say FAIL "the containers have no address for the model: set LLM_CONTAINER_URL, or OLLAMA_CONTAINER_URL for a local one"; fail=1; \
+	elif test -z "$$LLM_CONTAINER_URL" && case "$$their_model" in ollama*) false;; *) true;; esac; then \
+	  say FAIL "the containers would call $$their_model at $$their_url, which is the Ollama fallback - set LLM_CONTAINER_URL"; fail=1; \
+	else \
+	  say ok "containers call $$their_model at $$their_url"; \
+	fi; \
+	echo; echo "Asking $$LLM_MODEL one question, as the host calls it..."; \
 	PYTHONPATH=backend poetry run python -m llm.check || fail=1; \
 	echo; \
 	if test $$fail -eq 0; then echo "Ready. Next: make dev"; \
@@ -1128,6 +1128,23 @@ eval-upload:
 # Run the served model against them and record the scores in Phoenix.
 eval-score:
 	$(EVAL) --score $(EVAL_DATASET)
+
+# Send the recorded prompts to Phoenix, so a span opens against one.
+#
+# The span already carries the prompt it sent, filled in with that call's
+# passages. What it cannot show is the TEMPLATE, and
+# `llm.prompt_template.version` on it names a version Phoenix knows nothing
+# about until this has run. One Phoenix prompt per prompt, one Phoenix
+# version per PROMPT_VERSION, so two are diffable there.
+#
+# Read from the `prompts` table rather than from the code, so a version the
+# source has moved past goes too - which is the reason that table exists.
+# The stages write it when they start, so run one of them first.
+#
+# The source is still the code. An edit in Phoenix's UI reaches nothing and
+# the next run of this writes over it.
+prompts-publish:
+	$(EVAL) --publish-prompts
 
 # The two phrasing judgements, each against the floor a judge that ignores
 # its input reaches. That floor is the point: `self_contained` scored 84.2%
