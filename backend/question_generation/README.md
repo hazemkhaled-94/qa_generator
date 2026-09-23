@@ -320,6 +320,22 @@ for a version the source has moved past, which is what a span cannot: a
 Phoenix project is one run with a retention of its own, and `questions` is
 append-only.
 
+### And back to the calls that made it
+
+A question also carries `trace_id` and `span_id`: the trace it was written
+in, and the span the gates ran in. The Questions page turns them into two
+links — the **gate decision**, which is the span its verdict annotations
+hang off, and the **whole topic's trace**, which is the writer call with
+its prompt, the phrasing judgements and the verifier.
+
+The span cannot carry the question id instead, which is why the row
+carries the span: the question has no id yet when the gates run. Nothing
+joined the two before this, in either direction.
+
+`/redirects/spans/<id>` and `/redirects/traces/<id>` — Phoenix resolves
+either from the bare OTel hex through `getSpanByOtelId`, so a link needs
+nothing but the id and the address Phoenix is served at.
+
 **The source is the code.** A row is a record of what was sent; editing one
 changes nothing, and the next start-up writes the source's text back over
 it. A text that moves under an unchanged version is logged at WARNING

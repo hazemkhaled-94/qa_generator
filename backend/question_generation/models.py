@@ -472,6 +472,14 @@ class CheckedQuestion:
     #: conditional, so the sequence cannot be derived from the verdict and
     #: a fixed order.
     gates_ran: tuple[str, ...] = ()
+    #: The trace this question was written and judged in, and the span the
+    #: gates ran in - which is the span its verdict annotations hang off.
+    #: Columns, unlike the two above: what they are for is getting from a
+    #: stored question to the calls that produced it, and a row outlives
+    #: every process that could have remembered the connection. Empty
+    #: where nothing was recording.
+    trace_id: str = ""
+    span_id: str = ""
 
     @property
     def accepted(self) -> bool:
@@ -567,6 +575,11 @@ class StoredQuestion:
     #: resolves to the text. NULL on every question written before the
     #: version was recorded.
     prompt_version: str | None = None
+    #: The trace it was written in and the span the gates ran in. What a
+    #: page turns into a link to Phoenix. NULL on every question written
+    #: before they were recorded.
+    trace_id: str | None = None
+    span_id: str | None = None
 
 
 @dataclass(frozen=True)

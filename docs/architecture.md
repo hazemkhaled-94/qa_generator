@@ -231,6 +231,7 @@ what belongs to another.
 | Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
 | Cost and tokens | on the span, and on the log line beside it | Phoenix per run; Grafana's throughput dashboard over time; `make spend LOG=` over a captured log |
 | Gate verdicts | the row in Postgres, an attribute on the span, and one annotation per gate that read it | the Questions page; Phoenix's Evaluations view, a column per gate |
+| The join between them | `questions.trace_id` and `questions.span_id`, written where the gates run | the Questions page links to the span and the trace; Phoenix resolves either from the bare id |
 | Prompts | composed in the source, recorded to the `prompts` table by the stage that sends them, and on each span as the text it sent | the Questions page; `GET /prompts`; Phoenix after `make prompts-publish` |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
 | Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |

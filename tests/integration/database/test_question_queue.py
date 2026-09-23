@@ -1241,3 +1241,99 @@ def test_a_passage_with_no_embedding_is_never_called_furniture(corpus, engine) -
     _embed(engine, "UPDATE passages SET embedding = NULL")
 
     assert QuestionQueue(boilerplate_cosine=0.95).facts(written["topics"][0])
+
+
+# ── The link back to the trace ─────────────────────────────────────────────
+
+
+def test_a_stored_question_carries_the_trace_and_span_it_was_judged_in(
+    corpus, engine
+) -> None:
+    """The only durable end of the link.
+
+    A span carries no question id - the question has none yet when the
+    gates run - so nothing joined a row to the calls that produced it
+    until the row carried the span. Phoenix resolves either id from the
+    bare hex, so these two are a link on their own.
+    """
+    from question_generation.models import CheckedQuestion, criteria_of
+
+    written = corpus(topics=1, facts_per_topic=1)
+    topic_id = written["topics"][0]
+    facts = tuple(written["facts"][topic_id])
+    QuestionQueue().start()
+    QuestionQueue().claim()
+
+    QuestionQueue().store(
+        topic_id,
+        [
+            [
+                CheckedQuestion(
+                    question_text="What does the device weigh?",
+                    target_answer="4 kg",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=1, documents=1, topics=1, answer_chars=4
+                    ),
+                    language="en",
+                    status="accepted",
+                    rejected_reason=None,
+                    fact_ids=facts,
+                    trace_id="0bdf4a87ef67fc94b435f23b2824b7e1",
+                    span_id="412b8f4d0b9073d3",
+                )
+            ]
+        ],
+    )
+
+    with Session(engine) as session:
+        row = session.execute(
+            text("SELECT trace_id, span_id, prompt_version FROM questions")
+        ).one()
+
+    assert row.trace_id == "0bdf4a87ef67fc94b435f23b2824b7e1"
+    assert row.span_id == "412b8f4d0b9073d3"
+    assert row.prompt_version, "the prompt version is written from the same place"
+
+
+def test_a_question_written_with_nothing_recording_carries_no_link(
+    corpus, engine
+) -> None:
+    """NULL and not an empty string.
+
+    A process with no exporter has no trace, and a row holding "" would
+    build a link to `/redirects/spans/` and nothing.
+    """
+    from question_generation.models import CheckedQuestion, criteria_of
+
+    written = corpus(topics=1, facts_per_topic=1)
+    topic_id = written["topics"][0]
+    facts = tuple(written["facts"][topic_id])
+    QuestionQueue().start()
+    QuestionQueue().claim()
+
+    QuestionQueue().store(
+        topic_id,
+        [
+            [
+                CheckedQuestion(
+                    question_text="What does the device weigh?",
+                    target_answer="4 kg",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=1, documents=1, topics=1, answer_chars=4
+                    ),
+                    language="en",
+                    status="accepted",
+                    rejected_reason=None,
+                    fact_ids=facts,
+                )
+            ]
+        ],
+    )
+
+    with Session(engine) as session:
+        row = session.execute(text("SELECT trace_id, span_id FROM questions")).one()
+
+    assert row.trace_id is None
+    assert row.span_id is None

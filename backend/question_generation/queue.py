@@ -468,6 +468,12 @@ class QuestionQueue(RowQueue):
                             # that stores it, so the constant it wrote with
                             # is the constant in scope now.
                             prompt_version=PROMPT_VERSION,
+                            # Carried on the row rather than read here:
+                            # this runs after the topic's questions are
+                            # all written, and the span each was judged
+                            # in closed long ago.
+                            trace_id=question.trace_id or None,
+                            span_id=question.span_id or None,
                             run_id=run_id(),
                             follows_id=follows,
                             thread_position=position,

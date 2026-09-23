@@ -166,6 +166,8 @@ full table is in
 | `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
 | `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, where the golden-set datasets, the experiments and the gate verdicts go. The same service the line above sends spans to, read the other way. Compose sets the container's address over this name, as it does for the collector |
 | `PHOENIX_CONTAINER_BASE_URL` | `.env` | `http://phoenix:6006` | What compose sets there. Read by compose only — a process reads `PHOENIX_BASE_URL` wherever it runs |
+| `PHOENIX_BASE_URL` (frontend) | `.env` | `http://localhost:6006` | The same name on the `streamlit` service, taken as it stands rather than set over: it is written into a link a BROWSER follows, not called from the container. Unset shows a question's trace id as text instead of a link |
+| `OLLAMA_CONTAINER_URL` (Phoenix) | `.env` | `http://host.docker.internal:11434` | Reaches the playground as `OLLAMA_BASE_URL`. Ollama is the one provider Phoenix offers that needs no API key, which an `az login` credential cannot give a container |
 | `GRAFANA_DB_USER` | `.env` | `grafana_reader` | The role Grafana reads the application database as. `SELECT` and nothing else |
 | `ARGILLA_API_URL` | `.env` | `http://localhost:6900` | Where the review tool reaches Argilla. The host's address: it is a `make` target, not a container |
 | `ARGILLA_API_KEY` | `.env` | — | Argilla shows it under "My settings". **Not** `ARGILLA_PASSWORD` |

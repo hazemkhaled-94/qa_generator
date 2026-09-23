@@ -201,6 +201,8 @@ def _listing() -> Select:
                 Question.answer_form,
                 Question.planned_difficulty,
                 Question.prompt_version,
+                Question.trace_id,
+                Question.span_id,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
                 func.array_agg(func.distinct(Passage.doc_sha256)).label("documents"),
                 func.array_agg(func.distinct(Topic.label)).label("topics"),
@@ -248,6 +250,8 @@ def _stored(row: Any) -> StoredQuestion:
         answer_form=row.answer_form,
         planned_difficulty=row.planned_difficulty,
         prompt_version=row.prompt_version,
+        trace_id=row.trace_id,
+        span_id=row.span_id,
     )
 
 

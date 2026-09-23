@@ -30,3 +30,13 @@ def _integer(name: str) -> int:
 
 #: Rows per page in the listings.
 PAGE_SIZE = _integer("PAGE_SIZE")
+
+#: Where a BROWSER reaches Phoenix, for the link from a question to the
+#: trace that produced it. The host's address and not the container's,
+#: because nothing here calls it - the address is written into a link and
+#: followed by whoever is reading the page.
+#:
+#: Optional, unlike everything above. A deployment that publishes no
+#: Phoenix shows the trace id as text, which is still enough to find it by
+#: hand, and an unfollowable link is worse than none.
+PHOENIX_BASE_URL = os.environ.get("PHOENIX_BASE_URL", "").strip().rstrip("/")

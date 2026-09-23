@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import ClassVar
 
 from opentelemetry.trace import Span
@@ -42,7 +43,7 @@ from question_generation.types import PROMPT_VERSION, SPECS, spec
 from settings.runs import run_id
 from stages import StageService
 from telemetry import tracer, working
-from telemetry.evaluations import Evaluations, Verdict, current_span_id
+from telemetry.evaluations import Evaluations, Verdict, current_ids
 
 log = logging.getLogger(__name__)
 span = tracer(__name__)
@@ -630,12 +631,20 @@ class QuestionGenerationService(StageService):
                 if value:
                     current.set_attribute(name, value)
 
+            # On the ROW as well, which is the only durable end of the
+            # link: the span is written now and aged out by Phoenix's own
+            # retention, and the question is append-only and never
+            # hard-deleted. Without them nothing joins the two - a span
+            # carries no question id, because the question has none yet
+            # when this runs.
+            trace_id, span_id = current_ids()
+            checked = replace(checked, trace_id=trace_id, span_id=span_id)
+
             # And as an annotation, which is the Evaluations view. CODE and
             # not LLM: a gate is a rule reading a parse, and the phrasing
             # judgements that are a model's opinion are the ones posted as
             # LLM. The score is 1 or 0, so a project's mean over this
             # annotation IS its acceptance rate.
-            span_id = current_span_id()
             if span_id:
                 self._evaluations.record(*self._verdicts(span_id, checked))
             return checked

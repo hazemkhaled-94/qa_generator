@@ -610,6 +610,16 @@ services:
       LOG_DIR: /var/log/qa
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
       OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
+      # The HOST's address, deliberately, and the one place in this file
+      # where that is right: this is not called from the container, it is
+      # written into a link a BROWSER follows. .env's value is what a
+      # browser needs, so it is taken as it stands rather than set over
+      # the way the backend services have it.
+      #
+      # Optional. Unset, a question shows its trace id as text instead of
+      # a link, which is what a deployment that publishes no Phoenix
+      # should show.
+      PHOENIX_BASE_URL: ${PHOENIX_BASE_URL-}
       STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
     volumes:
       - ./frontend:/app:ro

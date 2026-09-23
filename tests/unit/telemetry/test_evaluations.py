@@ -170,3 +170,38 @@ def test_the_metadata_a_comparison_filters_on_survives(field: str) -> None:
     ).payload()
 
     assert field in payload["metadata"]
+
+
+def test_the_ids_are_empty_when_nothing_is_recording() -> None:
+    """A row written by a process with no exporter says so, not zeros."""
+    from telemetry.evaluations import current_ids
+
+    assert current_ids() == ("", "")
+
+
+def test_the_ids_are_the_hex_phoenix_resolves_from(monkeypatch) -> None:
+    """32 and 16 characters, which is what /redirects/ takes.
+
+    Phoenix finds a span or a trace from the bare OTel id -
+    `getSpanByOtelId` is what its redirect routes are built on - so a row
+    carrying these links to its own trace without knowing anything about
+    Phoenix's internal project ids.
+    """
+    from opentelemetry import trace as otel
+
+    from telemetry.evaluations import current_ids
+
+    context = otel.SpanContext(
+        trace_id=0x0BDF4A87EF67FC94B435F23B2824B7E1,
+        span_id=0x412B8F4D0B9073D3,
+        is_remote=False,
+        trace_flags=otel.TraceFlags(0x01),
+    )
+    monkeypatch.setattr(
+        otel, "get_current_span", lambda *_: otel.NonRecordingSpan(context)
+    )
+
+    assert current_ids() == (
+        "0bdf4a87ef67fc94b435f23b2824b7e1",
+        "412b8f4d0b9073d3",
+    )

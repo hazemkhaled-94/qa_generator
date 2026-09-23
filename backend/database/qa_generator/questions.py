@@ -303,6 +303,26 @@ class Question(Base):
         "gates held it to are all in the settings that version names. NULL for a "
         "question written before a setting could be changed without a restart.",
     )
+    trace_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The OpenTelemetry trace this question was written and judged "
+        "in, as 32 hex characters. What gets from a row to the calls that "
+        "produced it: Phoenix resolves a trace from this alone, so "
+        "<phoenix>/redirects/traces/<trace_id> opens it without anything "
+        "knowing Phoenix's internal ids. NULL for a question written before "
+        "this column, and for one written by a process exporting no spans.",
+    )
+    span_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The span the gates ran in, as 16 hex characters, which is the "
+        "span this question's verdict annotations hang off. Stored beside the "
+        "trace because it is the more useful of the two: /redirects/spans/ "
+        "opens the gate decision itself rather than the whole topic. The span "
+        "cannot carry the question id instead - the question has none yet when "
+        "the gates run.",
+    )
     prompt_version: Mapped[str | None] = mapped_column(
         Text,
         index=True,

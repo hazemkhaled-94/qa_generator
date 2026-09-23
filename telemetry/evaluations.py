@@ -109,10 +109,26 @@ def current_span_id() -> str | None:
     telemetry without an exporter and every test that did not open a span.
     A verdict with no span to attach to is dropped rather than invented.
     """
+    return current_ids()[1] or None
+
+
+def current_ids() -> tuple[str, str]:
+    """The trace and the span being recorded into, as Phoenix names them.
+
+    Both empty when nothing is recording. Empty rather than None because
+    the caller that wants both is writing them onto a row, and a column
+    holding "" for a run that exported no spans says the same thing a
+    NULL would without a second branch to produce it.
+
+    Phoenix resolves either from the hex alone -`getSpanByOtelId` is what
+    its `/redirects/spans/` route is built on - so a row carrying these
+    two is a row that links to its own trace without knowing anything
+    about Phoenix's internal ids.
+    """
     context = trace.get_current_span().get_span_context()
     if not context.is_valid:
-        return None
-    return format(context.span_id, "016x")
+        return "", ""
+    return format(context.trace_id, "032x"), format(context.span_id, "016x")
 
 
 class Evaluations:

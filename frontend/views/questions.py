@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, config, configure, page, stage
 
 #: The one stage this page runs. It queues over topics, which the Topics
 #: page fits; nothing here can fit them.
@@ -456,8 +456,45 @@ def _detail(client, question: dict) -> None:
                 column_config={"Question": st.column_config.TextColumn(width="large")},
             )
 
+        _trace(question)
         _prompt(client, question)
         _verdict(client, question)
+
+
+def _trace(question: dict) -> None:
+    """Links to the calls that produced this question, and their verdicts.
+
+    Two links, because they answer different questions. The **span** is
+    the gate decision, and it is what the per-gate annotations hang off,
+    so it opens on why this question was accepted or refused. The
+    **trace** is the whole topic: the writer call with its prompt, the
+    phrasing judgements, the verifier.
+
+    `/redirects/` rather than a project URL. Phoenix resolves either id
+    from the hex alone, so nothing here has to know its internal project
+    ids or survive it renumbering them.
+    """
+    trace_id, span_id = question.get("trace_id"), question.get("span_id")
+    if not trace_id and not span_id:
+        st.caption(
+            "Written before the trace was recorded on the row, so the calls "
+            "that produced it cannot be found from here."
+        )
+        return
+
+    if not config.PHOENIX_BASE_URL:
+        st.caption(f"Trace `{trace_id}`, span `{span_id}` — Phoenix is not linked.")
+        return
+
+    links = [
+        f"[{label}]({config.PHOENIX_BASE_URL}/redirects/{kind}/{one})"
+        for label, kind, one in (
+            ("the gate decision", "spans", span_id),
+            ("the whole topic's trace", "traces", trace_id),
+        )
+        if one
+    ]
+    st.caption("In Phoenix: " + ", and ".join(links) + ".")
 
 
 def _prompt(client, question: dict) -> None:

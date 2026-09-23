@@ -172,6 +172,8 @@ QUESTION = {
     "answer_form": "value",
     "planned_difficulty": "easy",
     "prompt_version": "8",
+    "trace_id": "0bdf4a87ef67fc94b435f23b2824b7e1",
+    "span_id": "412b8f4d0b9073d3",
 }
 
 QUESTION_SOURCE = {
