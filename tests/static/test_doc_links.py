@@ -67,14 +67,16 @@ def _targets(page: Path) -> list[str]:
 def _anchors(page: Path) -> set[str]:
     """The fragments GitHub will resolve in one page, from its headings.
 
-    Lower-cased, punctuation dropped, spaces hyphenated. An em dash is
-    dropped rather than hyphenated, which is why `Platform — the encoders`
-    is `platform--the-encoders` and not `platform-the-encoders`.
+    Lower-cased, punctuation dropped, then **each remaining space** becomes
+    a hyphen. One at a time rather than one per run, which is the whole of
+    the difference on a heading like `Platform — the encoders`: the em dash
+    is dropped and the two spaces around it are left, so the fragment is
+    `platform--the-encoders` and not `platform-the-encoders`.
     """
     found = set()
     for heading in _HEADING.findall(page.read_text()):
         kept = re.sub(r"[^\w\s-]", "", heading.strip().lower())
-        found.add(re.sub(r"\s+", "-", kept.strip()))
+        found.add(re.sub(r"\s", "-", kept.strip()))
     return found
 
 
