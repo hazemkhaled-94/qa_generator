@@ -128,7 +128,7 @@ help:
         settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-reclaim questions-rerun questions-reverify \
-        questions-balance \
+        questions-balance questions-export \
         questions-runs questions-diff \
         documents delete delete-derived \
         archive archive-purge \
@@ -737,6 +737,29 @@ questions-reverify:
 # pool could not fill.
 questions-balance:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
+
+# The questions as a spreadsheet: one sheet of questions, one of the facts
+# each cites, one of counts. This is the way the dataset leaves the database
+# - everything else that reads these rows is a service, and Argilla is NOT
+# this: it holds a disposable copy of a stratified SAMPLE pushed for review,
+# so exporting from there gives back the hundred rows somebody was asked to
+# look at rather than the set.
+#
+# OUT names the file. FILTER is passed through to the exporter, and takes
+# the same narrowing the Questions page and the API do - so what lands in
+# the workbook is what the filter says, with no default scope quietly
+# applied. Ask for nothing and you get everything, rejected rows included,
+# which is what the same request to /questions returns.
+#
+#   make questions-export
+#   make questions-export OUT=exam.xlsx FILTER="--status accepted --cognitive-level analyse"
+#   make questions-export FILTER="--status accepted --unanswerable"
+#   make questions-export FILTER="--no-citations"      # much faster, questions only
+#
+#   python -m question_generation.export --help        # every filter there is
+OUT ?= questions.xlsx
+questions-export:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.export --out $(OUT) $(FILTER)
 
 # Which runs there are, newest first, and how many questions each wrote.
 # A run is named by RUN_ID where one was given and by a uuid otherwise; see

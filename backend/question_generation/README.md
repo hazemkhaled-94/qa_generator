@@ -970,6 +970,45 @@ the first attempt where `QUESTIONS_RETRIES` asked for a second — because they
 are the drop-rate evidence, and hiding them would make the writer look better
 than it is.
 
+## Getting the dataset out
+
+**Where:** [`export.py`](export.py).
+
+```bash
+make questions-export OUT=exam.xlsx FILTER="--status accepted --cognitive-level analyse"
+```
+
+One workbook, three sheets: the **questions**, the **facts each cites** —
+one row per fact per passage, so a bridge takes two — and the **counts**,
+read off the same quality report the page shows rather than counted again,
+so a workbook mailed to somebody says what it is.
+
+The same thing on `GET /questions/export`, and behind **Build a workbook**
+on the Questions page. Built when asked for rather than on every render:
+`st.download_button` wants its bytes up front, so a page holding one would
+write a workbook of every question on each keystroke in the search box.
+
+**The filter is the caller's and there is no default scope.** Not "the
+release", not "everything accepted": whatever the same filter the listing
+takes says. Ask for nothing and you get everything, rejected rows included,
+because that is what the same request to `/questions` returns — a reader
+handed a narrower set than they asked for without having asked has been
+given the wrong file under a name that looks right.
+
+**Argilla is not this**, and it is the near miss worth naming. It holds a
+disposable copy of a stratified *sample* pushed for review, so exporting
+from there gives back the hundred rows somebody was asked to look at rather
+than the set. The database is what has the set.
+
+The Citations sheet is the expensive half, and `--no-citations` leaves it
+empty for a run over a whole corpus. It is also where the one bug in this
+worth remembering was: built as a WHERE subquery, SQLAlchemy correlated the
+four tables the id query is joined over to the outer query, emptied the
+subquery's own FROM and turned 1,229 rows into six million, which Excel
+then refused outright. It is a JOIN against a derived table with
+`correlate(None)` on it now, and `test_a_citation_row_is_one_fact_in_one_passage`
+is what holds it there.
+
 ## The embedding model
 
 `EMBEDDING_MODEL` is the one pretrained model in this pipeline, and the one
@@ -1029,12 +1068,13 @@ it is strongest in, and those passages.
 
 | Table | Holds |
 |---|---|
-| `questions` | the question, its target answer and the explanation beside it, its type, form and cognitive level, the three scopes and the band derived from them, the planned band beside it, the thread columns, the embedding, the release id, and the gate that stopped it when one did |
+| `questions` | the question, its target answer and the explanation beside it, its type, form and cognitive level, the three scopes and the band derived from them, the planned band beside it, the thread columns, the embedding, the release id, the gate that stopped it when one did, and the verdict a person reached when one has |
 | `question_facts` | which facts each question cites. A trigger deletes a question once its last citation is gone |
 
 **Serves:** `/questions`, `/questions/{id}`, `/questions/plan`,
-`/questions/quality`, `PATCH /questions/{id}`, and the five queue verbs under
-`/questions`. See the [API README](../api/README.md).
+`/questions/quality`, `/questions/export`, `PATCH /questions/{id}`, and the
+five queue verbs under `/questions`. See the
+[API README](../api/README.md).
 
 **Command line:**
 
@@ -1048,6 +1088,7 @@ make questions-rerun
 make questions-start TOPIC=7    # any of the five, over one topic
 make questions-reverify         # re-check stored questions; no model is called
 make questions-balance          # draw the balanced release
+make questions-export           # write what a filter selects to an .xlsx
 ```
 
 ## Configuration

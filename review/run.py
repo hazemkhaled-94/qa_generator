@@ -88,7 +88,25 @@ def main(argv: list[str] | None = None) -> int:
     repository = ReviewRepository()
 
     if args.status:
-        log.info("review: %s", repository.counts())
+        for name, counted in repository.counts().items():
+            agreement = counted["agreement"]
+            log.info(
+                "%s: %d of %d reviewed%s%s",
+                name,
+                counted["reviewed"],
+                counted["total"],
+                (
+                    f" ({', '.join(f'{v} {k}' for k, v in sorted(counted['verdicts'].items()))})"
+                    if counted["verdicts"]
+                    else ""
+                ),
+                (
+                    f"; agreed with the model on {counted['agreed']} "
+                    f"of them, {agreement:.0%}"
+                    if agreement is not None
+                    else "; nobody has looked, so there is no agreement to report"
+                ),
+            )
         return 0
 
     settings = Settings.load()

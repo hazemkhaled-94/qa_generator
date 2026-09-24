@@ -138,6 +138,7 @@ anything over one.
 | `GET /questions/{id}` | One question with the facts it was written from |
 | `GET /questions/plan` | What a topic is planned to be asked, before anything is written |
 | `GET /questions/quality` | How many hold up, which gate stopped the rest, and how much of the subject matter is covered |
+| `GET /questions/export` | The questions a filter selects, as an `.xlsx` workbook. Same filters as the listing, and no default scope |
 | `PATCH /questions/{id}` | Accept or reject one question |
 
 **Prompts** — served by [`backend/stages/`](../stages/README.md), which

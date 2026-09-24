@@ -140,6 +140,18 @@ class CatalogApi(Endpoint):
         """Fetches what generation is configured to write."""
         return self._request("GET", "/questions/plan").json()
 
+    def question_workbook(self, **filters) -> bytes:
+        """Fetches the questions this filter selects as an .xlsx workbook.
+
+        Bytes, not JSON: the API builds the workbook, because the rows it
+        holds are the rows a page never asked for - a download is the whole
+        filter and a page is fifty of it.
+        """
+        query = urlencode({k: v for k, v in filters.items() if v not in (None, "")})
+        return self._request(
+            "GET", f"/questions/export?{query}" if query else "/questions/export"
+        ).content
+
     def decide_question(self, question_id: int, status: str) -> dict:
         """Accepts or rejects one question."""
         return self._request(

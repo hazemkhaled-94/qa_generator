@@ -340,6 +340,32 @@
       ]
     }
   },
+  "/questions/export": {
+    "get": {
+      "parameters": [
+        "answer_form",
+        "answerable",
+        "citations",
+        "cognitive_level",
+        "difficulty",
+        "document",
+        "document_scope",
+        "field",
+        "follows",
+        "passage_scope",
+        "planned_difficulty",
+        "q",
+        "question_type",
+        "status",
+        "topic",
+        "topic_scope"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
   "/questions/plan": {
     "get": {
       "parameters": [],

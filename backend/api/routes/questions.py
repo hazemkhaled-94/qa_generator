@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from fastapi import Response
 from pydantic import BaseModel
 
 from api.dependencies import question_catalog, questions_queue
@@ -21,6 +22,7 @@ from api.params import DocumentFilter, Limit, Offset, RowId, SearchText, TopicId
 from api.routes.stage import stage_router
 from database.qa_generator import QuestionStatus
 from question_generation.config import Settings as QuestionSettings
+from question_generation.export import workbook
 from question_generation.models import (
     QuestionDetail,
     QuestionQuality,
@@ -67,6 +69,11 @@ AnswerForm = Literal["value", "list", "explanation"]
 #: spread and so how hard it is to FIND, and a question reaching two
 #: documents can still be a bare lookup once both are in hand.
 CognitiveLevel = Literal["recall", "understand", "apply", "analyse"]
+
+#: What an .xlsx is on the wire. Spelled out rather than guessed from the
+#: extension, because a browser handed `application/octet-stream` offers to
+#: save a file Excel then has to be told the type of.
+WORKBOOK = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 router = stage_router(name="questions", repository=questions_queue)
 
@@ -223,6 +230,76 @@ def quality(
         cognitive_level=cognitive_level,
         answer_form=answer_form,
         follows=follows,
+    )
+
+
+@router.get(
+    "/export",
+    response_class=Response,
+    responses={200: {"content": {WORKBOOK: {}}, "description": "An .xlsx workbook"}},
+)
+def export(
+    document: DocumentFilter = None,
+    topic: TopicId = None,
+    q: SearchText = None,
+    field: SearchField = "both",
+    status: Decision | None = None,
+    answerable: bool | None = None,
+    passage_scope: PassageScope | None = None,
+    document_scope: DocumentScope | None = None,
+    topic_scope: TopicScope | None = None,
+    difficulty: Band | None = None,
+    planned_difficulty: Band | None = None,
+    question_type: QuestionType | None = None,
+    cognitive_level: CognitiveLevel | None = None,
+    answer_form: AnswerForm | None = None,
+    follows: bool | None = None,
+    citations: bool = True,
+) -> Response:
+    """Writes the questions this filter selects to an .xlsx workbook.
+
+    Every filter is the listing's, so what downloads is what the page was
+    showing rather than a set chosen here. There is no default scope: a
+    request naming nothing gets everything, the rejected questions
+    included, because that is what the same request to the listing gets.
+
+    `citations` turns off the sheet naming the facts behind each question.
+    It is the expensive half over a whole corpus and the questions alone
+    are enough to run a benchmark from.
+
+    Declared before `/{question_id}` so `export` is not read as an id.
+    """
+    where = {
+        "document": document,
+        "topic": topic,
+        "search": q,
+        "field": field,
+        "status": status,
+        "answerable": answerable,
+        "passage_scope": passage_scope,
+        "document_scope": document_scope,
+        "topic_scope": topic_scope,
+        "difficulty": difficulty,
+        "planned_difficulty": planned_difficulty,
+        "question_type": question_type,
+        "cognitive_level": cognitive_level,
+        "answer_form": answer_form,
+        "follows": follows,
+    }
+    # One window the size of the count, rather than paging: a page boundary
+    # is where a concurrent write shows up twice or not at all, and an
+    # export is a snapshot or it is nothing.
+    total, _ = question_catalog.page(limit=1, **where)
+    _, rows = question_catalog.page(limit=max(total, 1), **where)
+    drawn = workbook(
+        rows,
+        question_catalog.citations(**where) if citations else (),
+        question_catalog.quality(**where),
+    )
+    return Response(
+        content=drawn,
+        media_type=WORKBOOK,
+        headers={"content-disposition": 'attachment; filename="questions.xlsx"'},
     )
 
 

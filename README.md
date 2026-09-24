@@ -148,6 +148,14 @@ make questions-start && make questions
 make questions-balance
 ```
 
+Then take the dataset out. One workbook of the questions, the facts each
+cites and the counts, over whatever filter you name — the same one the
+Questions page and `GET /questions/export` take, with no default scope:
+
+```bash
+make questions-export OUT=exam.xlsx FILTER="--status accepted"
+```
+
 ## Example 2 — applying a change without re-reading the corpus
 
 A setting that changes what a fact *is* does not mean calling the model again.

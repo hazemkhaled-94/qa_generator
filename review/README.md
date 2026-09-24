@@ -30,7 +30,7 @@ make review-push-topics
 make review-pull-topics
 make review-push-questions   # a sample, spread over the gates
 make review-pull-questions
-make review-status           # how much has been looked at
+make review-status           # how much has been looked at, and who agreed
 
 make review                  # push all three samples in one go
 make review-all              # every row of every kind, not a sample
@@ -50,6 +50,30 @@ python -m review.run --status
 
 `--push`, `--pull` and `--status` are mutually exclusive and one is
 required. `--all` and `--ids` modify a push.
+
+### What a review produces
+
+`review-status` reports, per dataset, how many rows carry a verdict and
+**how often the person and the model reached the same one**. That second
+number is what the sample exists for: a count of rows reviewed says a
+review happened, the agreement says what it found.
+
+```text
+facts: 120 of 6687 reviewed (98 accepted, 22 rejected); agreed with the model on 104 of them, 87%
+questions: 0 of 6997 reviewed; nobody has looked, so there is no agreement to report
+```
+
+It is a query because the two verdicts are kept in different columns and
+neither overwrites the other. A fact holds the checker's in `validated`
+and the person's in `reviewed_verdict`. A question holds the gates' in
+`rejected_reason` — NULL means no gate stopped it — and the person's in
+`reviewed_verdict`, with `status` saying what the question now is.
+
+Accepting a question a gate refused used to clear `rejected_reason`, on
+the grounds that a reason for an overturned rejection is stale. It is not
+stale, it is the other half of the disagreement, and cleared it made an
+overruled rejection indistinguishable from a question no gate ever
+stopped — so the agreement could not be computed at all. It is kept now.
 
 ### A sample, or the corpus
 

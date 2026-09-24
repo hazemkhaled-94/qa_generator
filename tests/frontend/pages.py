@@ -161,6 +161,7 @@ QUESTION = {
     "language": "en",
     "status": "accepted",
     "rejected_reason": None,
+    "reviewed_verdict": None,
     "created_at": "2026-09-14T11:00:00",
     "facts": 1,
     "documents": [SHA],

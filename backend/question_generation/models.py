@@ -571,6 +571,12 @@ class StoredQuestion:
     #: What its type asks of whoever answers it. A different axis from
     #: `difficulty`, which says how far the answer is spread.
     cognitive_level: str | None = None
+    #: What a person decided about it, or None if nobody has looked - which
+    #: is most questions, because a review is a sample. Beside `status` and
+    #: `rejected_reason` rather than folded into either: those two are what
+    #: the question is and what gate stopped it, and holding all three is
+    #: what says whether a reviewer and the gates agreed.
+    reviewed_verdict: str | None = None
     #: The prompt version that wrote it, which the `prompts` table
     #: resolves to the text. NULL on every question written before the
     #: version was recorded.
@@ -598,6 +604,27 @@ class QuestionSource:
     passage_id: int
     doc_sha256: str
     ordinal: int
+
+
+@dataclass(frozen=True)
+class Citation:
+    """One fact one question cites, named the way an export reads it.
+
+    The same pair :class:`QuestionSource` holds, carrying the question it
+    belongs to and the document's title rather than only its digest: a
+    spreadsheet is read by somebody checking an answer against a page, and
+    a sha256 is not a thing anybody can look up by hand.
+    """
+
+    question_id: int
+    fact_id: int
+    statement: str
+    evidence_text: str
+    validated: bool
+    document: str
+    doc_sha256: str
+    ordinal: int
+    page: int | None
 
 
 @dataclass(frozen=True)

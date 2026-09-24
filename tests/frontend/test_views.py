@@ -524,6 +524,38 @@ def test_accepting_a_question_writes_the_status_and_nothing_else(run_view) -> No
     ]
 
 
+def test_a_workbook_is_built_only_when_it_is_asked_for(run_view) -> None:
+    """The download is two presses, and the first is what costs anything.
+
+    `st.download_button` wants its bytes up front, so a page holding one
+    unconditionally would write a workbook of every question on each
+    rerun - on every keystroke in the search box. Nothing is asked of the
+    backend until somebody presses.
+    """
+    client = Answers(**answers(question_workbook=b"PK\x03\x04 a workbook"))
+    page = View(run_view("questions", catalog_api=client), "questions")
+
+    assert not [one for one in client.asked if one[0] == "question_workbook"]
+
+    page = page.press("Build a workbook")
+
+    assert [one for one in client.asked if one[0] == "question_workbook"]
+    assert page.raised == []
+    assert [one for one in page.app.get("download_button")]
+
+
+def test_a_workbook_is_dropped_when_the_filter_moves_under_it(run_view) -> None:
+    """A file offered after the filter changed is the wrong set under a right name."""
+    client = Answers(**answers(question_workbook=b"PK\x03\x04 a workbook"))
+    page = View(run_view("questions", catalog_api=client), "questions")
+    page = page.press("Build a workbook")
+
+    moved = page.choose("questions-status", "accepted")
+
+    assert moved.button("Build a workbook") is not None
+    assert not [one for one in moved.app.get("download_button")]
+
+
 def test_the_questions_page_says_when_a_cited_fact_no_longer_holds(run_view) -> None:
     """A question resting on a rejected fact is not a question any more."""
     page = View(

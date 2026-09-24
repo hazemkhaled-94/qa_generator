@@ -33,6 +33,7 @@ from database.qa_generator.outcomes import (
     QuestionRejection,
     QuestionStatus,
     QuestionType,
+    ReviewVerdict,
     TopicScope,
     one_of,
 )
@@ -130,6 +131,22 @@ class Question(Base):
         CheckConstraint(
             f"rejected_reason IS NULL OR {one_of('rejected_reason', QuestionRejection)}",
             name="questions_rejected_reason_valid",
+        ),
+        CheckConstraint(
+            f"reviewed_verdict IS NULL OR {one_of('reviewed_verdict', ReviewVerdict)}",
+            name="questions_reviewed_verdict_valid",
+        ),
+        # One fact about a row, so half of it written is a write that failed.
+        CheckConstraint(
+            "(reviewed_verdict IS NULL) = (reviewed_at IS NULL)",
+            name="questions_reviewed_together",
+        ),
+        # Partial: NULL for almost every row, and what anyone asks for is
+        # the reviewed ones.
+        Index(
+            "ix_questions_reviewed_verdict",
+            "reviewed_verdict",
+            postgresql_where=text("reviewed_verdict IS NOT NULL"),
         ),
         {
             "comment": "The test questions themselves. Append-only and never "
@@ -266,12 +283,18 @@ class Question(Base):
         "constraint. NULL on a question a person rejected from the page, which "
         "names no gate.",
     )
-    holdout_set_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid,
-        comment="The hold-out draw this question belongs to; one UUID per release. "
-        "Non-NULL means the question is withheld from the open export and kept "
-        "encrypted, so there is a test the development team has not tuned against. "
-        "NULL means it is in the open set.",
+    reviewed_verdict: Mapped[str | None] = mapped_column(
+        Text,
+        comment="What a person decided about this question: accepted or rejected. "
+        "NULL means nobody has looked, which is most questions - a review is a "
+        "sample. Separate from `status`, which is what the question IS, and from "
+        "`rejected_reason`, which is the gate's; holding all three is what makes "
+        "the agreement between a reviewer and the checker a query.",
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        comment="When the verdict above was recorded. NULL exactly when "
+        "reviewed_verdict is.",
     )
     cognitive_level: Mapped[str | None] = mapped_column(
         Text,

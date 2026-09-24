@@ -47,9 +47,29 @@ class Driver:
         self._main = module.main
 
     def counts(self) -> dict:
-        """What the repository reports."""
+        """What the repository reports: one entry per dataset a verdict lands in.
+
+        Facts with a review behind them and questions with none, so the
+        printing is exercised both ways - an agreement rate, and the
+        sentence that stands in for one when nobody has looked.
+        """
         self.counted += 1
-        return {"facts": 3, "reviewed": {}}
+        return {
+            "facts": {
+                "total": 3,
+                "reviewed": 2,
+                "verdicts": {"accepted": 1, "rejected": 1},
+                "agreed": 1,
+                "agreement": 0.5,
+            },
+            "questions": {
+                "total": 4,
+                "reviewed": 0,
+                "verdicts": {},
+                "agreed": 0,
+                "agreement": None,
+            },
+        }
 
     def run(self, *argv: str) -> int:
         """Runs the command line."""

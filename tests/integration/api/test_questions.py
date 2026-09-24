@@ -11,6 +11,9 @@ stage does, so the verbs are exercised here beside the reads.
 
 from __future__ import annotations
 
+import io
+
+import pandas as pd
 import pytest
 from seed import digest, document, fact, fitted, link, membership, passage, question
 from sqlalchemy.orm import Session
@@ -351,10 +354,18 @@ def test_a_question_id_that_is_not_a_number_is_refused(written) -> None:
 # ── Accepting and rejecting ────────────────────────────────────────────────
 
 
-def test_accepting_a_rejected_question_clears_the_gate_that_refused_it(
+def test_accepting_a_rejected_question_keeps_the_gate_that_refused_it(
     written,
 ) -> None:
-    """The row is no longer rejected, so a reason for it would be stale."""
+    """A person overruling a gate is a disagreement, and both halves are kept.
+
+    This used to clear the reason, on the grounds that a reason for a
+    rejection somebody overturned is a stale one. It is not stale, it is
+    the other half of the disagreement: cleared, the one number a review
+    sample exists to produce - how often the reviewer and the gates agreed
+    - could not be computed at all, because an overruled rejection was
+    indistinguishable from a question no gate ever stopped.
+    """
     client, held = written
 
     decided = client.patch(
@@ -362,7 +373,30 @@ def test_accepting_a_rejected_question_clears_the_gate_that_refused_it(
     ).json()
 
     assert decided["status"] == "accepted"
-    assert decided["rejected_reason"] is None
+    assert decided["rejected_reason"] == "duplicate"
+    assert decided["reviewed_verdict"] == "accepted"
+
+
+def test_a_question_nobody_looked_at_carries_no_verdict(written) -> None:
+    """NULL means nobody has looked, which is most questions."""
+    client, held = written
+
+    listed = client.get("/questions").json()["questions"]
+    untouched = [one for one in listed if one["id"] == held["ids"]["ordinary"]]
+
+    assert untouched[0]["reviewed_verdict"] is None
+
+
+def test_putting_a_question_back_to_draft_clears_the_verdict(written) -> None:
+    """`draft` says "I have not decided", which is not a verdict to record."""
+    client, held = written
+    where = f"/questions/{held['ids']['ordinary']}"
+
+    client.patch(where, json={"status": "rejected"})
+    back = client.patch(where, json={"status": "draft"}).json()
+
+    assert back["status"] == "draft"
+    assert back["reviewed_verdict"] is None
 
 
 def test_rejecting_a_question_keeps_the_row(written) -> None:
@@ -403,6 +437,103 @@ def test_a_verdict_that_is_not_one_of_the_three_is_refused(written, body) -> Non
     answered = client.patch(f"/questions/{held['ids']['ordinary']}", json=body)
 
     assert answered.status_code == 422
+
+
+# ── Export ─────────────────────────────────────────────────────────────────
+
+
+def workbook_from(response) -> dict:
+    """Reads a downloaded workbook back the way a recipient opens it."""
+    book = pd.ExcelFile(io.BytesIO(response.content))
+    return {name: book.parse(name) for name in book.sheet_names}
+
+
+def test_the_export_is_a_workbook_a_spreadsheet_can_open(written) -> None:
+    """Served as an .xlsx, named, and offered as a download."""
+    client, _ = written
+
+    drawn = client.get("/questions/export")
+
+    assert drawn.status_code == 200
+    assert drawn.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "questions.xlsx" in drawn.headers["content-disposition"]
+    assert list(workbook_from(drawn)) == ["Questions", "Citations", "Summary"]
+
+
+def test_the_export_has_no_default_scope(written) -> None:
+    """A request naming nothing gets everything the listing would.
+
+    Not "the release", not "everything accepted": a reader handed a
+    narrower set than they asked for without having asked has been given
+    the wrong file under a name that looks right. All four questions, the
+    rejected one included.
+    """
+    client, _ = written
+
+    questions = workbook_from(client.get("/questions/export"))["Questions"]
+
+    assert len(questions) == 4
+    assert set(questions["Status"]) == {"accepted", "rejected"}
+
+
+def test_the_export_takes_the_listings_filter(written) -> None:
+    """What downloads is what the page was showing."""
+    client, _ = written
+
+    questions = workbook_from(
+        client.get("/questions/export?status=accepted&answerable=false")
+    )["Questions"]
+
+    assert len(questions) == 1
+    assert not questions.iloc[0]["Answerable"]
+
+
+def test_a_citation_row_is_one_fact_in_one_passage(written) -> None:
+    """The grain of the Citations sheet, and the bug it is pinned against.
+
+    `crossing` cites two facts in two documents and the other three cite
+    one apiece, so five rows. Built as a WHERE subquery this came back as
+    the product of every join instead: SQLAlchemy correlated the four
+    tables the id query is joined over to the outer query, emptied the
+    subquery's own FROM, and turned 1,229 rows into six million on the
+    real corpus - which Excel then refused outright.
+    """
+    client, held = written
+
+    citations = workbook_from(client.get("/questions/export"))["Citations"]
+
+    assert len(citations) == 5
+    assert sorted(citations["Question ID"]) == sorted(
+        [
+            held["ids"]["ordinary"],
+            held["ids"]["crossing"],
+            held["ids"]["crossing"],
+            held["ids"]["refused"],
+            held["ids"]["unanswered"],
+        ]
+    )
+
+
+def test_citations_can_be_left_out(written) -> None:
+    """The expensive half, and the questions alone run a benchmark."""
+    client, _ = written
+
+    read = workbook_from(client.get("/questions/export?citations=false"))
+
+    assert read["Citations"].empty
+    assert len(read["Questions"]) == 4
+
+
+def test_a_filter_matching_nothing_still_exports(written) -> None:
+    """The one filter that matches no question is not the one that raises."""
+    client, _ = written
+
+    read = workbook_from(client.get("/questions/export?status=draft"))
+
+    assert read["Questions"].empty
+    assert "Question" in read["Questions"].columns
 
 
 # ── The queue under the same word ──────────────────────────────────────────

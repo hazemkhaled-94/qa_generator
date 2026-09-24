@@ -189,14 +189,16 @@ class FactKind(StrEnum):
 
 
 class ReviewVerdict(StrEnum):
-    """What a person decided about a fact they were shown.
+    """What a person decided about a row they were shown.
 
-    Stored in facts.reviewed_verdict, which is NULL until somebody looks.
-    Separate from `validated` on purpose: that one is the checker's and
-    `extract-revalidate` rewrites it in full, so a human decision recorded
-    there would last until the next re-judgement and then be gone with
-    nothing saying it had been. The same split questions already have
-    between `status` and `rejected_reason`.
+    Stored in facts.reviewed_verdict and questions.reviewed_verdict, both
+    NULL until somebody looks. Separate from the model's own verdict on
+    purpose: `facts.validated` is the checker's and `extract-revalidate`
+    rewrites it in full, so a human decision recorded there would last
+    until the next re-judgement and then be gone with nothing saying it had
+    been. Questions keep the same split three ways - `status` is what the
+    question is, `rejected_reason` is the gate's, this is the person's -
+    which is what makes their agreement a query.
     """
 
     ACCEPTED = "accepted"

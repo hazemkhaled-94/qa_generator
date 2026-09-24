@@ -209,6 +209,7 @@ what each leaves alone and why.
 | Target | Does |
 |---|---|
 | `make questions-balance` | Draw the balanced release out of what was accepted |
+| `make questions-export` | Write the questions a filter selects to an `.xlsx` |
 | `make questions-reverify` | Re-check stored questions; no model is called |
 | `make questions-runs` | Which runs there are, newest first |
 | `make questions-diff` | Two runs side by side, on the gate that stopped each |
@@ -218,6 +219,32 @@ what each leaves alone and why.
 make questions RUN_ID=b-gemma4-12b            # name a run
 make questions-diff RUNS="a-gpt-4.1 b-gemma4-12b"
 ```
+
+### Getting the dataset out
+
+`questions-export` is the way these rows leave the database. `OUT` names the
+file and `FILTER` takes the same narrowing the Questions page and
+`GET /questions` do, so a workbook is whatever the filter says — **there is
+no default scope**. Ask for nothing and you get everything, rejected rows
+included, which is what the same request to `/questions` returns.
+
+```bash
+make questions-export
+make questions-export OUT=exam.xlsx FILTER="--status accepted --cognitive-level analyse"
+make questions-export FILTER="--status accepted --unanswerable"
+make questions-export FILTER="--no-citations"   # much faster, questions only
+
+python -m question_generation.export --help     # every filter there is
+```
+
+Three sheets: the questions, the facts each cites — one row per fact per
+passage, so a bridge takes two — and the counts. The same workbook is on
+`GET /questions/export` and behind **Build a workbook** on the Questions
+page, which exports what that page is filtered to.
+
+Argilla is not this. It holds a disposable copy of a stratified **sample**
+pushed for review, so exporting from there gives back the hundred rows
+somebody was asked to look at rather than the set.
 
 `questions-diff` reads the live questions **and** the archived ones, which
 is what makes an A/B possible: `questions-rerun` deletes what it replaces,

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 
 from database.qa_generator import Fact, Question, ReviewVerdict
 from database.qa_generator.repository import Repository
@@ -210,12 +210,51 @@ class ReviewRepository(Repository):
         return written
 
     def counts(self) -> dict[str, Any]:
-        """How much of the corpus has been looked at."""
+        """How much of the corpus has been looked at, and who agreed.
+
+        Both datasets a verdict can land in, and for each the number the
+        sample exists to produce: how often the person and the model
+        reached the same verdict. A count of rows reviewed says a review
+        happened; the agreement says what it found.
+
+        The model's verdict is read off a different column in each. A fact
+        carries the checker's as `validated`. A question carries the
+        gates' as `rejected_reason` - NULL means no gate stopped it - which
+        is only readable because `decide()` stopped clearing it.
+        """
+        gated = case((Question.rejected_reason.is_(None), "accepted"), else_="rejected")
+        checked = case((Fact.validated, "accepted"), else_="rejected")
         with self._session() as session:
-            reviewed = session.execute(
-                select(Fact.reviewed_verdict, func.count())
-                .where(Fact.reviewed_verdict.is_not(None))
-                .group_by(Fact.reviewed_verdict)
-            ).all()
-            facts = session.execute(select(func.count()).select_from(Fact)).scalar_one()
-        return {"facts": facts, "reviewed": {code: n for code, n in reviewed}}
+            return {
+                "facts": self._looked(session, Fact, Fact.reviewed_verdict, checked),
+                "questions": self._looked(
+                    session, Question, Question.reviewed_verdict, gated
+                ),
+            }
+
+    @staticmethod
+    def _looked(session, table, verdict, model) -> dict[str, Any]:
+        """One dataset: how big it is, what was said, and how often it matched."""
+        total = session.execute(select(func.count()).select_from(table)).scalar_one()
+        rows = session.execute(
+            select(verdict, model.label("model"), func.count())
+            .where(verdict.is_not(None))
+            .group_by(verdict, model)
+        ).all()
+        said: dict[str, int] = {}
+        agreed = 0
+        for person, machine, count in rows:
+            said[person] = said.get(person, 0) + count
+            if person == machine:
+                agreed += count
+        reviewed = sum(said.values())
+        return {
+            "total": total,
+            "reviewed": reviewed,
+            "verdicts": said,
+            "agreed": agreed,
+            # None rather than 0.0 when nothing has been reviewed: a rate
+            # over no rows is not a rate, and printing 0% would read as
+            # "the reviewer never agreed" instead of "nobody has looked".
+            "agreement": round(agreed / reviewed, 3) if reviewed else None,
+        }

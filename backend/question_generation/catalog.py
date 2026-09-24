@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 
 from database.qa_generator import (
+    Document,
     Fact,
     FactPassage,
     Passage,
@@ -39,6 +40,7 @@ from database.qa_generator.passage_topics import DOMINANT
 from database.qa_generator.repository import Repository, matching
 from question_generation.balance import Row
 from question_generation.models import (
+    Citation,
     JudgedQuestion,
     Neighbour,
     QuestionDetail,
@@ -193,6 +195,7 @@ def _listing() -> Select:
                 Question.language,
                 Question.status,
                 Question.rejected_reason,
+                Question.reviewed_verdict,
                 Question.created_at,
                 Question.thread_position,
                 Question.follows_id,
@@ -239,6 +242,7 @@ def _stored(row: Any) -> StoredQuestion:
         language=row.language,
         status=row.status,
         rejected_reason=row.rejected_reason,
+        reviewed_verdict=row.reviewed_verdict,
         created_at=_when(row.created_at),
         facts=row.facts,
         documents=_present(row.documents),
@@ -599,16 +603,33 @@ class QuestionCatalog(Repository):
     def decide(self, question_id: int, status: str) -> StoredQuestion | None:
         """Records what a person decided about one question.
 
-        Clears the gate's reason when a person accepts: the row is no longer
-        rejected, so a reason for its rejection would be a stale one. A
-        person rejecting names no gate, which is why the column allows NULL.
+        Three columns, and they say different things. `status` is what the
+        question now IS, `rejected_reason` stays whatever gate stopped it,
+        and `reviewed_verdict` is what the person said.
+
+        The reason used to be cleared here, on the grounds that a reason for
+        a rejection somebody overturned is a stale one. It is not stale, it
+        is the other half of a disagreement: without it, a person accepting
+        what a gate refused erased the only record that the two had ever
+        disagreed, and the agreement rate a review sample exists to produce
+        was not a query. A person rejecting still names no gate, which is
+        why the column allows NULL on rows no gate ever touched.
+
+        Putting a question back to `draft` is the one decision that is not a
+        verdict - it says "I have not decided" - so it clears the verdict
+        rather than recording itself as one, which the column could not hold
+        anyway.
         """
+        decided = status in (QuestionStatus.ACCEPTED, QuestionStatus.REJECTED)
         with self._session.begin() as session:
             changed = session.execute(
                 update(Question)
                 .where(Question.id == question_id)
                 .values(
-                    status=status, rejected_reason=None, status_changed_at=func.now()
+                    status=status,
+                    reviewed_verdict=status if decided else None,
+                    reviewed_at=func.now() if decided else None,
+                    status_changed_at=func.now(),
                 )
             ).rowcount
         if not changed:
@@ -720,6 +741,76 @@ class QuestionCatalog(Repository):
                 for row in sources
             ],
         )
+
+    def citations(
+        self,
+        document: str | None = None,
+        topic: int | None = None,
+        search: str | None = None,
+        status: str | None = None,
+        answerable: bool | None = None,
+        field: str | None = None,
+        **scopes: Any,
+    ) -> list[Citation]:
+        """What every question a filter selects was written from.
+
+        The same rows :meth:`detail` reads one question at a time, for a
+        whole filter in one query. An export runs over thousands of
+        questions, and asking per question is that many round trips for a
+        join the database does once.
+
+        A question comes back once per (fact, passage) pair, so a bridge
+        resting on two passages is two rows. That is the grain a reader
+        checking an answer against its source wants: the document and the
+        page beside each half of what was cited.
+
+        The chosen ids are JOINED as a derived table rather than put in an
+        `IN`, and `correlate(None)` is why the difference matters. `_ids`
+        is joined over the same four tables this query selects from, so as
+        a WHERE subquery SQLAlchemy correlated those tables to the outer
+        query, emptied the subquery's own FROM and turned a filter on
+        1,229 rows into six million.
+        """
+        chosen = (
+            _ids(document, topic, search, status, answerable, field, **scopes)
+            .correlate(None)
+            .subquery()
+        )
+        with self._session() as session:
+            rows = session.execute(
+                select(
+                    QuestionFact.question_id,
+                    Fact.id.label("fact_id"),
+                    Fact.statement,
+                    Fact.evidence_text,
+                    Fact.validated,
+                    Passage.doc_sha256,
+                    Passage.ordinal,
+                    Passage.page_from,
+                    Document.title,
+                )
+                .select_from(QuestionFact)
+                .join(chosen, chosen.c.id == QuestionFact.question_id)
+                .join(Fact, Fact.id == QuestionFact.fact_id)
+                .join(FactPassage, FactPassage.fact_id == Fact.id)
+                .join(Passage, Passage.id == FactPassage.passage_id)
+                .join(Document, Document.sha256 == Passage.doc_sha256, isouter=True)
+                .order_by(QuestionFact.question_id, Passage.doc_sha256, Passage.ordinal)
+            ).all()
+        return [
+            Citation(
+                question_id=row.question_id,
+                fact_id=row.fact_id,
+                statement=row.statement,
+                evidence_text=row.evidence_text,
+                validated=row.validated,
+                document=row.title or row.doc_sha256[:12],
+                doc_sha256=row.doc_sha256,
+                ordinal=row.ordinal,
+                page=row.page_from,
+            )
+            for row in rows
+        ]
 
     def quality(
         self,

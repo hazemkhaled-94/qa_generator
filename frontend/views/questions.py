@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from lib import backend, catalog, config, configure, page, stage
+
+#: What an .xlsx is on the wire, which the download button labels the file
+#: with so a browser hands it to a spreadsheet rather than saving it blind.
+_WORKBOOK = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 #: The one stage this page runs. It queues over topics, which the Topics
 #: page fits; nothing here can fit them.
@@ -244,9 +250,51 @@ def view() -> None:
                 "Answer": st.column_config.TextColumn(width="medium"),
             },
         )
+        _export(client, where, total)
 
     if picked is not None:
         _detail(client, rows[picked])
+
+
+def _export(client, where: dict, total: int) -> None:
+    """Offers the filtered questions as a workbook, built when asked for.
+
+    Two steps rather than one, and the reason is what `st.download_button`
+    does: it wants the bytes up front, so a page holding one would build a
+    workbook of every question on every rerun - on each keystroke in the
+    search box, for a set this page is usually showing all of. So the
+    first press builds it and the second saves it.
+
+    Kept against the filter it was built from. A workbook offered after the
+    filter moved under it is the wrong set under a name that looks right,
+    which is worse than no button.
+    """
+    asked = json.dumps(where, sort_keys=True, default=str)
+    built = st.session_state.get("questions-workbook")
+
+    if built and built[0] == asked:
+        st.download_button(
+            f"Download {total:,} question(s) · .xlsx",
+            data=built[1],
+            file_name="questions.xlsx",
+            mime=_WORKBOOK,
+            key="questions-download",
+            type="primary",
+            width="stretch",
+        )
+        return
+
+    if st.button("Build a workbook", key="questions-build", width="stretch"):
+        with st.spinner(f"Writing {total:,} question(s)…"):
+            st.session_state["questions-workbook"] = (
+                asked,
+                client.question_workbook(**where),
+            )
+        st.rerun()
+    st.caption(
+        "One sheet of questions, one of the facts each cites, one of counts — "
+        "everything the filter above selects, not just this page."
+    )
 
 
 def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:

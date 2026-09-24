@@ -104,9 +104,11 @@ def push(
     if name == datasets.FACTS:
         records = [datasets.fact_record(one) for one in catalogs.facts.facts(draw)]
     elif name == datasets.QUESTIONS:
-        # `facts` skips a row already judged through `reviewed_verdict`;
-        # questions carry no such column, so the answers already in Argilla
-        # are what says which rows a sample has nothing left to ask about.
+        # What says a sample has nothing left to ask about this row. Read
+        # off Argilla rather than off `questions.reviewed_verdict`, which
+        # exists now and is not the same set: a verdict submitted in the UI
+        # and not yet pulled is in Argilla and not in the column, and
+        # pushing that row again asks somebody to judge it twice.
         # Never for an explicit queue: naming an id asks for that row.
         judged = set() if ids else answered(dataset)
         records = [
