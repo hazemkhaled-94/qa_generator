@@ -27,10 +27,14 @@ of the same `documents` row without either knowing the other exists.
 
 ```
 new  ──start──▶  pending  ──claimed──▶  running  ──▶  done
- ▲                   │                     │
- └──────stop─────────┘                     ├──▶  failed  ──retry──▶  pending
-                                           └──lease expired──▶ failed
+ ▲                   ▲                     │
+ └──────stop─────────┤                     ├──▶  failed  ──retry──▶  pending
+                     │                     └──lease expired──▶ failed
+                     └────────reclaim──────┘
 ```
+
+`reclaim` is the only verb that moves a `running` row, and the only one
+with no route. See [below](#reclaim-and-why-it-is-not-automatic).
 
 ### Claiming
 
@@ -81,23 +85,28 @@ message the command line prints. Two surfaces, one refusal, spelled once.
 ## The command line
 
 ```
-python -m <stage>.run [--status|--start|--stop|--retry|--rerun] [--only SCOPE=VALUE] [--watch]
+python -m <stage>.run [--status|--start|--stop|--retry|--reclaim|--rerun] [--only SCOPE=VALUE] [--watch]
 ```
 
-The flags mirror the stage's HTTP surface one for one, and the actions are
-**mutually exclusive** — two of them in one command silently ran only the
-first.
+The actions are **mutually exclusive** — two of them in one command silently
+ran only the first.
 
-| Flag | Does |
-|---|---|
-| `--status` | Report the queue depth |
-| `--start` | Queue the rows never asked for |
-| `--stop` | Take back what has not begun |
-| `--retry` | Return failed rows to the queue |
-| `--rerun` | Queue every row again, finished ones included |
-| `--only SCOPE=VALUE` | Narrow the action to one item, as `document=<sha256>` or `passage=<id>` |
-| `--watch` | Drain, and keep draining |
-| no flag | Drain the queue once, in the foreground, and stop |
+| Flag | Does | Has a route |
+|---|---|---|
+| `--status` | Report the queue depth | yes |
+| `--start` | Queue the rows never asked for | yes |
+| `--stop` | Take back what has not begun | yes |
+| `--retry` | Return failed rows to the queue | yes |
+| `--rerun` | Queue every row again, finished ones included | yes |
+| `--reclaim` | Return a row a dead worker still holds, without waiting out its lease | **no** |
+| `--only SCOPE=VALUE` | Narrow the action to one item, as `document=<sha256>` or `passage=<id>` | — |
+| `--watch` | Drain, and keep draining | — |
+| no flag | Drain the queue once, in the foreground, and stop | — |
+
+Five of the six mirror the route beside them. **`reclaim` is the one that
+does not**, deliberately: it is the only verb that moves an `in_progress`
+row, and it is safe only when a person knows the worker holding that row is
+gone. A button is the wrong shape for that.
 
 The five modules that answer it:
 
@@ -115,9 +124,54 @@ parser grows a flag for it — `--revocabulary` on chunking, `--revalidate`,
 `--balance` on question generation.
 
 Topic modelling is the exception. It builds the parser from a set of actions
-of its own rather than from the five plus extras, because it has no `start`
-and no `rerun` to extend: `--discover`, `--visualise` and `--delete` sit in
-the same mutually exclusive group as `--status`, `--stop` and `--retry`.
+of its own rather than from the shared ones plus extras, because it has no
+`start` and no `rerun` to extend: `--discover`, `--visualise` and `--delete`
+sit in the same mutually exclusive group as `--status`, `--stop` and
+`--retry`. It has no `--reclaim` either — a fit is one request row, and
+`--retry` after the lease is the whole of recovering it.
+
+### `reclaim`, and why it is not automatic
+
+`abandon` is the automatic version and stays the normal one: it sweeps on a
+lease, because **a row a live worker holds must not be given to a second**.
+`reclaim` is the deliberate one, and it is worth having separately because
+a person knows the worker is gone and the lease cannot.
+
+It fills the gap between the other two verbs. `retry` takes the failed,
+`rerun` explicitly skips what a worker holds, and `stop` takes back only
+what has not begun — so a worker killed mid-row left that row unreachable
+until its lease ran out. Question generation's lease is derived from what a
+topic costs and **computes to 67 days** at 120 questions a topic and a
+900-second timeout, which is not a wait.
+
+**Narrow it.** Nothing here can tell a dead claim from a live one:
+
+```bash
+make questions-reclaim TOPIC=473   # one topic, while a worker may be up
+make questions-reclaim             # every one the stage holds. Only when it is stopped
+```
+
+Two workers on one row is what the lease exists to prevent, and this is the
+one verb that can cause it.
+
+### Two things done once, before the first claim
+
+`queue_main` takes two optional callables, and both run after the queue
+verbs and before anything is drained.
+
+**`preflight`** is what a stage proves before it claims anything — for the
+three that call a model, that the model answers. It raises, and the process
+stops with nothing taken. A worker with no usable credential would
+otherwise claim a row every poll and fail it, and the queue would empty
+into `failed` while the container reported itself up. A watching worker
+retries instead of dying, backing off from 5 seconds towards 60, so a stack
+that came up before its model did recovers on its own.
+
+**`prompts`** records what this stage sends, so the version stamped on each
+row it writes can be resolved to the text that produced it. It runs after
+preflight, so a deployment that cannot work leaves no record of prompts it
+never sent, and it **never fails a start** — see
+[`prompts.py`](prompts.py) and [`backend/database/`](../database/README.md).
 
 ### Why a bare drain, on the host
 
@@ -174,10 +228,11 @@ poetry run pytest tests/unit/stages tests/integration/database/test_queue.py
 | [`tests/unit/stages/test_cli.py`](../../tests/unit/stages/test_cli.py) | Which flag combinations are refused, and that no service is built until a flag needs one |
 | [`tests/unit/stages/test_queue_narrowing.py`](../../tests/unit/stages/test_queue_narrowing.py) | Narrowing to one item, and both refusals |
 | [`tests/unit/stages/test_worker.py`](../../tests/unit/stages/test_worker.py) | Ending a worker's loop |
-| [`tests/integration/database/test_queue.py`](../../tests/integration/database/test_queue.py) | Claiming, the lease sweep and the four verbs against a real PostgreSQL |
+| [`tests/integration/database/test_queue.py`](../../tests/integration/database/test_queue.py) | Claiming, the lease sweep and the queue verbs against a real PostgreSQL |
+| [`tests/integration/database/test_prompt_store.py`](../../tests/integration/database/test_prompt_store.py) | Recording a prompt once per version, and reading back what a version asked for |
 | [`tests/integration/database/test_question_queue.py`](../../tests/integration/database/test_question_queue.py) | Two queues on one table, against the database that has to keep them apart |
 | [`tests/integration/database/test_reloading.py`](../../tests/integration/database/test_reloading.py) | A worker picking up a changed setting without being restarted |
-| [`tests/integration/api/test_stages.py`](../../tests/integration/api/test_stages.py) | The same five verbs over HTTP |
+| [`tests/integration/api/test_stages.py`](../../tests/integration/api/test_stages.py) | The five verbs that have a route, over HTTP |
 
 ## Known edges
 
@@ -191,6 +246,13 @@ Things that are true, are not bugs, and have surprised somebody.
   fight over one row.
 - **`rerun` skips what a worker holds right now.** It queues everything else,
   finished rows included. It is not a way to interrupt a running item.
+  `reclaim` is, and it is the one verb that can hand a live worker's row to
+  a second one. Narrow it.
+- **`reclaim` has no route, on purpose.** It is safe only when a person
+  knows the worker is gone, and the API cannot know that.
+- **A worker that cannot call its model does not start.** It is not a
+  silent failure and not a crash loop: a watching worker backs off from 5
+  seconds towards 60 and waits for the model to come up.
 - **A `make` target and a worker container can drain the same queue at the
   same time.** `SKIP LOCKED` makes that safe rather than forbidden, so a
   foreground drain during development quietly shares the work with whatever

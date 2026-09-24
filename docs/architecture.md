@@ -210,7 +210,7 @@ two models means running them over the *same* rows under two `RUN_ID`s.
 
 A worker proves its model answers before it claims anything, so the half
 that cannot authenticate stops instead of failing rows. See
-[`backend/llm/`](../backend/llm/README.md#a-worker-proves-the-model-before-it-claims-anything).
+[`backend/llm/`](../backend/llm/README.md#a-worker-proves-the-model-before-it-claims-anything-and-waits-for-it).
 
 There is no difference in what it is watched with. `LOG_DIR` names `./logs`
 on the host and the `logs` volume in a container — one name, set over in

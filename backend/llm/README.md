@@ -202,7 +202,7 @@ abandoned.
 | `LLM_BASE_URL` | `.env` | `http://localhost:11434` | Where that model is served |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run of a stage is comparable to the last one |
-| `LLM_TIMEOUT_SECONDS` | `backend.env` | 900 | How long one call may take. Extraction's lease is derived from this |
+| `LLM_TIMEOUT_SECONDS` | `backend.env` | 120 | How long one call may take. Extraction's lease is derived from this. Sized from 9,334 priced calls whose slowest was 15.5 s; it was 900, for a 31B whose median passage took 473 s. **Raise it for a model of that size** |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | How many attempts one call gets. The lease is derived from this too |
 | `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for. Unset takes its default |
 | `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob |

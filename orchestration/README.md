@@ -1,7 +1,7 @@
 # Orchestration
 
-The Dagster code location: one asset per stage, a job, a schedule and a
-sensor. It calls the API and nothing else.
+The Dagster code location: one asset per stage, a job, a schedule and two
+sensors. It calls the API and nothing else.
 
 Dagster is the "somebody" the queue model reserves a slot for. It **decides
 when a stage should run and never runs one**: it posts to the stage routes and
@@ -44,6 +44,31 @@ The schedule and the sensor both ship **stopped**, and are switched on in the
 UI. A stack that starts running the pipeline the moment it comes up is one
 nobody chose.
 
+### A fourth that only watches, and ships running
+
+| | |
+|---|---|
+| The `progress` sensor | Polls every stage's `/status` every 30 seconds and files an `AssetMaterialization` whenever a stage's worked count has risen |
+
+Without it Dagster saw only its **own** runs. Every other way of setting a
+stage going — `make extract`, `POST /extraction/start`, the Start button, a
+worker draining a queue somebody else filled — moved rows and left the
+asset graph saying "never materialised", which is the one reading of that
+graph nobody should have to qualify.
+
+So an asset is no longer only a trigger. What Dagster shows is the
+pipeline, not the subset of it Dagster ran.
+
+This one ships **running**, unlike the other three, and the difference is
+the point: those three *decide that work should happen*, and a deployment
+should opt into that. This one only watches, and **a watcher nobody
+switched on is a graph that is quietly wrong**.
+
+Its cursor holds the last count seen per stage, so a tick that finds
+nothing new reports nothing. The first tick after an empty cursor records
+every stage that has produced anything, which is how a graph that has been
+running for weeks without this catches up in one poll.
+
 `make up` starts the webserver and the daemon with everything else, and the UI
 is at <http://localhost:3000>. Starting them costs nothing on its own: both
 triggers ship stopped, so the webserver serves an asset graph and the daemon
@@ -79,7 +104,7 @@ make dagster-dev          # the same code location on the host, against the
 
 | Tool | Where | Why this one |
 |---|---|---|
-| **Dagster** | [`__init__.py`](__init__.py), [`stages.py`](stages.py) | Assets, checks, a schedule and a sensor, with a UI and a run history, in one dependency |
+| **Dagster** | [`__init__.py`](__init__.py), [`stages.py`](stages.py) | Assets, checks, a schedule and two sensors, with a UI and a run history, in one dependency |
 | **requests** | [`client.py`](client.py) | The stage routes. The only thing this package talks to |
 | **telemetry** | [`__init__.py`](__init__.py) | The same logging and tracing every other process installs, so its lines land in the same index under the same field names and its spans join the trace the API continues |
 
@@ -121,8 +146,13 @@ Things that are true, are not bugs, and have surprised somebody.
   row exactly where it was; the workers carry on draining.
 - **A failed row does not fail the run.** It is an asset check. That is what
   stops one scanned PDF halting the corpus.
-- **Both triggers ship stopped and stay stopped across a restart** until
-  somebody switches them on in the UI.
+- **The two triggers ship stopped and stay stopped across a restart** until
+  somebody switches them on in the UI. The `progress` sensor is the
+  exception and ships running: it starts nothing.
+- **A materialisation no longer means Dagster ran it.** `progress` files
+  one for work any surface set going, which is the point — but it does
+  mean the graph is a record of the pipeline rather than of this
+  orchestrator.
 - **Deleting this directory changes nothing about the pipeline.** Every stage
   still answers its route, its `make` target and its Start button.
 - **The orchestrator cannot fix a row.** It has no database access by design,

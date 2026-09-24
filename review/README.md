@@ -31,6 +31,10 @@ make review-pull-topics
 make review-push-questions   # a sample, spread over the gates
 make review-pull-questions
 make review-status           # how much has been looked at
+
+make review                  # push all three samples in one go
+make review-all              # every row of every kind, not a sample
+make pull                    # pull all three back
 ```
 
 Push, review in the UI at `ARGILLA_API_URL`, then pull.
@@ -39,11 +43,24 @@ Underneath, one command line:
 
 ```bash
 python -m review.run --push facts
+python -m review.run --push facts --all
 python -m review.run --pull questions
 python -m review.run --status
 ```
 
-The three are mutually exclusive and one is required.
+`--push`, `--pull` and `--status` are mutually exclusive and one is
+required. `--all` and `--ids` modify a push.
+
+### A sample, or the corpus
+
+`REVIEW_SAMPLE_SIZE` rows spread over the verdicts is the default, and it
+is what `make review` sends. `--all` sends every row of that kind instead,
+one dataset per kind either way, so **Argilla holds the corpus and the
+reviewer filters there** rather than taking what a draw offered.
+
+`make review-all` is that over all three kinds. It is the right shape when
+somebody is working through a corpus rather than spot-checking one; the
+sample is the right shape when the question is "how are we doing".
 
 ## Reviewing a queue somebody else built
 

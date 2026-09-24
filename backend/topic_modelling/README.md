@@ -299,6 +299,18 @@ invisible.
 One language the fitter refuses is logged and left out; the run fails only if
 *no* language produced a model.
 
+### Before any of it: the naming model is proved
+
+**Only when one is configured.** This stage names topics with a model where
+it has one and falls back to their terms where it does not, so an absent
+model is a choice — but a model that will not answer is a fit that would
+fail on every label, an hour after the factorisation finished.
+
+So when `TOPIC_MODEL` or `LLM_MODEL` resolves to something, the worker asks
+it one question before it claims the request, and stops if it does not
+answer. See
+[`backend/llm/`](../llm/README.md#a-worker-proves-the-model-before-it-claims-anything-and-waits-for-it).
+
 ---
 
 ## Tools, and where each is used

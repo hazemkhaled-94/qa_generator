@@ -70,6 +70,12 @@ call.
 
 All four answer **202** and return at once. None of them does the work.
 
+There is a fifth verb on the command line and **deliberately not here**:
+`reclaim` moves an `in_progress` row back to `pending` without waiting out
+its lease, which is safe only when a person knows the worker holding it is
+gone. The API cannot know that, so it does not offer it. See
+[`backend/stages/`](../stages/README.md#reclaim-and-why-it-is-not-automatic).
+
 | Stage | Narrows to | Example |
 |---|---|---|
 | `parsing` | `document` | `POST /parsing/document/{sha256}/start` |
@@ -133,6 +139,29 @@ anything over one.
 | `GET /questions/plan` | What a topic is planned to be asked, before anything is written |
 | `GET /questions/quality` | How many hold up, which gate stopped the rest, and how much of the subject matter is covered |
 | `PATCH /questions/{id}` | Accept or reject one question |
+
+**Prompts** — served by [`backend/stages/`](../stages/README.md), which
+holds the write every stage records its own prompts through.
+
+| Route | Answers |
+|---|---|
+| `GET /prompts` | Every recorded prompt, narrowed by `service`, `version` and `name`, each with the text as it was composed |
+
+`facts.prompt_version` and `questions.prompt_version` name a version, and
+until this table nothing in the deployment resolved one: the span carrying
+the prompt belongs to a Phoenix project with a retention of its own, and
+the row outlives it. A dataset exported six months later pointed at
+version 5 and could not say what version 5 asked for.
+
+**Read-only, and there is no route that writes one.** A prompt is changed
+in the source and recorded by the stage that sends it. It serves the table
+rather than asking the code, which is what keeps litellm out of this
+process — the modules that compose these prompts import the model client.
+
+The text comes with the listing rather than behind a second call: it is
+what the caller wanted, a prompt is a few kilobytes, and a listing that
+made you ask twice for the only interesting column would be two round
+trips to read one thing.
 
 **Settings** — served by [`backend/settings/`](../settings/README.md).
 

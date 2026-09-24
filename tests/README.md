@@ -20,7 +20,7 @@ make mutation       # change a gate and ask whether a test notices. Hours
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, the frontend's gate list, the two import contracts, every relative link in a README, and pyright at zero | nothing |
+| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, **every prompt pinned to its version by digest**, the frontend's gate list, the two import contracts, every relative link and heading a README names, and pyright at zero | nothing |
 | [`unit/`](unit/) | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
 | [`property/`](property/) | Invariants over generated input, with hypothesis | spaCy, for some |
 | [`regression/`](regression/) | The verdicts the checks have always reached, pinned as a table | spaCy |
@@ -47,6 +47,23 @@ silently never runs.
 | `smoke` | Builds images and reads the compose file |
 | `eval` | Scores a real served model; **never gates** |
 | `perf` | Times the ceilings the code names; **never gates** |
+
+## A prompt is pinned, not just versioned
+
+[`static/test_prompts_pinned.py`](static/test_prompts_pinned.py) pins every
+prompt a stage sends by **digest**, under the `PROMPT_VERSION` its module
+declares.
+
+"Two prompts are two datasets" is what the version is for, and nothing
+checked it: a rule could be added to `types.py`, every question written
+after it would differ from every question written before, and both would
+carry version 8. Changing a prompt now fails this file, and the only way to
+make it pass is to bump the version and write the new digest down — which
+is the decision the version exists to record.
+
+The digest and not the text, because the prompts run to hundreds of lines.
+It is spelled the way `stages/prompts.py` spells it, so a pin and a stored
+row compare without converting either.
 
 ## Two checks that are a tool rather than a test
 

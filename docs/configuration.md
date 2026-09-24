@@ -96,8 +96,11 @@ read-only and marked as the deployment's.
 |---|---|---|---|
 | `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
 | `LLM_BASE_URL` | `.env` | `http://localhost:11434` | Where that model is served |
+| `LLM_CONTAINER_MODEL` | `.env` | — | **Required by compose.** The model the *containers* call, which is not always the host's: a container holds no interactive cloud credential, and inheriting `LLM_MODEL` is how a stale container spent 2,019 restarts failing to authenticate. Set it to the same value if one model serves both |
+| `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | unset | The verifier as the containers reach it. It follows `LLM_CONTAINER_MODEL`, because a verifier the containers cannot reach is a run of ungated questions |
+| `OLLAMA_CONTAINER_URL` | `.env` | `http://host.docker.internal:11434` | Ollama's address as a container sees it. **Required by compose** too, and not overridable per stage: there is nowhere else a container may send a prompt. It also reaches Phoenix as `OLLAMA_BASE_URL`, which is what gives the playground a model it can use without an API key |
 | `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a **self-hosted** model is served, for the case where one stage names `ollama_chat/…` while the shared model is somewhere else. The address follows the provider: a stage overriding only the model would otherwise send an Ollama request to Azure |
-| `LLM_TIMEOUT_SECONDS` | `backend.env` | 900 | How long one call may take. The extraction lease is derived from it |
+| `LLM_TIMEOUT_SECONDS` | `backend.env` | 120 | How long one call may take. The extraction lease is derived from it. Sized from 9,334 priced calls whose slowest was 15.5 s — **raise it for a larger model**, because everything below is derived from it. It was 900, for a 31B whose median passage took 473 s |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease is derived from this too |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable to the last one |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |

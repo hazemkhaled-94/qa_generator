@@ -18,6 +18,7 @@ make eval-score                                  # score the model, and record i
 make eval-score EVAL_RUN_NAME=extraction-prompt-v7
 make eval-phrasing                               # the two phrasing judgements, against their floor
 make second-opinion RUN=<run id>                 # an independent judge, and where it disagrees
+make prompts-publish                             # the recorded prompts, so a span's version opens against one
 ```
 
 Underneath:
@@ -26,11 +27,39 @@ Underneath:
 python -m evaluation.run --upload extraction-golden
 python -m evaluation.run --score extraction-golden
 python -m evaluation.run --second-opinion <run id> --limit 50
+python -m evaluation.run --publish-prompts
 ```
 
-The three are mutually exclusive and one is required. Results are at
+The four are mutually exclusive and one is required. Results are at
 <http://localhost:6006>, signed in as `admin@localhost` with
 `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD`.
+
+## Publishing the prompts
+
+A span already carries the prompt it sent, filled in with that call's
+passages. What it cannot show is the **template** — the prompt with nothing
+substituted — and `llm.prompt_template.version` on the span names a version
+with nothing in Phoenix under it.
+
+```bash
+make prompts-publish
+```
+
+Each recorded prompt becomes a Phoenix prompt, so a span's version opens
+beside the trace, and the playground can select one rather than have it
+pasted in.
+
+It reads from the **database**, not from the code. That is what makes it
+work for a version the source has moved past — the same reason the
+`prompts` table exists — and it keeps the stages out of it: a publisher
+that asked `question_generation.prompts` would load litellm to read a
+string.
+
+**The source is the code.** Phoenix's UI allows an edit and an edit there
+reaches nothing: the pipeline composes from the source, the row records
+what it sent, and the next publish writes over whatever the UI did. Worth
+knowing before somebody changes a prompt in a browser and waits for the
+questions to change.
 
 ## Comparing two runs
 
@@ -578,6 +607,7 @@ medium and hard, which is what limits the draw.
 | [`cases.py`](cases.py) | The golden cases, and nothing that runs them. Read by this package **and** by `tests/eval/` |
 | [`experiments.py`](experiments.py) | Scoring the cases into Phoenix, and the floor each score is read against |
 | [`second_opinion.py`](second_opinion.py) | An independent judge over one run, and the disagreements it found |
+| [`prompts.py`](prompts.py) | Publishing the recorded prompts to Phoenix, so a span's `llm.prompt_template.version` reads against one that can be opened |
 | [`config.py`](config.py) | Where Phoenix is |
 | [`run.py`](run.py) | The command line |
 

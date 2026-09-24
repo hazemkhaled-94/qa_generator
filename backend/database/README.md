@@ -25,6 +25,8 @@ this package owns the tables, the enums, the connection and the migrations.
 | `questions` | The question, its answer, its derived difficulty, its thread, its embedding and its release | question generation |
 | `question_facts` | Which facts each question cites | question generation |
 | `service_settings` | The settings a deployment changed — see [`settings/`](../settings/README.md) | the API, the CLI, the UI |
+| `prompts` | One prompt per version per service, stored **as composed** — what a `prompt_version` on a row actually asked for | each stage, once before its first claim; see [`stages/`](../stages/README.md) |
+| `archived_rows` | Every row deleted from any of the ten above, as JSON — see below | an AFTER DELETE trigger, and [`archive/`](../archive/README.md) |
 
 ### `topics` carries two queues
 
@@ -158,6 +160,12 @@ The URL is assembled from the credentials in `.env` and is never a setting.
 
 `grafana_reader` holds `SELECT` and nothing else. A dashboard is a place
 people paste SQL into, and the application role can `DROP`.
+
+It is granted on **two** databases: the application's and Phoenix's, which
+the Run dashboard reads together. Phoenix owns its own schema, so the
+default privilege there is declared for the Phoenix role rather than the
+superuser — otherwise a table Phoenix creates on a later migration would be
+invisible to Grafana.
 
 The role is created by [`configs/postgres/init.sh`](../../configs/postgres/init.sh),
 which only runs on the first boot of an empty volume. On a stack that already

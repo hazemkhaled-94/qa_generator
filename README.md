@@ -66,6 +66,24 @@ LLM_MODEL=anthropic/claude-sonnet-4-5  # ANTHROPIC_API_KEY
 LLM_MODEL=azure/<deployment>           # a key, or Entra ID
 ```
 
+**Name the containers' model too.** `LLM_MODEL` is what a *host* command
+calls; the containers get `LLM_CONTAINER_MODEL`, and compose refuses to
+start without it:
+
+```ini
+LLM_CONTAINER_MODEL=ollama_chat/gemma4:12b
+```
+
+The two are separate because **some credentials exist only where a person
+is** — an interactive cloud login, a key in a login keychain — and a
+container holds none of them. Inheriting the host's model is how a stale
+container spent 2,019 restarts failing to authenticate. So the containers
+run a local model they can reach, the host runs whatever it can, and both
+drain the same queues at once: claiming is `FOR UPDATE SKIP LOCKED`, so
+that is two halves of one corpus rather than two runs of it.
+
+Set them to the same value if one model serves both.
+
 ```bash
 make install
 make doctor

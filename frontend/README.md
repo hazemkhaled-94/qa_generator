@@ -3,9 +3,14 @@
 A Streamlit application: one page per stage, and a page runs that stage and no
 other.
 
-It holds **one address** — `BACKEND_URL` — and no knowledge of the database,
-the object store, or the services behind the API. Everything it shows, it
-asked the API for.
+It holds **one address it calls** — `BACKEND_URL` — and no knowledge of the
+database, the object store, or the services behind the API. Everything it
+shows, it asked the API for.
+
+`PHOENIX_BASE_URL` is a second address and not a second exception: nothing
+here calls it. It is written into a link a **browser** follows, which is
+why compose leaves it as the host sees it rather than setting a container
+name over it.
 
 ## The pages
 
@@ -28,6 +33,28 @@ it. It asks `GET /services` for that rather than probing anything itself —
 the topology puts the api between the browser and everything else, and a
 page reaching twenty-odd hosts of its own would be the one thing on the
 network that ignores it.
+
+### A picked question links out to what produced it
+
+Two things the row carries that nothing else on a page does:
+
+| | From | Opens |
+|---|---|---|
+| The calls | `questions.span_id` and `questions.trace_id` | Phoenix. **Two links**, because they answer different questions: the span is the gate decision, the trace is the whole topic — the writer call with its prompt, the verifier's, and the phrasing judgements |
+| The prompt | `questions.prompt_version` and `question_type`, through `GET /prompts` | The prompt **as it was sent**, inline |
+
+Both degrade rather than break. A question written before the columns
+existed says so; a deployment with no `PHOENIX_BASE_URL` on the
+`streamlit` service shows the ids as text instead of links, because an
+unreachable link is worse than none.
+
+`PHOENIX_BASE_URL` is the one address here that compose does **not** set
+over to a container name: it is written into a link a *browser* follows,
+not called from the container.
+
+"Which prompt wrote this?" used to be answered by a git checkout. The row
+names a version and the table resolves it, which is the whole point of
+recording them — see [`backend/stages/`](../backend/stages/README.md).
 
 The queue's unit is not always the row: chunking replaces all of a document's
 passages at once, and extraction reads a passage and writes all of its facts
@@ -127,6 +154,7 @@ background of its own so it reads as a figure printed on white.
 |---|---|---|
 | `BACKEND_URL` | `.env` | The one address. `http://api:8000` from a container |
 | `PAGE_SIZE` | `.env` | Rows per page in the listings |
+| `PHOENIX_BASE_URL` | `.env` | Where a **browser** reaches Phoenix, for the trace and span links on a picked question. Optional: unset shows the ids as text. Taken as it stands rather than set over to a container name |
 | `LOG_LEVEL` | `.env` | The frontend logs through the same telemetry configuration as every other process |
 
 Both of the first two are **required**, and the error names the trap: being in

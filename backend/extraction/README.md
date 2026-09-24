@@ -393,6 +393,36 @@ A row carries no citation when the claim named no sentence that passage
 has: a fact refused as `evidence_absent`, and a bridge drawn under prompt
 version 1. Neither is offered to question generation.
 
+## What a run records about itself
+
+Two things happen once, before the first passage is claimed.
+
+**The model is proved.** A worker asks the configured model one question
+and refuses to start if it will not answer, rather than draining the queue
+into `failed` one expensive timeout at a time. A watching worker waits for
+it instead of dying. See
+[`backend/llm/`](../llm/README.md#a-worker-proves-the-model-before-it-claims-anything-and-waits-for-it).
+
+**The prompts are recorded.** `facts.prompt_version` names a version and
+nothing resolved one: the span carrying the prompt belongs to a Phoenix
+project with a retention of its own, and the row outlives it. So each of
+the three extractors writes its composed prompt to the `prompts` table
+under the version its own module declares — three versions, bumped
+separately, because what counts as a fact, what a digest condenses and
+what a bridge may claim are three decisions.
+
+[`prompts.py`](prompts.py) is the catalogue. The atomic prompt is recorded
+**with the cap paragraph `EXTRACTION_MIN_OTHER_SHARE` works out to**,
+because a record of the uncapped text would be a record of something the
+model was never given.
+
+Read it back with `GET /prompts?service=extraction`, or in Phoenix after
+`make prompts-publish`.
+
+Per fact, the verdict also goes to Phoenix's Evaluations view as an
+annotation on the span that produced it — the same verdict the row
+carries, where the call is.
+
 ## Configuration
 
 Nine settings of its own, in `configs/env/backend.env`. Everything else this

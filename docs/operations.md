@@ -101,18 +101,27 @@ pasted in.
 
 ## Dashboards
 
-Three, provisioned into Grafana from `configs/grafana/`, over two datasources.
+Four, provisioned into Grafana from `configs/grafana/`, over three
+datasources.
 
 | Dashboard | Reads | Shows |
 |---|---|---|
 | Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact acceptance by rejection code, question acceptance by gate, topics and their coverage |
 | Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused, and which queue verb was asked for over HTTP |
 | Pipeline logs | Elasticsearch | Lines per level, what failed and where, every line |
+| Run | all three | **One run on one page.** What it produced, what it cost, where the questions went, what the calls were for, its Phoenix projects, the gate verdicts recorded there, and every line it wrote |
 
 **The split is the point.** Logs say what happened once; the tables say what
 is true now. A row a worker died holding logged nothing and is still counted
 in Pipeline state, which is the difference that matters when a stage has gone
 quiet.
+
+**Run** is the one that crosses the split deliberately, and it is why there
+is a third datasource. A run is `questions.run_id` on the application side
+and a Phoenix project named `<stage>-<run id>` on the other; the gate counts
+are rows and the calls, tokens, latency and spend are in the spans. The
+`Phoenix` datasource is the same PostgreSQL server as `Pipeline`, a
+different database, read by the same `grafana_reader` role.
 
 The panel worth watching during a long run is the **model latency p99**. The
 extraction lease is derived from `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`,

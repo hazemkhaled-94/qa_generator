@@ -62,7 +62,7 @@ order somebody runs them, and none of them can do anything those cannot.
 | `make corpus` | Every stage in order, stopping at the first failure. Incremental: a stage with nothing queued costs one call |
 | `make services` | Every container, whether it is listening, and where to open it |
 | `make open` | The same, and open the application |
-| `make review` | Push facts, topic labels and questions to Argilla in one go |
+| `make review` | Push a sample of facts, topic labels and questions to Argilla in one go |
 | `make pull` | Pull every decision made there back into the database |
 
 `make auto` hands the whole thing to Dagster, so an upload starts a run on
@@ -212,6 +212,7 @@ what each leaves alone and why.
 | `make questions-reverify` | Re-check stored questions; no model is called |
 | `make questions-runs` | Which runs there are, newest first |
 | `make questions-diff` | Two runs side by side, on the gate that stopped each |
+| `make questions-reclaim` | Return a topic a dead worker still holds. **Narrow it** |
 
 ```bash
 make questions RUN_ID=b-gemma4-12b            # name a run
@@ -222,6 +223,23 @@ make questions-diff RUNS="a-gpt-4.1 b-gemma4-12b"
 is what makes an A/B possible: `questions-rerun` deletes what it replaces,
 so producing run B used to destroy run A. A run listed `(deleted)` is being
 read out of `archived_rows`.
+
+```bash
+make questions-reclaim TOPIC=473   # one topic, while a worker may be up
+make questions-reclaim             # every one the stage holds
+```
+
+`reclaim` is the gap between `retry`, which takes the failed, and `rerun`,
+which skips what a worker holds. An interrupted topic is `in_progress` and
+neither touches it, so until this existed the only thing that moved one was
+the lease — derived from what a topic costs, and **67 days** at 120
+questions a topic.
+
+**Narrow it while a worker may be up.** Nothing can tell a dead claim from a
+live one, and handing a live worker's row to a second worker is what the
+lease exists to prevent. Over the whole stage only when it is stopped. Every
+stage's command line has `--reclaim`; only this one has a `make` wrapper,
+and none of them has a route.
 
 ## Documents
 
@@ -302,6 +320,7 @@ order.
 | `make review-push-questions` / `review-pull-questions` | The same, for questions |
 | `make review-status` | How much has been looked at |
 | `make review-push-questions IDS=…` | Push exactly those question ids instead of a sample |
+| `make review-all` | Every artefact of every kind, each in its own dataset. Argilla then holds the corpus rather than a draw from it — `make review` is the sample |
 | `make eval-upload` | Put the golden cases in Phoenix |
 | `make eval-score` | Score the served model against them, and record it |
 | `make prompts-publish` | Send the recorded prompts to Phoenix, so a span's version opens against one |
