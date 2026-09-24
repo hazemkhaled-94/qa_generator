@@ -211,5 +211,3 @@ def trace_engine(engine: Engine) -> None:
         SQLAlchemyInstrumentor().instrument(engine=engine)
     except Exception as exc:  # noqa: BLE001
         log.warning("could not instrument the database engine: %s", exc)
-
-

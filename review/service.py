@@ -102,9 +102,7 @@ def push(
     draw = None if everything else settings.sample
 
     if name == datasets.FACTS:
-        records = [
-            datasets.fact_record(one) for one in catalogs.facts.facts(draw)
-        ]
+        records = [datasets.fact_record(one) for one in catalogs.facts.facts(draw)]
     elif name == datasets.QUESTIONS:
         # `facts` skips a row already judged through `reviewed_verdict`;
         # questions carry no such column, so the answers already in Argilla
