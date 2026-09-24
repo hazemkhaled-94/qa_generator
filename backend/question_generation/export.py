@@ -235,17 +235,51 @@ def parser() -> argparse.ArgumentParser:
     built.add_argument("--question-type", dest="question_type", metavar="KIND")
     built.add_argument("--difficulty", choices=("easy", "medium", "hard"))
     built.add_argument(
+        "--planned-difficulty",
+        dest="planned_difficulty",
+        choices=("easy", "medium", "hard"),
+        help="the band the plan asked for, as against the one it came out",
+    )
+    built.add_argument(
         "--cognitive-level",
         dest="cognitive_level",
         choices=("recall", "understand", "apply", "analyse"),
     )
     built.add_argument("--answer-form", dest="answer_form", metavar="FORM")
+    built.add_argument(
+        "--passage-scope",
+        dest="passage_scope",
+        choices=("single_passage", "multi_passage"),
+    )
+    built.add_argument(
+        "--document-scope",
+        dest="document_scope",
+        choices=("single_document", "cross_document"),
+    )
+    built.add_argument(
+        "--topic-scope", dest="topic_scope", choices=("single_topic", "multi_topic")
+    )
+    built.add_argument("--search", metavar="TEXT", help="what the search box takes")
+    built.add_argument(
+        "--field", choices=("question", "answer", "both"), default="both"
+    )
     answerable = built.add_mutually_exclusive_group()
     answerable.add_argument(
         "--answerable", action="store_true", help="only the ones with an answer"
     )
     answerable.add_argument(
         "--unanswerable", action="store_true", help="only the ones without"
+    )
+    # A follow-up cannot be read without the turn before it, so an exam set
+    # wants `--roots-only` and a conversational benchmark wants the threads.
+    follows = built.add_mutually_exclusive_group()
+    follows.add_argument(
+        "--roots-only",
+        action="store_true",
+        help="drop the follow-ups, which cannot be asked on their own",
+    )
+    follows.add_argument(
+        "--followups-only", action="store_true", help="only the follow-ups"
     )
     built.add_argument(
         "--no-citations",
@@ -272,15 +306,23 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.trace_engine(engine())
 
     answerable = True if args.answerable else (False if args.unanswerable else None)
+    follows = True if args.followups_only else (False if args.roots_only else None)
     where: dict[str, Any] = {
         "document": args.document,
         "topic": args.topic,
+        "search": args.search,
+        "field": args.field,
         "status": args.status,
         "answerable": answerable,
+        "follows": follows,
         "question_type": args.question_type,
         "difficulty": args.difficulty,
+        "planned_difficulty": args.planned_difficulty,
         "cognitive_level": args.cognitive_level,
         "answer_form": args.answer_form,
+        "passage_scope": args.passage_scope,
+        "document_scope": args.document_scope,
+        "topic_scope": args.topic_scope,
     }
 
     catalog = QuestionCatalog()
