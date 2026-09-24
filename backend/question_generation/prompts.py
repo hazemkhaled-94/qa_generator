@@ -54,14 +54,21 @@ def _writer() -> Iterator[Composed]:
 def _judges() -> Iterator[Composed]:
     """The prompts that judge one, each at its own module's version.
 
-    The two phrasing judgements are a model's opinion about wording; the
+    The three phrasing judgements are a model's opinion about wording; the
     verifier's four are the round trip. `_VERIFY` asks for the answer,
     and the three below it ask whether passages support an answer already
     in hand - which is a different question, and the reason recoverability
     may cost a second call.
+
+    All THREE phrasing prompts. `_NAMES` was missing, and a missing one is
+    the one failure this catalogue has: the stage sends it - `_phrasing`
+    asks it wherever the parse has already called a question thin - the row
+    records the version, and only the lookup that resolves the version to a
+    text comes back without it.
     """
     for name, text in (
         ("phrasing: source", phrasing._SOURCE),
+        ("phrasing: names something", phrasing._NAMES),
         ("phrasing: self-contained", phrasing._CONTAINED),
     ):
         yield Composed(name, phrasing.PROMPT_VERSION, text)

@@ -32,6 +32,22 @@ def _provider(model: str) -> str:
     return model.split("/", 1)[0] if "/" in model else ""
 
 
+def _self_hosted(model: str) -> bool:
+    """Whether a model id names a runtime this deployment runs itself.
+
+    `ollama` and `ollama_chat` are two prefixes and one runtime, which is
+    why this reads the start of the provider rather than comparing it.
+    """
+    return _provider(model).startswith("ollama")
+
+
+def _same_address(one: str | None, other: str | None) -> bool:
+    """Whether two addresses are the same host, trailing slash aside."""
+    if not one or not other:
+        return False
+    return one.rstrip("/") == other.rstrip("/")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Which model to call, where, and how patiently.
@@ -85,29 +101,42 @@ class Settings:
         not, because two of these values belong to the provider rather than
         to the deployment.
 
-        **The address follows the provider.** litellm reads a model id's
-        prefix to pick the provider, so a stage naming `ollama_chat/...`
-        while `LLM_BASE_URL` points at Azure sends an Ollama request to
-        Azure and is answered with a 404 - which is what happened the first
-        time a phrasing model was pointed at a local runtime. The one thing
-        a stage may override is the model, and an address that contradicts
-        it is not a second override; it is the first one not working.
+        **The address follows the provider, in both directions.** litellm
+        reads a model id's prefix to pick the provider, so a stage naming
+        `ollama_chat/...` while `LLM_BASE_URL` points at Azure sends an
+        Ollama request to Azure and is answered with a 404 - which is what
+        happened the first time a phrasing model was pointed at a local
+        runtime. The one thing a stage may override is the model, and an
+        address that contradicts it is not a second override; it is the
+        first one not working.
 
-        Only for a self-hosted prefix, and only where `OLLAMA_BASE_URL`
-        says where. Everything else keeps the shared address, because a
-        hosted provider's own default is what `base_url` being absent
-        means.
+        The other direction was missing, and `.env.example` is the shape it
+        bites in: `LLM_MODEL` is an `ollama_chat/...` and `LLM_BASE_URL` is
+        `http://localhost:11434`. A deployment built from that file which
+        points one stage at a hosted model kept the local address and sent
+        the hosted request to Ollama's port.
+
+        What is dropped is only an address this can PROVE belongs to the
+        runtime being left, which is when it is the one `OLLAMA_BASE_URL`
+        names. A shared address that is something else is left alone: it may
+        be a gateway in front of several providers, where the model id is
+        what routes and the address is the deployment's after all. Absent,
+        litellm uses the provider's own, which is what unset has always
+        meant.
 
         Args:
             model: The model to call, or None to keep the shared one.
         """
         if not model or _provider(model) == _provider(self.model):
             return self if not model else replace(self, model=model)
-        if not model.startswith("ollama"):
-            return replace(self, model=model)
         moved: dict[str, object] = {"model": model}
-        if self.ollama_base_url:
-            moved["base_url"] = self.ollama_base_url
+        if _self_hosted(model):
+            if self.ollama_base_url:
+                moved["base_url"] = self.ollama_base_url
+        elif _self_hosted(self.model) and _same_address(
+            self.base_url, self.ollama_base_url
+        ):
+            moved["base_url"] = None
         # Thinking is not decided here; see `thinking`. It follows the
         # model being called and not how that model was arrived at.
         return replace(self, **moved)
@@ -135,7 +164,7 @@ class Settings:
         """
         if self.num_ctx:
             return self.num_ctx
-        return WINDOW if _provider(self.model).startswith("ollama") else None
+        return WINDOW if _self_hosted(self.model) else None
 
     @property
     def thinking(self) -> str | None:
@@ -168,7 +197,7 @@ class Settings:
         """
         if self.reasoning_effort:
             return self.reasoning_effort
-        return "off" if _provider(self.model).startswith("ollama") else None
+        return "off" if _self_hosted(self.model) else None
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:

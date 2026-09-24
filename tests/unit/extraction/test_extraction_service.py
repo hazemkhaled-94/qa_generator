@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 import pytest
-from drivers import Extraction, passage, table_passage
+from drivers import Extraction, Vectors, passage, table_passage
 
 from database.qa_generator import FactKind, Rejection
 from extraction.models import Twin
@@ -280,3 +280,56 @@ class TestTheDedupGate:
 
         kept = [one for one in run.queue.stored[1] if one.validated]
         assert len(kept) == 1, "the second is refused against the first, not the third"
+
+    def test_both_writers_of_the_column_embed_the_same_text(self) -> None:
+        """Extraction and `--embed` write one column and disagreed about it.
+
+        The live path embedded the statement as the model wrote it and the
+        backfill embedded it case-folded, so `facts.embedding` held vectors
+        of two different strings - and the dedup probe, which compares a
+        fresh candidate against every stored fact, compared across them.
+        A German statement folded is not the string that was embedded at
+        extraction time.
+        """
+        from extraction.service import embed
+
+        written = "Das Gerät wiegt 4 kg."
+        live = Extraction(
+            passage(),
+            facts={"facts": [{"sentences": [0], "statement": written}]},
+            embed=True,
+        )
+        live.next()
+
+        backfill = Vectors()
+        embed(_OneFact(written), backfill)  # type: ignore[arg-type]
+
+        assert written in live.vectors.seen  # type: ignore[union-attr]
+        assert backfill.seen == [written]
+
+
+class _OneFact:
+    """A catalogue holding one unembedded fact and no unembedded passage."""
+
+    def __init__(self, statement: str) -> None:
+        """Holds the statement until it has been read once."""
+        self._left = [(1, statement)]
+
+    def unembedded_passages(self, limit: int, within=None) -> list:
+        """No passage is waiting for a vector."""
+        del limit, within
+        return []
+
+    def embed_passages(self, vectors: list) -> int:
+        """Nothing to write."""
+        return len(vectors)
+
+    def unembedded(self, limit: int, within=None) -> list:
+        """The fact, once."""
+        del limit, within
+        found, self._left = self._left, []
+        return found
+
+    def embed_facts(self, vectors: list) -> int:
+        """Records that the vector was written."""
+        return len(vectors)

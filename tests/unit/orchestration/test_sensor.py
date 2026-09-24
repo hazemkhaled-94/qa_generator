@@ -103,6 +103,48 @@ def test_a_later_upload_asks_for_its_own_run(monkeypatch) -> None:
     assert evaluate().run_key != first
 
 
+def test_the_same_number_arriving_twice_asks_twice(monkeypatch) -> None:
+    """Dagster keeps a run key for as long as it keeps the run.
+
+    Three documents uploaded, run, drained, three more uploaded was
+    `new-3` both times, and the second one launched nothing: the pipeline
+    stopped being unattended the second time a batch happened to be the
+    size of an earlier one.
+    """
+    answering(monkeypatch, new=3)
+    context = build_sensor_context()
+    first = orchestration.arrivals(context).run_key
+
+    # Worked, and drained. The tick that finds nothing is what records
+    # that the queue emptied.
+    answering(monkeypatch, parsed=3)
+    context = build_sensor_context(cursor=context.cursor)
+    orchestration.arrivals(context)
+
+    answering(monkeypatch, new=3, parsed=3)
+    again = orchestration.arrivals(build_sensor_context(cursor=context.cursor))
+
+    assert isinstance(again, RunRequest)
+    assert again.run_key != first
+
+
+def test_two_ticks_over_an_unchanged_queue_share_a_key_through_the_cursor(
+    monkeypatch,
+) -> None:
+    """The counter moves on a change, not on a tick.
+
+    A sensor that asked for a new run every minute while a stage with no
+    worker held the same three documents would queue a run a minute.
+    """
+    answering(monkeypatch, new=3)
+    context = build_sensor_context()
+    first = orchestration.arrivals(context).run_key
+
+    again = orchestration.arrivals(build_sensor_context(cursor=context.cursor))
+
+    assert again.run_key == first
+
+
 # ── What the orchestrator did not start ────────────────────────────────────
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import llm.config
-from settings import Source, csv, decimal, integer, optional
+from settings import Source, decimal, integer, mapping, optional
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,12 @@ class Settings:
 
         Args:
             source: Where to read them, or None for the process environment.
+
+        Raises:
+            KeyError: If any required setting is missing.
+            ValueError: If a numeric setting is not a number, or
+                TOPIC_LANGUAGE_NAMES carries an entry that is not
+                `code:name`.
         """
         return cls(
             # TOPIC_MODEL names the model that labels a topic, where naming
@@ -50,9 +56,14 @@ class Settings:
             )
             if optional("LLM_MODEL", source)
             else None,
-            languages=dict(
-                pair.split(":", 1) for pair in csv("TOPIC_LANGUAGE_NAMES", source)
-            ),
+            # Through `mapping`, as every other `key:value` setting is read.
+            # Split by hand, an entry carrying no colon raised
+            # "dictionary update sequence element #0 has length 1; 2 is
+            # required" out of the middle of `dict()`, which names neither
+            # the setting nor the entry - and this file is loaded by
+            # `settings.changes` to decide whether a change may be written,
+            # so that sentence is what a page would have shown somebody.
+            languages=mapping("TOPIC_LANGUAGE_NAMES", source),
             num_topics=integer("TOPIC_NUM_TOPICS", source),
             passages_per_topic=integer("TOPIC_PASSAGES_PER_TOPIC", source),
             passes=integer("TOPIC_PASSES", source),

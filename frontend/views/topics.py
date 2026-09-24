@@ -226,19 +226,41 @@ def _health(fit: dict, topics: list[dict]) -> list[dict[str, str]]:
     return rows
 
 
+@st.cache_data(show_spinner=False, max_entries=4)
+def _figure(_client, language: str | None, fitted_at: str | None) -> str | None:
+    """Fetches one language's figure, remembering the last few.
+
+    A pyLDAvis page inlines d3, the LDAvis script and the whole term-topic
+    matrix, so it is megabytes rather than kilobytes - and this is drawn
+    inside the Analysis fold, which runs its body whichever way it is
+    folded. Uncached it was fetched from the API on every rerun of the
+    script, which on Streamlit is every click on the page, whether or not
+    anybody had opened the fold. The same reason the Documents page caches
+    a file rather than pulling it again to redraw the viewer beside it.
+
+    `fitted_at` is in the key and is not read: a fit is the only thing that
+    redraws a figure, and it is the only thing that moves that timestamp,
+    so a refit misses the cache and anything else hits it. `_client` is
+    underscored so Streamlit leaves it out of the key.
+    """
+    return _client.topic_visualisation(language)
+
+
 def _map(client, fit: dict) -> None:
     """Draws one language model as a pyLDAvis figure."""
-    languages = [one["language"] for one in fit["languages"] if one["topics"]]
-    if not languages:
+    drawn_at = {
+        one["language"]: one["fitted_at"] for one in fit["languages"] if one["topics"]
+    }
+    if not drawn_at:
         return
 
     language = st.selectbox(
         "Topic map",
-        languages,
+        list(drawn_at),
         key="topics-map-language",
         help="One figure per language model. Topic numbers match the table.",
     )
-    drawn = client.topic_visualisation(language)
+    drawn = _figure(client, language, drawn_at[language])
     if drawn is None:
         st.caption(f"No map for {language}. A fit draws one.")
         return

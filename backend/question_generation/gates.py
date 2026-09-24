@@ -69,12 +69,32 @@ def _bare(text: str) -> str:
 
 
 def _folded(token: str) -> str:
-    """Drops the separators that only say which locale wrote a number.
+    """Reads a token as the value it is, where it is one.
 
-    `0,3` and `0.3` are one value; so are `1.033` and `1,033`. Only applied
-    when comparing one number against another, so no word is affected.
+    `0,3` and `0.3` are one value; so are `1.033`, `1,033` and `1033`. The
+    point is the comparison that stays: `4` is still not `48`, which is the
+    one thing the unit guard in `agrees` exists to catch.
+
+    Deleting the separators is what this used to do, and it deleted the
+    difference between a decimal comma and no separator at all: `12,5`
+    folded to `125`, so an answer asserting `1,5 Millionen` was confirmed
+    by passages that merely said `15`. A German corpus writes its decimals
+    with a comma, so that is the common shape and not an exotic one.
+
+    So the value is parsed rather than the punctuation dropped, by
+    `figures` below - the same reading that decides whether an aggregation
+    adds up, which already knows a three-digit group after the last
+    separator is a thousands group and anything else is a fraction.
+
+    Only for a token that is a figure WHOLE. A word keeps its punctuation,
+    which is what the paragraph above always claimed and the deletion never
+    did: `U.S.A.` folded to `USA`, and a version like `1.2.3` folded to
+    `123`.
     """
-    return token.replace(",", "").replace(".", "")
+    if _FIGURE.fullmatch(token) is None:
+        return token
+    found = figures(token)
+    return repr(found[0]) if len(found) == 1 else token
 
 
 def _misfits(
@@ -179,7 +199,12 @@ def fitting(
     The complaint reported is the asked-for form's, not the last one tried:
     that is the form the writer was told to produce, so it is the one a
     person reading the rejection needs to see.
+
+    A type declares at least one form, so `forms` is never empty from here;
+    the fallback is `structural`'s, which guards for that two lines before
+    calling this and would then have raised an IndexError inside it.
     """
+    asked = forms[0] if forms else AnswerForm.VALUE
     verbs = bool(claim(answer, language).verbs)
     looks = _looks_like(answer, verbs)
     tried = (
@@ -190,9 +215,9 @@ def fitting(
         failed = _misfits(answer, form, bounds, verbs)
         if failed is None:
             return form, None
-        if form == forms[0]:
+        if form == asked:
             first = failed
-    return forms[0], first or _misfits(answer, forms[0], bounds, verbs)
+    return asked, first or _misfits(answer, asked, bounds, verbs)
 
 
 def structural(

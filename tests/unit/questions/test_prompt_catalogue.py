@@ -65,6 +65,20 @@ def test_every_verifier_prompt_is_declared(catalogue) -> None:
         assert text in declared
 
 
+def test_every_phrasing_prompt_is_declared(catalogue) -> None:
+    """Three of them, and `_NAMES` was the one nobody declared.
+
+    The verifier's four had a check of this shape and the phrasing
+    judgements did not, so the one that was missing stayed missing:
+    `names_something` is sent wherever the parse has already called a
+    question thin, and the version on those rows resolved to two prompts
+    out of three.
+    """
+    declared = {one.text for one in catalogue.values()}
+    for text in (phrasing._SOURCE, phrasing._NAMES, phrasing._CONTAINED):
+        assert text in declared
+
+
 def test_a_declared_prompt_is_never_empty(catalogue) -> None:
     """An empty one resolves a version to nothing, which is worse than none."""
     for name, one in catalogue.items():

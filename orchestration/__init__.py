@@ -75,7 +75,7 @@ nightly = ScheduleDefinition(
     default_status=DefaultSensorStatus.STOPPED,
     description="Starts the pipeline when a stage has work nobody has asked for.",
 )
-def arrivals():
+def arrivals(context):
     """Requests a run when the first stage has documents sitting `new`.
 
     This is the piece that makes the pipeline unattended, and it is worth
@@ -88,23 +88,37 @@ def arrivals():
     Watches parsing only. The stages after it are chained by the asset
     graph, so a second sensor per stage would race the run already
     working through them.
+
+    The run key counts the decisions rather than the documents, and the
+    cursor is what makes that possible. Dagster remembers a run key for as
+    long as it keeps the run, so a key naming only the queue depth is a key
+    that comes round again: three documents uploaded, run, drained, three
+    more uploaded is `new-3` twice, and the second one launches nothing at
+    all. The counter moves when the queue this sensor is looking at differs
+    from the one it last asked about, so two polls over an unchanged queue
+    still share a key and still ask for one run.
     """
     settings = Settings.load()
     queue = Backend(settings.backend_url).status("parsing")
 
+    asked = json.loads(context.cursor) if context.cursor else {}
     waiting = queue.rows.get("new", 0)
     if not waiting:
+        # Recorded, not just skipped: an emptied queue is what tells the
+        # next arrival that it is a new one rather than the same one again.
+        context.update_cursor(json.dumps({"waiting": 0, "run": asked.get("run", 0)}))
         return SkipReason("no document is waiting to be asked for")
     if not queue.idle:
+        # The cursor is left alone: the run already going is the one that
+        # asked, and this tick has decided nothing.
         return SkipReason(
             f"{queue.outstanding} document(s) already queued or in progress"
         )
 
+    run = asked.get("run", 0) + (waiting != asked.get("waiting"))
+    context.update_cursor(json.dumps({"waiting": waiting, "run": run}))
     log.info("%d document(s) uploaded and never asked for; starting", waiting)
-    # Keyed on how many are waiting, so a second upload while a run is
-    # working asks for another run rather than being folded into the one
-    # already going - and two polls over an unchanged queue do not.
-    return RunRequest(run_key=f"new-{waiting}")
+    return RunRequest(run_key=f"new-{run}-{waiting}")
 
 
 @sensor(

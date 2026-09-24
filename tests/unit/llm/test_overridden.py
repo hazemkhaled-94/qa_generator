@@ -183,3 +183,40 @@ def test_a_deployment_that_is_self_hosted_throughout_turns_thinking_off() -> Non
     assert local.thinking == "off"
     assert local.overridden(None).thinking == "off"
     assert local.overridden("ollama_chat/granite4.2:8b").thinking == "off"
+
+
+def test_a_hosted_override_leaves_the_runtime_it_was_served_from() -> None:
+    """The mirror of the case above, and the half that was missing.
+
+    `.env.example` ships LLM_MODEL as an `ollama_chat/...` with
+    LLM_BASE_URL on localhost, so a deployment built from it that points
+    one stage at a hosted model kept `http://localhost:11434` and posted
+    the hosted request to Ollama's port. Absent, litellm resolves the
+    provider's own address.
+    """
+    settings = shared(
+        model="ollama_chat/gemma4:12b",
+        base_url="http://localhost:11434",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    moved = settings.overridden("azure/gpt-4.1")
+
+    assert moved.model == "azure/gpt-4.1"
+    assert moved.base_url is None
+
+
+def test_a_gateway_in_front_of_two_providers_keeps_its_address() -> None:
+    """An address this cannot prove belongs to the runtime is left alone.
+
+    LLM_BASE_URL is sometimes a proxy that several providers sit behind,
+    where the model id is what routes and the address is the deployment's.
+    Only the address OLLAMA_BASE_URL names is known to be the runtime's.
+    """
+    settings = shared(
+        model="ollama_chat/gemma4:12b",
+        base_url="http://gateway:4000",
+        ollama_base_url="http://localhost:11434",
+    )
+
+    assert settings.overridden("azure/gpt-4.1").base_url == "http://gateway:4000"

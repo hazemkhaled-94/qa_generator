@@ -37,7 +37,11 @@ GATES = {
     "phrasing": (
         phrasing,
         "2",
-        {"source": phrasing._SOURCE, "contained": phrasing._CONTAINED},
+        {
+            "source": phrasing._SOURCE,
+            "names": phrasing._NAMES,
+            "contained": phrasing._CONTAINED,
+        },
     ),
     "verifier": (
         verifier,
@@ -54,6 +58,9 @@ GATES = {
 #: Each gate prompt's digest, under its module's version above.
 GATE_PROMPTS = {
     "source": "39806a8d46bcba25",
+    # Unpinned until now, and unrecorded with it: `_NAMES` is the third
+    # phrasing judgement and both this file and the catalogue knew of two.
+    "names": "922ea5329c48fc42",
     "contained": "233676753e8fff37",
     "verify": "aa2ba7278d12f3c7",
     "support": "5839f6c9ba418d4a",

@@ -99,10 +99,19 @@ observability = [
     "opentelemetry-api>=1.44.0,<2.0.0",
     "opentelemetry-sdk>=1.44.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0",
-    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    # The ONE instrumentor this project applies, and `telemetry/traces.py`
+    # says why it is the one: Phoenix holds the logic, and an HTTP request,
+    # an S3 GET and a request handler are the system, which is what the
+    # logs are for. It is applied by name, off TRACE_DATABASE, and only
+    # while somebody is reading it.
+    #
+    # The fastapi, requests and botocore instrumentors were declared here
+    # and in three requirements files and NOTHING imported any of them -
+    # the `_INSTRUMENTORS` table that once applied them is gone, and no
+    # image runs under `opentelemetry-instrument`. deptry could not see it:
+    # all four ship the top-level name `opentelemetry`, so the
+    # `import opentelemetry` in traces.py satisfies every one of them.
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
-    "opentelemetry-instrumentation-requests>=0.65b0",
-    "opentelemetry-instrumentation-botocore>=0.65b0",
     # Turns a litellm call into a span carrying the prompt, the completion
     # and the token counts. Without it Phoenix shows an `extract` span with
     # no model detail at all, which is a trace viewer and not LLM

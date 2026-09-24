@@ -93,6 +93,31 @@ def revalidate(catalog: FactCatalog, checker: FactChecker, within=None) -> int:
 _EMBED_BATCH = 64
 
 
+def for_passage(text: str) -> str:
+    """A passage's text, as both paths that embed one prepare it."""
+    return normalised(text)
+
+
+def for_statement(text: str) -> str:
+    """A fact's statement, as both paths that embed one prepare it.
+
+    As written, and the identity is the point. What matters is not which
+    of the two preparations is better but that the two WRITERS of one
+    column agree: `_deduplicated` embedded the statement as it stands and
+    this backfill folded it, so `facts.embedding` held vectors of two
+    different texts - `normalised` case-folds, and a German statement
+    casefolded is not the string the model was given at extraction time.
+    The dedup gate then compared a raw candidate against a mixture, and so
+    did `selection.meets` when it paired two facts for one sample.
+
+    Unfolded rather than folded because the live path is what wrote almost
+    every row: a corpus re-levelled the other way would have to be
+    re-embedded whole. `make extract-embed` after clearing the column is
+    what does that if a deployment wants the other convention.
+    """
+    return text
+
+
 def embed(catalog: FactCatalog, embedder: Embedder, within=None) -> int:
     """Writes the vectors onto passages and facts already stored.
 
@@ -111,12 +136,12 @@ def embed(catalog: FactCatalog, embedder: Embedder, within=None) -> int:
         How many rows were embedded, passages and facts together.
     """
     done = 0
-    for read, write in (
-        (catalog.unembedded_passages, catalog.embed_passages),
-        (catalog.unembedded, catalog.embed_facts),
+    for read, write, prepare in (
+        (catalog.unembedded_passages, catalog.embed_passages, for_passage),
+        (catalog.unembedded, catalog.embed_facts, for_statement),
     ):
         while batch := read(_EMBED_BATCH, within):
-            vectors = embedder.embed_all([normalised(text) for _, text in batch])
+            vectors = embedder.embed_all([prepare(text) for _, text in batch])
             done += write(
                 [(row, vector) for (row, _), vector in zip(batch, vectors, strict=True)]
             )
@@ -774,7 +799,7 @@ class ExtractionService(StageService):
         """The passage's own vector, or None when this deployment writes none."""
         if self._embedder is None:
             return None
-        return self._embedder.embed(normalised(passage.text))
+        return self._embedder.embed(for_passage(passage.text))
 
     def _deduplicated(self, facts: list[CheckedFact], current) -> list[CheckedFact]:
         """Embeds every fact and refuses the ones already in the corpus.
@@ -792,7 +817,9 @@ class ExtractionService(StageService):
         """
         if self._embedder is None:
             return facts
-        vectors = self._embedder.embed_all([fact.statement for fact in facts])
+        vectors = self._embedder.embed_all(
+            [for_statement(fact.statement) for fact in facts]
+        )
         threshold = self._duplicate_cosine
         written: list[tuple[str, list[float]]] = []
         checked: list[CheckedFact] = []

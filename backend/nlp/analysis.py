@@ -38,6 +38,36 @@ _WHITESPACE = re.compile(r"\s+")
 #: the same year anywhere else as `2026`.
 _TRAILING = ".,;:"
 
+#: How many parsed texts to keep. The gates below read one question and one
+#: answer between six and eight ways each, and none of them knew another had
+#: already parsed the string: putting one candidate through
+#: `QuestionChecker.check` parsed its question six times, its target answer
+#: seven, and - in `asserted`, `explains` and `about` - the cited passages
+#: joined together up to three times, which is the expensive one at a couple
+#: of thousand characters a go.
+#:
+#: ponytail: sized for one candidate's worth of strings, not for a corpus.
+#: A Doc holds its own tokens and vectors, so a large cache is real memory in
+#: a worker that already carries the embedding model; this is small enough to
+#: be free and large enough that nothing within one `check` misses. The
+#: upgrade, if a caller ever needs more, is to thread one Doc through the
+#: gates instead of a string.
+_PARSED = 64
+
+
+@lru_cache(maxsize=_PARSED)
+def _read(text: str, language: str | None) -> Doc:
+    """Parses one text, remembering the last few.
+
+    Keyed on the text and the language rather than on the pipeline, because
+    the pipeline is what `pipeline` already caches and two languages
+    resolving to one model give one Doc either way.
+
+    Read-only to every caller here, which is what makes sharing a Doc safe:
+    nothing below writes to a token, a span or an extension.
+    """
+    return pipeline(language)(text)
+
 
 @lru_cache(maxsize=1)
 def _capitalises_nouns() -> frozenset[str]:
@@ -159,9 +189,7 @@ def interrogatives(text: str, language: str | None) -> tuple[str, ...]:
     gelten als reguliert?` carries two and is one question. Measured over 17
     real questions, the question words separated 16.
     """
-    return tuple(
-        token.text for token in pipeline(language)(text) if _interrogative(token)
-    )
+    return tuple(token.text for token in _read(text, language) if _interrogative(token))
 
 
 def _units(span: Doc | Span) -> tuple[str, ...]:
@@ -323,7 +351,7 @@ def pointing(text: str, language: str | None) -> tuple[str, ...]:
     verdict says whether it lands.
     """
     found: set[str] = set()
-    for token in pipeline(language)(text):
+    for token in _read(text, language):
         # A question word asks; it cannot point outside the question it is
         # asking. The tagger does not always agree - see `_ASKING`.
         if _interrogative(token) or token.lemma_.casefold() in _ASKING:
@@ -354,7 +382,7 @@ def phrases(text: str, language: str | None) -> tuple[str, ...]:
     the caller wants the one that says what the question is about and a
     question opens with the word asking rather than with its subject.
     """
-    document = pipeline(language)(text)
+    document = _read(text, language)
     kept = []
     for chunk in document.noun_chunks:
         content_words = [token for token in chunk if token.pos_ in _CONTENT]
@@ -426,7 +454,7 @@ def _sentences(document: Doc) -> list[Sentence]:
 
 def sentences(text: str, language: str | None) -> list[Sentence]:
     """Splits a passage into sentences, each located in the passage text."""
-    return _sentences(pipeline(language)(text))
+    return _sentences(_read(text, language))
 
 
 def vocabulary(text: str, language: str | None) -> frozenset[str]:
@@ -437,7 +465,7 @@ def vocabulary(text: str, language: str | None) -> frozenset[str]:
     separately and the tagger does not label a word the same way in a short
     statement as in the longer sentence it came from.
     """
-    document = pipeline(language)(text)
+    document = _read(text, language)
     return frozenset(
         variant.casefold()
         for token in document
@@ -456,12 +484,12 @@ def content(text: str, language: str | None) -> frozenset[str]:
     it possible to ask whether two phrasings say the same thing without
     asking whether they are spelled the same.
     """
-    return frozenset(_lemmas(pipeline(language)(text)))
+    return frozenset(_lemmas(_read(text, language)))
 
 
 def claim(text: str, language: str | None) -> Claim:
     """Reads what one written statement asserts."""
-    document = pipeline(language)(text)
+    document = _read(text, language)
     return Claim(
         predicates=_predicates(document),
         units=_units(document),

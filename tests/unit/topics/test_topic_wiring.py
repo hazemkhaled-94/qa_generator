@@ -96,11 +96,21 @@ def test_every_setting_is_required(monkeypatch, name) -> None:
 
 
 def test_a_language_pair_without_a_name_is_refused(monkeypatch) -> None:
-    """`de:German`, not `de`: the prompt has nothing to say otherwise."""
+    """`de:German`, not `de`: the prompt has nothing to say otherwise.
+
+    Named, both of them. Split by hand this raised "dictionary update
+    sequence element #0 has length 1; 2 is required" out of the middle of
+    `dict()`, which says neither which setting nor which entry - and
+    `settings.changes` loads this file to decide whether a change may be
+    written, so that sentence is what a page showed somebody who mistyped
+    one.
+    """
     monkeypatch.setenv("TOPIC_LANGUAGE_NAMES", "de")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="TOPIC_LANGUAGE_NAMES") as refusal:
         Settings.load()
+
+    assert "'de'" in str(refusal.value)
 
 
 # ── Wiring it up ──────────────────────────────────────────────────────────

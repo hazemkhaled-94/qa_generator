@@ -268,9 +268,12 @@ def strided(items: list, wanted: int) -> list:
     if wanted <= 0 or wanted >= len(items):
         return items
     step = len(items) / wanted
-    picked = sorted({int(position * step) for position in range(wanted)})
-    rest = [index for index in range(len(items)) if index not in set(picked)]
-    return [items[index] for index in picked + rest]
+    taken = {int(position * step) for position in range(wanted)}
+    # Built once. Spelled `not in set(picked)` inside the comprehension, it
+    # was rebuilt per item, which is the whole list walked again for every
+    # passage of every topic.
+    rest = [index for index in range(len(items)) if index not in taken]
+    return [items[index] for index in sorted(taken) + rest]
 
 
 class Deal:

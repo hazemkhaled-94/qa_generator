@@ -63,9 +63,21 @@ class PassageTopic(Base):
 #:
 #: DISTINCT ON rather than a max-weight join, so two topics tied at the same
 #: weight yield one row instead of two.
+#:
+#: The topic id breaks the tie, and it is not decoration. Without it two
+#: topics at the same weight leave WHICH of them is dominant to the plan,
+#: and this subquery is read by four different queries in two services -
+#: the facts a topic is the subject of, the passages a bridge is grouped
+#: from, what a listing is filtered by and what a question's topic_scope is
+#: counted over. Two of them disagreeing about one passage is a question
+#: stored under a subject the page it was drawn on does not list it under,
+#: and every other ordering in this pipeline already names its tiebreaker
+#: for exactly this reason.
 DOMINANT = (
     select(PassageTopic.passage_id, PassageTopic.topic_id)
-    .order_by(PassageTopic.passage_id, PassageTopic.weight.desc())
+    .order_by(
+        PassageTopic.passage_id, PassageTopic.weight.desc(), PassageTopic.topic_id
+    )
     .distinct(PassageTopic.passage_id)
     .subquery()
 )

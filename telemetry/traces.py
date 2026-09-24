@@ -114,10 +114,10 @@ def instrument_llm() -> None:
     :func:`configure`, and that is the whole reason this is a function of
     its own. Importing the instrumentor imports litellm, `configure` runs
     in every process, and the api is sized to serve JSON and deliberately
-    loads neither it nor anything else that holds a model. Putting it in
-    `_INSTRUMENTORS` would have loaded litellm into the api at start-up,
-    and `tests/static/test_api_stays_light.py` would not have caught it:
-    that reads imports as syntax, and the one there is a dynamic string.
+    loads neither it nor anything else that holds a model. Applying it from
+    `configure` would have loaded litellm into the api at start-up, and
+    `tests/static/test_api_stays_light.py` would not have caught it: that
+    reads imports as syntax, and the one here is inside a function.
 
     Does nothing the second time. Applies once per process; question
     generation builds two clients, a writer and a verifier, and the

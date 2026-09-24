@@ -19,6 +19,7 @@ from database.qa_generator import (
 from question_generation.checker import QuestionChecker
 from question_generation.gates import (
     OVERLAP,
+    _folded,
     agrees,
     anchored,
     asks_for_an_agent,
@@ -1078,6 +1079,34 @@ def test_a_number_is_the_same_number_in_either_locale(recovered, target) -> None
     not `48`.
     """
     assert agrees(recovered, target, "de")
+
+
+@pytest.mark.parametrize(
+    ("recovered", "target"),
+    [
+        ("125 Anlagen wurden geprüft", "12,5 Prozent"),
+        ("15 Anlagen wurden geprüft", "1,5 Millionen"),
+    ],
+)
+def test_a_decimal_comma_is_not_the_digits_run_together(recovered, target) -> None:
+    """The fold deleted the separator, so `12,5` and `125` were one value.
+
+    That is the common shape in a German corpus, not an exotic one, and it
+    ran through the one guard no opinion may overrule: every number the
+    target asserts has to occur in what came back. An answer claiming
+    `1,5 Millionen` was confirmed by a passage that merely said `15`.
+    """
+    assert not agrees(recovered, target, "de")
+
+
+@pytest.mark.parametrize("token", ["U.S.A.", "1.2.3"])
+def test_a_word_keeps_its_punctuation(token) -> None:
+    """What the fold's own docstring always claimed and it never did.
+
+    It dropped every dot and comma from every token it was handed, units
+    and vocabulary alike, so `U.S.A.` was `USA` and a version was a number.
+    """
+    assert _folded(token) == token
 
 
 # ── The form each type's answer takes, which decides who reads it how ──────

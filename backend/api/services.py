@@ -86,9 +86,13 @@ CATALOGUE: tuple[Service, ...] = (
     Service("grafana", "Dashboards over the logs and the pipeline state", 3000),
     Service("adminer", "The database, for a query nothing else answers", 8080),
     Service("postgres", "Documents, passages, facts, topics and questions", 5432),
-    Service(
-        "redis", "The lock a stage takes so two workers cannot claim one row", 6379
-    ),
+    # Argilla's, and nothing else's. The line here used to say it was "the
+    # lock a stage takes so two workers cannot claim one row", which is not
+    # true of anything: no backend package imports a Redis client, and what
+    # keeps two workers off one row is FOR UPDATE SKIP LOCKED in
+    # `stages.queue`. A page called System health that misdescribes the
+    # claim protocol is worse than one that leaves it out.
+    Service("redis", "The queue and cache Argilla runs on", 6379),
     Service("elasticsearch", "The log index Grafana reads", 9200),
     Service("filebeat", "Ships each container's log lines into Elasticsearch"),
     Service("seaweedfs-ui", "The object store's own pages", 9333),

@@ -41,10 +41,10 @@ docling-core>=2.0.0,<3.0.0
 botocore>=1.43.78,<2.0.0
 opentelemetry-sdk>=1.44.0,<2.0.0
 opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0
-opentelemetry-instrumentation-fastapi>=0.65b0
+# The one instrumentor anything applies, behind TRACE_DATABASE. The
+# fastapi, requests and botocore ones were declared and never imported;
+# see the note in pyproject.toml for why deptry could not say so.
 opentelemetry-instrumentation-sqlalchemy>=0.65b0
-opentelemetry-instrumentation-requests>=0.65b0
-opentelemetry-instrumentation-botocore>=0.65b0
 # Every model call as a span carrying its prompt, completion and tokens.
 # Imported by llm/client.py, which already imports litellm, and not by
 # telemetry: the api runs telemetry too and must load neither.

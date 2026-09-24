@@ -46,6 +46,27 @@ class Answers:
         return answer
 
 
+@pytest.fixture(autouse=True)
+def nothing_remembered():
+    """Empties Streamlit's data caches between runs.
+
+    A `@st.cache_data` cache is per PROCESS, and a page that caches a fetch
+    keys it on the arguments rather than on the client - which is the whole
+    point of `_client` being underscored. Two tests driving one page with
+    two scripted backends therefore share whatever the first of them
+    cached, and the second reads an answer the client it was given never
+    gave.
+
+    Until now this was safe by accident: the one page that cached keyed on
+    a document digest, and the fixtures happened to vary it.
+    """
+    import streamlit as st
+
+    st.cache_data.clear()
+    yield
+    st.cache_data.clear()
+
+
 @pytest.fixture
 def run_view(monkeypatch):
     """Runs one view with its backend clients stubbed."""
