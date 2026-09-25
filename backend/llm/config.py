@@ -11,20 +11,32 @@ from settings import Source, decimal, integer, optional, required
 #: names none.
 #:
 #: Measured over 9,334 priced calls: the widest was 4,308 tokens of prompt
-#: and answer together, p99 was 3,716, and the median 1,132. So this is
-#: about half as much again as anything this pipeline has ever sent.
+#: and answer together, p99 was 3,716, and the median 1,132. Those were
+#: calls by models that do not think, and 6,144 covered them.
 #:
-#: Not smaller, and the margin is the reason. A prompt over the window is
-#: TRUNCATED rather than refused - the answer comes back looking fine and
-#: rests on a passage the model never saw - so the cost of being too small
-#: is silent and the cost of being too large is some cache. `Client.answer`
-#: warns when a call comes within `_NEAR_WINDOW` of it, which is what makes
-#: the first half of that sentence survivable.
+#: **A reasoning model spends the window on reasoning.** One extraction
+#: call against muse-glimmer:30b-mlx measured 1,252 tokens of prompt and
+#: 4,702 of answer - 5,954 together, 97% of that 6,144, and the passage was
+#: the median one. A p90 passage would have gone over. Thinking is left on
+#: by default now (see `Settings.thinking`), so the window has to hold a
+#: prompt, however long the model reasons, and the answer after it.
 #:
-#: Smaller buys nothing measurable here: three concurrent requests at this
-#: window overlapped on the machine this was written on, 5.2s of wall
-#: against 12.6s of work, so the runtime is already serving more than one.
-WINDOW = 6144
+#: Not smaller, and the margin is the reason. A call over the window is
+#: TRUNCATED rather than refused - the oldest tokens go, which is the
+#: system prompt, and the answer comes back looking fine and written
+#: without the rules - so the cost of being too small is silent and the
+#: cost of being too large is some cache. `Client.answer` warns within
+#: `_NEAR_WINDOW` of it, on prompt AND completion, which is what makes the
+#: first half of that sentence survivable.
+#:
+#: Larger costs nothing measurable here. Timed on the same prompt, same
+#: passage, with the model unloaded between runs: 225s at 6,144 against
+#: 224s at the model's full 131,072, and the MLX runner allocated LESS
+#: memory at the larger window because it grows the cache as it fills it.
+#: What a huge window does cost is parallelism - the runtime sizes its
+#: concurrent slots from it, and at 131,072 it served one request at a
+#: time - which is why this is a bounded number and not the advertised one.
+WINDOW = 16384
 
 
 def _provider(model: str) -> str:

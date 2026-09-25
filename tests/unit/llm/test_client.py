@@ -63,15 +63,17 @@ def rate_limited() -> Exception:
     )
 
 
-def answered(shape, prompt: int | None = None):
+def answered(shape, prompt: int | None = None, completion: int = 8):
     """What `_ask` hands back: the parsed answer and the response it came in.
 
     `prompt` puts a usage on the response, for the checks that read how
-    many tokens a call spent.
+    many tokens a call spent. `completion` is the other half of the window
+    and defaults to a few, which is what a model that does not think sends
+    back.
     """
     if prompt is None:
         return shape(), None
-    return shape(), Response(Usage(prompt_tokens=prompt, completion_tokens=8))
+    return shape(), Response(Usage(prompt_tokens=prompt, completion_tokens=completion))
 
 
 def permanent() -> Exception:
@@ -470,6 +472,46 @@ def test_a_prompt_well_inside_the_window_says_nothing(monkeypatch, caplog) -> No
         )
 
     assert "TRUNCATED" not in caplog.text
+
+
+def test_a_long_answer_fills_the_window_too(monkeypatch, caplog) -> None:
+    """The overflow a reasoning model causes is at the other end.
+
+    Measured on muse-glimmer:30b-mlx reading a MEDIAN passage: 1,252
+    tokens of prompt and 4,702 of answer, 97% of a 6,144 window. Watching
+    the prompt alone calls that 20% and says nothing, and the p90 passage
+    that goes over loses its system prompt in silence.
+    """
+    monkeypatch.setattr(
+        Client,
+        "_ask",
+        lambda self, system, user, shape: answered(shape, prompt=1252, completion=4702),
+    )
+
+    with caplog.at_level("WARNING"):
+        Client(settings(num_ctx=6144, model="ollama_chat/gemma4:12b")).answer(
+            system="s", user="u", shape=Shape
+        )
+
+    assert "TRUNCATED" in caplog.text
+    assert "5,954" in caplog.text, "prompt and completion together"
+    assert "1,252 in" in caplog.text and "4,702 out" in caplog.text
+
+
+def test_the_two_halves_are_counted_together(monkeypatch, caplog) -> None:
+    """Neither half alone is near it; together they are over four fifths."""
+    monkeypatch.setattr(
+        Client,
+        "_ask",
+        lambda self, system, user, shape: answered(shape, prompt=3000, completion=2000),
+    )
+
+    with caplog.at_level("WARNING"):
+        Client(settings(num_ctx=6144, model="ollama_chat/gemma4:12b")).answer(
+            system="s", user="u", shape=Shape
+        )
+
+    assert "TRUNCATED" in caplog.text
 
 
 def test_a_hosted_model_is_never_warned_about_a_window(monkeypatch, caplog) -> None:

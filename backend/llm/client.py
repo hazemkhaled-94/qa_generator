@@ -288,29 +288,43 @@ class Client:
         return answered
 
     def _warn_if_near_the_window(self, spent: dict, shape: type[Shape]) -> None:
-        """Says so when a prompt came close to the context window.
+        """Says so when a call came close to the context window.
 
-        A runtime given a prompt longer than its window TRUNCATES it. The
-        answer comes back well-formed and confidently wrong, resting on a
-        passage the model was never shown, and nothing anywhere reports
-        it - not the response, not the gates, not the row. The one signal
-        available is how close the prompt got, and this is it.
+        A runtime given more than its window TRUNCATES, dropping the oldest
+        tokens - which is the system prompt. The answer comes back
+        well-formed and confidently wrong, written without the rules it was
+        supposed to follow, and nothing anywhere reports it: not the
+        response, not the gates, not the row.
+
+        **Prompt AND completion, because the window holds both.** This read
+        the prompt alone, which was the whole story while nothing thought:
+        the longest prompt a stage sends measured 1,441 tokens against a
+        6,144 window, so it never fired and never needed to. A reasoning
+        model moved the overflow to the other end - one extraction call
+        measured 1,252 tokens in and 4,702 out, which is 97% of that window
+        reached almost entirely by the answer. Watching the prompt alone
+        would have called that 20%.
 
         Only where a window was asked for, which is a self-hosted model:
         a hosted provider sizes its own and refuses the parameter.
         """
         window = self._settings.window
-        used = spent.get("llm.tokens.input")
+        prompt = spent.get("llm.tokens.input") or 0
+        completion = spent.get("llm.tokens.output") or 0
+        used = prompt + completion
         if not window or not used or used < window * _NEAR_WINDOW:
             return
         log.warning(
-            "%s: %s used %s of a %s-token window. A prompt over it is "
-            "TRUNCATED and answered anyway, so raise LLM_NUM_CTX before "
+            "%s: %s used %s of a %s-token window (%s in, %s out). Over it "
+            "the oldest tokens are TRUNCATED - the system prompt first - "
+            "and the answer comes back anyway, so raise LLM_NUM_CTX before "
             "this reaches it.",
             self._settings.model,
             shape.__name__,
             f"{used:,}",
             f"{window:,}",
+            f"{prompt:,}",
+            f"{completion:,}",
         )
 
     @staticmethod
