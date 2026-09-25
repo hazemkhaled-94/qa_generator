@@ -44,6 +44,14 @@ HEAVY = {
     "pyldavis": "the topic figure",
     "sklearn": "brought in by the topic model",
     "lingua": "the language detector",
+    # Not a model, and here for the same reason the rest are: the workbook
+    # export imports both, `GET /questions/export` is one route out of
+    # twenty that anybody calls by hand, and importing it at the top of
+    # `routes/questions.py` put sixty megabytes of them into the start-up
+    # of a process whose job is to serve JSON. The route imports it inside
+    # the function, which this reads as deferred and does not count.
+    "pandas": "the dataframe the workbook export builds",
+    "openpyxl": "the engine that export writes an .xlsx through",
 }
 
 

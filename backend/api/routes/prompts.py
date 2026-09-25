@@ -22,6 +22,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query
 
+from api.params import NAME_MAX, NO_NUL
 from stages.prompts import stored
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
@@ -50,15 +51,29 @@ class Prompt:
 
 @router.get("", summary="The prompts recorded, and what each version asked for")
 def read(
-    service: str | None = Query(None, description="questions or extraction"),
-    version: str | None = Query(None, description="a PROMPT_VERSION"),
-    name: str | None = Query(None, description="one prompt within a service"),
+    service: str | None = Query(
+        None, max_length=NAME_MAX, pattern=NO_NUL, description="questions or extraction"
+    ),
+    version: str | None = Query(
+        None, max_length=NAME_MAX, pattern=NO_NUL, description="a PROMPT_VERSION"
+    ),
+    name: str | None = Query(
+        None,
+        max_length=NAME_MAX,
+        pattern=NO_NUL,
+        description="one prompt within a service",
+    ),
 ) -> list[Prompt]:
     """Every recorded prompt, narrowed by whatever is given.
 
     All three filters are optional and combine. Naming all three is how a
     page resolves one question: its service, the `prompt_version` on its
     row and its `question_type`.
+
+    Each is bounded, as every other free-text parameter on this API is.
+    They were three bare strings, and PostgreSQL text cannot hold a NUL:
+    `?service=%00` reached psycopg and came back a server error rather
+    than the 422 the document already promises.
 
     The text comes with it rather than behind a second call. It is what
     the caller wanted, a prompt is a few kilobytes, and a listing that

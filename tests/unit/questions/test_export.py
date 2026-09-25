@@ -173,3 +173,53 @@ def test_the_summary_counts_what_the_workbook_holds() -> None:
     assert counted["Matching the filter"] == 4
     assert counted["difficulty: easy"] == 3
     assert counted["rejected: duplicate"] == 1
+
+
+class _Catalog:
+    """A catalogue that records how the export asked for its rows."""
+
+    def __init__(self, rows: int = 3) -> None:
+        """Holds that many questions."""
+        self._rows = rows
+        self.limits: list[int | None] = []
+
+    def page(self, limit=50, **where):
+        """Records the window asked for and answers within it."""
+        del where
+        self.limits.append(limit)
+        taken = self._rows if limit is None else min(limit, self._rows)
+        return self._rows, [stored(one) for one in range(1, taken + 1)]
+
+    def citations(self, **where):
+        """No citations; the sheet is optional and off here."""
+        del where
+        return []
+
+    def quality(self, **where):
+        """No report, which the workbook takes as None."""
+        del where
+
+
+def test_the_export_asks_for_every_row_in_one_window(tmp_path, monkeypatch) -> None:
+    """It counted, then asked for a window the size of the count.
+
+    Two statements with a gap between them: a question written into the
+    gap did not fit the window the count had already decided on, so the
+    workbook came up a row short of the figure on its own Summary sheet.
+
+    Patched where `main` imports from rather than on the module: those
+    three imports are inside the function, so the name this binds is the
+    one it looks up when it runs.
+    """
+    from question_generation import export as module
+
+    catalog = _Catalog(rows=3)
+    monkeypatch.setattr("question_generation.catalog.QuestionCatalog", lambda: catalog)
+    monkeypatch.setattr("database.qa_generator.engine", lambda: None)
+    monkeypatch.setattr("telemetry.trace_engine", lambda engine: None)
+    written = tmp_path / "questions.xlsx"
+
+    module.main(["--out", str(written), "--no-citations"])
+
+    assert catalog.limits == [None], "one unlimited read, not a count and a window"
+    assert written.exists()

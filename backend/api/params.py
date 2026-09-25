@@ -44,11 +44,22 @@ TopicId = Annotated[int | None, Query(ge=1, le=BIGINT_MAX)]
 #: caller has no legitimate use for one in a search term, and refusing it
 #: at the edge is cheaper than teaching every query to strip it.
 SEARCH_MAX = 200
-_NO_NUL = r"^[^\x00]*$"
+NO_NUL = r"^[^\x00]*$"
+
+#: The longest value a caller may narrow a listing to by NAME rather than
+#: search in: a service, a prompt's name, a PROMPT_VERSION. None of those is
+#: prose - the longest this project has is `verifier: supported` - so a value
+#: past this is one no row can hold.
+#:
+#: Public beside the pattern because `/prompts` takes three of them, and it
+#: was added after the two bounds above and reached for neither: `?service=
+#: %00` went to psycopg and answered 500, which is the exact call these
+#: exist to stop.
+NAME_MAX = 80
 
 SearchText = Annotated[
     str | None,
-    Query(max_length=SEARCH_MAX, pattern=_NO_NUL),
+    Query(max_length=SEARCH_MAX, pattern=NO_NUL),
 ]
 
 #: A document filter, which carried the same NUL defect as the search terms
@@ -61,7 +72,7 @@ SearchText = Annotated[
 #: stop the crash.
 DocumentFilter = Annotated[
     str | None,
-    Query(max_length=SEARCH_MAX, pattern=_NO_NUL),
+    Query(max_length=SEARCH_MAX, pattern=NO_NUL),
 ]
 
 #: One page of rows. The ceiling was already here; `offset` had a floor and

@@ -648,7 +648,7 @@ class QuestionCatalog(Repository):
         self,
         document: str | None = None,
         topic: int | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
         search: str | None = None,
         status: str | None = None,
@@ -656,7 +656,13 @@ class QuestionCatalog(Repository):
         field: str | None = None,
         **scopes: Any,
     ) -> tuple[int, list[StoredQuestion]]:
-        """Reads one page of questions and the total behind it."""
+        """Reads one page of questions and the total behind it.
+
+        `limit` of None is every row the filter selects, which is what the
+        export asks for. It has to be this call and not a count followed by
+        a window the size of it: those are two statements, and a question
+        written between them is one the window no longer has room for.
+        """
         listing = _filtered(
             _listing(), document, topic, search, status, answerable, field, **scopes
         )
@@ -677,25 +683,36 @@ class QuestionCatalog(Repository):
         shows what was asked before it as well as after: reading a follow-up
         without its parent is reading half a conversation, and the parent is
         what makes it answerable.
+
+        Both walks stop on a row they have already seen. `follows_id` is a
+        self-referential foreign key and nothing in the schema says a thread
+        may not close into a loop - `thread_position` counts up and no
+        constraint compares it to the parent's - so a cycle written by hand
+        or by a bad backfill would have hung the request that read it, which
+        is a page that never loads rather than a page that is wrong.
         """
         root = question
-        while root.follows_id is not None:
+        seen = {root.id}
+        while root.follows_id is not None and root.follows_id not in seen:
             found = self.one(root.follows_id)
             if found is None:  # pragma: no cover - the cascade prevents it
                 break
+            seen.add(found.id)
             root = found
 
         thread = [root]
+        walked = {root.id}
         while True:
             with self._session() as session:
                 nxt = session.scalar(
                     select(Question.id).where(Question.follows_id == thread[-1].id)
                 )
-            if nxt is None:
+            if nxt is None or nxt in walked:
                 break
             found = self.one(nxt)
             if found is None:  # pragma: no cover
                 break
+            walked.add(found.id)
             thread.append(found)
         return thread
 

@@ -22,7 +22,6 @@ from api.params import DocumentFilter, Limit, Offset, RowId, SearchText, TopicId
 from api.routes.stage import stage_router
 from database.qa_generator import QuestionStatus
 from question_generation.config import Settings as QuestionSettings
-from question_generation.export import workbook
 from question_generation.models import (
     QuestionDetail,
     QuestionQuality,
@@ -269,6 +268,15 @@ def export(
 
     Declared before `/{question_id}` so `export` is not read as an id.
     """
+    # Imported here rather than at the top of the module: `export` loads
+    # pandas and openpyxl, this process serves JSON, and one route that is
+    # called by hand should not be sixty megabytes every other route pays
+    # for at start-up. The same deferral `topic_modelling` uses for
+    # pyLDAvis. `tests/static/test_api_stays_light.py` reads imports as
+    # syntax and skips the ones inside a function, which is what makes the
+    # two agree.
+    from question_generation.export import workbook
+
     where = {
         "document": document,
         "topic": topic,
@@ -286,11 +294,12 @@ def export(
         "answer_form": answer_form,
         "follows": follows,
     }
-    # One window the size of the count, rather than paging: a page boundary
-    # is where a concurrent write shows up twice or not at all, and an
-    # export is a snapshot or it is nothing.
-    total, _ = question_catalog.page(limit=1, **where)
-    _, rows = question_catalog.page(limit=max(total, 1), **where)
+    # Unlimited, rather than counting and then asking for a window that
+    # size. Those were two statements with a gap between them: a question
+    # written into the gap did not fit the window the count had already
+    # decided on, and the export quietly came up one row short of the
+    # figure printed on its own Summary sheet.
+    _, rows = question_catalog.page(limit=None, **where)
     drawn = workbook(
         rows,
         question_catalog.citations(**where) if citations else (),

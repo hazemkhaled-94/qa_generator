@@ -8,6 +8,8 @@ documents.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from docling_core.types.doc.base import CoordOrigin
 from docling_core.types.doc.labels import DocItemLabel
@@ -758,3 +760,34 @@ def test_the_vocabulary_written_is_the_content_words_of_the_passage() -> None:
     assert "institution" in terms
     assert "publish" not in terms, terms
     assert "the" not in terms
+
+
+@pytest.mark.nlp
+def test_a_passage_whose_language_moved_is_reported(caplog) -> None:
+    """Its stored sentences are the old pipeline's, and stay that way.
+
+    A fact cites a sentence by index, so re-segmenting here would move
+    what every stored citation points at. The boundaries and the
+    predicate counts therefore keep the pipeline they were made under,
+    and a run that moved a language has to say which passages that is
+    true of - a re-chunk is what re-aligns them.
+    """
+    driver = RevocabularyDriver((1, ENGLISH, "en"), stored={1: "de"})
+
+    with caplog.at_level(logging.WARNING):
+        driver.run()
+
+    assert driver.languages == {1: "en"}
+    assert "changed language" in caplog.text
+    assert "Re-chunk" in caplog.text
+
+
+@pytest.mark.nlp
+def test_a_language_that_did_not_move_is_not_reported(caplog) -> None:
+    """Which is every passage of an ordinary re-read."""
+    driver = RevocabularyDriver((1, ENGLISH, "en"), stored={1: "en"})
+
+    with caplog.at_level(logging.WARNING):
+        driver.run()
+
+    assert "changed language" not in caplog.text

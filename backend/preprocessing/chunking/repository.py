@@ -163,6 +163,26 @@ class PassageCatalog(Repository):
         with self._session() as session:
             return [(row.id, row.text, row.language) for row in session.execute(query)]
 
+    def languages(self, within=None) -> dict[int, str | None]:
+        """What each passage's own language column says now.
+
+        The passage's, where `texts` reads the document's. A re-read that
+        moves one is what leaves `sentences` behind: those offsets and the
+        predicate count on each were produced by the pipeline the passage
+        USED to be read under, and this is what lets the caller say so.
+
+        Args:
+            within: A condition narrowing which passages, or None for all.
+
+        Returns:
+            One entry per passage, the language or None.
+        """
+        query = select(Passage.id, Passage.language)
+        if within is not None:
+            query = query.where(within)
+        with self._session() as session:
+            return {row.id: row.language for row in session.execute(query)}
+
     def revocabulary(self, read: list[tuple[int, str | None, list[str]]]) -> int:
         """Replaces the stored language and lemmas, and nothing else.
 

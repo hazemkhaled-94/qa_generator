@@ -39,6 +39,13 @@ sentence-transformers>=6.0.0,<7.0.0
 # both arrive transitively, and a transitive pin is somebody else's to drop.
 docling-core>=2.0.0,<3.0.0
 botocore>=1.43.78,<2.0.0
+# The workbook GET /questions/export writes. Both were installed here only
+# because something else happened to pull them - pandas through pyLDAvis
+# and openpyxl through a docling extra - so the route that imports them by
+# name worked by luck, and the next `make lock` that dropped either would
+# have taken the route down at its first call.
+pandas>=2.0.0,<4.0.0
+openpyxl>=3.1.5,<4.0.0
 opentelemetry-sdk>=1.44.0,<2.0.0
 opentelemetry-exporter-otlp-proto-grpc>=1.44.0,<2.0.0
 # The one instrumentor anything applies, behind TRACE_DATABASE. The

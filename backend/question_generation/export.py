@@ -326,12 +326,11 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     catalog = QuestionCatalog()
-    # The listing pages, and an export is every page. Asked for as one
-    # window the size of the count, so the rows come back in one query
-    # rather than in fifty round trips that a concurrent write could
-    # straddle.
-    total, _ = catalog.page(limit=1, **where)
-    _, questions = catalog.page(limit=max(total, 1), **where)
+    # The listing pages, and an export is every page. Unlimited rather than
+    # counted and then windowed to that count: those were two statements
+    # with a gap between them, and a question written into the gap did not
+    # fit the window the count had already decided on.
+    _, questions = catalog.page(limit=None, **where)
     citations = () if args.no_citations else catalog.citations(**where)
 
     with open(args.out, "wb") as handle:

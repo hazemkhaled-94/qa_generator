@@ -57,6 +57,22 @@ nlp = [
 
 data = [
     "numpy>=2.5.2,<3.0.0",
+    # The frame two first-party modules build directly:
+    # `evaluation.second_opinion` hands one to `evaluate_dataframe`, and
+    # `question_generation.export` writes the workbook out of one. It was
+    # declared under `observability` when only the first of those existed.
+    # Transitive through the evals package and through pyLDAvis; named for
+    # the reason transformers is - a package somebody else pins is one they
+    # may drop.
+    "pandas>=2.0.0,<4.0.0",
+    # The engine pandas writes an .xlsx through. pandas names it by string
+    # and imports nothing, so this would be transitive-only if the export
+    # only wrote cells; it also sets the column widths and freezes the
+    # headings, which is `openpyxl.styles` and `openpyxl.utils` imported by
+    # name. It arrives through docling's own `docling-slim[standard]`
+    # extra, which is about as far from this project's control as a pin
+    # gets.
+    "openpyxl>=3.1.5,<4.0.0",
 ]
 
 storage = [
@@ -124,10 +140,6 @@ observability = [
     # a SECOND opinion recorded beside the checker's verdict and never as a
     # gate - see evaluation/README.md on why a model's answers cannot gate.
     "arize-phoenix-evals (>=2.0.0,<3.0.0)",
-    # `evaluate_dataframe` takes and returns one, so second_opinion.py builds
-    # it directly. Transitive through the evals package; named for the reason
-    # transformers is - a package somebody else pins is one they may drop.
-    "pandas>=2.0.0,<4.0.0",
 ]
 
 dev = [

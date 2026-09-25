@@ -870,15 +870,30 @@ class ChunkDriver:
 class PassageRows:
     """The stored passages a re-read walks, held in memory."""
 
-    def __init__(self, *passages: tuple[int, str, str | None]) -> None:
-        """Takes one (id, text, document language) per passage."""
+    def __init__(
+        self,
+        *passages: tuple[int, str, str | None],
+        stored: dict[int, str | None] | None = None,
+    ) -> None:
+        """Takes one (id, text, document language) per passage.
+
+        `stored` is what each passage's own language column already says,
+        which is what a re-read compares against to know it moved one.
+        Empty means unchanged, which is every case but the one test about
+        a language changing under stored sentences.
+        """
         self.passages = list(passages)
+        self.stored = stored or {}
         self.written: list[tuple[int, str | None, list[str]]] = []
         self.batches: list[int] = []
 
     def texts(self, within=None) -> list[tuple[int, str, str | None]]:
         """Every passage's id, text and its document's language."""
         return list(self.passages)
+
+    def languages(self, within=None) -> dict[int, str | None]:
+        """What each passage's own language column says now."""
+        return dict(self.stored)
 
     def revocabulary(self, read: list[tuple[int, str | None, list[str]]]) -> int:
         """Replaces the stored language and lemmas."""
@@ -890,9 +905,13 @@ class PassageRows:
 class RevocabularyDriver:
     """Re-reading the language and vocabulary of stored passages."""
 
-    def __init__(self, *passages: tuple[int, str, str | None]) -> None:
-        """Takes the passages the corpus holds."""
-        self.rows = PassageRows(*passages)
+    def __init__(
+        self,
+        *passages: tuple[int, str, str | None],
+        stored: dict[int, str | None] | None = None,
+    ) -> None:
+        """Takes the passages the corpus holds, and what they say now."""
+        self.rows = PassageRows(*passages, stored=stored)
 
     def run(self) -> int:
         """Reads every passage again."""

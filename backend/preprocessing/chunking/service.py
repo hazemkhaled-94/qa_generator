@@ -26,6 +26,15 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
     The same two readings chunking makes, over passages already stored, so a
     change to either reaches the topic model without re-chunking.
 
+    The SENTENCES are deliberately left alone, and that is the one thing
+    worth knowing before running this. A fact cites a sentence by index, so
+    re-segmenting here would move what every stored citation points at -
+    the offsets would still be inside the text and would no longer be
+    inside the claim. So a passage whose language moves keeps the
+    boundaries and the predicate counts the old pipeline gave it, and this
+    says how many did: they are what `extract-revalidate` reads a statement
+    against, and a re-chunk of those documents is what re-aligns them.
+
     Args:
         catalog: Where the passages are read and written.
         within: A condition narrowing which passages, or None for all.
@@ -38,6 +47,7 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
         log.warning("no passages to read")
         return 0
 
+    before = catalog.languages(within)
     # Detected first, so each passage is read by the pipeline for the language
     # it is in, and one batch is parsed per language.
     spoken = [
@@ -45,6 +55,7 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
         for passage_id, text, fallback in passages
     ]
     written = 0
+    moved: list[int] = []
     for grouped, group in groupby(sorted(spoken, key=_spoken), key=_spoken):
         # Back to NULL: the key is "" for a passage with no language, and the
         # column takes no empty string.
@@ -56,12 +67,21 @@ def revocabulary(catalog: PassageCatalog, within=None) -> int:
                 batch, read([text for _, text, _ in batch], language), strict=True
             )
         ]
+        moved += [one for one, _, _ in found if before.get(one, language) != language]
         written += catalog.revocabulary(found)
         log.info(
             "%s: read %d passage(s), %d term(s)",
             language or "no language",
             len(found),
             sum(len(terms) for _, _, terms in found),
+        )
+    if moved:
+        log.warning(
+            "%d passage(s) changed language, and their stored sentences did "
+            "not: those boundaries and predicate counts are the old "
+            "pipeline's, and a fact cites one by index, so they are left as "
+            "they are. Re-chunk those documents to re-segment them.",
+            len(moved),
         )
     return written
 

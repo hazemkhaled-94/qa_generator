@@ -82,6 +82,14 @@ class Bucket:
     ) -> None:
         """Stores an object.
 
+        A metadata VALUE is percent-encoded, and that is load-bearing
+        rather than tidy: S3 user metadata travels as an HTTP header, a
+        header value is ASCII, and the one value written here is a
+        filename somebody chose. Unencoded, uploading `Jahresbericht
+        Prüfung.pdf` fails at the PUT. Nothing in this project reads the
+        metadata back, so nothing decodes it; a reader that wants to is
+        the thing that needs `unquote`, not this.
+
         Raises:
             ValueError: If a metadata key is not a valid header token.
         """

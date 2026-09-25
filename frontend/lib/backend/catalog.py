@@ -10,6 +10,11 @@ from urllib.parse import quote, urlencode
 
 from lib.backend.base import Endpoint
 
+#: How long the workbook download may take. Sized for the work rather than
+#: for a request: an export reads every row a filter selects, so it is the
+#: one GET on this client that is not a query.
+_EXPORT_SECONDS = 600.0
+
 
 def _within(scope: tuple[str, str] | None) -> str:
     """Renders the path segment that narrows a stage route to one item."""
@@ -146,10 +151,19 @@ class CatalogApi(Endpoint):
         Bytes, not JSON: the API builds the workbook, because the rows it
         holds are the rows a page never asked for - a download is the whole
         filter and a page is fifty of it.
+
+        Its own timeout, because the shared GET one is sized for a query.
+        This reads every row the filter selects, joins the citations behind
+        them and writes three sheets, and over a corpus of a few thousand
+        questions that is minutes rather than the ten seconds a listing is
+        allowed - so the default turned a working export into a timeout in
+        the browser while the API went on building it.
         """
         query = urlencode({k: v for k, v in filters.items() if v not in (None, "")})
         return self._request(
-            "GET", f"/questions/export?{query}" if query else "/questions/export"
+            "GET",
+            f"/questions/export?{query}" if query else "/questions/export",
+            timeout=_EXPORT_SECONDS,
         ).content
 
     def decide_question(self, question_id: int, status: str) -> dict:
