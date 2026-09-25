@@ -15,6 +15,7 @@ from database.qa_generator import FactKind
 from extraction.config import Settings
 from extraction.factory import build_bridge, build_service
 from llm.config import Settings as ModelSettings
+from stages.queue import StageQueue
 
 MODEL = ModelSettings(
     model="ollama/test-model",
@@ -98,11 +99,16 @@ def test_the_table_reader_is_claimed_by_name_and_the_model_is_the_default() -> N
     assert built._extractors.for_block_type("text").method == "llm"
 
 
-def test_the_lease_is_derived_from_the_model_settings() -> None:
-    """A healthy worker may take the timeout on every attempt."""
+def test_the_lease_is_the_queue_default_and_not_the_work() -> None:
+    """A worker refreshes its claim, so the lease is a liveness check.
+
+    Nothing derives it from the model any more: the row is held for as long
+    as the worker keeps saying it is there, whatever one passage costs.
+    """
     built = build_service(MODEL, settings(FactKind.ATOMIC))
 
-    assert built._repository.lease == timedelta(seconds=2)
+    assert built._repository.lease == StageQueue.lease
+    assert built._repository.lease <= timedelta(minutes=5)
 
 
 def test_the_digest_share_reaches_the_checker() -> None:

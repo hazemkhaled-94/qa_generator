@@ -14,16 +14,6 @@ from llm.config import Settings as ModelSettings
 log = logging.getLogger(__name__)
 
 
-def lease(settings: Settings, model: ModelSettings):
-    """How long one artefact may go unfinished before a run sweeps it.
-
-    An artefact is not one call: a question is three judgements, each of
-    which may take the timeout on every attempt. Derived from both, the
-    way question generation derives its from what a topic costs.
-    """
-    return settings.lease(model.timeout_seconds * model.max_attempts)
-
-
 def judge_model(settings: Settings, shared: ModelSettings) -> ModelSettings:
     """The model that judges, which is not the one that wrote.
 
@@ -52,7 +42,6 @@ def build_service(
         )
     return AssessmentService(
         repository=AssessmentQueue(
-            lease=lease(settings, model),
             kinds=judged_kinds(settings),
             sample=settings.sample,
             version=version,

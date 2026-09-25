@@ -11,7 +11,7 @@ import pytest
 
 from assessment import run as cli
 from assessment.config import Settings, judged_kinds
-from assessment.factory import judge_model, lease
+from assessment.factory import judge_model
 from llm.config import Settings as ModelSettings
 
 #: A complete set of values, for the reader to vary one of.
@@ -59,17 +59,6 @@ def test_the_kinds_are_checked_against_the_templates() -> None:
 
     with pytest.raises(ValueError, match="passage"):
         judged_kinds(settings(ASSESSMENT_KINDS="fact,passage"))
-
-
-def test_a_lease_covers_the_most_expensive_artefact() -> None:
-    """A lease covers the most expensive artefact, not the cheapest.
-
-    A question is three calls, and a lease sized for one would fail a
-    worker halfway through a healthy row.
-    """
-    one_call = model().timeout_seconds * model().max_attempts
-
-    assert lease(settings(), model()).total_seconds() > one_call * 3
 
 
 def test_the_judge_is_the_model_the_setting_names() -> None:

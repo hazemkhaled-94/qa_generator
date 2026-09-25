@@ -15,7 +15,7 @@ import logging
 import sys
 
 from assessment.config import Settings, judged_kinds
-from assessment.factory import build_service, judge_model, lease
+from assessment.factory import build_service, judge_model
 from assessment.repository import AssessmentQueue
 from llm.check import before_work
 from llm.config import Settings as ModelSettings
@@ -73,10 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         before_work(judge_model(settings, model))
 
     def queue() -> AssessmentQueue:
-        """The queue, with the lease this stage's settings derive."""
-        settings, model, _ = configured()
+        """The queue this stage claims from."""
+        settings, _, _ = configured()
         return AssessmentQueue(
-            lease=lease(settings, model),
             kinds=judged_kinds(settings),
             sample=settings.sample,
         )

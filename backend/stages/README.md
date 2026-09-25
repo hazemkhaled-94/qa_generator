@@ -24,11 +24,17 @@ columns of the same `documents` row.
 
 ```
 new  ──start──▶  pending  ──claimed──▶  running  ──▶  done
- ▲                   ▲                     │
- └──────stop─────────┤                     ├──▶  failed  ──retry──▶  pending
-                     │                     └──lease expired──▶ failed
-                     └────────reclaim──────┘
+ ▲                   ▲                   │  ▲│
+ └──────stop─────────┤                   │  └┘ heartbeat, every 30s
+                     │                   ├──▶  failed  ──retry──▶  pending
+                     │                   └──beat missed for 5 min──▶ failed
+                     └────────reclaim────┘
 ```
+
+A running row is held by the **beat**, not by a time limit. The worker
+refreshes `claimed_at` every `HEARTBEAT_SECONDS` for as long as it holds the
+row, so the work may take as long as it takes and the lease still answers
+the only question a sweep needs answered: is anyone still on it?
 
 ### Claiming
 
@@ -39,20 +45,27 @@ take the same row:
 podman compose up -d --scale extract-worker=4
 ```
 
-### Leases
+### Leases and the heartbeat
 
-Every claim is timestamped, and a stage's lease says how long one may go
-unfinished before another run sweeps it. A row a worker died holding is
-failed by the next run of that stage with
-`the worker did not finish; the run was interrupted` recorded against it, and
-`retry` returns it to the queue. There is no state a row can reach that
-nothing can move it out of.
+Every claim is timestamped, and a worker refreshes that timestamp every
+`HEARTBEAT_SECONDS` for as long as it holds the row. The lease is how many
+beats may be missed before another run sweeps the claim — five minutes, or
+ten of them. A row a worker died holding is failed by the next drain of that
+stage with `the worker did not finish; the run was interrupted` recorded
+against it, and `retry` returns it to the queue.
 
-A lease is **derived** from what the stage costs, never guessed. Extraction
-derives its from `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`, so raising
-either never makes a healthy worker look abandoned. A topic's lease is
-derived from `QUESTIONS_PER_TOPIC` candidates, each a writer call and a
-verifier call.
+**One lease for every stage, because it no longer measures the work.**
+`claimed_at` used to record only when work started, so a sweep could ask
+nothing better than "could this still be running?" — and the honest answer
+is the worst case the stage might cost. Each stage therefore derived its own
+from its settings, and question generation's came to 9 days. That bound the
+wrong thing: it was also how long a killed worker's topic stayed unreachable,
+since `stop` moves `pending`, `retry` moves `failed` and `rerun` skips what
+is held.
+
+Beating asks "is anyone still on it?" instead, which one small constant
+answers for a stage whose unit is a passage and a stage whose unit is a whole
+topic alike.
 
 ### Narrowing
 
@@ -118,8 +131,13 @@ and the lease cannot.
 
 It fills the gap between the other verbs. `retry` takes the failed, `rerun`
 skips what a worker holds, and `stop` takes back only what has not begun — so
-a worker killed mid-row left that row unreachable until its lease ran out,
-and question generation's lease computes to 67 days at 120 questions a topic.
+a worker killed mid-row is the one case none of them reaches.
+
+Before the heartbeat this was the *only* way out, and the wait was the whole
+worst case the work might have taken: question generation derived a lease of
+9 days at the settings it ran under, and 67 days at a 900-second timeout. A
+killed worker now loses its rows to `abandon` in five minutes, so this verb
+is for when five minutes is too long to wait.
 
 **Narrow it.** Nothing here can tell a dead claim from a live one:
 
@@ -166,9 +184,9 @@ path.
 |---|---|
 | `WORKER_POLL_SECONDS` | How long a watching worker sleeps between drains |
 
-Everything else a stage needs is the stage's own. Leases are derived rather
-than configured: a stage that could set its own timeout would be a stage
-whose lease nobody could derive.
+Everything else a stage needs is the stage's own. The lease is neither
+configured nor derived: it counts missed heartbeats, and a worker that is
+alive keeps its row however long the work runs.
 
 ## Tests
 

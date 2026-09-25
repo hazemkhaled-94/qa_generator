@@ -8,8 +8,10 @@ finds everything that failed whichever stage failed it.
 from __future__ import annotations
 
 import logging
+import threading
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, ClassVar
 
 from opentelemetry.trace import Span
@@ -17,6 +19,11 @@ from opentelemetry.trace import Span
 from stages.queue import StageQueue
 
 log = logging.getLogger(__name__)
+
+#: How often a worker says it is still on the row it holds. Ten of these fit
+#: inside `StageQueue.lease`, so a beat may be missed for a slow query or a
+#: paused process without the row being swept out from under it.
+HEARTBEAT_SECONDS = 30.0
 
 
 def _never() -> bool:
@@ -54,6 +61,36 @@ class StageService(ABC):
     def process_next(self) -> Any | None:
         """Claims one row and works it, returning its key or None."""
 
+    @contextmanager
+    def _beating(self) -> Iterator[None]:
+        """Says this worker is still alive for as long as the body runs.
+
+        One thread for the drain rather than one per row: the queue beats
+        whichever row it holds, and holds none between rows.
+        """
+        stop = threading.Event()
+
+        def beat() -> None:
+            """Refreshes the held claim until the drain is done with it."""
+            while not stop.wait(HEARTBEAT_SECONDS):
+                try:
+                    self._repository.touch()
+                except Exception:
+                    # Logged, not raised: this thread failing must not take
+                    # the work down with it, and a missed beat costs nothing
+                    # until the lease runs out.
+                    log.warning("%s: heartbeat failed", self.name, exc_info=True)
+
+        thread = threading.Thread(
+            target=beat, name=f"{self.name}-heartbeat", daemon=True
+        )
+        thread.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            thread.join(timeout=HEARTBEAT_SECONDS)
+
     def drain(self, stopping: Callable[[], bool] = _never) -> int:
         """Works every queued row, sweeping abandoned claims first."""
         abandoned = self._repository.abandon()
@@ -65,10 +102,11 @@ class StageService(ABC):
                 self.unit,
             )
         processed = 0
-        while not stopping():
-            if self.process_next() is None:
-                break
-            processed += 1
+        with self._beating():
+            while not stopping():
+                if self.process_next() is None:
+                    break
+                processed += 1
         if processed:
             log.info("%s: %d %s(s)", self.name, processed, self.unit)
         return processed

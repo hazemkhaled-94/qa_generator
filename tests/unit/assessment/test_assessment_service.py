@@ -48,6 +48,10 @@ class _Queue:
         """No claim has outlived its lease."""
         return 0
 
+    def touch(self) -> bool:
+        """Refreshes the claim this queue holds."""
+        return True
+
 
 class _Judge:
     """A judge answering with whatever it was built with."""

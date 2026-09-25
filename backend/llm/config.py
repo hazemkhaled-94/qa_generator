@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import timedelta
 
 from settings import Source, decimal, integer, optional, required
 
@@ -69,8 +68,7 @@ class Settings:
     settings for one served model is how the two come to disagree.
 
     A stage may name a different model with `overridden`, and only the
-    model: the address, the mode and the patience are the deployment's, and
-    the lease is derived from the last of those.
+    model: the address, the mode and the patience are the deployment's.
     """
 
     model: str
@@ -91,16 +89,6 @@ class Settings:
     #: Where a self-hosted runtime is, for a stage that overrides the model
     #: with one served there. None leaves every override on `base_url`.
     ollama_base_url: str | None = None
-
-    @property
-    def lease(self) -> timedelta:
-        """How long a claim may go unfinished before a later run sweeps it.
-
-        Derived rather than declared: a healthy worker may take the timeout
-        on every attempt, and a lease below that fails a row still being
-        worked. Doubled for the backoff between attempts and the checks after.
-        """
-        return timedelta(seconds=self.timeout_seconds * self.max_attempts * 2)
 
     def overridden(self, model: str | None) -> Settings:
         """These settings, calling a named model instead of the shared one.

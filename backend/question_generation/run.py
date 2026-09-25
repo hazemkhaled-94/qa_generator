@@ -14,7 +14,7 @@ from llm.config import Settings as ModelSettings
 from question_generation import prompts
 from question_generation.catalog import QuestionCatalog
 from question_generation.config import Settings
-from question_generation.factory import build_service, lease, models
+from question_generation.factory import build_service, models
 from question_generation.queue import QuestionQueue
 from question_generation.service import balance, reverify
 from settings.store import snapshot
@@ -78,9 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         before_work(*models(settings, model))
 
     def queue() -> QuestionQueue:
-        """The queue, with the lease this stage's settings derive."""
-        settings, model, _ = configured()
-        return QuestionQueue(lease=lease(settings, model))
+        """The queue this stage claims from."""
+        return QuestionQueue()
 
     return queue_main(
         name="questions",

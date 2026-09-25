@@ -50,6 +50,10 @@ class _Repository:
         """Reports that nothing was left claimed."""
         return 0
 
+    def touch(self) -> bool:
+        """Holds nothing to refresh."""
+        return False
+
 
 class _Service(StageService):
     """A stage whose work is to count that it was asked."""

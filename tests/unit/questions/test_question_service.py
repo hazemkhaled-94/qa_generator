@@ -10,6 +10,7 @@ and a row nothing can move is a stage that has stopped.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from factories import source
@@ -23,7 +24,10 @@ from database.qa_generator import (
 from llm.client import ModelUnavailable
 from question_generation.config import Settings
 from question_generation.models import CheckedQuestion, TopicToCover
+from question_generation.queue import QuestionQueue
 from question_generation.service import QuestionGenerationService
+from stages.queue import StageQueue
+from stages.service import HEARTBEAT_SECONDS
 
 SETTINGS = Settings(
     per_topic=4,
@@ -77,6 +81,10 @@ class StubQueue:
     def abandon(self) -> int:
         """Sweeps nothing; there is no earlier run here."""
         return 0
+
+    def touch(self) -> bool:
+        """Refreshes the claim this queue holds."""
+        return True
 
     def claim(self) -> TopicToCover | None:
         """Hands over the one topic, once."""
@@ -340,45 +348,20 @@ def test_a_sample_size_below_one_never_yields_an_empty_group(size) -> None:
     assert all(one.language == "en" for one in formed if one)
 
 
-def test_a_topics_lease_covers_every_call_it_will_make() -> None:
-    """A lease sized for one model call fails a live worker mid-topic.
+def test_a_topic_is_held_by_the_beat_and_not_by_the_lease() -> None:
+    """What a stranded topic used to cost, and no longer does.
 
-    Extraction reads one passage with one call and derives its lease from
-    that. A topic is `per_topic` candidates, each a writer call and a
-    verifier call, so the same arithmetic would sweep a worker that had
-    barely started.
+    Nothing but the lease running out used to return an `in_progress` row:
+    stop moves `pending`, retry moves `failed`, rerun skips what is held.
+    A lease sized for the worst case a topic could cost was therefore also
+    how long a killed worker's topic stayed unreachable - days of it.
+
+    The queue takes the default now, and a worker says it is still there
+    every `HEARTBEAT_SECONDS`, so the work may run as long as it likes.
     """
-    # One call's worst case: the timeout, on every attempt.
-    call = 900.0 * 3
-
-    held = SETTINGS.lease(call).total_seconds()
-
-    assert held >= call * SETTINGS.per_topic * 2, "shorter than the work"
-
-
-def test_the_lease_is_the_worst_case_and_not_a_multiple_of_it() -> None:
-    """Padding a worst case is what makes a stranded row stay stranded.
-
-    Nothing but the lease running out returns an `in_progress` row to the
-    queue: stop moves `pending` and retry moves `failed`. So every hour
-    added here is an hour a killed worker's topic cannot be picked up.
-
-    Three calls a candidate, not two: the writer's, the verifier's, and the
-    one a candidate may cost on top - the entailment pass when recall came
-    back empty, or the corpus probe on an unanswerable question. Times
-    `1 + retries`, because every candidate may be written again.
-    """
-    call = 900.0 * 3
-
-    held = SETTINGS.lease(call).total_seconds()
-
-    assert held == (
-        call
-        * SETTINGS.per_topic
-        * (1 + SETTINGS.max_followups)
-        * (1 + SETTINGS.retries)
-        * 3
-    )
+    assert QuestionQueue().lease == StageQueue.lease
+    assert StageQueue.lease <= timedelta(minutes=5)
+    assert HEARTBEAT_SECONDS * 2 < StageQueue.lease.total_seconds()
 
 
 def test_the_phrasing_gate_is_off_when_one_model_does_both() -> None:

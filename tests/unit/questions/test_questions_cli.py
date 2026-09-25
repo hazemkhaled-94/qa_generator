@@ -10,7 +10,6 @@ than from how much one row does.
 from __future__ import annotations
 
 import os
-from datetime import timedelta
 from typing import ClassVar
 
 import pytest
@@ -116,7 +115,6 @@ class Driver:
         monkeypatch.setattr(module, "QuestionQueue", lambda **kwargs: self.queue)
         monkeypatch.setattr(module, "QuestionCatalog", lambda: object())
         monkeypatch.setattr(module, "build_service", lambda *_: build())
-        monkeypatch.setattr(module, "lease", lambda *_: timedelta(hours=9))
         monkeypatch.setattr(
             module, "reverify", lambda catalog, settings, within: self._recheck(within)
         )
@@ -298,12 +296,12 @@ def test_a_narrowing_without_a_value_is_refused(cli) -> None:
 # ── The lease a topic needs ───────────────────────────────────────────────
 
 
-def test_the_queue_is_built_with_the_lease_this_stage_derives(monkeypatch) -> None:
-    """A topic is not a passage.
+def test_the_queue_is_built_without_a_lease_of_its_own(monkeypatch) -> None:
+    """A topic is held by the beat, not by a lease sized for the work.
 
-    It costs `per_topic` candidates, each a writer call and a verifier
-    call, so a lease sized for one call fails a worker halfway through its
-    first topic.
+    This stage used to derive one from what a topic costs, which made a
+    killed worker's topic unreachable for as long as the work might have
+    taken. The queue takes the shared default now.
     """
     from question_generation import run as module
     from stages import cli as shared
@@ -311,12 +309,10 @@ def test_the_queue_is_built_with_the_lease_this_stage_derives(monkeypatch) -> No
     held = {}
 
     def queue(**kwargs):
-        """Records the lease the run asked for."""
+        """Records what the run asked the queue for."""
         held.update(kwargs)
         return Queue(**kwargs)
 
-    # As the fixture above does: the lease is derived from the model
-    # settings, and this one is the deployment's rather than backend.env's.
     monkeypatch.setenv("LLM_MODEL", "ollama_chat/test-model")
     monkeypatch.setattr(module, "snapshot", lambda: (dict(os.environ), "test-settings"))
     monkeypatch.setattr(module, "QuestionQueue", queue)
@@ -327,4 +323,4 @@ def test_the_queue_is_built_with_the_lease_this_stage_derives(monkeypatch) -> No
 
     module.main(["--status"])
 
-    assert held["lease"] > timedelta(hours=1), held
+    assert "lease" not in held, held

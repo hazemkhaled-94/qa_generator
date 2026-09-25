@@ -12,7 +12,6 @@ what `.env` is.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 
 from settings import Source, boolean, csv, integer, optional
 
@@ -41,16 +40,6 @@ class Settings:
         """Whether a sample size of 0 means every artefact."""
         return self.sample <= 0
 
-    def lease(self, per_call: float) -> timedelta:
-        """How long one artefact may go unfinished before a run sweeps it.
-
-        Derived from what an artefact costs rather than configured: a
-        question is three judgements and so three calls, and a lease sized
-        for one would fail a worker halfway through a healthy row. Doubled
-        for the backoff between attempts and the write after them.
-        """
-        return timedelta(seconds=per_call * _MOST_METRICS * 2)
-
     @classmethod
     def load(cls, source: Source = None) -> Settings:
         """Reads settings from the environment, or from an override."""
@@ -60,19 +49,6 @@ class Settings:
             kinds=csv("ASSESSMENT_KINDS", source),
             sample=integer("ASSESSMENT_SAMPLE", source),
         )
-
-
-#: The most judgements any one artefact costs, which is a question's three.
-#: Read from the templates rather than written down, so adding a metric
-#: lengthens the lease with it.
-def _most_metrics() -> int:
-    """How many calls the most expensive artefact kind costs."""
-    from assessment.templates import TEMPLATES
-
-    return max(len(one) for one in TEMPLATES.values())
-
-
-_MOST_METRICS = _most_metrics()
 
 
 def judged_kinds(settings: Settings) -> tuple[str, ...]:

@@ -85,9 +85,8 @@ def test_both_models_are_served_where_the_deployment_says() -> None:
 
 
 def test_both_models_are_held_to_the_same_patience() -> None:
-    """The lease is derived from these, so one stage may not stretch them."""
+    """One stage naming its own model may not also change how patient it is."""
     written, checked = models(settings("ollama/writer", "ollama/checker"), SHARED)
 
     assert written.timeout_seconds == SHARED.timeout_seconds
     assert checked.max_attempts == SHARED.max_attempts
-    assert written.lease == SHARED.lease

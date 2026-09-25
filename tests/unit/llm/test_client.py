@@ -185,13 +185,6 @@ def test_the_failure_is_rewrapped_with_its_type_and_message(monkeypatch) -> None
     assert isinstance(raised.value.__cause__, litellm.exceptions.AuthenticationError)
 
 
-def test_the_lease_outlasts_every_attempt() -> None:
-    """A healthy worker may take the timeout on each one."""
-    lease = settings(timeout_seconds=900, max_attempts=3).lease
-
-    assert lease.total_seconds() >= 900 * 3
-
-
 # ── What reaches the runtime, and what is left out ────────────────────────
 
 

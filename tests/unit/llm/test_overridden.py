@@ -64,15 +64,13 @@ def test_nothing_but_the_model_changes() -> None:
     assert after.reasoning_effort == before.reasoning_effort
 
 
-def test_the_lease_is_unchanged_by_an_override() -> None:
-    """Derived from the timeout and the attempts, neither of which moved.
-
-    A stage that could lengthen its own lease could make a row unclaimable
-    for longer than the queue expects, with nothing but time to undo it.
-    """
+def test_the_patience_is_unchanged_by_an_override() -> None:
+    """Naming another model changes the model and nothing else."""
     before = shared()
+    after = before.overridden("ollama/other")
 
-    assert before.overridden("ollama/other").lease == before.lease
+    assert after.timeout_seconds == before.timeout_seconds
+    assert after.max_attempts == before.max_attempts
 
 
 def test_the_shared_settings_are_left_alone() -> None:

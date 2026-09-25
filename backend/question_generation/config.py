@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import timedelta
 
 from database.qa_generator import AnswerForm, Difficulty
 from question_generation.queue import ASKABLE
@@ -223,50 +222,6 @@ class Settings:
     answer_confidence: float = 0.9
     #: The longest pair either encoder reads, in tokens.
     encoder_max_tokens: int = 512
-
-    def lease(self, call_seconds: float) -> timedelta:
-        """How long one topic may go unfinished before a run sweeps it.
-
-        Derived from the work rather than declared. A topic is not a passage:
-        it costs `per_topic` candidates and each one is two model calls, a
-        writer's and a verifier's, so a lease sized for one call fails a
-        worker that is only halfway through its first topic.
-
-        A thread is more than one question, so `max_followups` is in it too:
-        every root may be followed twice, and each follow-up is another pair
-        of calls.
-
-        Three calls per candidate, not two: the writer's, the verifier's,
-        and the one a candidate may cost on top - the entailment pass when
-        recall came back empty, or the corpus probe on an unanswerable
-        question. And every candidate may be written `retries` times more.
-
-        This is a worst case on a worst case - every call taking its full
-        timeout on every attempt, on every question of the topic - so the
-        figure is days rather than hours and it grows with
-        QUESTIONS_PER_TOPIC. At 120 per topic and a 900-second timeout it
-        computes to 67 days, which is not a wait. That is the wrong
-        direction for the one thing the lease is for: a worker killed
-        mid-topic leaves that row unclaimable until it runs out.
-
-        `make questions-reclaim TOPIC=<id>` is what moves it. Not
-        `questions-retry`, which takes the FAILED, and not
-        `questions-rerun`, which skips what a worker holds - this said
-        `retry` for a while and it returned nothing, because an
-        interrupted topic is `in_progress` and neither verb touches that.
-
-        The real remedy is a smaller LLM_TIMEOUT_SECONDS. It is 900 to
-        survive a thinking model taking minutes a call; with thinking
-        derived off for a self-hosted one a call is 15 seconds, and every
-        figure here is 60 times larger than it needs to be.
-        """
-        return timedelta(
-            seconds=call_seconds
-            * self.per_topic
-            * (1 + self.max_followups)
-            * (1 + self.retries)
-            * 3
-        )
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:

@@ -305,6 +305,8 @@ class Queue:
         self.embeddings: dict[int, list[float] | None] = {}
         self.failed: dict[int, str] = {}
         self.swept = 0
+        #: How many times the worker said it was still on its row.
+        self.beats = 0
         #: What `nearest_fact` answers, or None for an empty corpus.
         self.twin: Twin | None = None
 
@@ -334,6 +336,11 @@ class Queue:
     def abandon(self) -> int:
         """Reports how many claims a previous run left behind."""
         return self.swept
+
+    def touch(self) -> bool:
+        """Counts one beat on the row this queue holds."""
+        self.beats += 1
+        return True
 
     @property
     def facts(self) -> list[CheckedFact]:

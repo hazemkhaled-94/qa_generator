@@ -48,7 +48,7 @@ def build_service(
         else client
     )
     return ExtractionService(
-        repository=PassageQueue(lease=model.lease, version=version),
+        repository=PassageQueue(version=version),
         extractors=ExtractorRegistry(
             extractors=(TableExtractor(),), default=LlmExtractor(client, cap)
         ),

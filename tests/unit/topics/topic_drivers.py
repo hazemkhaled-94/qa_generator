@@ -260,6 +260,10 @@ class RecordingQueue:
         """Sweeps claims an earlier run left behind."""
         return self.abandoned
 
+    def touch(self) -> bool:
+        """Refreshes the claim this queue holds."""
+        return True
+
 
 class RecordingExport:
     """The export bucket, held in memory."""

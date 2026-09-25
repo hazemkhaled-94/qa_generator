@@ -21,17 +21,6 @@ from question_generation.verifier import Verifier
 log = logging.getLogger(__name__)
 
 
-def lease(settings: Settings, model: ModelSettings):
-    """How long one topic may go unfinished before a run sweeps it.
-
-    A topic is not a passage. It costs `per_topic` candidates, each of them
-    a writer call and a verifier call, so the lease extraction derives for
-    one call would fail a worker that is only halfway through its first
-    topic.
-    """
-    return settings.lease(model.timeout_seconds * model.max_attempts)
-
-
 def models(
     settings: Settings, shared: ModelSettings
 ) -> tuple[ModelSettings, ModelSettings]:
@@ -73,7 +62,6 @@ def build_service(
     catalog = QuestionCatalog()
     return QuestionGenerationService(
         repository=QuestionQueue(
-            lease=lease(settings, model),
             kinds=settings.fact_kinds,
             # Recorded on every question written.
             version=version,

@@ -658,6 +658,10 @@ class ParseRows:
         """Sweeps claims an earlier run left behind."""
         return self.abandoned
 
+    def touch(self) -> bool:
+        """Refreshes the claim this queue holds."""
+        return True
+
 
 class ParseDriver:
     """The parsing flow, with the queue and both buckets in memory."""
@@ -809,6 +813,10 @@ class ChunkRows:
     def abandon(self) -> int:
         """Sweeps claims an earlier run left behind."""
         return self.abandoned
+
+    def touch(self) -> bool:
+        """Refreshes the claim this queue holds."""
+        return True
 
 
 class ChunkDriver:

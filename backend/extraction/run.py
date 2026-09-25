@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     return queue_main(
         name="extraction",
         module="extraction.run",
-        repository=lambda: PassageQueue(lease=configured()[0].lease),
+        repository=PassageQueue,
         build_service=build,
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,

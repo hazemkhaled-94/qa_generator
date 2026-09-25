@@ -88,10 +88,12 @@ class StageQueue(Repository):
     base: ClassVar[Any] = None
     #: The status this stage sets when it finishes a row.
     done: ClassVar[Status]
-    #: How long a claim may go unfinished before a later run treats it as
-    #: abandoned. Overridden per instance by a worker that knows what one row
-    #: can actually cost.
-    lease: timedelta = timedelta(hours=1)
+    #: How long a claim may go unrefreshed before a later run treats it as
+    #: abandoned. A worker holding a row refreshes it every
+    #: `stages.service.HEARTBEAT_SECONDS`, so this bounds how long a DEAD
+    #: worker's row stays claimed and not how long the work may take. Ten
+    #: missed beats.
+    lease: timedelta = timedelta(minutes=5)
     #: Selects the key of the next row this stage should take.
     next_pending: ClassVar[Any]
 
@@ -117,6 +119,10 @@ class StageQueue(Repository):
         super().__init__()
         if lease is not None:
             self.lease = lease
+        #: The key of the row this instance holds, for `touch` to refresh.
+        #: Written by the thread that works the row and read by the one that
+        #: beats; a lone reference, so neither sees a half-written value.
+        self._held: Any = None
 
     def _where(self, *conditions: Any) -> tuple[Any, ...]:
         """This queue's own rows, narrowed by whatever the caller gave.
@@ -134,7 +140,7 @@ class StageQueue(Repository):
         # or minutes. The claim is timestamped so a later run can tell it from
         # a live one.
         with self._session.begin() as session:
-            return session.execute(
+            claimed = session.execute(
                 update(self.columns.entity)
                 .where(self.columns.key == self.next_pending)
                 .values(
@@ -145,6 +151,13 @@ class StageQueue(Repository):
                 )
                 .returning(*returning)
             ).one_or_none()
+        # Every caller returns its key column first, which is what `touch`
+        # refreshes. Read by name rather than by position, so a stage that
+        # returns its columns in another order still beats.
+        self._held = (
+            None if claimed is None else getattr(claimed, self.columns.key.key)
+        )
+        return claimed
 
     def _finish(self, key: Any, *, session: Any = None, **values: Any) -> None:
         """Marks a row done for this stage, releasing the claim."""
@@ -160,6 +173,7 @@ class StageQueue(Repository):
                 }
             )
         )
+        self._held = None
         if session is not None:
             session.execute(statement)
             return
@@ -168,6 +182,7 @@ class StageQueue(Repository):
 
     def fail(self, key: Any, error: str) -> None:
         """Records a row this stage could not process, releasing the claim."""
+        self._held = None
         with self._session.begin() as session:
             session.execute(
                 update(self.columns.entity)
@@ -179,6 +194,37 @@ class StageQueue(Repository):
                         self.columns.error: error[:2000],
                     }
                 )
+            )
+
+    def touch(self) -> bool:
+        """Refreshes the claim on the row this instance is working.
+
+        What separates a live claim from a dead one. `claimed_at` records
+        when work started and nothing else, so a sweep could only ever ask
+        "could this still be running?" - and the honest answer is the worst
+        case the work might take, which is days for a stage whose unit is a
+        whole topic. Beating turns that into "is anyone still on it?", which
+        the lease can answer in minutes however long the work runs.
+
+        Refuses to refresh a row this queue no longer holds: `reclaim` moves
+        an interrupted row back to pending, and a beat still in flight must
+        not drag it back to claimed.
+        """
+        key = self._held
+        if key is None:
+            return False
+        with self._session.begin() as session:
+            return bool(
+                session.execute(
+                    update(self.columns.entity)
+                    .where(
+                        *self._where(
+                            self.columns.key == key,
+                            self.columns.status == Status.IN_PROGRESS,
+                        )
+                    )
+                    .values({self.columns.claimed_at: func.now()})
+                ).rowcount
             )
 
     def abandon(self) -> int:

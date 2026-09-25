@@ -189,11 +189,78 @@ def test_a_shorter_lease_sweeps_sooner(engine, database) -> None:
         session.commit()
     with engine.begin() as connection:
         connection.execute(
-            text("UPDATE documents SET parse_claimed_at = now() - interval '5 minutes'")
+            text("UPDATE documents SET parse_claimed_at = now() - interval '1 minute'")
         )
 
     assert ParseQueue().abandon() == 0
-    assert ParseQueue(lease=timedelta(minutes=1)).abandon() == 1
+    assert ParseQueue(lease=timedelta(seconds=30)).abandon() == 1
+
+
+def test_a_beat_keeps_a_row_the_worker_still_holds(engine, database) -> None:
+    """What makes the lease a liveness check rather than a time limit.
+
+    The row is older than any lease here. Beating is the only thing keeping
+    it, which is what lets one lease cover work of any length.
+    """
+    with Session(engine) as session:
+        session.add(document(digest(), parse_status=Status.PENDING))
+        session.commit()
+    queue = ParseQueue(lease=timedelta(seconds=30))
+    assert queue.claim() is not None
+    # Aged past the lease, as an hour of honest work would age it.
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE documents SET parse_claimed_at = now() - interval '1 hour'")
+        )
+    assert ParseQueue(lease=timedelta(seconds=30)).abandon() == 1
+
+    # Claimed again, and this time the holder says it is still there.
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE documents SET parse_status = 'in_progress', "
+                "parse_error = NULL, "
+                "parse_claimed_at = now() - interval '1 hour'"
+            )
+        )
+    assert queue.touch() is True
+    assert ParseQueue(lease=timedelta(seconds=30)).abandon() == 0
+
+
+def test_a_beat_does_not_reclaim_a_row_taken_back_from_the_worker(
+    engine, database
+) -> None:
+    """A beat must not undo a reclaim.
+
+    `reclaim` moves an interrupted row back to pending, and a beat still in
+    flight would otherwise drag it straight back to claimed.
+    """
+    with Session(engine) as session:
+        session.add(document(digest(), parse_status=Status.PENDING))
+        session.commit()
+    queue = ParseQueue()
+    assert queue.claim() is not None
+
+    assert ParseQueue().reclaim() == 1
+    assert queue.touch() is False
+    assert statuses(engine) == {Status.PENDING: 1}
+
+
+def test_a_queue_holding_nothing_beats_nothing(engine, database) -> None:
+    """Between rows there is no claim to refresh."""
+    assert ParseQueue().touch() is False
+
+
+def test_finishing_a_row_stops_the_beat(documents, engine) -> None:
+    """A beat after the work is done would refresh a row nobody holds."""
+    documents(pending=1)
+    queue = ParseQueue()
+    claimed = queue.claim()
+    assert claimed is not None
+
+    queue.fail(claimed.sha256, "no")
+
+    assert queue.touch() is False
 
 
 def test_the_queue_reports_its_depth_and_whether_anyone_is_on_it(
