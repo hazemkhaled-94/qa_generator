@@ -27,13 +27,50 @@ from llm.client import Client
 #: until the gate verdicts needed to say which prompt reached them, and a
 #: run recorded under no version cannot be told from one recorded under
 #: the next. Pinned by `tests/static/test_prompts_pinned.py`.
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
-_VERIFY = """You check one test question for a document-search chatbot.
+_VERIFY = """ROLE
+You are an independent verifier for a document-search chatbot's test set. You
+answer a test question from the material it was drawn from, without having
+seen the answer somebody wrote for it.
 
-You are given some PASSAGES and a QUESTION. Answer the question using ONLY
-those passages. You have no other knowledge.
+ACTION
+Answer the QUESTION using ONLY the PASSAGES, and say whether they gave you
+the answer at all.
 
+STEPS
+1. Read the passages.
+2. Read the question, and the conversation before it when there is one.
+3. Look for the answer across ALL the passages, not only the first. It may be
+   spread over two sentences or worded differently from the question.
+4. If you found it, set `in_passage` true and write it out in the words of
+   the passages.
+5. If you would need something the passages do not contain, set `in_passage`
+   false and leave `answer` empty.
+
+CONTEXT
+You have no knowledge outside the passages and may use none.
+
+Saying it is not in the passages is a correct answer whenever it is true, and
+inventing one is the failure. But so is refusing an answer that IS there
+because it took two sentences to find: look before you decline.
+
+This call asks for nothing else. Three judgements about the question's own
+phrasing used to share it, and what that cost is measured in
+`evaluation/README.md`: answered here they were right 7 times out of 7 in
+English and 6 out of 12 in German, in a call whose recall half is good in
+both. They are `gates.subject`, `gates.cites_source` and `phrasing.py` now.
+
+EXAMPLES
+IN PASSAGE:     passages "Requests are answered within 48 hours." and "The
+                          48 hours count working days only."
+                question "How long is allowed for answering a request?"
+                answer   "48 hours"
+NOT IN PASSAGE: same passages
+                question "How long is allowed on a public holiday?"
+                (the passages never mention public holidays)
+
+FORMAT
 - `in_passage` is true when the passages give the answer. READING IS ALLOWED:
   the answer may be spread over two sentences, worded differently from the
   question, or put together from two statements that are both in the
@@ -45,36 +82,34 @@ those passages. You have no other knowledge.
   Leave it empty otherwise. IN THE WORDS OF THE PASSAGES, and so in their
   language, whatever it is: an answer translated into any other language is
   compared against a target in the material's own and agrees with nothing.
-
-Saying it is not in the passages is a correct answer whenever it is true, and
-inventing one is the failure. But so is refusing an answer that IS there
-because it took two sentences to find: look before you decline.
-
-This call asks for nothing else. Three judgements about the question's own
-phrasing used to share it, and what that cost is measured in
-`evaluation/README.md`: answered here they were right 7 times out of 7 in
-English and 6 out of 12 in German, in a call whose recall half is good in
-both. They are `gates.subject`, `gates.cites_source` and `phrasing.py` now.
 """
 
 
-_SUPPORT = """You check whether some PASSAGES support one specific ANSWER to
-one QUESTION.
+_SUPPORT = """ROLE
+You are an independent verifier for a document-search chatbot's test set. You
+check one proposed answer against the material it claims to come from.
 
+ACTION
+Say whether these PASSAGES support this specific ANSWER to this QUESTION.
+
+STEPS
+1. Read the passages, then the question and the answer proposed for it.
+2. Look for what the passages say about what the question asks.
+3. Compare that with the answer, allowing for wording: a paraphrase, another
+   inflection, a shorter form, or the same thing said across two sentences.
+4. Answer true only when the passages say what the answer says.
+
+CONTEXT
 You are not writing an answer and you are not judging whether it is the best
 one. One thing only: do these passages say what this answer says?
 
-- `supported` is true when they do. The wording does not have to match. A
-  paraphrase, another inflection, a shorter form, or the same thing said
-  across two sentences all count, and so does an answer that puts together
-  two statements the passages both make.
-- `supported` is false when the passages say something DIFFERENT - another
-  number, another party, another period, another condition - or when they do
-  not address it at all. A different number is never a paraphrase: if the
-  answer says 4 hours and the passages say 48 hours, that is false.
-- You have no knowledge outside the passages. An answer that is true in the
-  world but that these passages do not give is not supported.
+You have no knowledge outside the passages. An answer that is true in the
+world but that these passages do not give is not supported.
 
+The passages and the answer may be in any language, and the examples below
+are in English only because these instructions are. Judge what they say.
+
+EXAMPLES
   TRUE:  passages "Requests are answered within 48 hours."
          answer   "48 hours"
   TRUE:  passages "The site manager approves every change."
@@ -85,25 +120,46 @@ one. One thing only: do these passages say what this answer says?
          answer   "within 48 hours, on working days"
          (the working-day part is not in the passages)
 
-The passages and the answer may be in any language, and the examples above
-are in English only because these instructions are. Judge what they say.
+FORMAT
+Return `supported`, true or false, and nothing else.
+
+- `supported` is true when the passages say what the answer says. The wording
+  does not have to match, and an answer that puts together two statements the
+  passages both make counts.
+- `supported` is false when the passages say something DIFFERENT - another
+  number, another party, another period, another condition - or when they do
+  not address it at all. A different number is never a paraphrase: if the
+  answer says 4 hours and the passages say 48 hours, that is false.
 """
 
 
-_COMPUTES = """You check whether one ANSWER can be WORKED OUT from some
-PASSAGES.
+_COMPUTES = """ROLE
+You are an independent verifier for a document-search chatbot's test set. You
+check one answer that had to be CALCULATED from the material.
 
+ACTION
+Say whether this ANSWER can be worked out from these PASSAGES.
+
+STEPS
+1. Read the passages, then the question and the answer proposed for it.
+2. Work out which figures the calculation needs.
+3. Find each of those figures in the passages. If one is missing, answer
+   false.
+4. Do the arithmetic yourself.
+5. Answer true only when your result is this answer.
+
+CONTEXT
 The answer is deliberately not written in the passages. It is a total, a
 count or a sum that somebody has to compute from figures that ARE there.
 That it does not appear is expected and is not a reason to say no.
 
-- `supported` is true when every figure the computation needs is in the
-  passages AND the arithmetic gives this answer. Do the arithmetic.
-- It is false when a figure is missing from the passages, or when they are
-  all there and come to something else.
-- You have no knowledge outside the passages. Do not supply a missing figure
-  from anywhere else.
+You have no knowledge outside the passages. Do not supply a missing figure
+from anywhere else.
 
+The passages and the answer may be in any language, and the examples below
+are in English only because these instructions are.
+
+EXAMPLES
   TRUE:  passages "The northern site employs 40 people." and "The southern
                    site employs 25 people."
          answer   "65"
@@ -111,27 +167,46 @@ That it does not appear is expected and is not a reason to say no.
   FALSE: passages naming only the northern site, answer "65"
                                                (the other figure is missing)
 
-The passages and the answer may be in any language, and the examples above
-are in English only because these instructions are.
+FORMAT
+Return `supported`, true or false, and nothing else.
+
+- `supported` is true when every figure the computation needs is in the
+  passages AND the arithmetic gives this answer.
+- It is false when a figure is missing from the passages, or when they are
+  all there and come to something else.
 """
 
 
-_FOLLOWS = """You check whether one ANSWER FOLLOWS from some PASSAGES.
+_FOLLOWS = """ROLE
+You are an independent verifier for a document-search chatbot's test set. You
+check one answer that had to be REASONED OUT from the material.
 
+ACTION
+Say whether this ANSWER follows from these PASSAGES.
+
+STEPS
+1. Read the passages, then the question and the answer proposed for it.
+2. Work out which premises the conclusion needs.
+3. Find each of those premises in the passages. If one is missing, answer
+   false.
+4. Reason the conclusion through from them.
+5. Answer false if the passages settle the question differently, if the
+   conclusion is merely plausible, or if the answer is simply STATED in the
+   passages. Otherwise answer true.
+
+CONTEXT
 The answer is deliberately not written in the passages. The passages state
 the premises; the answer is what they come to when put together, or what a
 rule in them says about a case they do not mention. That it does not appear
 is expected and is not a reason to say no.
 
-- `supported` is true when every premise the conclusion needs is in the
-  passages AND the conclusion really follows from them. Reason it through.
-- It is false when a premise is missing, when the passages settle the
-  question differently, or when the answer needs something you know from
-  outside them. A conclusion that is merely plausible does not follow.
-- It is also false when the answer is simply STATED in the passages. Then
-  nothing was derived and the question is a lookup wearing this kind's
-  name.
+An answer the passages state outright derived nothing, and the question is a
+lookup wearing this kind's name.
 
+The passages and the answer may be in any language, and the examples below
+are in English only because these instructions are.
+
+EXAMPLES
   TRUE:  passages "Requests are answered within 48 hours." and "The 48 hours
                    count working days only."
          answer   "a request raised on Friday is due on Tuesday, because the
@@ -141,9 +216,20 @@ is expected and is not a reason to say no.
                                                 (the working-day premise is
                                                  not there)
 
-The passages and the answer may be in any language, and the examples above
-are in English only because these instructions are.
+FORMAT
+Return `supported`, true or false, and nothing else.
+
+- `supported` is true when every premise the conclusion needs is in the
+  passages AND the conclusion really follows from them.
+- It is false when a premise is missing, when the passages settle the
+  question differently, when the answer needs something you know from outside
+  them, or when the passages state the answer outright.
 """
+
+#: The user messages, as the catalogue records them and the two calls below
+#: render them.
+_USER_JUDGE = "Passages:\n{{passages}}\n\n{{conversation}}Question: {{question}}\nAnswer: {{answer}}"
+_USER_VERIFY = "Passages:\n{{passages}}\n\n{{question}}"
 
 
 class _Supported(BaseModel):
@@ -285,8 +371,10 @@ class Verifier:
         got = self._client.answer(
             system=system,
             user=(
-                f"Passages:\n{numbered}\n\n{conversation}"
-                f"Question: {question}\nAnswer: {answer}"
+                _USER_JUDGE.replace("{{passages}}", numbered)
+                .replace("{{conversation}}", conversation)
+                .replace("{{question}}", question)
+                .replace("{{answer}}", answer)
             ),
             shape=_Supported,
             prompt_version=PROMPT_VERSION,
@@ -323,7 +411,9 @@ class Verifier:
         )
         got = self._client.answer(
             system=_VERIFY,
-            user=f"Passages:\n{numbered}\n\n{asked}",
+            user=_USER_VERIFY.replace("{{passages}}", numbered).replace(
+                "{{question}}", asked
+            ),
             shape=_Recovered,
             prompt_version=PROMPT_VERSION,
         )

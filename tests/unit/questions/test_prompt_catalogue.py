@@ -16,6 +16,8 @@ from extraction.extractors import bridge, digest, llm
 from question_generation import phrasing, verifier
 from question_generation import prompts as questions
 from question_generation.types import PROMPT_VERSION, SPECS
+from topic_modelling import labels
+from topic_modelling import prompts as topics
 
 
 @pytest.fixture(scope="module")
@@ -84,6 +86,45 @@ def test_a_declared_prompt_is_never_empty(catalogue) -> None:
     for name, one in catalogue.items():
         assert one.text.strip(), name
         assert one.version, name
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [questions.catalogue, extraction.catalogue, topics.catalogue],
+    ids=["questions", "extraction", "topics"],
+)
+def test_every_declared_prompt_carries_its_user_half(declared) -> None:
+    """A call sends two messages and the row carried one of them.
+
+    What that cost is what Phoenix showed: a published prompt was the
+    instructions with nothing under them, because the user message - the
+    passages, the facts, the question being judged - was never recorded.
+    """
+    for one in declared():
+        assert one.user_text.strip(), one.name
+        assert "{{" in one.user_text, (
+            f"{one.name} records a user message with nothing substituted into "
+            f"it, so it is one call's text and not the template"
+        )
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [questions.catalogue, extraction.catalogue, topics.catalogue],
+    ids=["questions", "extraction", "topics"],
+)
+def test_every_declared_prompt_carries_the_shape_it_asks_for(declared) -> None:
+    """Every call asks for a Pydantic shape, and no row said which."""
+    for one in declared():
+        assert one.response_schema, one.name
+        assert one.response_schema["type"] == "object", one.name
+
+
+def test_the_topic_labeller_is_declared() -> None:
+    """It sends a real prompt and had neither a version nor a row."""
+    by_name = {one.name: one for one in topics.catalogue()}
+
+    assert by_name["label"].version == labels.PROMPT_VERSION
 
 
 def test_extraction_declares_each_extractor_at_its_own_version() -> None:

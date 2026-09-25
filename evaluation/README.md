@@ -49,6 +49,23 @@ Each recorded prompt becomes a Phoenix prompt, so a span's version opens
 beside the trace, and the playground can select one rather than have it
 pasted in.
 
+A published version carries the **whole call** — the system message, the
+user message as its template, the invocation parameters and the response
+format:
+
+| What Phoenix shows | Where it comes from |
+|---|---|
+| System message | `prompts.text`, composed by the stage that sends it |
+| User message | `prompts.user_text`, the template with `{{name}}` where a call substitutes a passage, a fact or a question |
+| Invocation parameters | `llm.config.Settings` — temperature, timeout, and `num_ctx` and `reasoning_effort` where the call sends them |
+| Response format | `prompts.response_schema`, the JSON schema of the Pydantic shape the call asks for |
+
+All four go through `PromptVersion.from_openai`. The plain `PromptVersion`
+constructor takes a message list, a model name and a template format and
+**nothing else**, so a version built that way carries an empty
+invocation-parameters block and no response format — which is what Phoenix
+was showing for every prompt here.
+
 It reads from the **database**, not from the code. That is what makes it
 work for a version the source has moved past — the same reason the
 `prompts` table exists — and it keeps the stages out of it: a publisher

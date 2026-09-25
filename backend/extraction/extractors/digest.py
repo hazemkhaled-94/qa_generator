@@ -12,12 +12,47 @@ from extraction.models import BULLET, CandidateFact, PassageToExtract, Provenanc
 from llm.client import Client, ModelUnavailable
 
 #: Recorded on every summary and outline drawn with the prompt below.
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
-_SYSTEM = """You condense an excerpt into something a reader can read instead
-of it.
+_SYSTEM = """ROLE
+You are a technical editor. You condense one excerpt of a document into
+something a reader can read instead of it.
 
-You return two things about the same excerpt:
+ACTION
+Return two readings of the same excerpt: a short prose summary of what it is
+about, and an outline of the separate points it makes.
+
+STEPS
+1. Read the section context, then the excerpt.
+2. Work out what the excerpt is about and what it establishes.
+3. Write the summary from that, in two or three sentences.
+4. List the separate points behind the excerpt's sentences, one short line
+   each, between two and six of them.
+5. Check every number, date, name and amount in both against the excerpt,
+   and drop whatever the excerpt does not carry.
+
+CONTEXT
+You are given the section context the excerpt sits under and the excerpt
+itself. The context says what the excerpt is about and is NOT part of it.
+You have no knowledge beyond what you are shown and may use none.
+
+EXAMPLES
+Excerpt, under the context "Support > Response times":
+
+  Standard requests are answered within 48 hours on working days. Urgent
+  requests are answered within 4 hours and may be raised by phone.
+
+  summary: "Support response times differ by urgency. Standard requests are
+            answered within 48 hours counting working days only, and urgent
+            requests within 4 hours. Urgent requests may also be raised by
+            phone."
+  outline: ["Standard requests: answered within 48 hours",
+            "The 48-hour time counts working days only",
+            "Urgent requests: answered within 4 hours",
+            "Urgent requests may be raised by phone"]
+
+FORMAT
+Return two fields about the same excerpt:
 
 - `summary`: two or three sentences of prose saying what the excerpt is
   about and what it establishes. Someone who reads only this knows what the
@@ -36,21 +71,11 @@ Rules, all of them mandatory:
 - Keep the qualifiers that make a point true: the date, the place, the
   party, the unit, the condition.
 - Say what the excerpt says, not what it implies and not what you know.
-
-Worked example. Excerpt, under the context "Support > Response times":
-
-  Standard requests are answered within 48 hours on working days. Urgent
-  requests are answered within 4 hours and may be raised by phone.
-
-  summary: "Support response times differ by urgency. Standard requests are
-            answered within 48 hours counting working days only, and urgent
-            requests within 4 hours. Urgent requests may also be raised by
-            phone."
-  outline: ["Standard requests: answered within 48 hours",
-            "The 48-hour time counts working days only",
-            "Urgent requests: answered within 4 hours",
-            "Urgent requests may be raised by phone"]
 """
+
+#: The user message, as the catalogue records it and `_prompt` renders it.
+_USER = """{{context}}Excerpt:
+{{excerpt}}"""
 
 
 class _Digest(BaseModel):
@@ -140,7 +165,9 @@ class DigestExtractor(Extractor):
             if passage.section_path
             else ""
         )
-        return f"{heading}Excerpt:\n{passage.text}"
+        return _USER.replace("{{context}}", heading).replace(
+            "{{excerpt}}", passage.text
+        )
 
 
 def _bulleted(points: list[str]) -> str:

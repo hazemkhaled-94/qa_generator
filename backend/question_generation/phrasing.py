@@ -39,13 +39,33 @@ log = logging.getLogger(__name__)
 #: every worked example into the neutral domain the rest of the prompts use:
 #: the examples had been taken from the corpus being debugged against, which
 #: is the one thing extraction's own prompt warns about.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
-_SOURCE = """You are given ONE question, and you answer ONE thing about it.
+_SOURCE = """ROLE
+You are a question reviewer. You judge ONE property of ONE question and
+nothing else about it.
 
-Does the question say WHERE its answer is - naming or quoting a document, a
-report, a circular, a regulation by name, a section or a heading?
+ACTION
+Say whether the question says WHERE its answer is - naming or quoting a
+document, a report, a circular, a regulation by name, a section or a heading.
 
+STEPS
+1. Read the question.
+2. List every document, report, regulation, section or heading it names.
+3. For each one, decide whether the question treats it as WHERE THE ANSWER
+   IS, or as THE THING IT IS ASKING ABOUT.
+4. Answer true if any one of them is named as the source, false otherwise.
+
+CONTEXT
+Naming a party, a duty, a period or a thing being governed is NOT naming a
+source. Only saying which material holds the answer is. The hard cases are
+the ones where a document is named.
+
+The question may be in any language, and the examples below are in English
+and German only because these instructions are. Judge what the question
+does, not what it is written in.
+
+EXAMPLES
 TRUE:  "According to the service agreement, how long may a reply take?"
 TRUE:  "Under 'Support > Response times', what is the urgent reply time?"
 TRUE:  "What does section 4 say about weekend cover?"
@@ -62,24 +82,37 @@ FALSE: "Warum wird die Norm XY-4711 in diesem Zusammenhang erwähnt?"
         The pair above and this one have the same shape and differ only by
         which of the norm and the answer the question is about)
 
-Naming a party, a duty, a period or a thing being governed is NOT naming a
-source. Only saying which material holds the answer is. The hard cases are
-the ones where a document is named: ask whether the question treats it as
-WHERE THE ANSWER IS, or as THE THING IT IS ASKING ABOUT.
+FORMAT
+Return `names_its_source`, true or false, and nothing else."""
 
-The question may be in any language, and the examples above are in English
-and German only because these instructions are. Judge what the question
-does, not what it is written in."""
+_CONTAINED = """ROLE
+You are a question reviewer. You judge ONE property of ONE question and
+nothing else about it.
 
-_CONTAINED = """You are given ONE question and the POINTING WORDS somebody
-found in it, and you answer ONE thing about it.
+ACTION
+Say whether every POINTING WORD listed has something INSIDE THE QUESTION
+ITSELF to point at.
 
-Does every pointing word have something INSIDE THE QUESTION ITSELF to point
-at?
+STEPS
+1. Read the question, then the pointing words found in it.
+2. Take each pointing word in turn and look for the thing it points at.
+3. Decide whether that thing was introduced by this question, or whether it
+   sits outside the question.
+4. Answer true only when every pointing word lands inside the question.
 
+CONTEXT
 The asker has not seen the material. A pointing word that reaches outside the
 question reaches nothing they could know.
 
+The test is not whether the pointing word is ordinary. It is whether the
+thing it points at was introduced by this question. A question that sets a
+case up and then refers back to it is self-contained, however much it reads
+like a reference.
+
+The question may be in any language. Judge what it does, not what it is
+written in.
+
+EXAMPLES
 TRUE:  "If a system meets its target by editing the stored score instead of
         doing the task, how is this behaviour classified?"
        (pointing word: "this". The question set the behaviour out first, so
@@ -97,13 +130,8 @@ FALSE: "Wie unterscheiden sich die Antwortzeit und ein Teammitglied laut
         diesen Angaben?"
        (pointing word: "diesen". No Angaben are named.)
 
-The test is not whether the pointing word is ordinary. It is whether the
-thing it points at was introduced by this question. A question that sets a
-case up and then refers back to it is self-contained, however much it reads
-like a reference.
-
-The question may be in any language. Judge what it does, not what it is
-written in."""
+FORMAT
+Return `self_contained`, true or false, and nothing else."""
 
 
 class _NamesItsSource(BaseModel):
@@ -116,15 +144,33 @@ class _NamesItsSource(BaseModel):
     )
 
 
-_NAMES = """You are given ONE question, and you answer ONE thing about it.
+_NAMES = """ROLE
+You are a question reviewer. You judge ONE property of ONE question and
+nothing else about it.
 
-Does it name something a person searching a large corpus could have typed it
-about - a thing, a party, a duty, a period, a place?
+ACTION
+Say whether the question names something a person searching a large corpus
+could have typed it about - a thing, a party, a duty, a period, a place.
 
+STEPS
+1. Read the question.
+2. Take every noun in it in turn.
+3. Decide whether each is a bare word - components, requirements, criteria,
+   items - with nothing saying whose or which.
+4. Answer false only when EVERY noun in the question is such a bare word.
+
+CONTEXT
 The asker has not read the material and does not know which document answers
 them. A question that names nothing is one only somebody already holding the
 passage could have asked.
 
+The test is not whether the question is detailed. It is whether every noun in
+it is a bare word with nothing saying whose or which.
+
+The question may be in any language. Judge what it does, not what it is
+written in.
+
+EXAMPLES
 TRUE:  "How long is allowed for answering a standard support request?"
 TRUE:  "Why must a request be confirmed in writing?"
 TRUE:  "What does the device weigh?"
@@ -135,12 +181,13 @@ FALSE: "Für welche Kriterien gelten die Anforderungen?"
        (which criteria, whose requirements? nothing says)
 FALSE: "Which items are covered?"
 
-The test is not whether the question is detailed. It is whether every noun in
-it is a bare word - components, requirements, criteria, items - with nothing
-saying whose or which.
+FORMAT
+Return `names_something`, true or false, and nothing else."""
 
-The question may be in any language. Judge what it does, not what it is
-written in."""
+#: The user messages, as the catalogue records them and `PhrasingJudge`
+#: renders them.
+_USER = "QUESTION: {{question}}"
+_USER_CONTAINED = "QUESTION: {{question}}\n\nPOINTING WORDS found in it: {{pointers}}"
 
 
 class _NamesSomething(BaseModel):
@@ -186,7 +233,12 @@ class PhrasingJudge:
             is not False - a judgement nobody made must not reject a
             question - and the caller is what decides that.
         """
-        return self._asked(_SOURCE, question, _NamesItsSource, "names_its_source")
+        return self._asked(
+            _SOURCE,
+            _USER.replace("{{question}}", question),
+            _NamesItsSource,
+            "names_its_source",
+        )
 
     def names_something(self, question: str) -> bool | None:
         """Whether a question names anything a searcher could have typed.
@@ -202,7 +254,12 @@ class PhrasingJudge:
         Returns:
             What the model said, or None when it could not be reached.
         """
-        return self._asked(_NAMES, question, _NamesSomething, "names_something")
+        return self._asked(
+            _NAMES,
+            _USER.replace("{{question}}", question),
+            _NamesSomething,
+            "names_something",
+        )
 
     def self_contained(self, question: str, pointers: Sequence[str]) -> bool | None:
         """Whether a question's pointing words land inside it.
@@ -218,8 +275,8 @@ class PhrasingJudge:
         """
         if not pointers:
             return None
-        asked = (
-            f"QUESTION: {question}\n\nPOINTING WORDS found in it: {', '.join(pointers)}"
+        asked = _USER_CONTAINED.replace("{{question}}", question).replace(
+            "{{pointers}}", ", ".join(pointers)
         )
         return self._asked(_CONTAINED, asked, _SelfContained, "self_contained")
 

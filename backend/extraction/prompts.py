@@ -20,6 +20,9 @@ SERVICE = "extraction"
 def catalogue(cap: int | None = None) -> list[Composed]:
     """Every prompt this stage can send, composed as it would be sent.
 
+    Both halves and the shape: the system prompt, the user message as its
+    template, and the JSON schema the answer has to come back in.
+
     `cap` is what `EXTRACTION_MIN_OTHER_SHARE` works out to, as the
     factory resolved it, because the atomic extractor appends the cap
     instruction to its own prompt and a record of the uncapped text would
@@ -28,7 +31,25 @@ def catalogue(cap: int | None = None) -> list[Composed]:
     entirely rather than written as a limitless one.
     """
     return [
-        Composed("atomic", llm.PROMPT_VERSION, llm.composed(cap)),
-        Composed("digest", digest.PROMPT_VERSION, digest._SYSTEM),
-        Composed("bridge", bridge.PROMPT_VERSION, bridge._SYSTEM),
+        Composed(
+            "atomic",
+            llm.PROMPT_VERSION,
+            llm.composed(cap),
+            llm._USER,
+            llm._Facts.model_json_schema(),
+        ),
+        Composed(
+            "digest",
+            digest.PROMPT_VERSION,
+            digest._SYSTEM,
+            digest._USER,
+            digest._Digest.model_json_schema(),
+        ),
+        Composed(
+            "bridge",
+            bridge.PROMPT_VERSION,
+            bridge._SYSTEM,
+            bridge._USER,
+            bridge._Bridges.model_json_schema(),
+        ),
     ]

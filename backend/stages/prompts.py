@@ -17,6 +17,7 @@ import hashlib
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -46,16 +47,29 @@ class Composed:
             rather than per stage: question generation sends prompts from
             three, and they are bumped separately because they change for
             different reasons.
-        text: The prompt as composed, which is what the model is given.
+        text: The SYSTEM prompt as composed, which is what the model is
+            given as its instructions.
+        user_text: The USER message as its template, with `{{name}}` where
+            the call fills a passage, a fact or a question in. Every call
+            sends both halves; this is the one the row used not to carry.
+        response_schema: The JSON schema the answer has to come back in,
+            taken from the Pydantic shape the call asks for.
     """
 
     name: str
     version: str
     text: str
+    user_text: str = ""
+    response_schema: dict[str, Any] | None = None
 
     @property
     def digest(self) -> str:
-        """This text's digest."""
+        """This text's digest.
+
+        Over the SYSTEM half only, as `tests/static/test_prompts_pinned.py`
+        takes it, so a stored row and that file's pin can still be compared
+        without converting either.
+        """
         return digest(self.text)
 
 
@@ -138,25 +152,37 @@ def _write(service: str, held: Sequence[Composed]) -> int:
     """Upserts the prompts, warning about any that changed under a version."""
     with sessions().begin() as session:
         stored = {
-            (row.name, row.version): row.digest
+            (row.name, row.version): (row.digest, row.user_text, row.response_schema)
             for row in session.scalars(select(Prompt).where(Prompt.service == service))
         }
         moved = 0
         for one in held:
             was = stored.get((one.name, one.version))
-            if was == one.digest:
+            sending = (one.digest, one.user_text, one.response_schema)
+            if was == sending:
                 continue
             if was is not None:
+                # All three halves, not the digest alone: the digest is over
+                # the system prompt, and a user template edited under a fixed
+                # version is the same two datasets.
                 log.warning(
-                    "%s's %r prompt has changed but its PROMPT_VERSION is still "
-                    "%s: stored %s, sending %s. Two prompts under one version are "
-                    "two datasets that cannot be told apart. Bump the version and "
-                    "update tests/static/test_prompts_pinned.py.",
+                    "%s's %r prompt has changed (%s) but its PROMPT_VERSION is "
+                    "still %s. Two prompts under one version are two datasets "
+                    "that cannot be told apart. Bump the version and update "
+                    "tests/static/test_prompts_pinned.py.",
                     service,
                     one.name,
+                    ", ".join(
+                        half
+                        for half, before, now in zip(
+                            ("system prompt", "user template", "response schema"),
+                            was,
+                            sending,
+                            strict=True,
+                        )
+                        if before != now
+                    ),
                     one.version,
-                    was,
-                    one.digest,
                 )
             session.execute(
                 insert(Prompt)
@@ -165,13 +191,20 @@ def _write(service: str, held: Sequence[Composed]) -> int:
                     name=one.name,
                     version=one.version,
                     text=one.text,
+                    user_text=one.user_text,
+                    response_schema=one.response_schema,
                     digest=one.digest,
                 )
                 # first_seen_at is deliberately not touched: what it would
                 # then record is the last restart.
                 .on_conflict_do_update(
                     constraint="prompts_service_version_name_unique",
-                    set_={"text": one.text, "digest": one.digest},
+                    set_={
+                        "text": one.text,
+                        "user_text": one.user_text,
+                        "response_schema": one.response_schema,
+                        "digest": one.digest,
+                    },
                 )
             )
             moved += 1

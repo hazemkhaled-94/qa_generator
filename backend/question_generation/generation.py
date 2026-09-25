@@ -23,32 +23,37 @@ from pydantic import BaseModel, Field
 from llm.client import Client
 from question_generation.models import Candidate, FactGroup
 from question_generation.planning import Plan
-from question_generation.types import PROMPT_VERSION, READS
+from question_generation.types import PROMPT_VERSION, READS, TypeSpec
 
 __all__ = ["PROMPT_VERSION", "QuestionWriter"]
 
-_PERTURB = f"""You write one test question that the material does NOT answer.
+_PERTURB = (
+    """ROLE
+You are a test-question writer. The questions you write measure whether a
+document-search chatbot says it does not know, instead of inventing an answer.
 
-These measure whether a chatbot says it does not know instead of inventing an
-answer. So the question has to be a plausible thing to ask of this material
-and have no answer anywhere in it.
+ACTION
+Write ONE test question that the material does NOT answer anywhere, and that
+is still a plausible thing to ask of it.
 
-You are given one FACT and the PASSAGE it came from. Take the fact and move it
-just out of reach. Make ONE change:
-- ask about a neighbouring thing the material does not cover,
-- ask for a detail of the same subject it does not state, or
-- ask about a different party, place, period or category.
+STEPS
+1. Read the FACT and the PASSAGE it came from.
+2. Take the fact and move it just out of reach. Make ONE change:
+   - ask about a neighbouring thing the material does not cover,
+   - ask for a detail of the same subject it does not state, or
+   - ask about a different party, place, period or category.
+3. Answer your own question from the fact and the passage. If either of them
+   answers it, you have written the wrong question - go back to step 2.
+4. Read the question back against every rule under FORMAT.
 
-{READS}
-- IT MUST NOT BE ANSWERABLE from the fact or the passage. If reading either
-  answers your question, you have written the wrong question.
+CONTEXT
+You are given one FACT and the PASSAGE it came from, and nothing else. The
+person you are writing for has not read the passage. They do not know which
+document answers them - finding that out is the whole reason they are asking.
 
-- DO NOT ask something absurd and do not invent a thing that does not exist.
-  Both are too easy to decline. A question about an unrelated subject tests
-  nothing, because any chatbot declines that one.
+THE KIND OF QUESTION TO ASK: {{asks}}
 
-Worked example:
-
+EXAMPLES
   FACT: A standard support request is answered within 48 hours.
   PASSAGE: Standard requests are answered within 48 hours on working days.
   These times are set out in the service agreement.
@@ -63,21 +68,53 @@ Worked example:
   RIGHT  "How long is allowed for answering a standard support request raised
           on a public holiday?"
          (same subject, same shape, a condition the material does not cover)
+
+FORMAT
+Return `question`, and nothing else.
+
 """
+    + READS
+    + """- IT MUST NOT BE ANSWERABLE from the fact or the passage. If reading either
+  answers your question, you have written the wrong question.
 
-_FOLLOW = """You write the question somebody would ask NEXT.
+- DO NOT ask something absurd and do not invent a thing that does not exist.
+  Both are too easy to decline. A question about an unrelated subject tests
+  nothing, because any chatbot declines that one.
+"""
+)
 
+_FOLLOW = """ROLE
+You are a test-question writer. You write the question somebody would ask
+NEXT, as the following turn of a conversation already under way.
+
+ACTION
+Write the next question in that conversation, and TWO answers to it - the
+short key its reply is marked against, and an explanation for a reader who
+has never seen the material.
+
+STEPS
+1. Read the CONVERSATION so far, then the FACTS and the PASSAGE.
+2. Work out what somebody just told the last answer would want to know next
+   about the same material.
+3. Write that question, of the kind named below.
+4. Write `answer`, then `explanation`.
+5. Check that the FACTS answer your question, and that the conversation does
+   not already.
+
+CONTEXT
 You are given the FACTS, the PASSAGE they came from, and the CONVERSATION so
-far: one or more questions already asked and the answers they got.
+far: one or more questions already asked and the answers they got. Somebody
+has just been told the last answer and wants to know one more thing about the
+same material.
 
-Write the next question in that conversation. Somebody has just been told the
-last answer and wants to know one more thing about the same material.
-
-This one is different from a question asked cold, and the difference is the
+This question is different from one asked cold, and the difference is the
 point: it MAY rely on the conversation. "And for urgent requests?" is a
 perfectly good follow-up. You do not have to name the subject again, because
 the person you are talking to already knows it.
 
+{{type}}
+
+FORMAT
 Rules, all of them mandatory:
 - ONE question, ending in a question mark.
 - It must be answered by the FACTS, like any other. A follow-up whose answer
@@ -90,21 +127,49 @@ Rules, all of them mandatory:
   facts were offered: a chatbot answering half of one is neither right nor
   wrong. If the facts have no single honest question between them, ask about
   one of them and name only the facts you used.
-- ASK THE KIND OF QUESTION BELOW, and mean it. If the facts hold no answer of
-  that kind - no circumstance to give, no reason stated, two things that are
-  not comparable - ask what they do hold rather than forcing the shape onto
-  them. A question whose answer does not fit what it asked is worse than a
-  plainer one, and the worst of all is one whose answer repeats it back:
-  "Why is X done by Y?" answered "Because X is done by Y" has asked nothing.
+- ASK THE KIND OF QUESTION NAMED ABOVE, and mean it. If the facts hold no
+  answer of that kind - no circumstance to give, no reason stated, two things
+  that are not comparable - ask what they do hold rather than forcing the
+  shape onto them. A question whose answer does not fit what it asked is
+  worse than a plainer one, and the worst of all is one whose answer repeats
+  it back: "Why is X done by Y?" answered "Because X is done by Y" has asked
+  nothing.
 - Write in the language of the facts.
 - `facts` is the NUMBERS of the facts your question needs.
 
-THE WORKED EXAMPLE BELOW IS WRITTEN FOR A QUESTION ASKED COLD, because the
+THE WORKED EXAMPLE ABOVE IS WRITTEN FOR A QUESTION ASKED COLD, because the
 same one serves both. Take from it WHAT THE KIND ASKS FOR and WHAT ITS ANSWER
 LOOKS LIKE. Ignore anything in it about naming the subject or naming both
 sides: this question is the next turn of a conversation that has already
 named them, and repeating them is what makes a follow-up read like a form.
 """
+
+
+#: The user message both answerable kinds are asked with, as the catalogue
+#: records it and `_prompt` renders it.
+_USER = (
+    "FACTS - your question must be answered by these:\n"
+    "{{facts}}\n"
+    "\n"
+    "PASSAGE(S) - context only, so you know what the material is "
+    "about. Phrase the question from these; never quote or name a "
+    "heading or a title out of them, and never ask about anything "
+    "here that the facts above do not state:\n"
+    "{{passages}}{{note}}"
+)
+
+#: Appended to the conversation for a follow-up, after the facts.
+_USER_FOLLOW = "{{sample}}\n\n{{conversation}}"
+
+
+def _typed(spec: TypeSpec) -> str:
+    """What one question type contributes to the follow-up prompt."""
+    return (
+        f"WHAT TO ASK NEXT: {spec.asks}\n"
+        f"{spec.guidance}\n"
+        f"THE ANSWER IS {spec.answer_rule}\n\n"
+        f"EXAMPLES\n{spec.example}"
+    )
 
 
 def _under(position: int, statement: str) -> str:
@@ -219,12 +284,10 @@ class QuestionWriter:
                 answer in the shape.
         """
         written = self._client.answer(
-            system=(
-                f"{_FOLLOW}\nWHAT TO ASK NEXT: {plan.spec.asks}\n\n"
-                f"THE ANSWER IS {plan.spec.answer_rule}\n\n"
-                f"{plan.spec.directive}"
+            system=_FOLLOW.replace("{{type}}", _typed(plan.spec)),
+            user=_USER_FOLLOW.replace("{{sample}}", self._prompt(sample)).replace(
+                "{{conversation}}", self._conversation(thread)
             ),
-            user=f"{self._prompt(sample)}\n\n{self._conversation(thread)}",
             shape=_Answered,
             prompt_version=PROMPT_VERSION,
         )
@@ -248,7 +311,7 @@ class QuestionWriter:
         """
         first = FactGroup(sample.facts[:1])
         written = self._client.answer(
-            system=f"{_PERTURB}\nTHE KIND OF QUESTION TO ASK: {plan.spec.asks}",
+            system=_PERTURB.replace("{{asks}}", plan.spec.asks),
             user=self._prompt(first, note),
             shape=_Unanswered,
             prompt_version=PROMPT_VERSION,
@@ -343,9 +406,7 @@ class QuestionWriter:
             else ""
         )
         return (
-            f"FACTS - your question must be answered by these:\n{numbered}\n\n"
-            f"PASSAGE(S) - context only, so you know what the material is "
-            f"about. Phrase the question from these; never quote or name a "
-            f"heading or a title out of them, and never ask about anything "
-            f"here that the facts above do not state:\n{context}{again}"
+            _USER.replace("{{facts}}", numbered)
+            .replace("{{passages}}", context)
+            .replace("{{note}}", again)
         )

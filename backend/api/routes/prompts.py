@@ -32,15 +32,23 @@ router = APIRouter(prefix="/prompts", tags=["prompts"])
 class Prompt:
     """One prompt, as it was composed under one version."""
 
-    #: The stage that sends it: `questions` or `extraction`.
+    #: The stage that sends it: `questions`, `extraction` or `topics`.
     service: str
     #: What it is within that stage - a question type, `perturb`, one of
     #: the verifier's four.
     name: str
     #: The PROMPT_VERSION its module declared when this text was written.
     version: str
-    #: The prompt as composed, which is what the model was given.
+    #: The SYSTEM prompt as composed, which is what the model was given as
+    #: its instructions.
     text: str
+    #: The USER message as its template, with `{{name}}` where the call
+    #: fills a passage, a fact or a question in. Empty on a row recorded
+    #: before the column existed.
+    user_text: str
+    #: The JSON schema the answer had to come back in. Null on a row
+    #: recorded before the column existed.
+    response_schema: dict | None
     #: The first sixteen hex characters of the text's SHA-256, spelled as
     #: `tests/static/test_prompts_pinned.py` spells it, so a row and that
     #: file's pin can be compared without converting either.
@@ -52,7 +60,10 @@ class Prompt:
 @router.get("", summary="The prompts recorded, and what each version asked for")
 def read(
     service: str | None = Query(
-        None, max_length=NAME_MAX, pattern=NO_NUL, description="questions or extraction"
+        None,
+        max_length=NAME_MAX,
+        pattern=NO_NUL,
+        description="questions, extraction or topics",
     ),
     version: str | None = Query(
         None, max_length=NAME_MAX, pattern=NO_NUL, description="a PROMPT_VERSION"
@@ -86,6 +97,8 @@ def read(
             name=row.name,
             version=row.version,
             text=row.text,
+            user_text=row.user_text,
+            response_schema=row.response_schema,
             digest=row.digest,
             first_seen_at=row.first_seen_at,
         )

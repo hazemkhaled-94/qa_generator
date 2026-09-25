@@ -102,6 +102,7 @@ MODULES = frozenset(
         "factory.py",
         "labels.py",
         "models.py",
+        "prompts.py",
         "repository.py",
         "run.py",
         "service.py",
@@ -109,6 +110,22 @@ MODULES = frozenset(
         "visualisation.py",
     }
 )
+
+#: The prompt version recorded on every topic the labeller names. It had no
+#: version at all until the prompt was catalogued: a topic named under one
+#: wording and one named under the next were the same column with nothing to
+#: tell them apart, which is what the other two stages use this for.
+LABEL_PROMPT_VERSION = "1"
+
+
+def test_the_labeller_declares_the_prompt_version_pinned_here() -> None:
+    """A prompt changed under a fixed version is two namings of one column."""
+    from topic_modelling import labels
+
+    assert labels.PROMPT_VERSION == LABEL_PROMPT_VERSION, (
+        f"the labeller is at {labels.PROMPT_VERSION} and this file pins "
+        f"{LABEL_PROMPT_VERSION}. Bump both in the same commit."
+    )
 
 
 def test_the_service_reads_exactly_the_settings_named_here() -> None:

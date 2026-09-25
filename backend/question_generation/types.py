@@ -31,18 +31,54 @@ from database.qa_generator import (
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "8"
+PROMPT_VERSION = "9"
+
+#: Who the writer is, and what one call produces. The first two RASCEF
+#: sections, shared by every type.
+_ROLE = """ROLE
+You are a test-question writer. The questions you write measure a
+document-search chatbot: each one is put to the chatbot, and its reply is
+marked against the answer you write beside the question.
+
+ACTION
+Write ONE test question of the kind named below, and TWO answers to it - the
+short key its reply is marked against, and an explanation for a reader who
+has never seen the material.
+"""
+
+#: The order the work is done in, shared by every type.
+_STEPS = """STEPS
+1. Read the numbered FACTS, then the PASSAGE each came from.
+2. Decide which facts your question needs, and note their numbers.
+3. Write the question the way somebody who needs that information would type
+   it, obeying every rule under FORMAT.
+4. Write `answer`: the key, in exactly the form demanded below.
+5. Write `explanation`: three to six sentences for a reader who has not seen
+   the material.
+6. Read your question back against the rules. It names its subject and never
+   its source, points at nothing outside itself, asks one thing, and does not
+   contain its own answer.
+7. Check that every number, date and name in both answers is in the material.
+"""
+
+#: What the writer is given, and who it is writing for.
+_CONTEXT = """CONTEXT
+You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
+from. The question must be answered by the facts. The passage is there so you
+know what the material is about - use it to phrase the question, never as
+something to ask about and never as something to cite.
+
+The person you are writing for has not read the passage. They do not know
+which document answers them - finding that out is the whole reason they are
+asking.
+"""
 
 #: How every question must READ, whatever it is for. Shared by the writer and
 #: by the perturbation that writes the unanswerable ones: a rule in one prompt
 #: and not the other is how the two come to disagree, and it showed - every
 #: question padded with `spezifische` was an unanswerable one, written by the
 #: only prompt that had never been told not to.
-READS = """Write the question somebody who needs this information would actually
-type. They have not read the passage. They do not know which document answers
-them - finding that out is the whole reason they are asking.
-
-Rules, all of them mandatory:
+READS = """Rules, all of them mandatory:
 
 - NEVER SAY WHERE THE ANSWER IS. No "according to the report", no "in this
   circular", no naming or quoting a document, a section or a heading. Nobody
@@ -73,9 +109,9 @@ Rules, all of them mandatory:
 - VARY HOW YOU OPEN. A kind of question has more than one opening and real
   askers use all of them: a reason is asked as "Why ...", "What is the reason
   ...", "What makes ... necessary"; a comparison as "How do ... differ",
-  "What sets ... apart", "Which of ... is". Where a type below shows two
-  worked examples, they open differently ON PURPOSE - take the variety, not
-  just the first one. A set in which nine of ten questions of a kind open
+  "What sets ... apart", "Which of ... is". Where a type shows two worked
+  examples, they open differently ON PURPOSE - take the variety, not just
+  the first one. A set in which nine of ten questions of a kind open
   with the same word tests whether a chatbot handles that word, not whether
   it can find an answer.
 
@@ -123,23 +159,20 @@ to understand the answer. Write it for them:
   above about naming a document, a section or a heading apply here too.
 """
 
-_RULES = f"""You write ONE test question for measuring a document-search chatbot.
-
-You are given numbered FACTS drawn from a corpus, and the PASSAGE each came
-from. The question must be answered by the facts. The passage is there so you
-know what the material is about - use it to phrase the question, never as
-something to ask about and never as something to cite.
-
-{READS}
+#: Everything the answer has to satisfy, under the FORMAT heading: how the
+#: question must read, which facts to cite, and what the two answers are.
+_FORMAT_RULES = f"""{READS}
 - `facts` is the NUMBERS of the facts your question needs. Use several only
   when the question genuinely cannot be answered without all of them.
 
 {EXPLAINS}"""
 
-#: Appended to the rules above for every type whose sample spans more than one
+#: Added to the context for every type whose sample spans more than one
 #: passage. Without it the writer answers the first passage and ignores the
 #: rest, and the row carries a spread the question never used.
 _SPAN = """
+THIS CALL HAS AN EXTRA REQUIREMENT:
+
 - THIS QUESTION SHOULD NEED FACTS FROM MORE THAN ONE PASSAGE, so that a
   chatbot has to find and combine two places in the material rather than one.
 
@@ -218,8 +251,11 @@ class TypeSpec:
     #: One line, shown to the writer as the task and to the verifier as what
     #: the question was supposed to do.
     asks: str
-    #: What to ask, and one worked example, appended to the shared rules.
-    directive: str
+    #: One worked example of this type, shown under EXAMPLES.
+    example: str
+    #: What else this type requires, shown under CONTEXT beneath `asks`.
+    #: Empty where the `asks` line says all there is to say.
+    guidance: str = ""
     #: The other forms this type's answer is allowed to come back as. The
     #: prompt still asks for `form`; these are what the gates will also take.
     #:
@@ -283,15 +319,23 @@ class TypeSpec:
     def system(self, *, spans: bool = False) -> str:
         """The whole system prompt for writing a question of this type.
 
+        Assembled as RASCEF: the role, the action and the steps shared by
+        every type, then the context this type asks in, its worked example,
+        and the format both answers have to come back in.
+
         `spans` adds the instruction to use facts from more than one passage.
         Set by the plan from the shape of the sample, not by the type: a
         factoid drawn from two documents is a cross-document factoid.
         """
         return (
-            f"{_RULES}{_SPAN if spans or self.spans else ''}\n"
-            f"WHAT TO ASK: {self.asks}\n\n"
+            f"{_ROLE}\n{_STEPS}\n{_CONTEXT}\n"
+            f"WHAT TO ASK: {self.asks}\n"
+            f"{self.guidance}"
+            f"{_SPAN if spans or self.spans else ''}\n"
+            f"EXAMPLES\n{self.example}\n"
+            f"FORMAT\n"
             f"THE ANSWER IS {_FORMS[self.form]}\n\n"
-            f"{self.directive}"
+            f"{_FORMAT_RULES}"
         )
 
 
@@ -303,7 +347,7 @@ _SPECS = (
         passages=1,
         also=(AnswerForm.LIST,),
         asks="one checkable value - how many, how much, by when, what limit",
-        directive="""Worked example. Facts:
+        example="""Worked example. Facts:
 
   [1] A standard support request is answered within 48 hours.
   [2] An urgent support request is answered within 4 hours.
@@ -332,7 +376,7 @@ _SPECS = (
         passages=1,
         also=(AnswerForm.LIST,),
         asks="who or which party does, decides, owns or must be told something",
-        directive="""Worked example. Facts:
+        example="""Worked example. Facts:
 
   [1] The site manager approves every change to the shift plan.
 
@@ -355,10 +399,11 @@ _SPECS = (
         passages=1,
         also=(AnswerForm.VALUE,),
         asks="what a named thing, term or status IS, as the material defines it",
-        directive="""Ask about a term the material itself defines or describes. Do
-not ask for a dictionary definition of an ordinary word.
-
-Worked example. Facts:
+        guidance="""
+Ask about a term the material itself defines or describes. Do not ask for a
+dictionary definition of an ordinary word.
+""",
+        example="""Worked example. Facts:
 
   [1] A priority request is one raised by phone and confirmed in writing.
 
@@ -382,10 +427,11 @@ Worked example. Facts:
         form=AnswerForm.LIST,
         passages=1,
         asks="which things belong to a named set - the items, not how many",
-        directive="""There has to be a real set in the facts. If the material lists
-one thing, this is the wrong kind of question for it.
-
-Worked example. Facts:
+        guidance="""
+There has to be a real set in the facts. If the material lists one thing,
+this is the wrong kind of question for it.
+""",
+        example="""Worked example. Facts:
 
   [1] A request may be raised by phone.
   [2] A request may be raised through the web form.
@@ -411,9 +457,10 @@ Worked example. Facts:
         passages=1,
         also=(AnswerForm.VALUE,),
         asks="when, or under what circumstances, something applies or is required",
-        directive="""Ask for the circumstances, not for the thing itself.
-
-Worked example. Facts:
+        guidance="""
+Ask for the circumstances, not for the thing itself.
+""",
+        example="""Worked example. Facts:
 
   [1] The four-hour reply time applies only to requests marked urgent.
   [2] The four-hour reply time applies only on working days.
@@ -450,11 +497,12 @@ Worked example. Facts:
         form=AnswerForm.EXPLANATION,
         passages=1,
         asks="why something is required, done, or the way it is",
-        directive="""Only where the material actually gives a reason. If it states a
-rule and never says why, this is the wrong kind of question for it - do not
-invent the reason.
-
-Worked example. Facts:
+        guidance="""
+Only where the material actually gives a reason. If it states a rule and
+never says why, this is the wrong kind of question for it - do not invent the
+reason.
+""",
+        example="""Worked example. Facts:
 
   [1] Requests are confirmed in writing so the agreed time can be evidenced.
 
@@ -492,10 +540,11 @@ Worked example. Facts:
         passages=1,
         also=(AnswerForm.LIST,),
         asks="how something is done, or in what order the steps go",
-        directive="""Ask for the method. The answer names the steps, in order, in
-the words of the material.
-
-Worked example. Facts:
+        guidance="""
+Ask for the method. The answer names the steps, in order, in the words of the
+material.
+""",
+        example="""Worked example. Facts:
 
   [1] A request is raised through the web form.
   [2] The form is confirmed by email before work begins.
@@ -518,10 +567,10 @@ Worked example. Facts:
         form=AnswerForm.EXPLANATION,
         passages=1,
         asks="what happens, or what follows, when something is or is not done",
-        directive="""Only where the material states the consequence. Do not invent
-one.
-
-Worked example. Facts:
+        guidance="""
+Only where the material states the consequence. Do not invent one.
+""",
+        example="""Worked example. Facts:
 
   [1] A request left unconfirmed for five working days is closed.
 
@@ -545,9 +594,10 @@ Worked example. Facts:
         passages=2,
         also=(AnswerForm.EXPLANATION,),
         asks="how two named things differ, as the material states each of them",
-        directive="""Both sides must come from the facts. Name both in the question.
-
-Worked example. Facts:
+        guidance="""
+Both sides must come from the facts. Name both in the question.
+""",
+        example="""Worked example. Facts:
 
   [1] A standard support request is answered within 48 hours.
   [2] An urgent support request is answered within 4 hours.
@@ -585,9 +635,10 @@ Worked example. Facts:
         passages=2,
         derived=Derivation.ARITHMETIC,
         asks="a total, a count or a sum that no single fact states on its own",
-        directive="""The answer must be something the material does not write down
-anywhere - it has to be worked out from two or more facts. If one fact already
-states it, this is the wrong kind of question.
+        guidance="""
+The answer must be something the material does not write down anywhere - it
+has to be worked out from two or more facts. If one fact already states it,
+this is the wrong kind of question.
 
 THE FIGURES MUST BE THE SAME KIND OF THING, counted in the same unit, and
 their total must be a quantity somebody would want. Two numbers that merely
@@ -595,8 +646,8 @@ sit in the same corpus do not add up to anything: a year is not a count, a
 version number is not an amount, and a page number is not a duration. If the
 facts offer no two figures that measure one thing between them, this is the
 wrong kind of question for them - say so by asking about one of them instead.
-
-Worked example. Facts:
+""",
+        example="""Worked example. Facts:
 
   [1] The northern site employs 40 people.
   [2] The southern site employs 25 people.
@@ -628,9 +679,10 @@ Worked example. Facts:
         passages=2,
         also=(AnswerForm.EXPLANATION,),
         asks="what changed between two periods, or what the order of events was",
-        directive="""Both periods, or both events, must be in the facts.
-
-Worked example. Facts:
+        guidance="""
+Both periods, or both events, must be in the facts.
+""",
+        example="""Worked example. Facts:
 
   [1] The reply time was 72 hours in 2024.
   [2] The reply time was 48 hours in 2025.
@@ -654,15 +706,16 @@ Worked example. Facts:
         form=AnswerForm.EXPLANATION,
         passages=2,
         asks="what must be true when two things the material states both hold",
-        directive="""Both premises must be in the facts, and the conclusion must
-be in NEITHER. If the material already says it, that is a `consequence` and not
-this: what makes this kind worth asking is that somebody has to put two
-statements together and see what they come to.
+        guidance="""
+Both premises must be in the facts, and the conclusion must be in NEITHER. If
+the material already says it, that is a `consequence` and not this: what makes
+this kind worth asking is that somebody has to put two statements together and
+see what they come to.
 
 Do not invent a premise. If the facts do not settle the question between them,
 there is no implication here to ask about.
-
-Worked example. Facts:
+""",
+        example="""Worked example. Facts:
 
   [1] A standard request is answered within 48 hours.
   [2] The 48-hour time counts working days only.
@@ -697,14 +750,15 @@ Worked example. Facts:
         # answering is not a lookup however little of the corpus it reaches.
         least=Difficulty.MEDIUM,
         asks="which rule the material gives governs a case it does not mention",
-        directive="""Put a CASE the material does not name to a rule it does.
-The rule has to be in the facts; the case must not be, or there is nothing to
-apply and the answer is a lookup.
+        guidance="""
+Put a CASE the material does not name to a rule it does. The rule has to be in
+the facts; the case must not be, or there is nothing to apply and the answer is
+a lookup.
 
 The case must be one the rule actually settles. A case the material leaves open
 is an unanswerable question, which is a different kind.
-
-Worked example. Facts:
+""",
+        example="""Worked example. Facts:
 
   [1] A request marked urgent is answered within 4 hours.
   [2] A request is marked urgent when it stops work at a site.

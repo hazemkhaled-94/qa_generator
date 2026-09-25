@@ -20,16 +20,32 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from question_generation import phrasing, verifier
-from question_generation.generation import _FOLLOW, _PERTURB
+from question_generation.generation import (
+    _FOLLOW,
+    _PERTURB,
+    _USER,
+    _USER_FOLLOW,
+    _Answered,
+    _Unanswered,
+)
 from question_generation.types import PROMPT_VERSION, SPECS
 from stages.prompts import Composed
 
 #: What the stage records its prompts under.
 SERVICE = "questions"
 
+#: The JSON schemas the three writer shapes and the four judge shapes ask
+#: their answers to come back in.
+_ANSWERED = _Answered.model_json_schema()
+_UNANSWERED = _Unanswered.model_json_schema()
+
 
 def catalogue() -> list[Composed]:
-    """Every prompt this stage can send, composed as it would be sent."""
+    """Every prompt this stage can send, composed as it would be sent.
+
+    Both halves and the shape: the system prompt, the user message as its
+    template, and the JSON schema the answer has to come back in.
+    """
     return list(_writer()) + list(_judges())
 
 
@@ -43,12 +59,14 @@ def _writer() -> Iterator[Composed]:
     of half of what was sent.
     """
     for name, spec in sorted(SPECS.items()):
-        yield Composed(name, PROMPT_VERSION, spec.system())
+        yield Composed(name, PROMPT_VERSION, spec.system(), _USER, _ANSWERED)
         spanning = spec.system(spans=True)
         if spanning != spec.system():
-            yield Composed(f"{name} (spans)", PROMPT_VERSION, spanning)
-    yield Composed("perturb", PROMPT_VERSION, _PERTURB)
-    yield Composed("follow", PROMPT_VERSION, _FOLLOW)
+            yield Composed(
+                f"{name} (spans)", PROMPT_VERSION, spanning, _USER, _ANSWERED
+            )
+    yield Composed("perturb", PROMPT_VERSION, _PERTURB, _USER, _UNANSWERED)
+    yield Composed("follow", PROMPT_VERSION, _FOLLOW, _USER_FOLLOW, _ANSWERED)
 
 
 def _judges() -> Iterator[Composed]:
@@ -66,16 +84,55 @@ def _judges() -> Iterator[Composed]:
     records the version, and only the lookup that resolves the version to a
     text comes back without it.
     """
-    for name, text in (
-        ("phrasing: source", phrasing._SOURCE),
-        ("phrasing: names something", phrasing._NAMES),
-        ("phrasing: self-contained", phrasing._CONTAINED),
+    for name, text, user, shape in (
+        (
+            "phrasing: source",
+            phrasing._SOURCE,
+            phrasing._USER,
+            phrasing._NamesItsSource,
+        ),
+        (
+            "phrasing: names something",
+            phrasing._NAMES,
+            phrasing._USER,
+            phrasing._NamesSomething,
+        ),
+        (
+            "phrasing: self-contained",
+            phrasing._CONTAINED,
+            phrasing._USER_CONTAINED,
+            phrasing._SelfContained,
+        ),
     ):
-        yield Composed(name, phrasing.PROMPT_VERSION, text)
-    for name, text in (
-        ("verifier: recover", verifier._VERIFY),
-        ("verifier: supported", verifier._SUPPORT),
-        ("verifier: computes", verifier._COMPUTES),
-        ("verifier: follows", verifier._FOLLOWS),
+        yield Composed(
+            name, phrasing.PROMPT_VERSION, text, user, shape.model_json_schema()
+        )
+    for name, text, user, shape in (
+        (
+            "verifier: recover",
+            verifier._VERIFY,
+            verifier._USER_VERIFY,
+            verifier._Recovered,
+        ),
+        (
+            "verifier: supported",
+            verifier._SUPPORT,
+            verifier._USER_JUDGE,
+            verifier._Supported,
+        ),
+        (
+            "verifier: computes",
+            verifier._COMPUTES,
+            verifier._USER_JUDGE,
+            verifier._Supported,
+        ),
+        (
+            "verifier: follows",
+            verifier._FOLLOWS,
+            verifier._USER_JUDGE,
+            verifier._Supported,
+        ),
     ):
-        yield Composed(name, verifier.PROMPT_VERSION, text)
+        yield Composed(
+            name, verifier.PROMPT_VERSION, text, user, shape.model_json_schema()
+        )

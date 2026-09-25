@@ -25,7 +25,7 @@ this package owns the tables, the enums, the connection and the migrations.
 | `questions` | The question, its answer, its derived difficulty, its thread, its embedding and its release | question generation |
 | `question_facts` | Which facts each question cites | question generation |
 | `service_settings` | The settings a deployment changed — see [`settings/`](../settings/README.md) | the API, the CLI, the UI |
-| `prompts` | One prompt per version per service, stored **as composed** — what a `prompt_version` on a row actually asked for | each stage, once before its first claim; see [`stages/`](../stages/README.md) |
+| `prompts` | One prompt per version per service, stored **as composed** — the system message, the user message as its template, and the JSON schema the answer came back in. What a `prompt_version` on a row actually asked for | each stage, once before its first claim; see [`stages/`](../stages/README.md) |
 | `archived_rows` | Every row deleted from any of the ten above, as JSON — see below | an AFTER DELETE trigger, and [`archive/`](../archive/README.md) |
 
 ### `topics` carries two queues

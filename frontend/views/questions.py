@@ -586,7 +586,15 @@ def _prompt(client, question: dict) -> None:
             f"{written['first_seen_at'][:10]}. Read-only: a prompt is changed "
             f"in the source, and what is here is the record of what was sent."
         )
+        st.caption("System")
         st.code(written["text"], language="text", wrap_lines=True)
+        # Both halves, because both were sent. A row written before the
+        # column existed carries no user template and says so.
+        st.caption("User")
+        if written.get("user_text"):
+            st.code(written["user_text"], language="text", wrap_lines=True)
+        else:
+            st.caption("Not recorded under this version.")
 
 
 def _verdict(client, question: dict) -> None:

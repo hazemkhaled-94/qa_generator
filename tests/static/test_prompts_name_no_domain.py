@@ -28,6 +28,7 @@ failure names the prompt and the word.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,39 @@ SUBJECTS = (
     "liquiditätsmanagement",
     "bankensektor",
 )
+
+
+#: What a placeholder in a prompt template looks like.
+PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+
+
+@pytest.mark.parametrize("module", PROMPTS)
+def test_every_placeholder_in_a_prompt_is_filled_in_the_same_module(
+    module: str,
+) -> None:
+    """A template variable nobody substitutes reaches the model as itself.
+
+    The user half of every prompt is held as a TEMPLATE, so the row records
+    what a version asked for rather than the passages one call happened to
+    carry. The cost of that is a new way to be wrong: add `{{pointers}}` to
+    a template, forget the `.replace`, and the model is sent the braces
+    themselves with no error anywhere and an answer that looks fine.
+
+    Each placeholder is written twice - once in the template, once where the
+    call fills it - and both are in the module that sends the prompt. So a
+    name that appears once is the one nobody substitutes.
+    """
+    source = (ROOT / module).read_text(encoding="utf-8")
+    once = [
+        name
+        for name in sorted(set(PLACEHOLDER.findall(source)))
+        if source.count("{{" + name + "}}") < 2
+    ]
+
+    assert not once, (
+        f"{module} names {once} in a prompt template and substitutes nothing "
+        f"for it, so the model is sent the braces themselves"
+    )
 
 
 def _prompts(path: Path) -> list[tuple[int, str]]:

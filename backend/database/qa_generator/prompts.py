@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Identity, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.qa_generator.base import Base
@@ -23,9 +24,15 @@ class Prompt(Base):
 
     This is that pointer made resolvable, and it is why the text is stored
     COMPOSED rather than as the pieces it is built from. A type's system
-    prompt is the shared rules plus its own directive and worked examples,
-    assembled at call time; the pieces are in the source and the thing the
-    model was actually given is here.
+    prompt is the shared role, steps, context and format rules plus its own
+    worked example, assembled at call time; the pieces are in the source and
+    the thing the model was actually given is here.
+
+    BOTH HALVES. Every call sends a system message and a user message, and
+    the row carried only the first - so what a version asked for was half
+    recorded, and a prompt opened in Phoenix showed instructions with no
+    input beneath them. `user_text` is the second half, held as its template
+    because the passages substituted into it are the row's own columns.
 
     Written by the code and read by everything else. A row is a record of
     what a version meant, not a place to change it: editing one here
@@ -78,7 +85,26 @@ class Prompt(Base):
         "this table is for.",
     )
     text: Mapped[str] = mapped_column(
-        Text, comment="The prompt as composed, which is what the model was given."
+        Text,
+        comment="The SYSTEM prompt as composed, which is what the model was "
+        "given as its instructions.",
+    )
+    user_text: Mapped[str] = mapped_column(
+        Text,
+        server_default="",
+        comment="The USER message as its template, with `{{name}}` where the "
+        "call fills a passage, a fact or a question in. Every call sends both "
+        "halves; this is the one the row used not to carry, so Phoenix showed "
+        "a system message and nothing under it. Empty on a row recorded "
+        "before the column existed.",
+    )
+    response_schema: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="The JSON schema the answer had to come back in, from the "
+        "Pydantic shape the call asks for. NULL on a row recorded before the "
+        "column existed, which is not the same as a call that asked for no "
+        "shape - there is no such call.",
     )
     digest: Mapped[str] = mapped_column(
         Text,

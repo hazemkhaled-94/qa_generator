@@ -41,7 +41,7 @@ Two things the row carries that nothing else on a page does:
 | | From | Opens |
 |---|---|---|
 | The calls | `questions.span_id` and `questions.trace_id` | Phoenix. **Two links**, because they answer different questions: the span is the gate decision, the trace is the whole topic — the writer call with its prompt, the verifier's, and the phrasing judgements |
-| The prompt | `questions.prompt_version` and `question_type`, through `GET /prompts` | The prompt **as it was sent**, inline |
+| The prompt | `questions.prompt_version` and `question_type`, through `GET /prompts` | The prompt **as it was sent**, inline — both halves, system then user |
 
 Both degrade rather than break. A question written before the columns
 existed says so; a deployment with no `PHOENIX_BASE_URL` on the

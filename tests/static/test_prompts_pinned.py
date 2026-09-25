@@ -26,7 +26,7 @@ from question_generation.generation import _FOLLOW, _PERTURB
 from question_generation.types import PROMPT_VERSION, SPECS
 
 #: The version every digest below was taken under.
-VERSION = "8"
+VERSION = "9"
 
 #: The prompts of the two gates that are not the writer's, each pinned to
 #: its own module's PROMPT_VERSION. They were unpinned and the verifier was
@@ -36,7 +36,7 @@ VERSION = "8"
 GATES = {
     "phrasing": (
         phrasing,
-        "2",
+        "3",
         {
             "source": phrasing._SOURCE,
             "names": phrasing._NAMES,
@@ -45,7 +45,7 @@ GATES = {
     ),
     "verifier": (
         verifier,
-        "1",
+        "2",
         {
             "verify": verifier._VERIFY,
             "support": verifier._SUPPORT,
@@ -57,40 +57,40 @@ GATES = {
 
 #: Each gate prompt's digest, under its module's version above.
 GATE_PROMPTS = {
-    "source": "39806a8d46bcba25",
+    "source": "867ffe8a2658a4cd",
     # Unpinned until now, and unrecorded with it: `_NAMES` is the third
     # phrasing judgement and both this file and the catalogue knew of two.
-    "names": "922ea5329c48fc42",
-    "contained": "233676753e8fff37",
-    "verify": "aa2ba7278d12f3c7",
-    "support": "5839f6c9ba418d4a",
-    "computes": "936687282578bc61",
-    "follows": "752a6da85ab3fa5f",
+    "names": "1e20e3cb47a06b42",
+    "contained": "e1ecbfc515b009c2",
+    "verify": "5ff0d4c7dca5f205",
+    "support": "9e809a5e0c9f0395",
+    "computes": "48ee508c865b8c53",
+    "follows": "f1f9cef0e0db1194",
 }
 
-#: Each type's whole system prompt: the shared rules, the answer form, the
-#: directive and its worked examples.
+#: Each type's whole system prompt: the shared role, steps, context and
+#: format rules, the answer form, and its own guidance and worked example.
 TYPES = {
-    "aggregation": "e965582d60522c93",
-    "application": "b444eecdbff9cf31",
-    "comparison": "dd57b8cb9c8a659b",
-    "condition": "ce344dd6b8daaeda",
-    "consequence": "e4ed91488e70010e",
-    "definition": "d4c14309f6b022d5",
-    "entity": "86e2d5ad5310703f",
-    "enumeration": "40b0d69e7b0d2472",
-    "factoid": "b498acbbf5537e5e",
-    "implication": "fd2f98bad0b0bb08",
-    "procedure": "83cd9e3744d6aca0",
-    "reason": "9d64a2bf5ce43efc",
-    "temporal": "c681eaec3d0fb768",
+    "aggregation": "b13e83411a4f456f",
+    "application": "b0a53ee0bfeb247c",
+    "comparison": "e7558c38a96fbcff",
+    "condition": "bc668d21ba00ef82",
+    "consequence": "e2a47f33a7dbebc0",
+    "definition": "b92b8fc50dca575a",
+    "entity": "4af05d338433b997",
+    "enumeration": "8cf540a910df6740",
+    "factoid": "40677a7ad6b08caf",
+    "implication": "e6696a33d2f3e6b2",
+    "procedure": "243f1ef58f146935",
+    "reason": "aefe58a398167401",
+    "temporal": "442e8f8206dfcb3a",
 }
 
 #: The two prompts that are not a type's: the perturbation that writes the
 #: unanswerable questions, and the one that writes the next turn.
 OTHERS = {
-    "perturb": "0b3d2a3bdc02bab1",
-    "follow": "c3f02405d0cedd9f",
+    "perturb": "bc3ac7e3b642feed",
+    "follow": "5a51de7610ee94f4",
 }
 
 

@@ -15,29 +15,70 @@ log = logging.getLogger(__name__)
 #: How much of each representative passage the model is shown.
 _EXCERPT_CHARS = 400
 
-_SYSTEM = """You name the subject a set of documents share.
+#: Recorded on every topic named with the prompt below. Bumped whenever that
+#: prompt changes what a name is.
+PROMPT_VERSION = "1"
 
-You are given the terms a statistical model found to define one topic, and a
-few excerpts the model placed in it. Answer with the name of the subject.
+_SYSTEM = """ROLE
+You are a cataloguer. You name the subject that a set of documents share, for
+a coverage report a person reads by its names.
 
-Rules:
+ACTION
+Answer with the name of the subject the topic is about, or with "Mixed" when
+it has none.
+
+STEPS
+1. Read the defining terms, strongest first.
+2. Count how many of them name PARTS OF A DOCUMENT rather than a subject.
+   If more than half do, answer "Mixed" and stop.
+3. Read the excerpts and work out what they are all about.
+4. If the terms and excerpts share no subject, answer "Mixed" and stop.
+5. Check the names already taken. If the name you would give is one of them,
+   name what separates this topic from that one instead; if nothing does,
+   answer "Mixed".
+6. Write the name in the language you are asked for.
+
+CONTEXT
+You are given the terms a statistical model found to define one topic, a few
+excerpts the model placed in it, the language to answer in, and the names
+already given to other topics of the same fit.
+
+A wrong name is worse than none, because a coverage report is read by its
+names. Two topics under one name cannot be told apart in that report.
+
+EXAMPLES
+  terms: shelving, pallet, forklift, aisle, load
+    -> "Warehouse safety"
+  terms: contents, foreword, appendix, index, shelving
+    -> "Mixed"  (more than half name parts of a document)
+
+FORMAT
+Return `label`, and nothing else.
+
 - A short noun phrase, at most six words. Not a sentence.
 - Name the SUBJECT, not the document type: "Warehouse safety", not
   "Procedural document about warehouse safety".
-- Write it in the language named below, because the report it appears in is
-  read in that language.
+- Write it in the language named in the message, because the report it
+  appears in is read in that language.
 - Use the terms and excerpts only. If they share no subject, say exactly
-  "Mixed" and nothing else - a wrong name is worse than none, because a
-  coverage report is read by its names.
+  "Mixed" and nothing else.
 - ANSWER "Mixed" WHEN MORE THAN HALF THE TERMS NAME PARTS OF A DOCUMENT
   rather than a subject: contents, foreword, acknowledgements, copyright
   notice, revision history, release notes, appendix, index, glossary,
   version. One subject word among them does not make the topic that subject.
-- DO NOT REUSE A NAME ALREADY TAKEN, listed below when there are any. Two
-  topics with one name cannot be told apart in the report they appear in. If
-  this topic is genuinely the one that name describes, name what separates
-  it from that one instead; if nothing does, answer "Mixed".
+- DO NOT REUSE A NAME ALREADY TAKEN. If this topic is genuinely the one that
+  name describes, name what separates it from that one instead; if nothing
+  does, answer "Mixed".
 - No quotation marks, no trailing punctuation."""
+
+#: The user message, as the catalogue records it and `_prompt` renders it.
+_USER = """Language: {{language}}
+
+{{taken}}Defining terms, strongest first:
+{{terms}}
+
+Excerpts this topic covers:
+{{excerpts}}"""
 
 
 class _Label(BaseModel):
@@ -92,6 +133,7 @@ class TopicLabeller:
                 system=_SYSTEM,
                 user=self._prompt(topic, language, excerpts, taken),
                 shape=_Label,
+                prompt_version=PROMPT_VERSION,
             )
         except ModelUnavailable as exc:
             log.warning("could not name topic %d: %s", topic.topic_index, exc)
@@ -121,8 +163,8 @@ class TopicLabeller:
         )
         already = f"Names already taken:\n{', '.join(taken)}\n\n" if taken else ""
         return (
-            f"Language: {self._languages.get(language, language)}\n\n"
-            f"{already}"
-            f"Defining terms, strongest first:\n{', '.join(topic.top_terms)}\n\n"
-            f"Excerpts this topic covers:\n{shown}"
+            _USER.replace("{{language}}", self._languages.get(language, language))
+            .replace("{{taken}}", already)
+            .replace("{{terms}}", ", ".join(topic.top_terms))
+            .replace("{{excerpts}}", shown)
         )

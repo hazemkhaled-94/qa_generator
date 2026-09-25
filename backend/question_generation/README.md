@@ -311,8 +311,14 @@ back:
 | Where | Shows |
 |---|---|
 | The Questions page | "The prompt that wrote this", folded under a selected question |
-| `GET /prompts?service=questions&version=8&name=factoid` | The same, as JSON |
+| `GET /prompts?service=questions&version=9&name=factoid` | The same, as JSON |
 | Phoenix, after `make prompts-publish` | The prompt beside the traces, one Phoenix version per `PROMPT_VERSION` |
+
+Each of the three records the **whole call**: the system message, the user
+message as its template, and the JSON schema the answer had to come back
+in. Phoenix gets the invocation parameters with them — the temperature, the
+window and the reasoning effort the call was made at, read off the same
+settings `llm.client` builds the call from.
 
 The span of a call already carries the prompt it sent — filled in, with
 that call's facts in it. The table carries the **template**, and carries it

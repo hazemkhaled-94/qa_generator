@@ -103,14 +103,15 @@ def main(argv: list[str] | None = None) -> int:
 def _publish(settings: Settings) -> int:
     """Sends the recorded prompts to Phoenix.
 
-    Named with the configured model, which is what Phoenix needs to offer
-    a prompt in its playground: opened there, it is replayed against the
-    model that sent it.
+    With the configured model's settings, which is what Phoenix needs to
+    offer a prompt in its playground and to show what the call was made
+    with: opened there, it is replayed against the model that sent it, at
+    the temperature and the window that sent it.
     """
     from evaluation import prompts
     from llm.config import Settings as ModelSettings
 
-    prompts.publish(settings, ModelSettings.load().model)
+    prompts.publish(settings, ModelSettings.load())
     return 0
 
 
