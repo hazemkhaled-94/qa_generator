@@ -114,6 +114,13 @@ def test_every_other_kind_records_the_one_passage_it_rests_on(
     assert held == [(passages[0], 0)]
 
 
+# The point of this one is what POSTGRES does with the second row, and the
+# session notices the clash first: `fact_passages` is keyed on the pair, so
+# the new object lands on the identity of the one `fact()` already put
+# there and SQLAlchemy says so on the way out. That warning is the mapper
+# working, not the constraint, and under `filterwarnings = error` it ends
+# the test before the flush it exists to watch.
+@pytest.mark.filterwarnings("ignore:New instance:sqlalchemy.exc.SAWarning")
 def test_one_passage_cannot_be_named_twice_by_one_fact(session, passages) -> None:
     """The same passage twice is one passage, and bridges nothing."""
     anchor = passages[0]
