@@ -277,6 +277,7 @@ def test_a_page_with_nothing_on_it_says_so(run_view, name) -> None:
                     passages={"total": 0, "passages": []},
                     facts={"total": 0, "facts": []},
                     questions={"total": 0, "questions": []},
+                    assessments={"total": 0, "assessments": []},
                     topics=[],
                     stage_status=lambda *a, **k: status(),
                 )

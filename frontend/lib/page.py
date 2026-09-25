@@ -36,6 +36,7 @@ STATUS_HELP = {
     "extracted": "Read for facts.",
     "modelled": "Fitted into the stored topic model.",
     "generated": "Questions have been written for it.",
+    "assessed": "An LLM judge has answered about it.",
 }
 
 

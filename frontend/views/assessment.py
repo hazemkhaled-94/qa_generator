@@ -17,6 +17,16 @@ from lib import backend, catalog, configure, page, stage
 #: The one stage this page runs.
 _ASSESSMENT = stage.Queue("assessment", "Assessment", "artifacts", "assessed")
 
+#: The columns the search box can look in, by the heading each carries,
+#: mapped to the name /assessment takes. The explanations are the half
+#: nothing else in this application can search: until this phase there
+#: were no model opinions stored to search.
+_FIELDS = {
+    "Artefact and the judge's reasons": "both",
+    "The artefact": "artifact",
+    "What the judge said": "explanation",
+}
+
 #: What each artefact kind is called on the page, and what judging it asks.
 _KINDS = {
     "fact": ("Facts", "Does the cited evidence support the statement?"),
@@ -60,6 +70,8 @@ def view() -> None:
     overview, analysis, service = st.container(), st.container(), st.container()
 
     plan = client.assessment_plan()
+
+    words, field = catalog.search("assessment", _FIELDS)
     chosen, pager = catalog.filters(
         "assessment",
         {
@@ -78,7 +90,12 @@ def view() -> None:
     )
 
     only_disagreements = st.session_state.get("assessment-disagreements", False)
-    where = {"kind": chosen["kind"], "metric": chosen["metric"]}
+    where = {
+        "kind": chosen["kind"],
+        "metric": chosen["metric"],
+        "q": words,
+        "field": field,
+    }
     total, rows = catalog.paged(
         "assessment",
         pager,
@@ -145,7 +162,7 @@ def view() -> None:
             "half of one corpus, which is why it cannot reject anything."
         )
 
-    with service, page.panel("Assessment"):
+    with service, page.panel("Assessment — the evaluation phase"):
         stage.service(client, _ASSESSMENT)
         st.caption(
             f"Judging {', '.join(plan['kinds'])} with "
@@ -154,7 +171,7 @@ def view() -> None:
         )
         configure.panel("assessment")
 
-    with page.panel(f"Verdicts · {total:,}"):
+    with page.panel(f"Assessments · {total:,}"):
         if not rows:
             st.caption("Nothing matches.")
             return

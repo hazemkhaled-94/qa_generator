@@ -326,3 +326,30 @@ def test_the_queue_narrows_to_one_kind(corpus, engine) -> None:
     assert moved == 1
     assert pending["question"] == Status.PENDING
     assert pending["fact"] == Status.NEW
+
+
+def test_a_search_looks_in_the_artefact_and_in_what_the_judge_said(corpus) -> None:
+    """Two places, and the second is the half nothing else here can search.
+
+    Until this phase there were no model opinions stored, so "which answers
+    did it call unsupported, and in what words" had no query at all.
+    """
+    queue = AssessmentQueue(kinds=("fact",))
+    queue.start()
+    claimed = queue.claim()
+    assert claimed is not None
+    queue.record(_judged(claimed.assessment_id, approved=False))
+    catalog = AssessmentCatalog()
+
+    assert catalog.page(search="five days", field="artifact")[0] == 1
+    assert catalog.page(search="five days", field="explanation")[0] == 0
+    assert catalog.page(search="evidence says", field="explanation")[0] == 1
+    assert catalog.page(search="evidence says", field="both")[0] == 1
+    assert catalog.page(search="nothing like this")[0] == 0
+
+
+def test_a_percent_sign_somebody_typed_is_not_a_wildcard(corpus) -> None:
+    """`matching` autoescapes, which a hand-rolled ILIKE would not."""
+    AssessmentQueue(kinds=("fact",)).start()
+
+    assert AssessmentCatalog().page(search="%")[0] == 0

@@ -25,6 +25,11 @@ _COUNTS = {
     ("extraction", "validated"): "Facts that passed every check.",
     ("topic_modelling", "memberships"): "Passage-to-topic links held.",
     ("topic_modelling", "passages_with_a_topic"): "Passages in at least one topic.",
+    ("assessment", "approved"): "Artefacts an LLM judge backed on every measure.",
+    ("assessment", "refused"): (
+        "Artefacts it did not. Never a rejection: the checker and the gates "
+        "decide what is kept."
+    ),
 }
 
 

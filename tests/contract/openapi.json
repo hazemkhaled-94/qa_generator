@@ -4,10 +4,12 @@
       "parameters": [
         "approved",
         "disagreements",
+        "field",
         "kind",
         "limit",
         "metric",
-        "offset"
+        "offset",
+        "q"
       ],
       "responses": [
         "200",

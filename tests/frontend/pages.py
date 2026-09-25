@@ -245,6 +245,78 @@ def resting(passage_id: int, ordinal: int, position: int, **fields: Any) -> dict
     }
 
 
+#: One artefact the judge answered about, as GET /assessment returns it.
+#: Refused, and refused on a fact the checker KEPT, because that pair is
+#: what the page exists to surface.
+ASSESSMENT = {
+    "id": 1,
+    "kind": "fact",
+    "artifact_id": 7,
+    "status": "assessed",
+    "approved": False,
+    "judge_model": "ollama_chat/qwen3:14b",
+    "prompt_version": "1",
+    "run_id": "a-run",
+    "trace_id": "a" * 32,
+    "span_id": "b" * 16,
+    "assessed_at": "2026-09-25T12:00:00Z",
+    "error": None,
+    "verdict": "accepted",
+    "summary": "A reply is due in five days.",
+    "metrics": [
+        {
+            "metric": "hallucination",
+            "label": "hallucinated",
+            "score": 1.0,
+            "approved": False,
+            "explanation": "the evidence gives no number of days",
+        },
+        {
+            "metric": "relevance",
+            "label": "relevant",
+            "score": 1.0,
+            "approved": True,
+            "explanation": "the sentences are about reply times",
+        },
+    ],
+}
+
+#: What the judge made of the corpus, as GET /assessment/quality returns it.
+ASSESSMENT_QUALITY = {
+    "total": 3,
+    "judged": 2,
+    "approved": 1,
+    "refused": 1,
+    "disagreements": 1,
+    "by_kind": {"fact": 1, "topic": 1, "question": 1},
+    "approved_by_kind": {"fact": 0, "topic": 1, "question": 0},
+    "metrics": [
+        {
+            "metric": "hallucination",
+            "judged": 2,
+            "approved": 1,
+            "direction": "minimize",
+        },
+        {"metric": "relevance", "judged": 2, "approved": 2, "direction": "maximize"},
+    ],
+    "judge_models": ["ollama_chat/qwen3:14b"],
+    "outstanding": 1,
+}
+
+#: What the evaluation phase is configured to do, as /assessment/plan says.
+ASSESSMENT_PLAN = {
+    "enabled": True,
+    "judge_model": "ollama_chat/qwen3:14b",
+    "kinds": ["fact", "topic", "question"],
+    "sample": 200,
+    "prompt_version": "1",
+    "metrics": {
+        "fact": ["hallucination", "relevance"],
+        "topic": ["summarization", "relevance"],
+        "question": ["hallucination", "qa_correctness", "relevance"],
+    },
+}
+
 #: Every backend call the catalogue pages make, and a default answer for
 #: each. One dictionary, because one client serves five pages and a page
 #: that started calling something new should not need a new fixture.
@@ -275,6 +347,9 @@ CATALOG: dict[str, Any] = {
     "question_quality": QUESTION_QUALITY,
     "question_plan": PLAN,
     "decide_question": QUESTION,
+    "assessments": {"total": 1, "assessments": [ASSESSMENT]},
+    "assessment_quality": ASSESSMENT_QUALITY,
+    "assessment_plan": ASSESSMENT_PLAN,
 }
 
 #: The stage each page is allowed to run, and nothing else.
@@ -284,6 +359,7 @@ OWNED = {
     "facts": "extraction",
     "topics": "topics",
     "questions": "questions",
+    "assessment": "assessment",
 }
 
 #: The pages that list something and let a row be picked.

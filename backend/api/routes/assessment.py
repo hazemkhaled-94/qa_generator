@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.dependencies import assessment_catalog, assessment_queue
-from api.params import Limit, Offset
+from api.params import Limit, Offset, SearchText
 from api.routes.stage import stage_router
 from assessment.config import Settings as AssessmentSettings
 from assessment.models import AssessmentQuality, StoredAssessment
@@ -29,6 +29,11 @@ from settings.store import resolved
 #: them and the frontend's pickers cannot drift from what is accepted.
 Kind = Literal["fact", "topic", "question"]
 Metric = Literal["hallucination", "relevance", "qa_correctness", "summarization"]
+
+#: Where a search looks. The artefact is "which fact was this about";
+#: the explanation is "what did the judge say", and that is the half no
+#: other listing in this API can search.
+SearchField = Literal["artifact", "explanation", "both"]
 
 router = stage_router(name="assessment", repository=assessment_queue)
 
@@ -94,10 +99,17 @@ def assessments(
     approved: bool | None = None,
     metric: Metric | None = None,
     disagreements: bool = False,
+    q: SearchText = None,
+    field: SearchField = "both",
     limit: Limit = 50,
     offset: Offset = 0,
 ) -> AssessmentPage:
     """Lists the verdicts, newest first.
+
+    `q` searches the artefact itself or what the judge said about it.
+    Searching the explanations is the half nothing else here can do: until
+    this phase there were no model opinions stored to search, so "which
+    answers did it call unsupported, and in what words" had no query.
 
     `metric` narrows to the artefacts one named metric did NOT approve,
     which is how a reader asks "what did the hallucination check catch".
@@ -109,6 +121,6 @@ def assessments(
     matters.
     """
     total, rows = assessment_catalog.page(
-        kind, approved, metric, disagreements, limit, offset
+        kind, approved, metric, disagreements, q, field, limit, offset
     )
     return AssessmentPage(total=total, assessments=rows)

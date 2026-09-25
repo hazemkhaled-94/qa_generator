@@ -67,3 +67,40 @@ def test_every_pinned_alias_is_a_literal() -> None:
     for name in (*PINNED, "Band"):
         assert get_args(getattr(questions, name)), f"{name} is not a Literal"
         assert Literal[get_args(getattr(questions, name))]
+
+
+def test_the_settings_route_offers_exactly_the_services_the_catalogue_has() -> None:
+    """The one vocabulary that was written out twice, and drifted.
+
+    `settings.catalog.Service` is what a setting declares itself under and
+    what the Configuration panel is drawn from; the route has a Literal of
+    its own so the OpenAPI document lists the services and an unknown one
+    is refused before it reaches the catalogue. Two lists, and nothing held
+    them together.
+
+    Adding the evaluation phase added a service to the catalogue and not to
+    the route, so every setting of it was described, served read-only by
+    nothing, and `GET /settings/assessment` answered 422 - which reaches a
+    person as a Configuration panel that will not open on one page and
+    works on the other six.
+    """
+    from api.routes import settings as route
+    from settings.catalog import Service
+
+    offered = set(get_args(route.Service))
+    described = set(get_args(Service))
+
+    assert offered == described, (
+        f"the route offers {sorted(offered - described)} that the catalogue "
+        f"does not describe, and is missing {sorted(described - offered)} "
+        f"that it does"
+    )
+
+
+def test_every_service_the_catalogue_names_has_a_setting() -> None:
+    """A service with nothing to configure draws an empty panel."""
+    from settings.catalog import SETTINGS, Service
+
+    described = {one.service for one in SETTINGS}
+
+    assert set(get_args(Service)) == described

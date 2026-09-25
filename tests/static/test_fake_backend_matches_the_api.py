@@ -26,6 +26,7 @@ import dataclasses
 
 import pytest
 
+from assessment.models import AssessmentQuality, StoredAssessment
 from extraction.models import FactQuality, StoredFact
 from question_generation.models import QuestionQuality, StoredQuestion
 
@@ -36,6 +37,8 @@ PINNED: dict[str, tuple[str, type, str | None]] = {
     "fact_quality": ("FACT_QUALITY", FactQuality, None),
     "question": ("QUESTION", StoredQuestion, None),
     "fact": ("FACT", StoredFact, None),
+    "assessment": ("ASSESSMENT", StoredAssessment, None),
+    "assessment_quality": ("ASSESSMENT_QUALITY", AssessmentQuality, None),
 }
 
 

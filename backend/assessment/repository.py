@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     literal,
     literal_column,
+    or_,
     select,
     union_all,
 )
@@ -46,7 +47,7 @@ from database.qa_generator import (
     Status,
     Topic,
 )
-from database.qa_generator.repository import Repository
+from database.qa_generator.repository import Repository, matching
 from settings.runs import run_id
 from stages import Columns, RowQueue
 
@@ -378,6 +379,8 @@ class AssessmentCatalog(Repository):
         approved: bool | None = None,
         metric: str | None = None,
         disagreements: bool = False,
+        search: str | None = None,
+        field: str = "both",
         limit: int | None = 50,
         offset: int = 0,
     ) -> tuple[int, list[StoredAssessment]]:
@@ -396,7 +399,10 @@ class AssessmentCatalog(Repository):
         # same query: page two would be each kind's second page, which
         # skips rows nobody asked to skip and repeats rows already shown.
         wanted = union_all(
-            *(self._of_kind(one, approved, metric, disagreements) for one in kinds)
+            *(
+                self._of_kind(one, approved, metric, disagreements, search, field)
+                for one in kinds
+            )
         )
         counting = select(func.count()).select_from(wanted.subquery())
         paged = wanted.order_by(literal_column("id").desc())
@@ -435,7 +441,13 @@ class AssessmentCatalog(Repository):
         return (kind,) if kind else tuple(TEMPLATES)
 
     def _selected(
-        self, kind: str, approved: bool | None, metric: str | None, disagreements: bool
+        self,
+        kind: str,
+        approved: bool | None,
+        metric: str | None,
+        disagreements: bool,
+        search: str | None = None,
+        field: str = "both",
     ):
         """The conditions one kind's filter selects."""
         link, entity, key = _LINK[kind]
@@ -456,10 +468,47 @@ class AssessmentCatalog(Repository):
                 )
                 .exists()
             )
+        if search:
+            where.append(self._searched(kind, search, field))
         return link, entity, key, where
 
+    @staticmethod
+    def _searched(kind: str, search: str, field: str):
+        """The condition a search box's words select.
+
+        Two places worth looking, and they answer different questions. The
+        ARTEFACT is "which fact was this about"; the judge's EXPLANATION is
+        "what did it say about them" - and the second is the one nothing
+        else in this repository can search, because until this phase there
+        were no model opinions stored to search.
+
+        `matching` rather than a hand-rolled ILIKE, for the reason it
+        exists: without `autoescape` a `%` somebody typed is a wildcard.
+        """
+        artefact = matching(search, _SUMMARY[kind])
+        explained = (
+            select(literal(1))
+            .select_from(AssessmentMetric)
+            .where(
+                AssessmentMetric.assessment_id == Assessment.id,
+                matching(search, AssessmentMetric.explanation),
+            )
+            .exists()
+        )
+        if field == "artifact":
+            return artefact
+        if field == "explanation":
+            return explained
+        return or_(artefact, explained)
+
     def _of_kind(
-        self, kind: str, approved: bool | None, metric: str | None, disagreements: bool
+        self,
+        kind: str,
+        approved: bool | None,
+        metric: str | None,
+        disagreements: bool,
+        search: str | None = None,
+        field: str = "both",
     ) -> Select:
         """One kind's rows, as a select the union windows over.
 
@@ -469,7 +518,9 @@ class AssessmentCatalog(Repository):
         rejection code, a topic's is whether it is in coverage, and a
         question's is its gate.
         """
-        link, entity, key, where = self._selected(kind, approved, metric, disagreements)
+        link, entity, key, where = self._selected(
+            kind, approved, metric, disagreements, search, field
+        )
         return (
             select(
                 Assessment.id.label("id"),

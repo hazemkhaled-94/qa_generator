@@ -42,6 +42,13 @@ _STATUS = {
 
 #: The service a request names. A Literal, so the OpenAPI document lists
 #: them and anything else is refused before it reaches the catalogue.
+#:
+#: Held identical to `settings.catalog.Service` by
+#: `tests/static/test_api_vocabularies.py`. The two were written out twice
+#: and drifted the first time a service was added: the catalogue grew
+#: `assessment`, this did not, and `GET /settings/assessment` answered 422
+#: for a service whose settings the catalogue was describing perfectly -
+#: which reaches a person as a Configuration panel that will not open.
 Service = Literal[
     "ingestion",
     "parsing",
@@ -49,6 +56,7 @@ Service = Literal[
     "extraction",
     "topics",
     "questions",
+    "assessment",
     "platform",
 ]
 
