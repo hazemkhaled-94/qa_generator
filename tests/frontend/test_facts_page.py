@@ -41,7 +41,7 @@ def test_every_reading_is_offered_as_a_filter(page) -> None:
 
 def test_each_reading_is_explained_where_it_is_chosen(page) -> None:
     """A reader picking one should not have to know what it means."""
-    said = page().explains("facts-kind")
+    said = page().tooltip("facts-kind")
 
     for reading in ("Atomic", "Summary", "Outline", "Bridge"):
         assert reading in said

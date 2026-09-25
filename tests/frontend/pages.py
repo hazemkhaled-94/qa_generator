@@ -720,8 +720,13 @@ class View:
         """What one picker is currently set to."""
         return self._widget(key).value
 
-    def explains(self, key: str) -> str:
-        """The tooltip behind one picker, which says what choosing does."""
+    def tooltip(self, key: str) -> str:
+        """The help behind one picker, which says what choosing does.
+
+        Not `explanations`, which is the tooltip on every FIGURE by label.
+        Two names a letter apart for two different things is how a test
+        ends up asserting about the wrong one.
+        """
         return self._widget(key).help or ""
 
     def numbers(self) -> dict[str, Any]:
