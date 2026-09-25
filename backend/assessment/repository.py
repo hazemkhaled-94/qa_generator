@@ -175,15 +175,47 @@ class AssessmentQueue(RowQueue):
         self,
         lease: Any = None,
         *,
-        kinds: tuple[str, ...] = (),
-        sample: int = 0,
+        kinds: tuple[str, ...] | None = None,
+        sample: int | None = None,
         version: str | None = None,
     ) -> None:
-        """Binds the queue, with what to enrol and what to stamp on a verdict."""
+        """Binds the queue, with what to enrol and what to stamp on a verdict.
+
+        `kinds` and `sample` of None are read from the SETTINGS when an
+        enrolment actually happens, rather than defaulted here. The worker
+        passes both, because it has already resolved them to stamp the
+        version beside them; the api passes neither, and a default of
+        "every kind, every row" is what that turned into.
+
+        That default enrolled 11,392 artefacts the first time
+        `POST /assessment/enrol` was called against a deployment whose
+        ASSESSMENT_SAMPLE was 200 - and `start`, which enrols and then
+        queues, would have put all of them in front of the judge at three
+        to six model calls each.
+        """
         super().__init__(lease)
-        self._kinds = tuple(kinds) or tuple(TEMPLATES)
+        self._kinds = tuple(kinds) if kinds else None
         self._sample = sample
         self._version = version
+
+    def _asked(self) -> tuple[tuple[str, ...], int]:
+        """Which kinds to enrol and how many of each, as they stand now.
+
+        Read per call rather than per instance: the api builds this queue
+        once at import and serves it for the life of the process, so a
+        setting changed through the Configuration panel has to reach it
+        without a restart.
+        """
+        if self._kinds is not None and self._sample is not None:
+            return self._kinds, self._sample
+        from assessment.config import Settings
+        from settings.store import resolved
+
+        settings = Settings.load(resolved())
+        return (
+            self._kinds if self._kinds is not None else tuple(settings.kinds),
+            self._sample if self._sample is not None else settings.sample,
+        )
 
     # ── Enrolling ────────────────────────────────────────────────────────
 
@@ -198,17 +230,18 @@ class AssessmentQueue(RowQueue):
         Returns:
             How many artefacts were enrolled.
         """
+        kinds, sample = self._asked()
         with self._session.begin() as session:
             # Counted off RETURNING rather than off `rowcount`. An
             # `ON CONFLICT DO NOTHING` that inserted nothing reports -1,
             # not 0, so three kinds already enrolled summed to -3 and a
             # second `start` claimed to have un-enrolled the corpus.
             return sum(
-                len(session.execute(self._enrolment(kind)).fetchall())
-                for kind in self._kinds
+                len(session.execute(self._enrolment(kind, sample)).fetchall())
+                for kind in kinds
             )
 
-    def _enrolment(self, kind: str):
+    def _enrolment(self, kind: str, sample: int):
         """The INSERT that enrols one kind's artefacts."""
         enrolled: dict[str, tuple[Select, str]] = {
             ArtifactKind.FACT: (select(Fact.id).order_by(Fact.id.desc()), "fact_id"),
@@ -226,8 +259,8 @@ class AssessmentQueue(RowQueue):
         source, column = enrolled[kind]
         # Newest first, so a sample of a corpus judged once already is the
         # part that arrived since rather than the part judged before.
-        if self._sample > 0:
-            source = source.limit(self._sample)
+        if sample > 0:
+            source = source.limit(sample)
         chosen = source.subquery()
         return (
             insert(Assessment)

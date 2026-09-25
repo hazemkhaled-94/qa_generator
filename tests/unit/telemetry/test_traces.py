@@ -64,21 +64,66 @@ def test_a_run_exports(exporters) -> None:
     assert len(exporters) == 1
 
 
-def test_a_run_is_filed_under_its_own_project(monkeypatch) -> None:
-    """`<position>-<service>-<run>`, which joins it to `run.id` in the logs.
-
-    Numbered, because Phoenix sorts its projects by name and a corpus moves
-    extraction, topics, questions - which sorts the other way round.
-    """
+def _resource(monkeypatch) -> dict:
+    """Captures the resource attributes `configure` builds."""
     seen: dict = {}
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(traces.trace, "set_tracer_provider", lambda _p: None)
     monkeypatch.setattr(
         traces.Resource, "create", staticmethod(lambda a: seen.update(a) or None)
     )
-    traces.configure("extraction", run="abc123")
+    return seen
 
-    assert seen[traces.PROJECT] == "4-extraction-abc123"
+
+def test_a_named_run_is_filed_under_a_project_of_its_own(monkeypatch) -> None:
+    """`<position>-<service>-<name>`, which is what an A/B is read off.
+
+    Numbered, because Phoenix sorts its projects by name and a corpus moves
+    extraction, topics, questions - which sorts the other way round.
+    """
+    seen = _resource(monkeypatch)
+
+    traces.configure("extraction", run="abc123", named="a-gpt-4.1")
+
+    assert seen[traces.PROJECT] == "4-extraction-a-gpt-4.1"
+
+
+def test_a_run_nobody_named_appends_to_the_stage(monkeypatch) -> None:
+    """Rather than taking a project of its own and never being found again.
+
+    `run_id` mints a uuid per PROCESS and a worker restarts, so a project
+    per unnamed run is a project per restart. One deployment reached five
+    hundred of them, almost all holding a handful of spans.
+    """
+    seen = _resource(monkeypatch)
+
+    traces.configure("extraction", run="8f2c1e")
+
+    assert seen[traces.PROJECT] == "4-extraction"
+
+
+def test_every_span_carries_the_run_whether_or_not_it_was_named(
+    monkeypatch,
+) -> None:
+    """Which is what tells two runs apart inside a shared project.
+
+    The project stopped being the thing that separates them, so something
+    else has to be, and it is the same id the logs and the rows carry.
+    """
+    for named in (None, "a-gpt-4.1"):
+        seen = _resource(monkeypatch)
+        traces.configure("extraction", run="8f2c1e", named=named)
+        assert seen["run.id"] == "8f2c1e"
+
+
+def test_a_process_with_no_run_is_filed_nowhere(monkeypatch) -> None:
+    """The api, the frontend and the orchestrator export nothing at all."""
+    seen = _resource(monkeypatch)
+
+    traces.configure("api")
+
+    assert traces.PROJECT not in seen
+    assert "run.id" not in seen
 
 
 def test_nothing_instruments_http_or_the_object_store() -> None:

@@ -68,31 +68,44 @@ except ImportError:  # pragma: no cover
     PROJECT = "openinference.project.name"
 
 
-def configure(service_name: str, run: str | None = None) -> None:
+def configure(
+    service_name: str, run: str | None = None, named: str | None = None
+) -> None:
     """Sets up the tracer provider, and exports only for a run.
 
-    `run` does two things, and they are the same thing said twice: it puts
-    this process's spans in a Phoenix project of their own,
-    `<position>-<service>-<run>`, and it is what decides there is an
-    exporter at all.
-    A process that names no run is a service, a host command or a query
-    against the database - none of them the logic Phoenix is for - and it
-    gets a provider that records and sends nothing.
+    `run` is what decides there is an exporter at all. A process that names
+    no run is a service, a host command or a query against the database -
+    none of them the logic Phoenix is for - and it gets a provider that
+    records and sends nothing.
 
     That is the whole separation. Phoenix answers "what did this run
     produce, and what did it cost"; the logs answer everything else, for
     every process, run or no run.
+
+    `named` is the run's NAME where somebody chose one, and it decides the
+    PROJECT rather than the export. Named, this run gets a project of its
+    own and is comparable against another by name; unnamed, it appends to
+    the stage's own project and is told apart by the `run.id` attribute
+    below.
+
+    The two used to be one argument, and a project per unnamed run does not
+    survive a worker: a uuid per process, a process per restart, and one
+    deployment reached five hundred projects nobody could find anything in.
 
     Exports to OTEL_EXPORTER_OTLP_ENDPOINT. Credentials come from
     OTEL_EXPORTER_OTLP_HEADERS and are read by the exporter itself.
     """
     attributes = {"service.name": service_name}
     if run:
-        # Named for the service too, so one run of the whole pipeline is
-        # five projects that sort together rather than one heap in which
-        # extraction's calls and question generation's are indistinguishable.
-        # Numbered so they sort in the order the stages run, not by name.
-        attributes[PROJECT] = pipeline.project(service_name, run)
+        # Numbered for the service, so one pass over the pipeline is seven
+        # projects that sort in the order the stages run rather than one
+        # heap in which extraction's calls and question generation's are
+        # indistinguishable.
+        attributes[PROJECT] = pipeline.project(service_name, named)
+        # On the span as well as in the logs and on the row. This is what
+        # separates two runs sharing a project, and it is the reason an
+        # unnamed run no longer needs one of its own.
+        attributes["run.id"] = run
     provider = TracerProvider(resource=Resource.create(attributes))
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") if run else None

@@ -353,3 +353,27 @@ def test_a_percent_sign_somebody_typed_is_not_a_wildcard(corpus) -> None:
     AssessmentQueue(kinds=("fact",)).start()
 
     assert AssessmentCatalog().page(search="%")[0] == 0
+
+
+def test_a_queue_told_nothing_enrols_what_the_settings_say(corpus, engine) -> None:
+    """The api builds one of these with no arguments at all.
+
+    It serves `POST /assessment/enrol` and `POST /assessment/start`, and a
+    default of "every kind, every row" is not a default - it is the
+    deployment's cost decision being ignored. Against a real corpus that
+    default enrolled 11,392 artefacts under an ASSESSMENT_SAMPLE of 200,
+    and `start` would have queued all of them.
+    """
+    AssessmentQueue().enrol()
+
+    assert sum(enrolled(engine).values()) == 3, (
+        "the fixture holds one artefact of each judgeable kind, and "
+        "ASSESSMENT_SAMPLE in the test environment is well above that"
+    )
+
+
+def test_what_a_caller_names_beats_what_the_settings_say(corpus, engine) -> None:
+    """The worker resolves both to stamp the version beside them."""
+    AssessmentQueue(kinds=("question",), sample=1).enrol()
+
+    assert set(enrolled(engine)) == {"question"}

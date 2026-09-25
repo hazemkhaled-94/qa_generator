@@ -64,7 +64,11 @@ def working(
 
 
 def configure(
-    service_name: str, level: str | None = None, run: str | None = None
+    service_name: str,
+    level: str | None = None,
+    run: str | None = None,
+    named: str | None = None,
+    tracing: bool = True,
 ) -> None:
     """Configures logging and tracing for this process.
 
@@ -80,12 +84,25 @@ def configure(
     The logs take it either way. `run.id` is on every line a stage writes,
     which is what lets Grafana show one run's lines across five processes
     and Phoenix's project name find the same run from the other side.
+
+    `named` is the run's NAME where somebody chose one. It decides only
+    which project the spans are filed under; see `traces.configure`.
+
+    `tracing` off configures the logs and installs NO tracer provider,
+    which is not the same as installing one that does not export. A
+    provider can be set exactly once per process - OpenTelemetry ignores
+    the second attempt and warns - so a caller that wants its logs before
+    it knows whether it is going to work must leave tracing alone until it
+    does. That is what a stage's preflight needs: the model call it makes
+    to prove the model answers would otherwise be exported, and a run that
+    then gives up has created a Phoenix project holding one failed call.
     """
     # Order matters: the shared format references the trace fields, and
     # tracing logs while setting itself up.
     logs.add_trace_fields()
     logs.configure(service_name, level, run)
-    traces.configure(service_name, run)
+    if tracing:
+        traces.configure(service_name, run, named)
     logging.getLogger(__name__).info(
         "telemetry configured for %s%s", service_name, f", run {run}" if run else ""
     )

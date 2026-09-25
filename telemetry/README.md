@@ -154,11 +154,44 @@ OpenTelemetry, to Phoenix. A span per unit of work of the **logic**,
 annotated with the same names the log fields use.
 
 A stage passes `settings.runs.run_id()` to `configure`, which sets
-`openinference.project.name` on the resource. One run of one stage is then
-one project, `<stage>-<run id>`, and two runs compare directly on what the
-database does not hold: the call count, the tokens, the latency and the
-spend. Named with the service as well as the run, so one pass over the
-pipeline is five projects that sort together.
+`openinference.project.name` on the resource. The project is the **stage**,
+numbered so one pass over the pipeline sorts in the order a corpus moves.
+
+**A run gets a project of its own only when somebody named it.**
+
+```bash
+make questions                      # 6-question_generation
+make questions RUN_ID=a-gpt-4.1     # 6-question_generation-a-gpt-4.1
+```
+
+A project per run was the original design and it does not survive a
+worker: `run_id` mints a uuid per PROCESS, `restart: unless-stopped` makes
+a process per restart, and this deployment reached **five hundred
+projects** — 497 of them holding one span, the model call a preflight made
+before giving up. The comparison that design existed for is still there
+and is now the thing you ask for by name.
+
+Two runs sharing a project are still separable: `run.id` is a resource
+attribute on every span, the same id the logs and the rows carry. Telling
+them apart is a filter rather than a hunt through a sidebar.
+
+**The exporter is installed after the preflight, not before.** A project
+is created by the first span filed under it, and a stage's first span is
+the model call its preflight makes. A credential that has expired
+therefore left a project per attempt — which under `restart:
+unless-stopped` is a project per restart. `stages/cli.py` now configures
+the logs first and tracing only once the process knows it is going to
+claim rows.
+
+```bash
+make phoenix-projects   # what Phoenix holds
+make phoenix-prune      # take back the ones in which no work happened
+```
+
+`prune` takes a project only when every span in it is a model call **and**
+it could read every span. One too big to read in a page is left alone: the
+first fifty spans of a real run are model calls too, and
+`5-topic_modelling` reads exactly that way.
 
 The api, the frontend, the orchestrator and every host command pass nothing,
 and that is what turns their exporter off rather than filing them under

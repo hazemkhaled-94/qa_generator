@@ -49,5 +49,20 @@ def run_id() -> str:
     watches for - so it has to be re-read and handed to whatever writes a
     row. A run cannot change: it IS the process.
     """
-    named = (os.environ.get(VARIABLE) or "").strip()
-    return named or uuid4().hex
+    return named_run() or uuid4().hex
+
+
+def named_run() -> str | None:
+    """The run's name where somebody chose one, and None where nobody did.
+
+    The difference between a run that is going to be COMPARED and a run
+    that is merely happening, which is what decides whether it gets a
+    Phoenix project of its own. Every run still has an id - `run_id` above
+    mints one - and that id is on every log line and every span whether or
+    not anybody named it.
+
+    A project per unnamed run was the original arrangement and it does not
+    survive a worker: one uuid per process, one process per restart, and
+    five hundred projects holding a handful of spans each.
+    """
+    return (os.environ.get(VARIABLE) or "").strip() or None

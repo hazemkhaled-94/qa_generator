@@ -124,7 +124,7 @@ help:
         extract-rerun extract-revalidate extract-bridge extract-recap \
         extract-embed \
         topics topics-status topics-discover topics-stop topics-delete \
-        topics-retry topics-visualise \
+        topics-retry topics-visualise topics-render \
         settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-reclaim questions-rerun questions-reverify \
@@ -607,6 +607,7 @@ extract-embed:
 #   make topics-status       GET /topics/status
 #   make topics-discover    POST /topics/discover
 #   make topics-visualise    GET /topics/visualisation/{language}
+#   make topics-render       (no route; redraws it from the stored model)
 #   make topics-stop        POST /topics/stop
 #   make topics-retry       POST /topics/retry
 #   make topics-delete    DELETE /topics
@@ -624,10 +625,30 @@ topics-status:
 topics-discover:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --discover
 
-# Write each language's pyLDAvis page to ./topics/<language>.html. Drawn by a
-# fit, so run topics-discover first if there is none.
+# Write each language's pyLDAvis page to ./topics/<language>.html. Reads the
+# stored page; topics-render is what draws one.
 topics-visualise:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --visualise
+
+# Redraw each language's page from its stored model, without re-fitting the
+# corpus. This is what the `models` bucket is for: `export` holds a view and
+# `models` holds what the view is of, so a lost or corrupted page costs a
+# render rather than a fit.
+#
+# The page it writes REPLACES the one already there. One model is kept per
+# language - the next fit replaces it, as the database holds one fit's
+# topics - so this picks which language to redraw and not which fit to
+# redraw from. A figure drawn from an older model would number its topics
+# off rows that no longer exist.
+#
+# CODE and not LANG: make imports the environment, LANG is the POSIX locale
+# and is always set, so `make topics-render` quietly ran with
+# `--language C.UTF-8` and refused every language the corpus has.
+#
+#   make topics-render
+#   make topics-render CODE=de
+topics-render:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --render $(if $(CODE),--language $(CODE))
 
 # Delete every topic and membership. Passages, facts and questions stay.
 # A label a person assigned is stored nowhere else, and the archived row is
@@ -1299,6 +1320,32 @@ eval-phrasing:
 second-opinion:
 	@test -n "$(RUN)" || { echo 'usage: make second-opinion RUN=<run id>  (make questions-runs lists them)'; exit 2; }
 	$(EVAL) --second-opinion $(RUN) $(if $(LIMIT),--limit $(LIMIT))
+
+# ── Phoenix projects ───────────────────────────────────────────────────────
+#
+# A Phoenix project is created by the first span filed under it and
+# removed by nothing. While a project meant a run somebody asked for that
+# was fine; `run_id` mints a uuid per PROCESS, a --watch worker is a
+# process per restart, and a credential that has expired restarts it every
+# minute. This deployment reached five hundred projects, 497 of them
+# holding one span: the model call a preflight made before giving up.
+#
+# Two changes stop it growing - an unnamed run appends to its stage's own
+# project, and the exporter is not installed until the preflight passes -
+# and this takes back what the old arrangement left.
+#
+#   make phoenix-projects    what Phoenix holds, changing nothing
+#   make phoenix-prune       delete the projects in which no work happened
+#
+# `prune` takes a project only when every span in it is a model call AND
+# it could read every span. A project too big to read in one page is left
+# alone: the first fifty spans of a real run are model calls too.
+phoenix-projects:
+	$(LOADENV) && poetry run python -m telemetry.projects --list
+
+# Irreversible. Says what it is taking before it takes it.
+phoenix-prune:
+	$(LOADENV) && poetry run python -m telemetry.projects --prune
 
 # ── Review ─────────────────────────────────────────────────────────────────
 #

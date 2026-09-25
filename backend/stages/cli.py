@@ -18,7 +18,7 @@ from typing import Any
 import telemetry
 from database.qa_generator import engine
 from settings import decimal
-from settings.runs import run_id
+from settings.runs import named_run, run_id
 from stages.queue import StageQueue, Unnarrowable
 from stages.service import StageService
 from stages.worker import watch
@@ -153,12 +153,19 @@ def queue_main(
     actions = {**_ACTIONS, **{flag: help for flag, (help, _, _) in extra.items()}}
     args = parser(module, actions).parse_args(argv)
 
-    # Named with the run, so this drain's spans are a Phoenix project of
-    # their own and two runs compare on calls, tokens, latency and spend -
-    # which the rows carry none of. `run_id` is a uuid unless RUN_ID names
-    # one; see settings/runs.py.
-    telemetry.configure(name, run=run_id())
-    telemetry.trace_engine(engine())
+    # Logs now, tracing once this process knows it is going to work.
+    #
+    # The exporter is what creates a Phoenix project, and the first span a
+    # stage produces is the preflight's - the call it makes to prove the
+    # model answers. A deployment whose credential has expired therefore
+    # left a project per attempt holding one failed call, which under
+    # `restart: unless-stopped` is a project per restart. That is the same
+    # failure the comment in `_ready` describes from the other side, and
+    # this is the half of it the retry loop could not fix.
+    #
+    # A provider can be installed once per process, so this cannot be done
+    # by configuring twice; `tracing=False` leaves it uninstalled.
+    telemetry.configure(name, run=run_id(), named=named_run(), tracing=False)
 
     def act(run):
         """Runs one queue operation, narrowed to whatever --only names."""
@@ -194,6 +201,13 @@ def queue_main(
     # would empty into `failed` while the container reported itself up.
     if preflight is not None and not _ready(name, preflight, args.watch):
         return 1
+
+    # Past here the process is going to claim rows, so its spans are worth
+    # a project. Named with the run only when somebody named the run: an
+    # unnamed one appends to the stage's own project and is told apart by
+    # the `run.id` attribute. See telemetry/pipeline.py.
+    telemetry.configure(name, run=run_id(), named=named_run())
+    telemetry.trace_engine(engine())
 
     # After preflight, so a deployment that cannot work does not leave a
     # record of prompts it never sent. Never raises; see stages.prompts.

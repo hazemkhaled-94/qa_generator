@@ -30,7 +30,25 @@ log = logging.getLogger(__name__)
 #: The verbs a narrowed action accepts. A Literal rather than a free string,
 #: so the OpenAPI document lists them and anything else is refused before it
 #: reaches a queue.
-Action = Literal["start", "stop", "retry", "rerun"]
+#:
+#: `reclaim` is here and was not, and the reason it was not no longer holds.
+#: It used to be CLI-only because "the API cannot know a worker is gone" -
+#: but neither can the command line, and a person driving this over HTTP was
+#: left with the one stuck row none of the other verbs reaches. What the
+#: danger actually needs is a narrowing, which is what `confirm` below
+#: enforces on the corpus-wide form.
+Action = Literal["start", "stop", "retry", "rerun", "reclaim"]
+
+#: Every verb `answered` can put into words, which is `Action` plus the one
+#: a single stage has. `enrol` is the assessment phase's: nothing upstream
+#: creates an assessment, so that stage alone can be asked to create the
+#: rows without queuing any of them.
+#:
+#: Wider than `Action` on purpose. `Action` is what `stage_router` puts in
+#: `POST /{action}`, so a verb added there is a verb EVERY stage advertises
+#: and no other stage has an `enrol` to offer. A route that owns itself
+#: describes what it did through this instead.
+Verb = Literal["start", "stop", "retry", "rerun", "reclaim", "enrol"]
 
 #: What each refusal the queue can raise is answered with.
 _REFUSED = {"unknown_scope": 404, "invalid_value": 400}
@@ -46,6 +64,13 @@ _DONE = {
     ),
     "retry": ("returned to the queue", "nothing has failed"),
     "rerun": ("queued again; the worker will pick them up", "there is nothing to redo"),
+    "reclaim": (
+        "taken back from the worker that held them and queued again",
+        "no row is held",
+    ),
+    #: Assessment's own, phrased here so every verb reads the same way
+    #: wherever it is answered. See `routes/assessment.py`.
+    "enrol": ("enrolled, and queued for nobody", "every artefact is enrolled"),
 }
 
 
@@ -90,6 +115,10 @@ class StageRepository(StageQueueState, Protocol):
 
     def reset(self, within: Any = None) -> int:
         """Returns every row to the queue, finished ones included."""
+        ...
+
+    def reclaim(self, within: Any = None) -> int:
+        """Returns a row a dead worker still holds."""
         ...
 
 
@@ -169,7 +198,7 @@ def _narrowed(repository: StageQueueState, scope: str, value: str):
 
 def answered(
     name: str,
-    action: Action,
+    action: Verb,
     rows: int,
     *,
     scope: str | None = None,
@@ -233,6 +262,7 @@ def acted(
         "stop": repository.stop,
         "retry": repository.retry,
         "rerun": repository.reset,
+        "reclaim": repository.reclaim,
     }[action](within)
     return answered(name, action, rows, scope=scope, value=value)
 
@@ -249,15 +279,32 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
         """Reports how much work this stage has waiting."""
         return status_of(name, repository)
 
-    @router.post("/{action}", status_code=202)
-    def whole_queue(action: Action) -> StageAction:
+    @router.post("/{action}", status_code=202, responses=refusals)
+    def whole_queue(action: Action, confirm: bool = False) -> StageAction:
         """Runs one queue verb over everything this stage owns.
 
         Returns at once: none of these does the work. `start` makes rows
         claimable, `stop` makes them `new` again, `retry` clears a failure
         and `rerun` queues finished rows too, skipping whatever a worker
         holds right now. The worker picks them up on its next poll.
+
+        Raises:
+            ApiError: 400 `confirm_required` for an unnarrowed `reclaim`.
+                Nothing here can tell a dead claim from a live one, so this
+                is the one verb that can hand a row a live worker is on to a
+                second one. Narrowed to a single item it is the ordinary way
+                out of a killed worker; over a whole stage it is safe only
+                once that stage is stopped, which is a thing only the person
+                running it knows.
         """
+        if action == "reclaim" and not confirm:
+            raise ApiError(
+                400,
+                "confirm_required",
+                "reclaim over a whole stage can take a row from a worker "
+                "that is still on it. Narrow it to one item, or pass "
+                "?confirm=true once the stage is stopped.",
+            )
         return acted(name, repository, action)
 
     @router.get("/{scope}/{value}/status", responses=refusals)

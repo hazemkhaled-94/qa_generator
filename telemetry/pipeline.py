@@ -77,10 +77,28 @@ def numbered(name: str, stage: str | None = None, separator: str = "-") -> str:
     return f"{at}{separator}{name}" if at else name
 
 
-def project(service: str, run: str) -> str:
-    """What Phoenix files one run of one service under.
+def project(service: str, run: str | None = None) -> str:
+    """What Phoenix files one service's spans under.
 
     A service that is not a stage keeps its own name, so a host command
     that names a run is still filed under something readable.
+
+    `run` is the NAME somebody chose, not the id every run has. Absent -
+    which is every run nobody named - the project is the stage alone and
+    successive runs append to it.
+
+    Filing every run under a project of its own was the original design and
+    it does not survive contact with a worker: `run_id` mints a uuid per
+    PROCESS, `restart: unless-stopped` makes a process per restart, and one
+    deployment reached five hundred projects, almost all of them holding a
+    handful of spans nobody could find again. The comparison that design
+    existed for is still there and is now the thing you ask for by name:
+
+        make questions RUN_ID=a-gpt-4.1     ->  6-question_generation-a-gpt-4.1
+        make questions                      ->  6-question_generation
+
+    Runs stay separable inside a shared project either way, because
+    `run.id` is a resource attribute on every span. What changed is that
+    telling them apart is a filter rather than a hunt through a sidebar.
     """
-    return f"{numbered(service)}-{run}"
+    return f"{numbered(service)}-{run}" if run else numbered(service)
