@@ -7,7 +7,7 @@ from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, configure, lineage, page, stage
 
 #: The one stage this page runs. A fit is all-or-nothing over one
 #: vocabulary, so it has no per-topic form.
@@ -317,6 +317,9 @@ def _detail(client, chosen: dict, topics: list[dict]) -> None:
             client.describe_topic(chosen["id"], label.strip() or None, included)
             st.toast(f"Topic {chosen['language']} #{chosen['topic_index']} saved.")
             st.rerun()
+
+        with st.expander("How this was produced"):
+            lineage.panel("topic", chosen["id"])
 
 
 def _removal(client, has_topics: bool) -> None:

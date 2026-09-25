@@ -6,7 +6,7 @@ import json
 
 import streamlit as st
 
-from lib import backend, catalog, config, configure, page, stage
+from lib import backend, catalog, config, configure, lineage, page, stage
 
 #: What an .xlsx is on the wire, which the download button labels the file
 #: with so a browser hands it to a spreadsheet rather than saving it blind.
@@ -503,6 +503,9 @@ def _detail(client, question: dict) -> None:
                 hide_index=True,
                 column_config={"Question": st.column_config.TextColumn(width="large")},
             )
+
+        with st.expander("How this was produced"):
+            lineage.panel("question", question["id"])
 
         _trace(question)
         _prompt(client, question)

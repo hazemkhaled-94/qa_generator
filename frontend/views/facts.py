@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, configure, lineage, page, stage
 
 #: The one stage this page runs. It queues over a passage, so a fact picked
 #: below is run by the passage it was drawn from.
@@ -340,6 +340,9 @@ def _detail(client, fact: dict) -> None:
             "together, this one included."
         )
         stage.service(client, _EXTRACTION, scope)
+
+        with st.expander("How this was produced"):
+            lineage.panel("fact", fact["id"])
 
 
 page.render(view)

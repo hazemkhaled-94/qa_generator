@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, configure, lineage, page, stage
 
 #: The one stage this page runs. Chunking is the Passages page's and
 #: extraction is the Facts page's; neither can be reached from here.
@@ -140,6 +140,9 @@ def _detail(client, document: dict) -> None:
                 "Download", data=data, file_name=name, mime="application/pdf"
             )
             st.pdf(data, height=700)
+
+        with st.expander("How this was produced"):
+            lineage.panel("document", sha)
 
     _removal(client, document, name, sha)
 

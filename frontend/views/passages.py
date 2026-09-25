@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, configure, lineage, page, stage
 
 #: The one stage this page runs. It queues over a document and replaces all
 #: of its passages at once, so a passage picked below is run by its document.
@@ -216,6 +216,9 @@ def _detail(client, row: dict) -> None:
             "passages, this one included."
         )
         stage.service(client, _CHUNKING, scope)
+
+        with st.expander("How this was produced"):
+            lineage.panel("passage", row["id"])
 
 
 def _pages(row: dict) -> str:
