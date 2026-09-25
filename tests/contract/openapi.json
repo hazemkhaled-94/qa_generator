@@ -301,6 +301,19 @@
       ]
     }
   },
+  "/lineage/{kind}/{artifact_id}": {
+    "get": {
+      "parameters": [
+        "artifact_id",
+        "kind"
+      ],
+      "responses": [
+        "200",
+        "404",
+        "422"
+      ]
+    }
+  },
   "/parsing/status": {
     "get": {
       "parameters": [],

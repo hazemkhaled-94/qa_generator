@@ -113,6 +113,7 @@ def test_extraction_records_the_trace(engine, database) -> None:
 def test_a_question_records_every_gate_that_read_it(engine, database) -> None:
     """Not only the one that stopped it, which is all `rejected_reason` says."""
     from seed import fact, fitted, membership
+
     from question_generation.models import CheckedQuestion, criteria_of
     from question_generation.queue import QuestionQueue
 

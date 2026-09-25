@@ -33,6 +33,39 @@ from database.qa_generator import (
 #: datasets, as with extraction.
 PROMPT_VERSION = "9"
 
+#: Every gate, in the order `checker.check` applies them, cheapest first.
+#: What `CheckedQuestion.gates_ran` and `questions.gates_ran` are a subset
+#: of, and in this order.
+#:
+#: Two are conditional and their position is still fixed: `off_topic` runs
+#: only for an unanswerable question, `round_trip` only for what reaches
+#: it. So a sequence cannot be derived from the verdict, but a POSITION can
+#: be given to a name.
+#:
+#: The position is what orders them in Phoenix, where each gate is a column
+#: of the Evaluations view and columns sort by name. `gate 5: phrasing`
+#: sorts where the gate runs; `phrasing` would sort beside
+#: `near_duplicate`, which is three gates earlier.
+#:
+#: Here rather than in `checker`, which loads the embedder and the verifier:
+#: the api reads a stored question's sequence and may load neither.
+GATES = (
+    "structural",
+    "off_topic",
+    "kind_and_thread",
+    "near_duplicate",
+    "phrasing",
+    "round_trip",
+)
+
+#: What one gate's verdict is called where it is shown beside the others.
+PASSED, REFUSED = "passed", "refused"
+
+
+def annotation(gate: str) -> str:
+    """What one gate is called in Phoenix's Evaluations view."""
+    return f"gate {GATES.index(gate) + 1}: {gate}"
+
 #: Who the writer is, and what one call produces. The first two RASCEF
 #: sections, shared by every type.
 _ROLE = """ROLE
