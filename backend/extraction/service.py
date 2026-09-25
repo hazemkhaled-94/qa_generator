@@ -474,6 +474,38 @@ def _reference_list(passage: PassageToExtract) -> bool:
     return numeric > _NUMERIC_WORDS
 
 
+def _nothing_found(passage: PassageToExtract, current) -> None:
+    """Says so when a readable passage produced no candidate at all.
+
+    `skipped` has already refused the passages nothing could be read from -
+    headings, navigation, a grid of identifiers, anything with no sentences
+    - so reaching here means this pipeline decided the passage carries
+    claims and the model returned none. That is not the same answer as "it
+    carries none", and it used to be recorded as though it were: the row
+    went to `extracted` with nothing under it and the run looked clean.
+
+    **The whole corpus can be lost this way without one error.** A model
+    answering every call with an empty list marks all 1,495 passages read
+    and writes no fact; the first thing to notice is a topic fit with
+    nothing to fit. Measured: muse-glimmer:30b-mlx sent `reasoning_effort
+    =off` returns 6 output tokens and zero facts on every call, and 2 of 2
+    the moment it is allowed to think.
+
+    A warning rather than a raise, because one such passage is ordinary -
+    a page of prose that asserts nothing does exist - and failing the row
+    would strand a corpus on its dullest page. It is the RATE that is the
+    signal, which is why the count is on the span as well as in the log.
+    """
+    log.warning(
+        "passage %d: readable, and the model proposed nothing. One is "
+        "ordinary; many means the model is answering empty - check "
+        "LLM_REASONING_EFFORT and the context window",
+        passage.id,
+        extra={"passage.id": passage.id, "extract.nothing_found": True},
+    )
+    current.set_attribute("extract.nothing_found", True)
+
+
 def skipped(passage: PassageToExtract) -> str | None:
     """Says why a passage is not worth a model call.
 
@@ -785,6 +817,8 @@ class ExtractionService(StageService):
             for reader in self._readers(passage, current)
             for candidate in reader.extract(passage)
         ]
+        if not facts:
+            _nothing_found(passage, current)
         cap = self._atomic_cap
         refused = over_cap(facts, cap)
         if cap is not None and refused:

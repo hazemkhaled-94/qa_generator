@@ -170,34 +170,40 @@ class Settings:
     def thinking(self) -> str | None:
         """What to send as `reasoning_effort`, or None to omit it.
 
-        `off` for a **self-hosted** model the deployment has said nothing
-        about, because every call in this pipeline asks for a structured
-        answer and a thinking model asked for one spends its window
-        reasoning instead. Measured on this corpus's writer prompt against
-        gemma4:12b: 414.7 seconds and 8,555 output tokens, of which 32,436
-        characters were reasoning and 283 were the answer - against 12.6
-        seconds with thinking off, for a better question. A single boolean
-        measured the same way was a median 19.5s against 3.2s.
+        **Nothing, unless the deployment says otherwise.** The model is left
+        its own default, which for a reasoning model means it thinks and for
+        every other model means there is nothing to turn off.
 
-        The PROVIDER decides it, not whether a stage overrode the model.
-        That distinction is the bug this replaced: the default used to sit
-        on the cross-provider override path, so it fired for a hosted
-        deployment naming one local model and never for a deployment whose
-        models are all local - which is what a container gets from
-        LLM_CONTAINER_MODEL. Every call in that deployment thought, and a
-        writer call timed out at LLM_TIMEOUT_SECONDS three times over.
+        This used to send `off` to a self-hosted model, and the measurement
+        behind that is still true: on this corpus's writer prompt gemma4:12b
+        took 414.7 seconds and 8,555 output tokens - 32,436 characters of
+        reasoning against 283 of answer - where thinking off took 12.6
+        seconds and wrote a better question. A single boolean measured the
+        same way was a median 19.5s against 3.2s.
+
+        What that measurement could not see is the other half. `off` is a
+        real instruction, not the absence of one, and a model built to think
+        answers an instruction not to with **nothing at all**: muse-glimmer
+        :30b-mlx returned 0 facts on every golden case and 6 output tokens
+        per call, and proposed 2 of 2 correctly the moment it was allowed to
+        think. Both pathologies end in an empty answer, so a default can
+        only choose which family of open models is broken out of the box.
+
+        It now chooses neither. Running on local models is the point of this
+        pipeline, so an open model that thinks has to work on a clone, and
+        one that should not think is one setting away. The cost of the
+        reversal is paid where it can be seen rather than silently: a
+        passage that yields nothing is a warning now, which is what says
+        `off` is the setting this deployment wants.
 
         `off` is Ollama's spelling, a hosted reasoning model wants `none`,
-        and each refuses the other's - which is why this is derived per
-        model rather than defaulted in one place. Ollama accepts it on a
-        model that does not think at all, so it costs nothing to send.
+        and each refuses the other's - which is why there is still no value
+        that could be defaulted here for both. Ollama accepts `off` on a
+        model that does not think at all, so it costs nothing to set.
 
-        LLM_REASONING_EFFORT overrides it, including back on: a deployment
-        that wants its local model thinking sets `low` and gets it.
+        LLM_REASONING_EFFORT decides it, and nothing overrides that.
         """
-        if self.reasoning_effort:
-            return self.reasoning_effort
-        return "off" if _self_hosted(self.model) else None
+        return self.reasoning_effort or None
 
     @classmethod
     def load(cls, source: Source = None) -> Settings:

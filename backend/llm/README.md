@@ -163,7 +163,7 @@ abandoned.
 | `LLM_TIMEOUT_SECONDS` | `backend.env` | 120 | How long one call may take. Extraction's lease derives from this |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease derives from this too |
 | `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for |
-| `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob |
+| `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob. Unset sends nothing, so the model keeps its own default — a reasoning model thinks. Set `off` for a small model that cannot afford to |
 | `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a self-hosted model is served. The address follows the provider |
 | `LLM_CONTAINER_MODEL` | `.env` | unset | `LLM_MODEL` as the containers see it |
 | `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | unset | The verifier as the containers see it |

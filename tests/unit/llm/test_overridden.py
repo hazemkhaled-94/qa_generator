@@ -131,13 +131,15 @@ def test_a_self_hosted_override_with_nowhere_to_send_it_is_left_alone() -> None:
     assert settings.overridden("ollama_chat/other").base_url == "http://one-place"
 
 
-def test_a_self_hosted_override_turns_thinking_off() -> None:
-    """A thinking model asked for a structured answer reasons instead.
+def test_a_self_hosted_override_leaves_thinking_alone() -> None:
+    """Overriding the model to a local one says nothing about thinking.
 
-    Measured: gemma4:12b answered one boolean in a median 19.5s with
-    thinking at its default and 3.2s with it off, and the schema it was
-    answering has a single field. `off` is Ollama's spelling and a hosted
-    provider refuses it, so it cannot be one global value.
+    It used to turn it off, and the measurement behind that still holds -
+    gemma4:12b answered one boolean in a median 19.5s thinking and 3.2s
+    with it off. But `off` is an instruction a reasoning model answers
+    with nothing at all, so the derivation broke the open models this
+    pipeline exists to run. LLM_REASONING_EFFORT decides it now, and an
+    override is not a deployment saying anything about it.
     """
     settings = shared(
         model="azure/gpt-4.1",
@@ -147,9 +149,7 @@ def test_a_self_hosted_override_turns_thinking_off() -> None:
 
     overridden = settings.overridden("ollama_chat/gemma4:12b")
 
-    assert overridden.thinking == "off"
-    # Derived, not written onto the field: what the deployment said
-    # stays what it said, and `thinking` is what a call reads.
+    assert overridden.thinking is None
     assert overridden.reasoning_effort is None
 
 
@@ -169,19 +169,27 @@ def test_a_hosted_override_is_left_thinking_as_it_was() -> None:
     assert shared(reasoning_effort=None).overridden("azure/gpt-4.1").thinking is None
 
 
-def test_a_deployment_that_is_self_hosted_throughout_turns_thinking_off() -> None:
-    """The case the old rule missed, and the reason it moved.
+def test_a_deployment_that_is_self_hosted_throughout_says_nothing_either() -> None:
+    """A container running Ollama for everything still decides nothing here.
 
-    A container given LLM_CONTAINER_MODEL runs Ollama for everything, so
-    nothing is a cross-provider override: the writer is not overridden at
-    all and the verifier is the same provider. Both took the early return,
-    the parameter was omitted, and every call thought - a writer call ran
-    414.7 seconds and timed out at LLM_TIMEOUT_SECONDS three times over.
+    This is where the rule used to bite hardest: LLM_CONTAINER_MODEL makes
+    every model local, so every call was sent `off`. That is exactly the
+    deployment an open reasoning model is pulled into, and `off` is what it
+    answers with nothing - so the setting meant to protect a clone was what
+    broke it. Unset now means unset, all the way down an override chain.
     """
     local = shared(model="ollama_chat/gemma4:12b", reasoning_effort=None)
 
+    assert local.thinking is None
+    assert local.overridden(None).thinking is None
+    assert local.overridden("ollama_chat/granite4.2:8b").thinking is None
+
+
+def test_a_deployment_that_named_an_effort_keeps_it_down_the_chain() -> None:
+    """The one way thinking is decided, and an override does not touch it."""
+    local = shared(model="ollama_chat/gemma4:12b", reasoning_effort="off")
+
     assert local.thinking == "off"
-    assert local.overridden(None).thinking == "off"
     assert local.overridden("ollama_chat/granite4.2:8b").thinking == "off"
 
 

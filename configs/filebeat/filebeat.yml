@@ -172,6 +172,25 @@ setup.template.append_fields:
     type: keyword
   - name: upload.size_bytes
     type: long
+  # A readable passage the model proposed no fact for. One is ordinary; the
+  # RATE is the signal, which is why it is a field and not only a message -
+  # a run full of them is a model answering empty, and the whole corpus can
+  # be marked read with nothing under it without one error being raised.
+  - name: extract.nothing_found
+    type: boolean
+  # One artefact the evaluation phase judged, and what the judge said.
+  # `artifact.kind` is what every panel about this phase groups on: the
+  # same judgement over a fact and over a question is two measurements.
+  - name: artifact.kind
+    type: keyword
+  - name: artifact.id
+    type: long
+  - name: assessment.id
+    type: long
+  - name: assessment.approved
+    type: boolean
+  - name: assessment.metrics
+    type: long
   # A queue verb asked for over HTTP.
   - name: queue.action
     type: keyword

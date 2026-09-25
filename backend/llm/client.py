@@ -6,6 +6,7 @@ Importing this loads litellm. Nothing outside a worker should name it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, TypeVar
 
@@ -47,7 +48,72 @@ _TRANSIENT = (
     InstructorRetryException,
 )
 
+#: Reasoning a model wrote into the answer instead of into a field of its
+#: own. A well-behaved runtime keeps the two apart - Ollama returns
+#: `message.thinking` beside `message.content`, and litellm carries it as
+#: `reasoning_content` - but plenty of open weights emit the tags inline,
+#: and then the answer is valid JSON with an essay in front of it.
+#:
+#: Matched non-greedily and per tag name, so two blocks in one answer are
+#: two matches rather than everything between the first and the last.
+_REASONING = re.compile(
+    r"<(think|thinking|reasoning)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE
+)
+
+#: An opening tag that never closed, which is a model cut off mid-thought.
+#: Everything after it is reasoning, so there is no answer in this response
+#: - stripping it to nothing is what makes the parser say so.
+_UNCLOSED = re.compile(
+    r"<(think|thinking|reasoning)\b[^>]*>.*\Z", re.DOTALL | re.IGNORECASE
+)
+
 Shape = TypeVar("Shape", bound=BaseModel)
+
+
+def without_reasoning(text: str) -> str:
+    """The answer with any inline reasoning taken out of it.
+
+    Returns the text unchanged when there is none, which is the common
+    case and every non-reasoning model: this only ever removes, so a
+    model that never thinks pays a regex miss and nothing else.
+    """
+    return _UNCLOSED.sub("", _REASONING.sub("", text)).strip()
+
+
+def answering(completion: Any) -> Any:
+    """Wraps a completion function so inline reasoning never reaches the parser.
+
+    One place, because every call in this pipeline goes through instructor
+    and instructor parses `message.content`. A model that puts its thinking
+    there hands the parser an essay with JSON somewhere inside it, which
+    fails the schema, retries, fails again and arrives as `ModelUnavailable`
+    - a model that answered correctly, reported as one that could not be
+    reached.
+
+    Left alone otherwise. The field is not read, not counted and not
+    recorded: a response carrying no reasoning is not a response missing
+    anything, so there is nothing here to fail on when a model never
+    produces any.
+    """
+
+    def called(*args: Any, **kwargs: Any) -> Any:
+        """Calls the model and cleans each choice's content in place."""
+        response = completion(*args, **kwargs)
+        for choice in getattr(response, "choices", ()) or ():
+            message = getattr(choice, "message", None)
+            content = getattr(message, "content", None)
+            if message is None or not content:
+                continue
+            cleaned = without_reasoning(content)
+            if cleaned != content:
+                log.debug(
+                    "dropped %d character(s) of inline reasoning",
+                    len(content) - len(cleaned),
+                )
+                message.content = cleaned
+        return response
+
+    return called
 
 
 class ModelUnavailable(Exception):
@@ -132,7 +198,7 @@ class Client:
         # Any: instructor replaces create() at run time, so a checker would
         # match these keywords against the unpatched signature.
         self._client: Any = instructor.from_litellm(
-            litellm.completion, mode=mode(settings.structured_mode)
+            answering(litellm.completion), mode=mode(settings.structured_mode)
         )
         # Only _TRANSIENT: retrying a bad model name or schema costs the
         # backoff on every call and buries the real error.
@@ -282,11 +348,11 @@ class Client:
             # parallelism from it, and a hosted provider refuses the
             # parameter outright. See `Settings.window`.
             **({"num_ctx": window} if (window := self._settings.window) else {}),
-            # Derived per model rather than read straight off the setting:
-            # a self-hosted one is sent `off` unless the deployment said
-            # otherwise. See `Settings.thinking` for what that is worth -
-            # 414.7 seconds against 12.6 on this corpus's writer prompt.
-            # Ollama reads this as `think`.
+            # Omitted unless LLM_REASONING_EFFORT names one, which leaves a
+            # model its own default: a reasoning model thinks and every
+            # other model has nothing to turn off. See `Settings.thinking`
+            # for why sending `off` by default broke the models this
+            # pipeline exists to run. Ollama reads this as `think`.
             **(
                 {"reasoning_effort": thinking}
                 if (thinking := self._settings.thinking)

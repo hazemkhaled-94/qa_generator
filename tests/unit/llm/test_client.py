@@ -15,7 +15,14 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
-from llm.client import Client, ModelUnavailable, mode, priced, spend
+from llm.client import (
+    Client,
+    ModelUnavailable,
+    answering,
+    mode,
+    priced,
+    spend,
+)
 from llm.config import Settings
 
 
@@ -249,17 +256,21 @@ def test_a_hosted_model_is_left_its_own_default() -> None:
     assert "reasoning_effort" not in sent(reasoning_effort=None, model="azure/gpt-4.1")
 
 
-def test_a_self_hosted_model_is_told_not_to_think() -> None:
-    """Without it a writer call took 414.7 seconds instead of 12.6.
+def test_a_self_hosted_model_is_left_its_own_default_too() -> None:
+    """Nothing is sent unless the deployment named an effort.
 
-    8,555 output tokens, of which 32,436 characters were reasoning and
-    283 were the answer. Nothing in the deployment had to ask for this:
-    every call here wants a structured answer, and a thinking model given
-    one reasons instead of answering.
+    This used to send `off` to anything self-hosted, on the measurement
+    that a 12B spends its window reasoning and has no room to answer -
+    414.7 seconds against 12.6, and a worse question. What that could not
+    see is that `off` is an instruction rather than the absence of one:
+    muse-glimmer:30b-mlx answers it with 6 output tokens and zero facts,
+    and proposes 2 of 2 the moment it may think.
+
+    Both end in an empty answer, so a default only chooses which family of
+    open models is broken on a clone. Sending nothing chooses neither.
     """
-    assert (
-        sent(reasoning_effort=None, model="ollama_chat/gemma4:12b")["reasoning_effort"]
-        == "off"
+    assert "reasoning_effort" not in sent(
+        reasoning_effort=None, model="ollama_chat/gemma4:12b"
     )
 
 
@@ -473,3 +484,78 @@ def test_a_hosted_model_is_never_warned_about_a_window(monkeypatch, caplog) -> N
         )
 
     assert "TRUNCATED" not in caplog.text
+
+
+# ── Reasoning written into the answer ──────────────────────────────────────
+
+
+def response(content: str):
+    """A completion carrying one choice, the way litellm returns it."""
+    return litellm.ModelResponse(
+        choices=[{"message": {"role": "assistant", "content": content}}]
+    )
+
+
+def test_inline_reasoning_is_taken_out_of_the_answer() -> None:
+    """A well-behaved runtime keeps thinking in a field of its own.
+
+    Plenty of open weights do not, and then the answer is valid JSON with
+    an essay in front of it - which fails the schema, retries, fails again
+    and arrives as `ModelUnavailable`: a model that answered correctly,
+    reported as one that could not be reached.
+    """
+    cleaned = answering(lambda **_: response('<think>Let me see.</think>{"a": 1}'))()
+
+    assert cleaned.choices[0].message.content == '{"a": 1}'
+
+
+@pytest.mark.parametrize(
+    "tag", ["think", "thinking", "reasoning", "THINK", 'think signature="x"']
+)
+def test_every_spelling_of_the_tag_is_taken_out(tag: str) -> None:
+    """One family of tags, however a given model spells it."""
+    closing = tag.split()[0]
+    body = f"<{tag}>hm</{closing}>{{}}"
+
+    assert answering(lambda **_: response(body))().choices[0].message.content == "{}"
+
+
+def test_two_blocks_are_two_matches() -> None:
+    """Non-greedy, or everything between the first and the last goes."""
+    body = '<think>one</think>{"a": 1}<think>two</think>'
+
+    assert (
+        answering(lambda **_: response(body))().choices[0].message.content == '{"a": 1}'
+    )
+
+
+def test_a_thought_that_never_closed_leaves_no_answer() -> None:
+    """A model cut off mid-thought has not answered.
+
+    Everything after the opening tag is reasoning, so stripping it to
+    nothing is what makes the parser say there is no answer here - rather
+    than the schema failing on half an essay.
+    """
+    body = "<think>I will start by considering"
+
+    assert answering(lambda **_: response(body))().choices[0].message.content == ""
+
+
+def test_an_answer_with_no_reasoning_is_untouched() -> None:
+    """The common case, and every model that never thinks.
+
+    Nothing here reads the field, counts it or records it, so a response
+    carrying none is not a response missing anything.
+    """
+    body = '{"value": "answered"}'
+
+    assert answering(lambda **_: response(body))().choices[0].message.content == body
+
+
+@pytest.mark.parametrize("content", [None, ""])
+def test_an_empty_answer_is_passed_through(content) -> None:
+    """Nothing to strip, and nothing to fail on either."""
+    assert answering(lambda **_: response(content))().choices[0].message.content in (
+        None,
+        "",
+    )

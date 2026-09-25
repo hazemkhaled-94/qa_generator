@@ -89,7 +89,7 @@ could ask a database for anything, so they are served read-only.
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease derives from this too |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
-| `LLM_NUM_CTX`, `LLM_REASONING_EFFORT` | `backend.env` | unset | Context window and reasoning knob. Both follow the provider |
+| `LLM_NUM_CTX`, `LLM_REASONING_EFFORT` | `backend.env` | unset | Context window and reasoning knob. The window follows the provider; the reasoning knob is sent only when set, so a model keeps its own default |
 | `EXTRACTION_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only |
 | `TOPIC_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | The model that names a topic |
 | `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | One judgement on a smaller model |

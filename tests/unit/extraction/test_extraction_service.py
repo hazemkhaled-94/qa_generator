@@ -333,3 +333,65 @@ class _OneFact:
     def embed_facts(self, vectors: list) -> int:
         """Records that the vector was written."""
         return len(vectors)
+
+
+# ── A readable passage the model found nothing in ──────────────────────────
+
+EMPTY: dict = {"facts": []}
+
+
+def test_a_readable_passage_with_no_facts_is_warned_about(caplog) -> None:
+    """A model answering empty marks the corpus read and writes nothing.
+
+    `skipped` has already refused everything nothing could be read from,
+    so reaching the model and getting none back is not the same answer as
+    "this passage carries none". It used to be recorded as though it were:
+    the row went to `extracted` with nothing under it and the run looked
+    clean, which is how a whole corpus is lost without one error.
+
+    Measured: muse-glimmer:30b-mlx sent `reasoning_effort=off` returns 6
+    output tokens and zero facts on every call.
+    """
+    run = Extraction(passage(), facts=EMPTY)
+
+    with caplog.at_level("WARNING"):
+        run.next()
+
+    assert "proposed nothing" in caplog.text
+    assert "LLM_REASONING_EFFORT" in caplog.text, "the log names the first fix"
+
+
+def test_the_passage_is_still_read_rather_than_failed(caplog) -> None:
+    """One such passage is ordinary; a page of prose asserting nothing exists.
+
+    It is the RATE that is the signal, so this warns and moves on. Failing
+    the row would strand a corpus on its dullest page.
+    """
+    run = Extraction(passage(), facts=EMPTY)
+
+    with caplog.at_level("WARNING"):
+        run.next()
+
+    assert run.queue.stored == {1: []}
+    assert run.queue.failed == {}
+
+
+def test_a_skipped_passage_is_not_warned_about(caplog) -> None:
+    """A heading never reached the model, so it proposed nothing correctly."""
+    run = Extraction(passage("Risiko", language="de"), facts=EMPTY)
+
+    with caplog.at_level("WARNING"):
+        run.next()
+
+    assert run.model.calls == 0
+    assert "proposed nothing" not in caplog.text
+
+
+def test_a_passage_that_yielded_facts_is_not_warned_about(caplog) -> None:
+    """The ordinary path stays quiet."""
+    run = Extraction(passage(), facts=ATOMIC)
+
+    with caplog.at_level("WARNING"):
+        run.next()
+
+    assert "proposed nothing" not in caplog.text
