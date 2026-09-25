@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argilla as rg
 
+from review.judged import UNJUDGED, Opinion
 from review.records import FactRow, QuestionRow
 
 #: The dataset names, which are also what the CLI takes.
@@ -37,6 +38,58 @@ NAMES = (FACTS, TOPIC_LABELS, QUESTIONS)
 _VERDICT = ["accepted", "rejected"]
 
 
+def _judge_metadata() -> list[rg.TermsMetadataProperty]:
+    """What the evaluation phase said, as the two terms it is filtered by.
+
+    Two properties rather than one: `judge` is the verdict and is what a
+    reviewer narrows by, and `judge_disagrees` is the pair worth a sitting
+    of their own - the artefacts the pipeline kept and the judge refused.
+
+    A function and not a constant, like every other declaration in this
+    module: building an `rg.` object reaches for the default client, so one
+    at import time makes importing this module require a running Argilla.
+    """
+    return [
+        rg.TermsMetadataProperty(name="judge", title="What the LLM judge said"),
+        rg.TermsMetadataProperty(
+            name="judge_disagrees", title="Judge disagrees with the pipeline"
+        ),
+    ]
+
+
+def _judge_field() -> rg.TextField:
+    """The field carrying the judge's reasoning.
+
+    Not required: the phase may be off, or may not have reached this row,
+    and a required field would make a record unpushable in both cases.
+    """
+    return rg.TextField(
+        name="judge", title="What the LLM judge said, and why", required=False
+    )
+
+
+#: The paragraph added to every dataset's guidelines. One wording for all
+#: three, because the thing it has to establish is the same in each: the
+#: judge is not an answer key.
+_JUDGE_GUIDELINE = (
+    "\n\n"
+    "The `judge` field is what an LLM judge said about this row, and the "
+    "`judge` metadata is its verdict in one word. It is NOT the answer. It "
+    "is a second machine opinion recorded beside the checker's, and it "
+    "gates nothing - one was measured at chance on German text. Where it "
+    "says it disagrees with the pipeline, that pair is the reason this row "
+    "is in front of you: one of the two is wrong and only you can say which."
+)
+
+
+def judge_metadata(opinion: Opinion) -> dict[str, str]:
+    """The two metadata terms one artefact's verdict becomes."""
+    return {
+        "judge": opinion.verdict,
+        "judge_disagrees": "yes" if opinion.disagrees else "no",
+    }
+
+
 def fact_settings() -> rg.Settings:
     """What a reviewer is shown about a fact, and what they are asked."""
     return rg.Settings(
@@ -50,11 +103,12 @@ def fact_settings() -> rg.Settings:
             "paraphrase of the passage rather than a claim drawn from it.\n\n"
             "`rejection_code` is what the automatic checker decided. You are "
             "judging the statement, not agreeing with the checker - the "
-            "disagreements are the point of the exercise."
+            "disagreements are the point of the exercise." + _JUDGE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="statement", title="The fact as written"),
             rg.TextField(name="evidence", title="The sentences it cites"),
+            _judge_field(),
         ],
         questions=[
             rg.LabelQuestion(
@@ -67,6 +121,7 @@ def fact_settings() -> rg.Settings:
         metadata=[
             rg.TermsMetadataProperty(name="kind", title="Fact kind"),
             rg.TermsMetadataProperty(name="checker", title="What the checker said"),
+            *_judge_metadata(),
             rg.IntegerMetadataProperty(name="fact_id", title="Fact id"),
         ],
     )
@@ -82,11 +137,12 @@ def topic_settings() -> rg.Settings:
             "is right. A topic that is an artefact of the fitting rather than "
             "a subject - boilerplate, page furniture, a mix of everything - "
             "should be marked out of coverage, which means no questions are "
-            "written about it at all."
+            "written about it at all." + _JUDGE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="terms", title="Its strongest terms"),
             rg.TextField(name="label", title="What the model named it"),
+            _judge_field(),
         ],
         questions=[
             rg.TextQuestion(
@@ -104,6 +160,7 @@ def topic_settings() -> rg.Settings:
         metadata=[
             rg.TermsMetadataProperty(name="language", title="Language"),
             rg.TermsMetadataProperty(name="labelled_by", title="Named by"),
+            *_judge_metadata(),
             rg.IntegerMetadataProperty(name="topic_id", title="Topic id"),
             rg.IntegerMetadataProperty(name="passages", title="Passages held"),
         ],
@@ -122,12 +179,22 @@ def question_settings() -> rg.Settings:
             "answer is not recoverable from the facts shown.\n\n"
             "An unanswerable question is not automatically wrong: some are "
             "written deliberately, to check that a chatbot says it does not "
-            "know. `answerable` says which kind this is."
+            "know. `answerable` says which kind this is.\n\n"
+            "`facts` is what was written from, `evidence` is the sentences "
+            "those facts cite, and `explanation` is why the writer says "
+            "that is the answer. Judge the answer against the evidence: a "
+            "fact can be a fair reading of a sentence that does not say "
+            "what the answer claims." + _JUDGE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="question", title="The question"),
             rg.TextField(name="answer", title="The answer it expects"),
             rg.TextField(name="facts", title="The facts it was written from"),
+            rg.TextField(name="evidence", title="The sentences those facts cite"),
+            rg.TextField(
+                name="explanation", title="Why that is the answer, as the writer put it"
+            ),
+            _judge_field(),
         ],
         questions=[
             rg.LabelQuestion(
@@ -143,6 +210,7 @@ def question_settings() -> rg.Settings:
             rg.TermsMetadataProperty(name="language", title="Language"),
             rg.TermsMetadataProperty(name="answerable", title="Answerable"),
             rg.TermsMetadataProperty(name="gate", title="What the gates said"),
+            *_judge_metadata(),
             rg.IntegerMetadataProperty(name="question_id", title="Question id"),
         ],
     )
@@ -155,40 +223,47 @@ SETTINGS = {
 }
 
 
-def fact_record(row: FactRow) -> rg.Record:
+def fact_record(row: FactRow, judge: Opinion = UNJUDGED) -> rg.Record:
     """One fact as a record."""
     return rg.Record(
         # The database id, so a pulled answer finds its row again. Argilla
         # deduplicates on it too, so pushing a record twice updates rather
         # than doubling it.
         id=str(row.id),
-        fields={"statement": row.statement, "evidence": row.evidence},
+        fields={
+            "statement": row.statement,
+            "evidence": row.evidence,
+            "judge": judge.detail,
+        },
         metadata={
             "kind": row.kind,
             "checker": row.rejection_code or "accepted",
+            **judge_metadata(judge),
             "fact_id": row.id,
         },
     )
 
 
-def topic_record(topic) -> rg.Record:
+def topic_record(topic, judge: Opinion = UNJUDGED) -> rg.Record:
     """One topic as a record."""
     return rg.Record(
         id=str(topic.id),
         fields={
             "terms": ", ".join(topic.top_terms),
             "label": topic.label or "(the model named nothing)",
+            "judge": judge.detail,
         },
         metadata={
             "language": topic.language or "unknown",
             "labelled_by": topic.labelled_by or "nobody",
+            **judge_metadata(judge),
             "topic_id": topic.id,
             "passages": topic.passages,
         },
     )
 
 
-def question_record(row: QuestionRow) -> rg.Record:
+def question_record(row: QuestionRow, judge: Opinion = UNJUDGED) -> rg.Record:
     """One question as a record."""
     return rg.Record(
         id=str(row.id),
@@ -196,6 +271,13 @@ def question_record(row: QuestionRow) -> rg.Record:
             "question": row.question_text,
             "answer": row.target_answer or "(deliberately unanswerable)",
             "facts": "\n".join(f"- {one}" for one in row.facts) or "(none recorded)",
+            "evidence": "\n".join(f"- {one}" for one in row.evidence)
+            or "(none recorded)",
+            # A question written to have no answer explains nothing, which
+            # is the ordinary case rather than a gap: the field says so
+            # rather than arriving empty, which Argilla refuses.
+            "explanation": row.answer_explanation or "(none written)",
+            "judge": judge.detail,
         },
         metadata={
             "difficulty": row.difficulty or "unbanded",
@@ -203,6 +285,7 @@ def question_record(row: QuestionRow) -> rg.Record:
             "language": row.language,
             "answerable": str(row.answerable).lower(),
             "gate": row.rejected_reason or row.status,
+            **judge_metadata(judge),
             "question_id": row.id,
         },
     )

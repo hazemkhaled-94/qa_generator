@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import telemetry
 from api.status import Counter, StatusService
+from assessment.repository import AssessmentCatalog, AssessmentQueue
 from blob_store.seaweedfs import ArchiveBucket, ExportBucket
 from database.qa_generator import engine
 from extraction.repository import FactCatalog, PassageQueue
@@ -44,6 +45,7 @@ chunking_queue = ChunkQueue()
 extraction_queue = PassageQueue()
 topics_queue = TopicQueue()
 questions_queue = QuestionQueue()
+assessment_queue = AssessmentQueue()
 
 #: One catalogue per thing the pipeline produced, for the routes that read it.
 ingestion_repository = DocumentRepository()
@@ -51,6 +53,7 @@ passage_catalog = PassageCatalog()
 fact_catalog = FactCatalog()
 topic_catalog = TopicCatalog()
 question_catalog = QuestionCatalog()
+assessment_catalog = AssessmentCatalog()
 
 #: Generated artefacts a route serves back, such as the topic visualisations.
 export_bucket = ExportBucket()
@@ -96,6 +99,10 @@ status_service = StatusService(
         ),
         "question_generation": Counter(
             "Topics by question status, and questions held.", questions_queue.counts
+        ),
+        "assessment": Counter(
+            "Artefacts by assessment status, and what the judge said.",
+            assessment_queue.counts,
         ),
     }
 )

@@ -153,6 +153,16 @@ view.
 `annotator_kind` separates them: a gate is **CODE**, and the three phrasing
 judgements are **LLM**.
 
+The evaluation phase is the other writer of annotations here, and everything
+it posts is **LLM**. One per metric, named as `arize-phoenix-evals` names it
+— `hallucination`, `relevance`, `qa_correctness`, `summarization` — plus an
+`assessment` summary per artefact. Same client, same batching, same bargain
+with an unreachable Phoenix. See
+[`backend/assessment/`](../backend/assessment/README.md), and note that
+`hallucination` scores 1.0 for the **bad** label because its optimisation
+direction is minimise; each annotation carries its `direction` as metadata
+so a chart is read the right way up.
+
 A question produces a **summary** — `gate`, labelled with whatever stopped it
 or `accepted` — and then **one annotation per gate that read it**, named
 `gate 1: structural` through `gate 6: round_trip`:

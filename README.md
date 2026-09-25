@@ -86,12 +86,39 @@ make topics-discover
 make questions-start && make questions
 make questions-balance
 
+make assess-start    && make assess        # optional; see below
+
 make questions-export OUT=exam.xlsx FILTER="--status accepted"
 ```
 
 Every stage also has a replay that skips the expensive part — re-applying a
 changed setting without calling the model again. They are listed in
 [docs/make.md](docs/make.md).
+
+### The evaluation phase
+
+`assess` is the one step above that is optional and off by default. It puts
+every fact, topic and question to an independent LLM judge and records what
+it said **beside** the checker's verdict — never over it, because a judge
+that could reject rows was measured at chance on this corpus's German half.
+
+What it is for is the pairs where the two disagree: an artefact the pipeline
+kept and the judge refused is either a check that let something through or a
+judge that is wrong, and only a person settles which.
+
+```ini
+ASSESSMENT_ENABLED=true                      # .env
+ASSESSMENT_JUDGE_MODEL=ollama_chat/qwen3:14b # not LLM_MODEL
+```
+
+```bash
+make assess-enrol    # how many model calls it would cost, before paying
+make assess-start && make assess
+```
+
+The verdicts land in the Assessment page, `/assessment`, the Dagster asset,
+Phoenix's Evaluations view, the Argilla records and the exported workbook.
+See [`backend/assessment/`](backend/assessment/README.md).
 
 ## Documentation
 
@@ -107,6 +134,7 @@ Each service documents itself beside its code.
 | [`backend/extraction/`](backend/extraction/README.md) | Those passages become facts citing a sentence |
 | [`backend/topic_modelling/`](backend/topic_modelling/README.md) | Each language becomes topics over its own vocabulary |
 | [`backend/question_generation/`](backend/question_generation/README.md) | Each topic's facts become questions with known answers |
+| [`backend/assessment/`](backend/assessment/README.md) | An LLM judge reads all of it back, and decides nothing |
 
 **The surfaces:**
 

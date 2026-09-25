@@ -31,6 +31,16 @@ for line in TUNING.read_text().splitlines():
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/x")
 
+# The evaluation phase's switch lives in `.env`, which no test sources -
+# it is a deployment's decision rather than a tuning value, like the judge
+# model beside it. `GET /assessment/plan` is the first api route to read
+# one of those, so without a value here the contract layer gets a 500 from
+# a route whose whole job is to say whether the phase is on.
+#
+# Off, which is also the shipped default: a test run that judged anything
+# would be a test run making model calls.
+os.environ.setdefault("ASSESSMENT_ENABLED", "false")
+
 # A test run exports no spans and posts no annotations, whatever the shell
 # that launched it had sourced.
 for _unset in ("OTEL_EXPORTER_OTLP_ENDPOINT", "PHOENIX_BASE_URL"):

@@ -20,7 +20,7 @@ import sys
 import telemetry
 from database.qa_generator import engine
 from question_generation.catalog import QuestionCatalog
-from review import datasets
+from review import datasets, judged
 from review.config import Settings
 from review.records import ReviewRepository
 from review.service import Catalogs, pull, push
@@ -111,7 +111,14 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings.load()
     catalogs = Catalogs(
-        facts=repository, questions=QuestionCatalog(), topics=TopicCatalog()
+        facts=repository,
+        questions=QuestionCatalog(),
+        topics=TopicCatalog(),
+        # What the evaluation phase said about each row, shown beside the
+        # checker's verdict. Wired unconditionally: a deployment that has
+        # never run the phase has no assessment rows, so every record
+        # carries `not_judged` and nothing has to know whether it is on.
+        judge=judged.catalog(),
     )
 
     if args.push:

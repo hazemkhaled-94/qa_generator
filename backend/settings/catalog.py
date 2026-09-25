@@ -25,7 +25,7 @@ from typing import Literal
 #: the control a page draws for it.
 Kind = Literal["integer", "decimal", "boolean", "text", "csv", "mapping"]
 
-#: The services a setting may belong to: six stages, and the platform they
+#: The services a setting may belong to: seven stages, and the platform they
 #: share. One page configures exactly one.
 Service = Literal[
     "ingestion",
@@ -34,6 +34,7 @@ Service = Literal[
     "extraction",
     "topics",
     "questions",
+    "assessment",
     "platform",
 ]
 
@@ -744,20 +745,25 @@ SETTINGS: tuple[Setting, ...] = (
         kind="integer",
         low=1,
         optional=True,
-        help="Context window to ask the runtime for. Absent takes its "
-        "default, which on a self-hosted runtime reserves the whole "
-        "advertised window as key-value cache before reading anything.",
+        help="Context window to ask the runtime for. It holds the prompt "
+        "AND the answer, so a thinking model needs room for however long it "
+        "reasons. Absent, a self-hosted model is asked for 16,384 and a "
+        "hosted one is asked for nothing. Over the window the oldest tokens "
+        "are dropped - the system prompt first - and the answer comes back "
+        "anyway, so too small fails silently.",
     ),
     Setting(
         name="LLM_REASONING_EFFORT",
         service="platform",
         kind="text",
         optional=True,
-        choices=("none", "low", "medium", "high"),
+        choices=("off", "none", "low", "medium", "high"),
         help="How much a thinking model may think before answering. Absent "
-        "turns thinking off, which is what a structured answer wants. A "
-        "hosted reasoning model wants `none` for that, and refuses a "
-        "temperature other than 1 without it.",
+        "sends nothing and the model keeps its own default, so a reasoning "
+        "model thinks. `off` is Ollama's switch and `none` a hosted "
+        "provider's, which also refuses a temperature other than 1 without "
+        "it. Set `off` for a small local model: it spends the window "
+        "reasoning and has no room left to answer.",
     ),
     Setting(
         name="EMBEDDING_MODEL",
@@ -804,6 +810,46 @@ SETTINGS: tuple[Setting, ...] = (
         help="Languages that write every noun with a capital, where a "
         "lower-case word tagged as a noun is a word from another language. "
         "Empty means no language is read that way.",
+    ),
+    # ── Assessment, which is the evaluation phase ─────────────────────────
+    # None of these invalidates anything. A judgement is recorded beside the
+    # checker's verdict and no stage reads one, so changing what is judged
+    # or who judges it stales nothing the pipeline produced - it stales the
+    # opinions, and `assessment-rerun` is what rewrites those.
+    Setting(
+        name="ASSESSMENT_ENABLED",
+        service="assessment",
+        kind="boolean",
+        help="Whether the evaluation phase runs at all. Off, the queue "
+        "enrols nothing and a drain claims nothing. The pipeline is "
+        "unaffected either way: this phase only ever records an opinion "
+        "beside the checker's.",
+    ),
+    Setting(
+        name="ASSESSMENT_JUDGE_MODEL",
+        service="assessment",
+        kind="text",
+        optional=True,
+        help="The model that judges. Absent calls the one LLM_MODEL names, "
+        "which makes the pipeline mark its own work - name a different one, "
+        "for the reason QUESTIONS_VERIFIER_MODEL exists.",
+    ),
+    Setting(
+        name="ASSESSMENT_KINDS",
+        service="assessment",
+        kind="csv",
+        choices=("fact", "topic", "question"),
+        help="Which artefacts are judged. Narrowing this is how a deployment "
+        "pays for the questions and not for twenty thousand facts.",
+    ),
+    Setting(
+        name="ASSESSMENT_SAMPLE",
+        service="assessment",
+        kind="integer",
+        low=0,
+        help="How many artefacts of each kind one start enrols, newest "
+        "first. 0 is every one of them, which on a large corpus is a model "
+        "call per fact.",
     ),
     Setting(
         name="WORKER_POLL_SECONDS",

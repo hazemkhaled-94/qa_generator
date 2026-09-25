@@ -6,7 +6,8 @@ module may import, and what runs in a container.
 ## 1. What a document becomes
 
 Six packages, in the order a document moves. Each writes its own tables and
-reads the previous one's.
+reads the previous one's. A seventh, `assessment`, runs after all of them and
+writes nothing any of them reads.
 
 ```mermaid
 flowchart TD
@@ -17,14 +18,17 @@ flowchart TD
     ext -->|facts, each citing a sentence| top[topic_modelling]
     top -->|topics, passage memberships| qgn[question_generation]
     qgn --> out([questions with known answers])
+    qgn -->|every fact, topic and question| ass[assessment]
+    ass --> opinion([a judgement beside each verdict])
 
     ext -.calls.-> llm{{served model}}
     top -.calls.-> llm
     qgn -.calls.-> llm
     qgn -.verifies with.-> vfy{{verifier model}}
+    ass -.judges with.-> jdg{{judge model}}
 
     classDef model fill:#fff3cd,stroke:#b8860b
-    class llm,vfy model
+    class llm,vfy,jdg model
 ```
 
 | Stage | Claims | Reads | Writes | Done value |
@@ -34,9 +38,17 @@ flowchart TD
 | `extraction` | `passages.extract_status` | one passage | `facts`, `fact_passages` | `extracted` |
 | `topic_modelling` | `topics.status` | every passage's vocabulary | `topics`, `passage_topics` | `modelled` |
 | `question_generation` | `topics.question_status` | one topic's facts | `questions`, `question_facts` | `generated` |
+| `assessment` | `assessments.assess_status` | one fact, topic or question | `assessments`, `assessment_metrics` | `assessed` |
 
 Ingestion owns no queue: an upload writes a row and an object, and parsing is
 what is then asked to run.
+
+Assessment owns a queue with nothing upstream to fill it. No stage hands it an
+artefact, so `start` **enrols** whatever has no assessment and then queues it —
+topic modelling's arrangement, where asking is what creates the work, reached
+from the other direction. It is also the one stage that can be switched off
+entirely, with `ASSESSMENT_ENABLED`, because it is the one stage the dataset
+does not depend on.
 
 A stage selects on its own status column and on nothing else. Chunking never
 reads `parse_status`, which is how parsing and chunking own different columns
@@ -87,8 +99,9 @@ Higher may import lower; nothing imports upward.
 ```mermaid
 flowchart TD
     api --> stages
-    subgraph services [the six services, none importing another]
+    subgraph services [the seven services, none importing another]
         direction LR
+        assessment
         extraction
         ingestion
         preprocessing

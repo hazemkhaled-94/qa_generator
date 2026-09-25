@@ -16,7 +16,7 @@ from typing import Literal
 from fastapi import Response
 from pydantic import BaseModel
 
-from api.dependencies import question_catalog, questions_queue
+from api.dependencies import assessment_catalog, question_catalog, questions_queue
 from api.errors import ApiError, ErrorBody
 from api.params import DocumentFilter, Limit, Offset, RowId, SearchText, TopicId
 from api.routes.stage import stage_router
@@ -266,6 +266,12 @@ def export(
     It is the expensive half over a whole corpus and the questions alone
     are enough to run a benchmark from.
 
+    What an independent judge made of each question goes in too, where the
+    evaluation phase has run. Not optional, unlike the citations: it is one
+    query over the questions already selected, and a benchmark shipped
+    without the second opinion recorded against it is the workbook this
+    phase exists to stop somebody sending.
+
     Declared before `/{question_id}` so `export` is not read as an id.
     """
     # Imported here rather than at the top of the module: `export` loads
@@ -304,6 +310,7 @@ def export(
         rows,
         question_catalog.citations(**where) if citations else (),
         question_catalog.quality(**where),
+        assessment_catalog.verdicts_for("question", [one.id for one in rows]),
     )
     return Response(
         content=drawn,

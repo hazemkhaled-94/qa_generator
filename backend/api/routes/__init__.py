@@ -5,11 +5,14 @@ are the pipeline stages, each built from `stage_router`; `topics` is the
 topic modelling stage, which owns its routes because its trigger is a
 request rather than the stage before it; `passages` and `facts` read back
 what those stages produced; `questions` is both a stage and its output, and
-so carries both in one router; `settings` is what each of them is configured
-to do, one service per request; `prompts` is what a version of one asked
-for; `system` is the platform itself.
+so carries both in one router; `assessment` is the evaluation phase, which
+judges what those stages produced and carries both in one router for the
+same reason; `settings` is what each of them is configured to do, one
+service per request; `prompts` is what a version of one asked for; `system`
+is the platform itself.
 """
 
+from api.routes.assessment import router as assessment_router
 from api.routes.chunking import router as chunking_router
 from api.routes.documents import router as documents_router
 from api.routes.extraction import router as extraction_router
@@ -34,12 +37,14 @@ ROUTERS = (
     passages_router,
     facts_router,
     questions_router,
+    assessment_router,
     settings_router,
     prompts_router,
 )
 
 __all__ = [
     "ROUTERS",
+    "assessment_router",
     "chunking_router",
     "documents_router",
     "extraction_router",

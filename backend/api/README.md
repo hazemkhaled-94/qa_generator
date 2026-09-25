@@ -28,14 +28,14 @@ gensim or spaCy into this process.
 
 **Read routes** are a noun: `/documents`, `/passages`, `/facts`, `/topics`,
 `/questions`. **Queue routes** are a verb under a stage's name: `/parsing`,
-`/chunking`, `/extraction`, `/questions`, `/topics`. Four of the five are
-built by one factory — [`stage_router`](routes/stage.py) — so a verb cannot
-mean two things depending on which stage answered it.
+`/chunking`, `/extraction`, `/questions`, `/topics`, `/assessment`. Five of
+the six are built by one factory — [`stage_router`](routes/stage.py) — so a
+verb cannot mean two things depending on which stage answered it.
 
-`/questions` is the one path that is both, because a question is what
-generation produces and what it is called. The queue routes are declared
-first, which keeps `/questions/status` from being read as a question with the
-id `status`.
+`/questions` and `/assessment` are the paths that are both, because in each
+case the stage and what it produces share the word. The queue routes are
+declared first, which keeps `/questions/status` from being read as a question
+with the id `status`.
 
 ### The queue surface every stage shares
 
@@ -70,6 +70,7 @@ gone. See [`backend/stages/`](../stages/README.md).
 | `extraction` | `document`, `passage` | `POST /extraction/passage/{id}/retry` |
 | `questions` | `topic` | `POST /questions/topic/{id}/rerun` |
 | `topics` | — | a fit is all-or-nothing over one vocabulary |
+| `assessment` | `kind` | `POST /assessment/kind/question/start` |
 
 Topic modelling's routes are written out in
 [`routes/topics.py`](routes/topics.py) rather than built by the factory:
@@ -126,6 +127,18 @@ Topic modelling's routes are written out in
 | `GET /questions/quality` | How many hold up, which gate stopped the rest, and coverage |
 | `GET /questions/export` | The questions a filter selects, as an `.xlsx`. No default scope |
 | `PATCH /questions/{id}` | Accept or reject one question |
+
+**Assessment** — served by [the evaluation phase](../assessment/README.md).
+
+| Route | Answers |
+|---|---|
+| `GET /assessment` | What an LLM judge made of each fact, topic and question |
+| `GET /assessment/plan` | Whether the phase is on, who judges, and what each kind is asked |
+| `GET /assessment/quality` | How much was judged, how each metric did, and where the judge and the pipeline disagree |
+
+There is no PATCH, deliberately. A judgement is a record of what a model
+said; a person who disagrees has `reviewed_verdict`, through
+[`review/`](../../review/README.md) or the Facts and Questions pages.
 
 **Prompts** — served by [`backend/stages/`](../stages/README.md).
 

@@ -17,9 +17,21 @@ from dagster import AssetKey, Definitions
 from orchestration import arrivals, corpus, defs, nightly
 
 #: The order a document moves through the pipeline. Each waits for the one
-#: before it, which is what makes the graph a pipeline rather than five
+#: before it, which is what makes the graph a pipeline rather than six
 #: things that happen to be in a list.
-ORDER = ("parsed_documents", "passages", "facts", "topics", "questions")
+#:
+#: `assessments` is last and is not a stage the corpus moves THROUGH: it
+#: judges what the five before it produced and writes nothing any of them
+#: reads. It is in the chain so that it runs after all of them, which is
+#: the one thing about its position that matters.
+ORDER = (
+    "parsed_documents",
+    "passages",
+    "facts",
+    "topics",
+    "questions",
+    "assessments",
+)
 
 SPECS = {spec.key.to_user_string(): spec for spec in defs.resolve_all_asset_specs()}
 

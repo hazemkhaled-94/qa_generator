@@ -22,6 +22,7 @@ class Status(StrEnum):
     EXTRACTED = "extracted"
     MODELLED = "modelled"
     GENERATED = "generated"
+    ASSESSED = "assessed"
 
 
 #: The states shared by every stage. A stage's own set is these plus its done

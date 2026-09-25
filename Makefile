@@ -739,8 +739,12 @@ questions-balance:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --balance $(ONLY)
 
 # The questions as a spreadsheet: one sheet of questions, one of the facts
-# each cites, one of counts. This is the way the dataset leaves the database
-# - everything else that reads these rows is a service, and Argilla is NOT
+# each cites, one of counts. A question's own row carries what it rests on
+# too - the facts, the evidence under them, its subjects, its documents by
+# title, the answer at length and the judge's reasoning - so a row reads
+# without joining the citations by id. This is the way the dataset leaves
+# the database - everything else that reads these rows is a service, and
+# Argilla is NOT
 # this: it holds a disposable copy of a stratified SAMPLE pushed for review,
 # so exporting from there gives back the hundred rows somebody was asked to
 # look at rather than the set.
@@ -760,6 +764,81 @@ questions-balance:
 OUT ?= questions.xlsx
 questions-export:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.export --out $(OUT) $(FILTER)
+
+# ── The evaluation phase ───────────────────────────────────────────────────
+#
+# An LLM judge over every fact, topic and question, run AFTER the whole
+# pipeline and never during it. A separate phase because it is a separate
+# question: every stage before it decides what to keep, and this one decides
+# nothing at all.
+#
+# What it produces is an opinion recorded BESIDE the checker's verdict, in a
+# column of its own, and the pair where they differ is the output that
+# matters - an artefact the pipeline kept and the judge refused is either a
+# check that let something through or a judge that is wrong, and only a
+# person settles which. See backend/assessment/README.md, and
+# evaluation/README.md on why a model's answer cannot be a gate here.
+#
+#   make assess-start && make assess      # judge everything, then watch
+#   make assess-status                    # how far it has got
+#   make assess-enrol                     # what it WOULD cost, before paying
+#
+# Off unless ASSESSMENT_ENABLED is true in .env, and every target below says
+# so and stops rather than quietly doing nothing.
+#
+# ASSESSMENT_JUDGE_MODEL is who judges, and it should not be LLM_MODEL: a
+# model asked whether its own facts follow from its own evidence says yes.
+#
+# ASSESSMENT_KINDS and ASSESSMENT_SAMPLE in configs/env/backend.env are the
+# cost dials. All three kinds at a sample of 200 is a few hundred model
+# calls; every fact of a large corpus is tens of thousands.
+ASSESS = $(LOADENV) && PYTHONPATH=backend poetry run python -m assessment.run
+
+# Drain the judging queue here, in the foreground.
+assess:
+	$(ASSESS)
+
+# Report the queue by artefact state, and what the judge has said so far.
+assess-status:
+	$(ASSESS) --status $(ONLY)
+
+# Enrol every artefact that has no assessment and queue it. Nothing is
+# judged until this runs, and nothing upstream enrols anything: a fact
+# arrives from extraction with nowhere to record a judgement, so this is
+# what creates the row as well as what queues it.
+#
+# Narrow it with ONLY to pay for one kind:
+#   make assess-start ONLY=--only\ kind=question
+assess-start:
+	$(ASSESS) --start $(ONLY)
+
+# Enrol without queuing. The dry run: it reports how many artefacts this
+# phase would cost a model call each, before anybody commits to paying for
+# them. A question costs three calls, a fact and a topic two.
+assess-enrol:
+	$(ASSESS) --enrol
+
+# Take back whatever has not begun. The artefact in hand finishes.
+assess-stop:
+	$(ASSESS) --stop $(ONLY)
+
+# Return every artefact the judge could not be reached for. A failure here
+# is the MODEL being down, not an artefact being bad: a judgement that came
+# back as a refusal is recorded as one and is not a failed row.
+assess-retry:
+	$(ASSESS) --retry $(ONLY)
+
+# Return an artefact a dead worker still holds, without waiting out its
+# lease. Narrow it unless the worker is stopped; see stages/README.md.
+assess-reclaim:
+	$(ASSESS) --reclaim $(ONLY)
+
+# Judge everything again, finished rows included. This is what a changed
+# template or a changed judge model calls for: the verdicts already stored
+# are overwritten as each row is judged again, so a corpus never holds two
+# opinions from two template versions with nothing saying which is current.
+assess-rerun:
+	$(ASSESS) --rerun $(ONLY)
 
 # Which runs there are, newest first, and how many questions each wrote.
 # A run is named by RUN_ID where one was given and by a uuid otherwise; see

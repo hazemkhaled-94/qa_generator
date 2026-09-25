@@ -197,6 +197,7 @@ non_dev_dependency_groups = [
 known_first_party = [
     "api",
     "archive",
+    "assessment",
     "blob_store",
     "database",
     "drivers",

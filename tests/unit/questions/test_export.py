@@ -37,8 +37,10 @@ def stored(id: int = 1, **overrides) -> StoredQuestion:
         "rejected_reason": None,
         "created_at": "2026-09-24T12:00:00+00:00",
         "facts": 1,
-        "documents": ["a1b2c3"],
+        "documents": ["Service policy"],
         "topics": ["Support", "Policy"],
+        "statements": ["A standard request is answered in 48 hours."],
+        "evidence": ["Requests are answered in 48 hours."],
     }
     return StoredQuestion(**{**fields, **overrides})
 
@@ -65,11 +67,11 @@ def sheets(drawn: bytes) -> dict[str, pd.DataFrame]:
     return {name: book.parse(name) for name in book.sheet_names}
 
 
-def test_the_workbook_has_the_three_sheets() -> None:
-    """Questions, what they cite, and what the set came out as."""
+def test_the_workbook_has_the_four_sheets() -> None:
+    """Questions, what they cite, what a judge said, and the set's shape."""
     read = sheets(workbook([stored()], [cited()]))
 
-    assert list(read) == ["Questions", "Citations", "Summary"]
+    assert list(read) == ["Questions", "Citations", "Assessment", "Summary"]
     assert len(read["Questions"]) == 1
     assert len(read["Citations"]) == 1
 
@@ -96,6 +98,82 @@ def test_a_list_is_joined_rather_than_repr_ed() -> None:
     assert row["Topics"] == "Support, Policy"
 
 
+def test_a_question_row_carries_what_it_rests_on() -> None:
+    """The facts, the evidence and the reason, on the question's own row.
+
+    The Citations sheet holds the same pairs one row apiece, and a reader
+    who has filtered the Questions sheet to the refused ones should not
+    have to join it by id to see what any of them cited.
+    """
+    row = sheets(workbook([stored()]))["Questions"].iloc[0]
+
+    assert row["The facts it cites"] == "A standard request is answered in 48 hours."
+    assert row["The evidence they rest on"] == "Requests are answered in 48 hours."
+    assert row["Answer in full"] == "A standard request is answered within 48 hours."
+    # The title, not the digest: a sha256 is not a thing anybody can look
+    # up by hand, which is why the Citations sheet already resolves one.
+    assert row["Documents"] == "Service policy"
+
+
+def test_sentences_are_one_per_line_rather_than_comma_joined() -> None:
+    """A comma between two sentences reads as one sentence."""
+    cited = ["The first holds.", "The second holds."]
+    row = sheets(workbook([stored(statements=cited)]))["Questions"].iloc[0]
+
+    assert row["The facts it cites"] == "The first holds.\nThe second holds."
+
+
+class _Judged:
+    """One question's judgement, as the assessment catalogue hands it over."""
+
+    def __init__(self, *metrics) -> None:
+        """Holds these judgements and nothing else."""
+        self.metrics = metrics
+        self.approved = all(one.approved for one in metrics)
+        self.judge_model = "a-model"
+        self.refused = [one.metric for one in metrics if not one.approved]
+        self.disagrees = False
+
+
+class _Metric:
+    """One metric of one judgement."""
+
+    def __init__(self, metric: str, label: str, approved: bool, why: str) -> None:
+        """Holds what the judge said about this one metric."""
+        self.metric, self.label, self.approved, self.explanation = (
+            metric,
+            label,
+            approved,
+            why,
+        )
+        self.score = 1.0 if approved else 0.0
+
+
+def test_the_judges_reasoning_is_on_the_question_row() -> None:
+    """Not only on the Assessment sheet.
+
+    A reader sorting the questions by what the judge refused wants the
+    reason in the row they are looking at; a label with no reasoning
+    beside it is one nobody can check.
+    """
+    refused = _Metric("groundedness", "unsupported", False, "The passages say 24.")
+    row = sheets(workbook([stored()], judged={1: _Judged(refused)}))["Questions"].iloc[
+        0
+    ]
+
+    assert row["Judge"] == "refused"
+    assert row["Judge refused by"] == "groundedness"
+    assert "The passages say 24." in row["Why the judge said so"]
+
+
+def test_an_unjudged_question_says_so_rather_than_going_blank() -> None:
+    """A blank cell reads as "no problem found"."""
+    row = sheets(workbook([stored()]))["Questions"].iloc[0]
+
+    assert row["Judge"] == "not judged"
+    assert pd.isna(row["Why the judge said so"])
+
+
 def test_nothing_selected_still_has_its_headings() -> None:
     """An empty filter writes an empty sheet, not a broken one.
 
@@ -105,7 +183,7 @@ def test_nothing_selected_still_has_its_headings() -> None:
     """
     read = sheets(workbook([], []))
 
-    assert list(read) == ["Questions", "Citations", "Summary"]
+    assert list(read) == ["Questions", "Citations", "Assessment", "Summary"]
     assert read["Questions"].empty
     assert "Question" in read["Questions"].columns
 
@@ -200,6 +278,19 @@ class _Catalog:
         del where
 
 
+class _NoJudgements:
+    """An assessment catalogue for a corpus nobody has judged.
+
+    Which is every corpus until the evaluation phase is switched on, so
+    this is the ordinary case rather than a stub for an unusual one.
+    """
+
+    def verdicts_for(self, kind: str, ids: list[int]) -> dict:
+        """Nothing has been judged."""
+        del kind, ids
+        return {}
+
+
 def test_the_export_asks_for_every_row_in_one_window(tmp_path, monkeypatch) -> None:
     """It counted, then asked for a window the size of the count.
 
@@ -217,6 +308,12 @@ def test_the_export_asks_for_every_row_in_one_window(tmp_path, monkeypatch) -> N
     monkeypatch.setattr("question_generation.catalog.QuestionCatalog", lambda: catalog)
     monkeypatch.setattr("database.qa_generator.engine", lambda: None)
     monkeypatch.setattr("telemetry.trace_engine", lambda engine: None)
+    # The judge's verdicts are looked up the same way the questions are,
+    # and are the same kind of import inside `main`. Patched here so this
+    # stays a test about the window and not about a database.
+    monkeypatch.setattr(
+        "assessment.repository.AssessmentCatalog", lambda: _NoJudgements()
+    )
     written = tmp_path / "questions.xlsx"
 
     module.main(["--out", str(written), "--no-citations"])

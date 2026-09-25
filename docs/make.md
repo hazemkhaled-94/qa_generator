@@ -109,14 +109,17 @@ make logs-prune LOGS_KEEP_DAYS=7
 
 Each is the same operation as the route beside it.
 
-| | Parsing | Chunking | Extraction | Questions |
-|---|---|---|---|---|
-| queue what was never asked for | `parse-start` | `chunk-start` | `extract-start` | `questions-start` |
-| drain here, in the foreground | `parse` | `chunk` | `extract` | `questions` |
-| show the queue | `parse-status` | `chunk-status` | `extract-status` | `questions-status` |
-| take back what has not begun | `parse-stop` | `chunk-stop` | `extract-stop` | `questions-stop` |
-| return failures to the queue | `parse-retry` | `chunk-retry` | `extract-retry` | `questions-retry` |
-| queue everything again | `parse-rerun` | `chunk-rerun` | `extract-rerun` | `questions-rerun` |
+| | Parsing | Chunking | Extraction | Questions | Assessment |
+|---|---|---|---|---|---|
+| queue what was never asked for | `parse-start` | `chunk-start` | `extract-start` | `questions-start` | `assess-start` |
+| drain here, in the foreground | `parse` | `chunk` | `extract` | `questions` | `assess` |
+| show the queue | `parse-status` | `chunk-status` | `extract-status` | `questions-status` | `assess-status` |
+| take back what has not begun | `parse-stop` | `chunk-stop` | `extract-stop` | `questions-stop` | `assess-stop` |
+| return failures to the queue | `parse-retry` | `chunk-retry` | `extract-retry` | `questions-retry` | `assess-retry` |
+| queue everything again | `parse-rerun` | `chunk-rerun` | `extract-rerun` | `questions-rerun` | `assess-rerun` |
+
+`assess-start` also **enrols**: nothing upstream creates an assessment, so it
+creates the rows as well as queuing them.
 
 Topic modelling has no `start` and no `rerun`: a fit is all-or-nothing over
 one vocabulary.
@@ -198,9 +201,18 @@ make questions-export FILTER="--no-citations"   # much faster, questions only
 python -m question_generation.export --help     # every filter there is
 ```
 
-Three sheets: the questions, the facts each cites — one row per fact per
-passage — and the counts. Argilla is not this: it holds a disposable copy of
-a sample pushed for review.
+Four sheets: the questions, the facts each cites — one row per fact per
+passage — what an LLM judge made of each answer, and the counts. Argilla is
+not this: it holds a disposable copy of a sample pushed for review.
+
+A question's own row carries what it rests on, so it reads on its own: the
+facts it cites and the evidence under them, its subjects, its documents **by
+title**, the answer at length, and why the judge said what it did. The
+Citations sheet is still the grain that carries the page number and the
+passage ordinal, which is what checking an answer against the source needs.
+
+The Assessment sheet and the three `Judge` columns are empty unless
+`make assess` has run.
 
 `questions-diff` reads live questions **and** archived ones, so a run
 `questions-rerun` replaced still answers. A run listed `(deleted)` is being
@@ -214,6 +226,42 @@ make questions-reclaim             # every one the stage holds
 `reclaim` fills the gap between `retry`, which takes the failed, and `rerun`,
 which skips what a worker holds. Narrow it while a worker may be up: nothing
 can tell a dead claim from a live one.
+
+## The evaluation phase
+
+An LLM judge over every fact, topic and question, run after the pipeline and
+never during it. Off unless `ASSESSMENT_ENABLED` is true in `.env`, and every
+target says so and stops rather than quietly doing nothing.
+
+**It decides nothing.** The verdict goes in a column of its own beside the
+checker's, and no stage reads it. See
+[`backend/assessment/`](../backend/assessment/README.md) for why it cannot
+be a gate.
+
+| Target | Does |
+|---|---|
+| `make assess-enrol` | Create the rows without queuing any. The dry run: how many model calls this would cost |
+| `make assess-start` | Enrol and queue everything that has no verdict |
+| `make assess` | Drain the judging queue here, in the foreground |
+| `make assess-status` | The queue, and what the judge has said so far |
+| `make assess-stop` | Take back what has not begun |
+| `make assess-retry` | Return the artefacts the judge could not be reached for |
+| `make assess-rerun` | Judge everything again, under the current templates |
+| `make assess-reclaim` | Return an artefact a dead worker holds. **Narrow it** |
+
+```bash
+make assess-enrol                              # count the cost first
+make assess-start ONLY=--only\ kind=question   # the deliverable only
+make assess
+```
+
+A fact and a topic cost two model calls each; a question costs three.
+`ASSESSMENT_KINDS` and `ASSESSMENT_SAMPLE` in `configs/env/backend.env` are
+the dials, and the default is a sample of 200 per kind rather than a corpus.
+
+A failure here is the **model** being unreachable, not an artefact being bad:
+a judgement that came back as a refusal is recorded as one and is not a
+failed row.
 
 ## Documents
 

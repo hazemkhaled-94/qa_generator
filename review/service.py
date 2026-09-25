@@ -21,6 +21,7 @@ import argilla as rg
 
 from review import datasets
 from review.config import Settings
+from review.judged import UNJUDGED, opinions
 from review.records import ReviewRepository
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,12 @@ class Catalogs:
     questions: Any
     #: Topics: `describe`, which PATCH /topics/{id} also calls.
     topics: Any
+    #: What the LLM judge said about each row, attached to the record so a
+    #: reviewer sees both machine verdicts. None reads as "nobody judged
+    #: anything", which is the honest answer for a deployment with the
+    #: evaluation phase switched off - and is what keeps a push working
+    #: without one.
+    judge: Any = None
 
 
 def connect(settings: Settings) -> rg.Argilla:
@@ -102,7 +109,11 @@ def push(
     draw = None if everything else settings.sample
 
     if name == datasets.FACTS:
-        records = [datasets.fact_record(one) for one in catalogs.facts.facts(draw)]
+        rows = catalogs.facts.facts(draw)
+        said = opinions(catalogs.judge, "fact", [one.id for one in rows])
+        records = [
+            datasets.fact_record(one, said.get(one.id, UNJUDGED)) for one in rows
+        ]
     elif name == datasets.QUESTIONS:
         # What says a sample has nothing left to ask about this row. Read
         # off Argilla rather than off `questions.reviewed_verdict`, which
@@ -111,15 +122,23 @@ def push(
         # pushing that row again asks somebody to judge it twice.
         # Never for an explicit queue: naming an id asks for that row.
         judged = set() if ids else answered(dataset)
-        records = [
-            datasets.question_record(one)
+        rows = [
+            one
             for one in catalogs.facts.questions(draw, ids)
             if str(one.id) not in judged
+        ]
+        said = opinions(catalogs.judge, "question", [one.id for one in rows])
+        records = [
+            datasets.question_record(one, said.get(one.id, UNJUDGED)) for one in rows
         ]
     else:
         # Every topic, not a sample. A corpus has dozens, not thousands,
         # and a topic left unreviewed is one whose name nobody checked.
-        records = [datasets.topic_record(one) for one in catalogs.topics.topics()]
+        rows = catalogs.topics.topics()
+        said = opinions(catalogs.judge, "topic", [one.id for one in rows])
+        records = [
+            datasets.topic_record(one, said.get(one.id, UNJUDGED)) for one in rows
+        ]
 
     if not records:
         log.info("%s: nothing left to review", name)

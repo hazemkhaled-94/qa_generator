@@ -16,7 +16,10 @@ import io
 import pandas as pd
 import pytest
 from seed import digest, document, fact, fitted, link, membership, passage, question
+from sqlalchemy import update
 from sqlalchemy.orm import Session
+
+from database.qa_generator import Document
 
 pytestmark = pytest.mark.integration
 
@@ -152,6 +155,55 @@ def test_a_question_citing_two_facts_is_returned_once(written) -> None:
     assert len(crossing) == 1
     assert crossing[0]["facts"] == 2
     assert sorted(crossing[0]["documents"]) == sorted([digest("a"), digest("b")])
+
+
+def test_the_listing_carries_what_each_question_cites(written) -> None:
+    """The statements and the sentences under them, on the row itself.
+
+    A benchmark is shipped from this listing, and a question handed over
+    without what it rests on is one nobody can check the answer of. Both
+    facts of the cross-document question, so the aggregate reaches through
+    every citation rather than stopping at the first.
+    """
+    client, held = written
+
+    listed = client.get("/questions").json()
+    crossing = next(
+        one for one in listed["questions"] if one["id"] == held["ids"]["crossing"]
+    )
+
+    assert sorted(crossing["statements"]) == [
+        "An urgent request may be raised by phone.",
+        "The policy is reviewed yearly.",
+    ]
+    assert sorted(crossing["evidence"]) == sorted(crossing["statements"])
+
+
+def test_a_document_is_named_rather_than_digested(written, engine) -> None:
+    """A sha256 is not a thing anybody can look up by hand.
+
+    The Citations sheet has resolved one to its title since it existed and
+    the question row shipped the digest, which is the disagreement this
+    closes. The digest stays the fallback for a row carrying no title -
+    the fixture's documents have none, which is what the test above rests
+    on.
+    """
+    client, held = written
+    with Session(engine) as session:
+        session.execute(
+            update(Document)
+            .where(Document.sha256 == digest("b"))
+            .values(title="The service policy")
+        )
+        session.commit()
+
+    listed = client.get("/questions").json()
+    crossing = next(
+        one for one in listed["questions"] if one["id"] == held["ids"]["crossing"]
+    )
+
+    assert "The service policy" in crossing["documents"]
+    assert digest("b") not in crossing["documents"]
 
 
 def test_rejected_questions_are_listed_too(written) -> None:
@@ -459,7 +511,16 @@ def test_the_export_is_a_workbook_a_spreadsheet_can_open(written) -> None:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     assert "questions.xlsx" in drawn.headers["content-disposition"]
-    assert list(workbook_from(drawn)) == ["Questions", "Citations", "Summary"]
+    # Assessment is there whether or not the evaluation phase has run: an
+    # empty sheet is one a reader can see the shape of, and its absence
+    # would read as "this workbook predates the judge" rather than as
+    # "nobody has judged these".
+    assert list(workbook_from(drawn)) == [
+        "Questions",
+        "Citations",
+        "Assessment",
+        "Summary",
+    ]
 
 
 def test_the_export_has_no_default_scope(written) -> None:

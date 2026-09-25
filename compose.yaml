@@ -139,6 +139,7 @@ x-worker: &worker
     - ./backend/nlp:/app/nlp:ro
     - ./backend/llm:/app/llm:ro
     - ./backend/question_generation:/app/question_generation:ro
+    - ./backend/assessment:/app/assessment:ro
     - ./backend/archive:/app/archive:ro
     - ./telemetry:/shared/telemetry:ro
     - logs:/var/log/qa
@@ -471,6 +472,7 @@ services:
       - ./backend/extraction:/app/extraction:ro
       - ./backend/topic_modelling:/app/topic_modelling:ro
       - ./backend/question_generation:/app/question_generation:ro
+      - ./backend/assessment:/app/assessment:ro
       - ./backend/nlp:/app/nlp:ro
       - ./backend/llm:/app/llm:ro
       - ./backend/archive:/app/archive:ro
@@ -592,6 +594,31 @@ services:
     deploy:
       resources:
         limits: { cpus: "2.0", memory: 6G }
+
+  # The evaluation phase: an LLM judge over the facts, topics and questions
+  # the five workers above produced. Started like the rest and idle like the
+  # rest until somebody asks for it - and idle twice over here, because
+  # `assessment.run` reads ASSESSMENT_ENABLED and stops before it claims
+  # anything when the phase is off, which is the default.
+  #
+  # So a deployment that never turns this on pays for one container polling
+  # an empty queue, which is what every other worker costs when its stage
+  # has nothing to do.
+  #
+  # 1 GB and no model weights. This is the one worker that loads NO encoder:
+  # it asks a served model three questions about text it already has and
+  # writes the answers down. No spaCy pipeline, no embedder, no NLI model -
+  # judging is a call, not a parse. That is also why it is the cheapest
+  # stage to scale horizontally if a corpus makes it the bottleneck.
+  assess-worker:
+    <<: *worker
+    command: ["python", "-m", "assessment.run", "--watch"]
+    env_file: *model-env-files
+    environment:
+      <<: [*service-env, *model-env]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
 
   streamlit:
     build:

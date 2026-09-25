@@ -1,4 +1,87 @@
 {
+  "/assessment": {
+    "get": {
+      "parameters": [
+        "approved",
+        "disagreements",
+        "kind",
+        "limit",
+        "metric",
+        "offset"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/assessment/plan": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/assessment/quality": {
+    "get": {
+      "parameters": [
+        "kind"
+      ],
+      "responses": [
+        "200",
+        "422"
+      ]
+    }
+  },
+  "/assessment/status": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/assessment/{action}": {
+    "post": {
+      "parameters": [
+        "action"
+      ],
+      "responses": [
+        "202",
+        "422"
+      ]
+    }
+  },
+  "/assessment/{scope}/{value}/status": {
+    "get": {
+      "parameters": [
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "200",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
+  "/assessment/{scope}/{value}/{action}": {
+    "post": {
+      "parameters": [
+        "action",
+        "scope",
+        "value"
+      ],
+      "responses": [
+        "202",
+        "400",
+        "404",
+        "422"
+      ]
+    }
+  },
   "/chunking/status": {
     "get": {
       "parameters": [],

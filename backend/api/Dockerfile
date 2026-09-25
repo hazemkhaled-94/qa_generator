@@ -94,6 +94,7 @@ COPY backend/preprocessing/ ./preprocessing/
 COPY backend/extraction/ ./extraction/
 COPY backend/topic_modelling/ ./topic_modelling/
 COPY backend/question_generation/ ./question_generation/
+COPY backend/assessment/ ./assessment/
 COPY backend/nlp/ ./nlp/
 COPY backend/llm/ ./llm/
 # The version stamped on a stored object is read from it at run time.

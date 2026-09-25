@@ -23,6 +23,7 @@
 root_packages =
     api
     archive
+    assessment
     blob_store
     database
     extraction
@@ -43,7 +44,7 @@ name = A stage sits above what it shares and below nothing but the api
 type = layers
 layers =
     api
-    extraction | ingestion | preprocessing | question_generation | topic_modelling | archive
+    assessment | extraction | ingestion | preprocessing | question_generation | topic_modelling | archive
     stages
     llm | nlp | blob_store
     settings
@@ -68,12 +69,31 @@ ignore_imports =
     settings.changes -> preprocessing.parsing.config
     settings.changes -> question_generation.config
     settings.changes -> topic_modelling.config
+    question_generation.export -> assessment.repository
 
 
 [importlinter:contract:stages-are-independent]
 name = No backend service imports another
 type = independence
+# The second deliberate edge, and it is one import in one function body.
+#
+# `question_generation.export.main` is the COMMAND LINE that writes the
+# workbook, not the library that builds it. `workbook()` itself takes the
+# judgements as an argument and imports nothing - which is what lets the api
+# call it while holding its own catalogue - and `main` is the other caller,
+# so it looks them up the way it already looks up the questions.
+#
+# grimp cannot tell those two apart: it reads an import inside a function
+# exactly as it reads one at module scope, which is the same limitation the
+# comment at the top of this file describes from the other direction.
+#
+# Narrow on purpose. `assessment.repository` and nothing else, in the one
+# module that is an entry point. An edge from a SERVICE into another service
+# is what this contract exists to stop and is still stopped.
+ignore_imports =
+    question_generation.export -> assessment.repository
 modules =
+    assessment
     extraction
     ingestion
     preprocessing.chunking

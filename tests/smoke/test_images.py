@@ -40,6 +40,7 @@ ENTRY_POINTS = (
     "extraction.run",
     "topic_modelling.run",
     "question_generation.run",
+    "assessment.run",
     "stages.cli",
     "telemetry",
 )

@@ -10,12 +10,27 @@ than the set. The database is what has the set.
 
 So: one workbook, three sheets.
 
-- **Questions** - one row per question, the columns a reader filters on.
+- **Questions** - one row per question, the columns a reader filters on,
+  and what that question rests on: the facts it cites, the evidence under
+  them, its subjects, the documents by name, the answer at length and why
+  the judge said what it did. One row is readable on its own, because a
+  reader filtering this sheet to the refused questions should not have to
+  join another by id to see what any of them cited.
 - **Citations** - one row per (question, fact, passage), which is what an
   answer is checked against. A bridge cites two passages and so takes two
-  rows.
+  rows. Still here beside the folded-up version above: this is the grain
+  that carries the page number and the passage ordinal, which is what
+  somebody checking an answer against the source needs.
+- **Assessment** - one row per (question, judgement), which is what an
+  independent model made of each answer. Empty unless the evaluation phase
+  has run.
 - **Summary** - what the filter selected, as counts. Written so a workbook
   mailed to somebody says what it is without them having to pivot it.
+
+The judgements arrive as an argument rather than being read here. This
+package must not import `assessment` - no backend service imports another,
+which `.importlinter` enforces - so the two callers that already hold a
+catalogue each look them up and hand them over.
 
 **The filter is the caller's and there is no default scope.** Not "the
 release", not "everything accepted": whatever the same filter the listing
@@ -32,7 +47,7 @@ import argparse
 import io
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import Any, cast
 
@@ -68,11 +83,27 @@ _COLUMNS = (
     ("status", "Status"),
     ("rejected_reason", "Gate"),
     ("reviewed_verdict", "Reviewed"),
+    # Filled from the `judged` argument rather than off the row: a question
+    # carries no judgement of its own, and this package cannot read the
+    # table that does. Blank where the evaluation phase has not run.
+    ("judge", "Judge"),
+    ("judge_refused", "Judge refused by"),
+    ("judge_why", "Why the judge said so"),
     ("facts", "Facts cited"),
+    # Two sets, not pairs: each is de-duplicated on its own, so the nth
+    # line of one is not the nth line of the other. The Citations sheet is
+    # what puts a fact beside the sentence it was drawn from.
+    ("statements", "The facts it cites"),
+    ("evidence", "The evidence they rest on"),
     ("topics", "Topics"),
     ("documents", "Documents"),
     ("created_at", "Written"),
 )
+
+#: Fields whose list is written one item per line rather than comma-joined.
+#: A comma between two sentences reads as one sentence, and both of these
+#: hold sentences. The cells are wrapped, so the lines show.
+_LINES = frozenset({"statements", "evidence"})
 
 _CITATION_COLUMNS = (
     ("question_id", "Question ID"),
@@ -83,6 +114,19 @@ _CITATION_COLUMNS = (
     ("document", "Document"),
     ("page", "Page"),
     ("ordinal", "Passage"),
+)
+
+#: The Assessment sheet. One row per judgement rather than per question,
+#: because a question is judged three times and a reader wants to sort on
+#: which judgement failed.
+_ASSESSMENT_COLUMNS = (
+    "Question ID",
+    "Judgement",
+    "Answer",
+    "Approved",
+    "Score",
+    "Why",
+    "Judge",
 )
 
 #: How wide each heading's column is drawn, by the heading. Anything not
@@ -96,6 +140,11 @@ _WIDTHS = {
     "Evidence": 60,
     "Topics": 30,
     "Documents": 30,
+    "Why": 70,
+    "Judge refused by": 26,
+    "Why the judge said so": 70,
+    "The facts it cites": 60,
+    "The evidence they rest on": 60,
 }
 
 #: Columns whose text is wrapped rather than run off under the next cell.
@@ -107,16 +156,19 @@ _WRAPPED = frozenset(_WIDTHS)
 _CELL_LIMIT = 32_000
 
 
-def _flatten(value: Any) -> Any:
+def _flatten(value: Any, joiner: str = ", ") -> Any:
     """Renders one field as a cell.
 
-    Lists become a comma-joined string - a spreadsheet has no cell type for
-    a list, and `str(list)` would put Python's brackets and quotes in front
+    Lists become a joined string - a spreadsheet has no cell type for a
+    list, and `str(list)` would put Python's brackets and quotes in front
     of a reader. Long text is cut at the limit Excel enforces, with the cut
     marked so nobody reads a truncated answer as a short one.
+
+    `joiner` is a comma for the short coded lists and a newline for the two
+    holding sentences, which a comma would run together into one.
     """
     if isinstance(value, (list, tuple)):
-        value = ", ".join(str(item) for item in value)
+        value = joiner.join(str(item) for item in value)
     if isinstance(value, str) and len(value) > _CELL_LIMIT:
         return value[:_CELL_LIMIT] + "… [truncated]"
     return value
@@ -125,7 +177,10 @@ def _flatten(value: Any) -> Any:
 def _frame(rows: Sequence[Any], columns: Sequence[tuple[str, str]]) -> pd.DataFrame:
     """Builds one sheet's frame, in the column order named above."""
     records = [
-        {heading: _flatten(asdict(row).get(field)) for field, heading in columns}
+        {
+            heading: _flatten(asdict(row).get(field), "\n" if field in _LINES else ", ")
+            for field, heading in columns
+        }
         for row in rows
     ]
     # An empty selection still gets its headings, so a workbook of nothing
@@ -133,17 +188,121 @@ def _frame(rows: Sequence[Any], columns: Sequence[tuple[str, str]]) -> pd.DataFr
     return pd.DataFrame(records, columns=pd.Index([head for _, head in columns]))
 
 
-def _summary(quality: QuestionQuality | None, count: int, cited: int) -> pd.DataFrame:
+def _judged_frame(
+    questions: Sequence[StoredQuestion], judged: Mapping[int, Any]
+) -> pd.DataFrame:
+    """The Questions sheet, with the judge's three columns filled in.
+
+    Filled after the frame is built rather than read off the row, because
+    `StoredQuestion` carries no judgement and this package cannot read the
+    table that does. The three columns keep their declared position either
+    way, which is what building them into `_COLUMNS` as blanks buys.
+    """
+    frame = _frame(questions, _COLUMNS)
+    if not len(frame):
+        return frame
+    found = [judged.get(one.id) for one in questions]
+    frame["Judge"] = [_verdict(one) for one in found]
+    frame["Judge refused by"] = [
+        ", ".join(getattr(one, "refused", ()) or ()) if one is not None else ""
+        for one in found
+    ]
+    frame["Why the judge said so"] = [_reasoning(one) for one in found]
+    return frame
+
+
+def _reasoning(one: Any) -> str:
+    """Every judgement about one question, one per line.
+
+    Beside the verdict rather than only on the Assessment sheet: a reader
+    sorting the questions by what the judge refused wants the reason in the
+    row they are looking at, and a judgement with no reasoning beside it is
+    a label nobody can check.
+
+    The same rendering `review/judged.py` gives a reviewer, written twice
+    because it cannot be imported: that module reaches the assessments
+    through `assessment.repository`, and no backend service imports
+    another.
+    """
+    if one is None:
+        return ""
+    return "\n".join(
+        f"{metric.metric}: {metric.label} — {metric.explanation}"
+        for metric in one.metrics or ()
+    )
+
+
+def _verdict(one: Any) -> str:
+    """How one question's judgement reads in a cell.
+
+    `not judged` rather than blank, and the distinction is the point: a
+    blank cell in a spreadsheet reads as "no problem found", and a question
+    nobody judged is not one the judge approved.
+    """
+    if one is None or one.approved is None:
+        return "not judged"
+    return "approved" if one.approved else "refused"
+
+
+def _assessment_frame(
+    questions: Sequence[StoredQuestion], judged: Mapping[int, Any]
+) -> pd.DataFrame:
+    """The Assessment sheet: one row per judgement of each question.
+
+    Only the questions this workbook holds, so the sheet cannot describe
+    rows the filter excluded.
+    """
+    records = []
+    for question in questions:
+        one = judged.get(question.id)
+        if one is None:
+            continue
+        for metric in one.metrics or ():
+            records.append(
+                {
+                    "Question ID": question.id,
+                    "Judgement": metric.metric,
+                    "Answer": metric.label,
+                    "Approved": "yes" if metric.approved else "no",
+                    "Score": metric.score,
+                    "Why": _flatten(metric.explanation),
+                    "Judge": one.judge_model,
+                }
+            )
+    return pd.DataFrame(records, columns=pd.Index(list(_ASSESSMENT_COLUMNS)))
+
+
+def _summary(
+    quality: QuestionQuality | None,
+    count: int,
+    cited: int,
+    judged: Mapping[int, Any] | None = None,
+) -> pd.DataFrame:
     """The Summary sheet: what this workbook holds, as counts.
 
     Reads the quality report the API already serves rather than counting
     the frames again, so the figures in the workbook are the figures on the
     page it was exported from.
+
+    The judge's three figures are counted over THIS workbook's questions
+    rather than read off the corpus-wide report, because a workbook that
+    says "38 disagreements" about a filter holding twelve questions is
+    describing something the reader cannot see.
     """
     rows: list[tuple[str, Any]] = [
         ("Questions in this workbook", count),
         ("Citation rows", cited),
     ]
+    if judged is not None:
+        answered = [one for one in judged.values() if one.approved is not None]
+        rows += [
+            ("Judged by a model", len(answered)),
+            ("Judge approved", sum(1 for one in answered if one.approved)),
+            (
+                "Kept by the pipeline, refused by the judge",
+                sum(1 for one in answered if one.disagrees),
+            ),
+        ]
     if quality is not None:
         measured = asdict(quality)
         rows += [
@@ -185,6 +344,7 @@ def workbook(
     questions: Sequence[StoredQuestion],
     citations: Sequence[Citation] = (),
     quality: QuestionQuality | None = None,
+    judged: Mapping[int, Any] | None = None,
 ) -> bytes:
     """Builds the workbook, and returns it as the bytes of an .xlsx file.
 
@@ -192,11 +352,21 @@ def workbook(
     things with them: the API streams it, the command line writes it, and
     the frontend hands it to a download button. Nothing here touches a
     filesystem.
+
+    `judged` maps a question's id to what an independent model made of it,
+    as `assessment.models.StoredAssessment`. Passed in rather than read
+    here, and typed loosely for the same reason: no backend service
+    imports another, so this one is handed the verdicts by whichever
+    caller already holds a catalogue. None leaves the Assessment sheet out
+    and the two Judge columns blank, which is a deployment that has never
+    run the evaluation phase.
     """
+    held: Mapping[int, Any] = judged or {}
     sheets = {
-        "Questions": _frame(questions, _COLUMNS),
+        "Questions": _judged_frame(questions, held),
         "Citations": _frame(citations, _CITATION_COLUMNS),
-        "Summary": _summary(quality, len(questions), len(citations)),
+        "Assessment": _assessment_frame(questions, held),
+        "Summary": _summary(quality, len(questions), len(citations), judged),
     }
     buffer = io.BytesIO()
     # `WriteExcelBuffer` is a protocol a BytesIO satisfies at runtime and
@@ -206,9 +376,11 @@ def workbook(
             frame.to_excel(writer, sheet_name=name, index=False)
             _dress(writer.sheets[name], frame)
     log.info(
-        "wrote a workbook of %d question(s) and %d citation row(s)",
+        "wrote a workbook of %d question(s), %d citation row(s) and %d "
+        "judgement row(s)",
         len(questions),
         len(citations),
+        len(sheets["Assessment"]),
     )
     return buffer.getvalue()
 
@@ -297,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         The process exit code.
     """
     import telemetry
+    from assessment.repository import AssessmentCatalog
     from database.qa_generator import engine
     from question_generation.catalog import QuestionCatalog
 
@@ -333,8 +506,14 @@ def main(argv: list[str] | None = None) -> int:
     _, questions = catalog.page(limit=None, **where)
     citations = () if args.no_citations else catalog.citations(**where)
 
+    # Imported inside `main` rather than at the top of the module, like
+    # the catalogue beside it. `workbook` is also called by the api, and
+    # no backend service may import another - this is the command line
+    # rather than the library, and it is allowed to know about both.
+    judged = AssessmentCatalog().verdicts_for("question", [one.id for one in questions])
+
     with open(args.out, "wb") as handle:
-        handle.write(workbook(questions, citations, catalog.quality(**where)))
+        handle.write(workbook(questions, citations, catalog.quality(**where), judged))
     log.info("wrote %s", args.out)
     return 0
 

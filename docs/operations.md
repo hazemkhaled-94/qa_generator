@@ -10,14 +10,14 @@ Once `make dev` reports ready:
 |---|---|---|
 | Frontend | <http://localhost:8501> | Run each stage, browse what it produced |
 | API | <http://localhost:8000/docs> | OpenAPI documentation |
-| Phoenix | <http://localhost:6006> | Traces, gate verdicts, prompts, experiments, the playground |
+| Phoenix | <http://localhost:6006> | Traces, gate verdicts, judgements, prompts, experiments, the playground |
 | Grafana | <http://localhost:3001> | Logs and pipeline dashboards |
 | Argilla | <http://localhost:6900> | Review what the models decided |
 | Adminer | <http://localhost:9001> | Database browser |
 | Dagster | <http://localhost:3000> | The asset graph and run history |
 
 Behind them: PostgreSQL, SeaweedFS, Elasticsearch, Redis, Filebeat, the
-Dagster daemon and the five stage workers — twenty-three containers in all.
+Dagster daemon and the six stage workers — twenty-four containers in all.
 
 `make services` and the System health page both ask `GET /services`, which
 probes the catalogue in
@@ -45,6 +45,12 @@ is one request row.
 `models` volume, before it claims anything. The topics sit `pending` until it
 finishes and `make logs` says so. The container is given 6 GB because of it,
 and the weights are per container, not per lane.
+
+`assess-worker` is the cheapest of the six to scale and the only one that
+loads **no** weights at all: it asks a served model three questions about
+text it already has. 1 GB and one CPU. It also does nothing until
+`ASSESSMENT_ENABLED` is true, so a deployment that never turns the
+evaluation phase on pays for one container polling an empty queue.
 
 ## What the model costs
 
@@ -146,6 +152,8 @@ read back through `/{stage}/status`.
 | Symptom | Usually |
 |---|---|
 | Topics sit `pending`, nothing in the logs | `question-worker` is downloading 2.2 GB of embedding weights |
+| `make assess` prints one line and stops | `ASSESSMENT_ENABLED` is not true in `.env` |
+| Every artefact is `failed` after `make assess` | `ASSESSMENT_JUDGE_MODEL` names a model that is not served. The verdicts are unaffected; `make assess-retry` |
 | A queue fills and nothing drains it | That stage has no container. `make up` |
 | Grafana panels are empty | The shipper. `make logs-shipper` |
 | A panel that groups by `stage` finds nothing | A field missing from `append_fields` in `filebeat.yml` |

@@ -205,6 +205,44 @@ class ReviewVerdict(StrEnum):
     REJECTED = "rejected"
 
 
+class ArtifactKind(StrEnum):
+    """What an assessment is about.
+
+    The three things this pipeline produces that a judge can hold an opinion
+    about, and the three `review/` already puts in front of a person. A
+    passage and a parsed document are absent on purpose: judging a
+    conversion needs the source page rendered beside it, which nothing here
+    keeps.
+    """
+
+    FACT = "fact"
+    TOPIC = "topic"
+    QUESTION = "question"
+
+
+class JudgeMetric(StrEnum):
+    """What an LLM judge was asked, by the name phoenix-evals uses.
+
+    The names, the labels and the scores are taken from
+    arize-phoenix-evals' own evaluator configs rather than invented, so a
+    `hallucination` annotation posted by this pipeline means in Phoenix what
+    a `hallucination` annotation posted by anything else means. The
+    templates behind them are this repository's - see
+    `assessment/templates.py` - because the shipped ones are written in
+    English about a retrieval answer, and half of this corpus is German.
+
+    HALLUCINATION  does the evidence support every part of the statement?
+    RELEVANCE      is the evidence about what the artefact claims it is?
+    QA_CORRECTNESS is the expected answer the right answer to the question?
+    SUMMARIZATION  does this name stand in for what it summarises?
+    """
+
+    HALLUCINATION = "hallucination"
+    RELEVANCE = "relevance"
+    QA_CORRECTNESS = "qa_correctness"
+    SUMMARIZATION = "summarization"
+
+
 class Rejection(StrEnum):
     """Why a candidate fact was not accepted.
 

@@ -346,7 +346,16 @@ def test_the_orchestrator_does_not_run_the_backend_image(resolved, service) -> N
 
 #: The services that call a model, and so the only ones given the configured
 #: provider's credentials.
-MODEL_CALLERS = {"extract-worker", "topic-worker", "question-worker"}
+MODEL_CALLERS = {
+    "extract-worker",
+    "topic-worker",
+    "question-worker",
+    # The evaluation phase asks a model each judgement. It needs the
+    # credentials for the same reason the three above do, and it is the
+    # only one of the four that calls a model without loading any weights
+    # of its own.
+    "assess-worker",
+}
 
 
 def _env_files(service: dict) -> list[str]:

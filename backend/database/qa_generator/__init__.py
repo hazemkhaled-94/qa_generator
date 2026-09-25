@@ -5,6 +5,7 @@ what Alembic compares the live schema against.
 """
 
 from database.qa_generator.archived_rows import ArchivedRow
+from database.qa_generator.assessments import Assessment, AssessmentMetric
 from database.qa_generator.base import Base
 from database.qa_generator.documents import Document
 from database.qa_generator.engine import engine, sessions
@@ -13,11 +14,13 @@ from database.qa_generator.facts import Fact
 from database.qa_generator.ingest_events import IngestEvent
 from database.qa_generator.outcomes import (
     AnswerForm,
+    ArtifactKind,
     CognitiveLevel,
     Derivation,
     Difficulty,
     DocumentScope,
     FactKind,
+    JudgeMetric,
     Outcome,
     PassageScope,
     QuestionRejection,
@@ -40,6 +43,9 @@ from database.qa_generator.topics import Topic
 __all__ = [
     "AnswerForm",
     "ArchivedRow",
+    "ArtifactKind",
+    "Assessment",
+    "AssessmentMetric",
     "Base",
     "CognitiveLevel",
     "Derivation",
@@ -50,6 +56,7 @@ __all__ = [
     "FactKind",
     "FactPassage",
     "IngestEvent",
+    "JudgeMetric",
     "Outcome",
     "Passage",
     "PassageScope",

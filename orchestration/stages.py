@@ -220,11 +220,134 @@ def questions_check() -> AssetCheckResult:
     )
 
 
+@asset(
+    name="assessments",
+    deps=[AssetKey("questions")],
+    group_name="pipeline",
+    description="The evaluation phase: an LLM judge over every fact, topic "
+    "and question the pipeline produced. Records an opinion beside the "
+    "checker's verdict and changes nothing.",
+    compute_kind="queue",
+)
+def assessments(context: AssetExecutionContext) -> Output[int]:
+    """Judges everything the pipeline produced, if the phase is switched on.
+
+    Last in the graph, and that position is the whole point: the judge is
+    asked about the corpus as it finally stands, not about a fact that a
+    later revalidation would have rejected anyway.
+
+    Switched off, this materialises rather than fails. A deployment that
+    has not turned the phase on has not got a broken pipeline, and an asset
+    that went red every night because a cost decision was made deliberately
+    is an asset nobody would keep.
+    """
+    settings = Settings.load()
+    backend = Backend(settings.backend_url)
+
+    plan = backend.plan("assessment")
+    if not plan.get("enabled"):
+        context.log.info("assessment: ASSESSMENT_ENABLED is off; nothing judged")
+        return Output(
+            0,
+            metadata={
+                "enabled": False,
+                "why": MetadataValue.text(
+                    "ASSESSMENT_ENABLED is off in .env. The pipeline is "
+                    "unaffected: this phase only records an opinion beside "
+                    "the checker's verdict."
+                ),
+            },
+        )
+
+    queued = backend.act("assessment", "start")
+    context.log.info("assessment: %d artifact(s) queued", queued)
+
+    queue = backend.drain(
+        "assessment", timeout=settings.drain_timeout, poll=settings.poll_seconds
+    )
+    done = produced(queue.rows)
+    return Output(
+        done,
+        metadata={
+            "enabled": True,
+            "judge": plan.get("judge_model") or "LLM_MODEL (judging its own work)",
+            "kinds judged": MetadataValue.json(plan.get("kinds") or []),
+            "queued by this run": queued,
+            "artifacts judged": done,
+            "failed": queue.failed,
+            "queue": MetadataValue.json(queue.rows),
+        },
+    )
+
+
+@asset_check(
+    asset="assessments",
+    name="nothing_failed",
+    description="Whether the judge could not be reached for any artefact.",
+)
+def assessments_check() -> AssetCheckResult:
+    """Reports the artefacts the judge could not be asked about.
+
+    A failure here is the model being unreachable, not an artefact being
+    bad: a judgement that was refused is recorded as a refusal and is not
+    a failed row.
+    """
+    settings = Settings.load()
+    queue = Backend(settings.backend_url).status("assessment")
+    return AssetCheckResult(
+        passed=queue.failed == 0,
+        metadata={
+            "failed": queue.failed,
+            "retry with": "POST /assessment/retry",
+            "queue": MetadataValue.json(queue.rows),
+        },
+    )
+
+
+@asset_check(
+    asset="assessments",
+    name="judge_agrees_with_the_checker",
+    description="Where the judge refused something the pipeline kept.",
+)
+def assessments_agreement() -> AssetCheckResult:
+    """Reports the disagreements, and never fails on them.
+
+    A disagreement is not a defect. It is either a check that let something
+    through or a judge that is wrong, and which of those it is cannot be
+    decided here - `evaluation/README.md` records an LLM judge measured at
+    chance on the German half of this corpus. So this check passes whatever
+    it finds and carries the count, which is a number worth watching on the
+    asset page and never a reason to fail a run.
+
+    What acts on it is a person: `make review-push-questions`.
+    """
+    settings = Settings.load()
+    quality = Backend(settings.backend_url).judged()
+    judged = quality.get("judged", 0)
+    approved = quality.get("approved", 0)
+    disagreements = quality.get("disagreements", 0)
+    return AssetCheckResult(
+        passed=True,
+        metadata={
+            "judged": judged,
+            "approved": approved,
+            "approval rate": f"{approved / judged:.0%}" if judged else "nothing judged",
+            "kept by the pipeline, refused by the judge": disagreements,
+            "what to do": MetadataValue.text(
+                "Neither side is right by default. Put them in front of "
+                "somebody: make review-push-questions, then review-pull-questions."
+            ),
+            "by metric": MetadataValue.json(quality.get("metrics") or []),
+        },
+    )
+
+
 #: Every stage that has an asset, as (asset name, route prefix, unit).
-#: `ROW_STAGES` plus the two that are asked for rather than started.
+#: `ROW_STAGES` plus the three that are asked for rather than started.
 ALL_STAGES = ROW_STAGES + (
     ("topics", "topics", "fit"),
     ("questions", "questions", "topic"),
+    ("assessments", "assessment", "artifact"),
 )
 
 #: Queue statuses that mean a row has NOT been produced yet. Everything

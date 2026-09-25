@@ -12,6 +12,26 @@ Argilla holds a **copy** of the rows put in front of somebody and the answers
 they gave. A pull brings the answers home and the copy is disposable —
 delete the Argilla dataset and the pipeline has lost nothing.
 
+## Two machine verdicts on every record
+
+Each record already carried what the **checker** decided. It now also
+carries what an **LLM judge** decided, from
+[the evaluation phase](../backend/assessment/README.md): a `judge` field
+holding the judgement and its reasoning, and `judge` and `judge_disagrees`
+as metadata to filter on.
+
+`judge_disagrees=yes` is the sitting worth having. Those are the artefacts
+the pipeline **kept** and the judge refused — one of the two is wrong, and a
+person is the only thing that settles which.
+
+Neither machine verdict is an answer key, and the guidelines say so on every
+dataset. Anchoring is the risk and it is the lesser one, for the reason the
+next paragraph gives: a sample nobody can interpret gets abandoned.
+
+`not_judged` where the phase has not run, which is a filterable value rather
+than an absent field — "which of these has nobody judged" is a question a
+reviewer asks.
+
 Nothing in the pipeline reads Argilla, and no container carries the client:
 this runs on the host, like `make schema`.
 

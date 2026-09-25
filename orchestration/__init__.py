@@ -195,6 +195,7 @@ defs = Definitions(
         stages.facts,
         stages.topics,
         stages.questions,
+        stages.assessments,
     ],
     asset_checks=[
         stages.parsed_documents_check,
@@ -202,6 +203,8 @@ defs = Definitions(
         stages.facts_check,
         stages.topics_check,
         stages.questions_check,
+        stages.assessments_check,
+        stages.assessments_agreement,
     ],
     jobs=[corpus],
     schedules=[nightly],

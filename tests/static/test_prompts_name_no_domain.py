@@ -50,7 +50,20 @@ PROMPTS = (
     "backend/extraction/extractors/bridge.py",
     "backend/extraction/extractors/digest.py",
     "backend/topic_modelling/labels.py",
+    # The evaluation phase's seven judging templates. Here for the reason
+    # the rest are, and with one of its own: a judge's worked example is
+    # the likeliest of all of them to be pasted in from the corpus being
+    # debugged against, because the example that shows what a bad fact
+    # looks like is a bad fact somebody just found.
+    "backend/assessment/templates.py",
 )
+
+#: Modules whose templates are filled in one loop rather than one
+#: `.replace` per placeholder. The placeholder check below counts a name
+#: twice and cannot apply to them; each declares the fields its templates
+#: take and raises when one is missing, which is the same guarantee made
+#: where the substitution actually happens.
+RENDERED_GENERICALLY = frozenset({"backend/assessment/templates.py"})
 
 #: The shortest string worth reading as a prompt. Below it a literal is a
 #: field description, a log line or a key, and a subject word in one of those
@@ -103,6 +116,15 @@ def test_every_placeholder_in_a_prompt_is_filled_in_the_same_module(
 ) -> None:
     """A template variable nobody substitutes reaches the model as itself.
 
+    Skipped for the modules that substitute GENERICALLY rather than one
+    `.replace` per name. The check below counts a name twice - once in the
+    template and once where the call fills it - and a module that renders
+    every placeholder in one loop writes each name once by construction.
+    Those declare the fields each template takes and refuse to render
+    without them, which is the same property checked at run time and
+    against the query that supplies the values; see
+    `tests/unit/assessment/test_templates.py`.
+
     The user half of every prompt is held as a TEMPLATE, so the row records
     what a version asked for rather than the passages one call happened to
     carry. The cost of that is a new way to be wrong: add `{{pointers}}` to
@@ -113,6 +135,8 @@ def test_every_placeholder_in_a_prompt_is_filled_in_the_same_module(
     call fills it - and both are in the module that sends the prompt. So a
     name that appears once is the one nobody substitutes.
     """
+    if module in RENDERED_GENERICALLY:
+        pytest.skip(f"{module} declares its fields and checks them when rendering")
     source = (ROOT / module).read_text(encoding="utf-8")
     once = [
         name

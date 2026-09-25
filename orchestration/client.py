@@ -96,6 +96,25 @@ class Backend:
         log.info("topics: fit %s queued", fit)
         return fit
 
+    def plan(self, stage: str) -> dict:
+        """What one stage is configured to do, as its own /plan reports it.
+
+        Only the assessment phase has one that the orchestrator reads, and
+        it reads it for one thing: whether the phase is switched on. An
+        asset that started a phase a deployment turned off would be the
+        orchestrator deciding something `.env` had already decided.
+        """
+        return self._call("GET", f"/{stage}/plan")
+
+    def judged(self) -> dict:
+        """What the judge made of the corpus, as /assessment/quality reports it.
+
+        Read so the assessment asset can carry the approval rate and the
+        disagreement count as metadata. A number on an asset page and never
+        a reason to fail one - see `assessments_agreement`.
+        """
+        return self._call("GET", "/assessment/quality")
+
     def drain(self, stage: str, *, timeout: float, poll: float) -> Queue:
         """Waits until a stage has nothing claimable left.
 

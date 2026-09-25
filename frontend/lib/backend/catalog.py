@@ -166,6 +166,18 @@ class CatalogApi(Endpoint):
             timeout=_EXPORT_SECONDS,
         ).content
 
+    def assessments(self, **filters) -> dict:
+        """Fetches one page of the judge's verdicts."""
+        return self._query("/assessment", filters)
+
+    def assessment_quality(self, **filters) -> dict:
+        """Fetches what the judge made of the corpus, under the same filter."""
+        return self._query("/assessment/quality", filters)
+
+    def assessment_plan(self) -> dict:
+        """Fetches whether the evaluation phase runs, and what it judges."""
+        return self._request("GET", "/assessment/plan").json()
+
     def decide_question(self, question_id: int, status: str) -> dict:
         """Accepts or rejects one question."""
         return self._request(

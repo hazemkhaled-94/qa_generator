@@ -60,17 +60,19 @@ and names the stage, and that stage's `-rerun` rebuilds it.
 Every fact, topic and question records the configuration it was produced
 under.
 
-## The seven services
+## The eight services
 
 `ingestion` on Upload, `parsing` on Documents, `chunking` on Passages,
-`extraction` on Facts, `topics` on Topics, `questions` on Questions, and
-`platform` — the model, the tokenizer and the language pipelines — on System
-health. Each configures its own settings and no others.
+`extraction` on Facts, `topics` on Topics, `questions` on Questions,
+`assessment` on Assessment, and `platform` — the model, the tokenizer and the
+language pipelines — on System health. Each configures its own settings and
+no others.
 
 A stage may name a different model of its own: `EXTRACTION_MODEL`,
-`TOPIC_MODEL`, `QUESTIONS_MODEL`, each meaning `LLM_MODEL` when absent. Three
+`TOPIC_MODEL`, `QUESTIONS_MODEL`, each meaning `LLM_MODEL` when absent. Four
 more name a model for one judgement: `EXTRACTION_DIGEST_MODEL`,
-`QUESTIONS_PHRASING_MODEL` and `QUESTIONS_VERIFIER_MODEL`.
+`QUESTIONS_PHRASING_MODEL`, `QUESTIONS_VERIFIER_MODEL` and
+`ASSESSMENT_JUDGE_MODEL`.
 
 Pool sizes and addresses are not configurable. They are read before a service
 could ask a database for anything, so they are served read-only.
@@ -143,6 +145,23 @@ The ones a run's cost is decided by. The full table is in
 | `QUESTIONS_ANSWER_CHARS` | `value:1:80,list:3:300,explanation:20:600` | Shortest and longest target answer per form |
 | `QUESTIONS_DUPLICATE_COSINE` | 0.93 | How alike two questions must be before the later one is dropped |
 | `QUESTIONS_RELEASE_SIZE` | 0 | How many to draw. `0` is the largest the pool can fill |
+
+## The evaluation phase
+
+An LLM judge over every fact, topic and question, run after the pipeline.
+Off by default, and it changes nothing the pipeline keeps. The full table is
+in [`backend/assessment/`](../backend/assessment/README.md).
+
+| Variable | Where | Default | Purpose |
+|---|---|---|---|
+| `ASSESSMENT_ENABLED` | `.env` | `false` | Whether the phase runs at all |
+| `ASSESSMENT_JUDGE_MODEL` | `.env` | — | Who judges. **Not** `LLM_MODEL`: a model asked whether its own facts follow from its own evidence says yes |
+| `ASSESSMENT_KINDS` | `backend.env` | `fact,topic,question` | Which artefacts are judged |
+| `ASSESSMENT_SAMPLE` | `backend.env` | 200 | How many of each kind one start enrols, newest first. `0` is all of them |
+
+The two cost dials are the ones to set first. A fact and a topic are two
+model calls each and a question is three, so a corpus of twenty thousand
+facts judged whole is forty thousand calls.
 
 ## Observability, review and orchestration
 
