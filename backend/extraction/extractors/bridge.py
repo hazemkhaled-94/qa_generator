@@ -10,11 +10,12 @@ from database.qa_generator import FactKind
 from extraction.extractors.base import ExtractionFailed
 from extraction.models import CandidateFact, Cited, PassageToExtract, Provenance
 from llm.client import Client, ModelUnavailable
+from nlp.models import named as in_language
 
 #: Recorded on every bridge drawn with the prompt below. Bumped whenever that
 #: prompt changes what counts as a bridge or how one is cited: two prompts are
 #: two datasets.
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
 
 _SYSTEM = """ROLE
 You are a claims analyst working across documents. You read several excerpts
@@ -99,7 +100,9 @@ Rules, all of them mandatory:
   convert or otherwise compute a value: a total nobody wrote down is not in
   the material. Relate what is written; do not calculate it.
 - NAME THE SUBJECT. Never write "it", "this", "they", "he", "she".
-- Write the statement in the language of the excerpts.
+- WRITE IN THE LANGUAGE NAMED BENEATH THE EXCERPTS. It is their own
+  language. It is named there rather than left to you because a model reading
+  a corpus that is mostly one language writes that language for all of it.
 - Excerpts that merely sit near each other bridge nothing. An empty list is a
   correct answer and is better than a forced one.
 """
@@ -107,7 +110,9 @@ Rules, all of them mandatory:
 #: The user message, as the catalogue records it and `_prompt` renders it.
 _USER = """Excerpts:
 
-{{excerpts}}"""
+{{excerpts}}
+
+Write every statement in {{language}}."""
 
 
 class _Cited(BaseModel):
@@ -221,7 +226,11 @@ class BridgeExtractor:
                 for sentence in passage.sentences
             )
             blocks.append(f"[P{position}]{heading}\n{numbered}")
-        return _USER.replace("{{excerpts}}", "\n\n".join(blocks))
+        # Every passage of a group is of one topic, and a topic is fitted
+        # over one language's vocabulary, so the first is as good as a vote.
+        return _USER.replace("{{excerpts}}", "\n\n".join(blocks)).replace(
+            "{{language}}", in_language(offered[0].language)
+        )
 
 
 def _cited(named: list[_Cited]) -> tuple[Cited, ...]:

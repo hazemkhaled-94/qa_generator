@@ -195,7 +195,7 @@ CHECKS = {
 #: The prompt version recorded on every fact each model-backed reader draws.
 #: Bumped whenever the prompt changes what counts as a fact: two prompts are
 #: two datasets, and a corpus read under both is neither.
-PROMPTS = {"llm": "8", "digest": "2", "bridge": "3"}
+PROMPTS = {"llm": "9", "digest": "3", "bridge": "4"}
 
 
 def test_the_service_reads_exactly_the_settings_named_here() -> None:

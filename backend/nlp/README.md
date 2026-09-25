@@ -104,7 +104,7 @@ features every tagset marks; a handful are lemma lists. This is all of it.
 **Medium, not small.** `de_core_news_sm` does not tag a German modal as a
 finite verb, which silently changes what `not_atomic` means.
 
-### 2. Add the language to five lemma lists
+### 2. Add the language to five lemma lists, and name it
 
 These are the readings no feature marks. A language missing from one means
 that gate **silently never fires** for it — no error, no log.
@@ -117,8 +117,21 @@ that gate **silently never fires** for it — no error, no log.
 | `_AGENTS` | same | The interrogatives that ask after a **party** rather than a thing | `wer`, `who` |
 | `_ANAPHORIC` | [`analysis.py`](analysis.py) | Adjectives pointing back at something already said | `besagt`, `aforementioned` |
 
+| `_NAMED` | [`models.py`](models.py) | What to call the language in a prompt | `de: German` |
+
 Read by **lemma and never as a substring**: `Risikobericht` is a thing a
 corpus is about and `Bericht` is a thing a corpus IS.
+
+`_NAMED` is the one that is not a lemma list, and it fails loudly rather
+than silently: a language missing from it falls back to its own ISO code,
+which is still an instruction a model can follow. Every prompt that writes
+text names its language from it, because *"write in the language of the
+excerpt"* is an inference — and on a corpus of 1,444 German passages
+against 51 English, a model infers German for all of it. Every validated
+fact drawn from an English passage in one run came back in German, and
+nothing in extraction checks a language, so the drift reached question
+generation as a German question labelled English and was thrown out as
+`malformed` — 31 of the 34 English questions that run wrote.
 
 `_AGENTS` could not be a feature — no tagset marks animacy on an
 interrogative.

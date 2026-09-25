@@ -10,9 +10,10 @@ from database.qa_generator import FactKind
 from extraction.extractors.base import ExtractionFailed, Extractor
 from extraction.models import BULLET, CandidateFact, PassageToExtract, Provenance
 from llm.client import Client, ModelUnavailable
+from nlp.models import named
 
 #: Recorded on every summary and outline drawn with the prompt below.
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 _SYSTEM = """ROLE
 You are a technical editor. You condense one excerpt of a document into
@@ -67,7 +68,9 @@ Rules, all of them mandatory:
 - Be shorter than the excerpt. A summary as long as what it summarises is of
   no use to anybody.
 - Name the subject. Do not open with "it", "this" or "they".
-- Write in the language of the excerpt.
+- WRITE IN THE LANGUAGE NAMED BENEATH THE EXCERPT. It is the excerpt's own
+  language. It is named there rather than left to you because a model reading
+  a corpus that is mostly one language writes that language for all of it.
 - Keep the qualifiers that make a point true: the date, the place, the
   party, the unit, the condition.
 - Say what the excerpt says, not what it implies and not what you know.
@@ -75,7 +78,9 @@ Rules, all of them mandatory:
 
 #: The user message, as the catalogue records it and `_prompt` renders it.
 _USER = """{{context}}Excerpt:
-{{excerpt}}"""
+{{excerpt}}
+
+Write the summary and the outline in {{language}}."""
 
 
 class _Digest(BaseModel):
@@ -165,8 +170,10 @@ class DigestExtractor(Extractor):
             if passage.section_path
             else ""
         )
-        return _USER.replace("{{context}}", heading).replace(
-            "{{excerpt}}", passage.text
+        return (
+            _USER.replace("{{context}}", heading)
+            .replace("{{excerpt}}", passage.text)
+            .replace("{{language}}", named(passage.language))
         )
 
 

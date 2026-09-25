@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field
 from extraction.extractors.base import ExtractionFailed, Extractor
 from extraction.models import CandidateFact, PassageToExtract, Provenance
 from llm.client import Client, ModelUnavailable
+from nlp.models import named
 
 #: Recorded on every fact drawn with the prompt below. Bumped whenever that
 #: prompt changes what counts as a fact.
-PROMPT_VERSION = "8"
+PROMPT_VERSION = "9"
 
 _SYSTEM = """ROLE
 You are a claims analyst. You read one numbered excerpt of a document and
@@ -93,7 +94,10 @@ Rules, all of them mandatory:
   place, the party, the unit, the condition.
 - A number, a date, a name, a limit, a duty and a definition are each a claim
   worth a fact of its own.
-- Write the statement in the language of the excerpt.
+- WRITE IN THE LANGUAGE NAMED BENEATH THE EXCERPT. It is the excerpt's own
+  language. It is named there rather than left to you because a model reading
+  a corpus that is mostly one language writes that language for all of it,
+  and a statement in the wrong language is a fact nothing downstream can use.
 - Do not copy the sentence out. A statement that repeats its sentence adds
   nothing; it has to carry ONE of the claims and leave the rest.
 - A sentence with no factual content yields no facts. An empty list is a
@@ -103,7 +107,9 @@ Rules, all of them mandatory:
 #: The user message, as the catalogue records it and `_prompt` renders it.
 #: One source, so the recorded template and the sent text cannot drift.
 _USER = """{{context}}Excerpt:
-{{excerpt}}"""
+{{excerpt}}
+
+Write every statement in {{language}}."""
 
 #: Appended when EXTRACTION_MIN_OTHER_SHARE caps how many atomic facts a
 #: passage keeps. Asked for here as well as enforced on what comes back,
@@ -234,4 +240,8 @@ class LlmExtractor(Extractor):
         numbered = "\n".join(
             f"[{sentence.index}] {sentence.text}" for sentence in passage.sentences
         )
-        return _USER.replace("{{context}}", heading).replace("{{excerpt}}", numbered)
+        return (
+            _USER.replace("{{context}}", heading)
+            .replace("{{excerpt}}", numbered)
+            .replace("{{language}}", named(passage.language))
+        )

@@ -26,7 +26,7 @@ from question_generation.generation import _FOLLOW, _PERTURB
 from question_generation.types import PROMPT_VERSION, SPECS
 
 #: The version every digest below was taken under.
-VERSION = "9"
+VERSION = "10"
 
 #: The prompts of the two gates that are not the writer's, each pinned to
 #: its own module's PROMPT_VERSION. They were unpinned and the verifier was
@@ -71,26 +71,26 @@ GATE_PROMPTS = {
 #: Each type's whole system prompt: the shared role, steps, context and
 #: format rules, the answer form, and its own guidance and worked example.
 TYPES = {
-    "aggregation": "b13e83411a4f456f",
-    "application": "b0a53ee0bfeb247c",
-    "comparison": "e7558c38a96fbcff",
-    "condition": "bc668d21ba00ef82",
-    "consequence": "e2a47f33a7dbebc0",
-    "definition": "b92b8fc50dca575a",
-    "entity": "4af05d338433b997",
-    "enumeration": "8cf540a910df6740",
-    "factoid": "40677a7ad6b08caf",
-    "implication": "e6696a33d2f3e6b2",
-    "procedure": "243f1ef58f146935",
-    "reason": "aefe58a398167401",
-    "temporal": "442e8f8206dfcb3a",
+    "aggregation": "fdd5e04bd6498b60",
+    "application": "b117f77a12d7c48b",
+    "comparison": "b830d07a45e28b0e",
+    "condition": "5aa6a7bfa2b47d63",
+    "consequence": "cb040e89c09dd27a",
+    "definition": "3611bc6e84479fe3",
+    "entity": "3ed7e7ffa7b302f1",
+    "enumeration": "815f03137711aa29",
+    "factoid": "197f849c62c1a2b6",
+    "implication": "8f28c60b01012c1e",
+    "procedure": "7a9ee6f977f5b75c",
+    "reason": "4f95746de48aa871",
+    "temporal": "0cd864fbf29687b0",
 }
 
 #: The two prompts that are not a type's: the perturbation that writes the
 #: unanswerable questions, and the one that writes the next turn.
 OTHERS = {
-    "perturb": "bc3ac7e3b642feed",
-    "follow": "5a51de7610ee94f4",
+    "perturb": "5e529d86b898c767",
+    "follow": "7a0b084fee6bea7e",
 }
 
 

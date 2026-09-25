@@ -21,6 +21,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from llm.client import Client
+from nlp.models import named
 from question_generation.models import Candidate, FactGroup
 from question_generation.planning import Plan
 from question_generation.types import PROMPT_VERSION, READS, TypeSpec
@@ -116,6 +117,9 @@ the person you are talking to already knows it.
 
 FORMAT
 Rules, all of them mandatory:
+- ONE QUESTION WORD, and one only. Count them before you answer. Two of
+  them is two questions however it is punctuated, and joining them with
+  "and" or "or" does not make them one.
 - ONE question, ending in a question mark.
 - It must be answered by the FACTS, like any other. A follow-up whose answer
   is not in the material tests nothing.
@@ -134,7 +138,10 @@ Rules, all of them mandatory:
   worse than a plainer one, and the worst of all is one whose answer repeats
   it back: "Why is X done by Y?" answered "Because X is done by Y" has asked
   nothing.
-- Write in the language of the facts.
+- WRITE IN THE LANGUAGE NAMED UNDER THE FACTS. It is named there rather
+  than left to you because a model reading a corpus that is mostly one
+  language writes that language for all of it, and a question in the wrong
+  language is thrown away.
 - `facts` is the NUMBERS of the facts your question needs.
 
 THE WORKED EXAMPLE ABOVE IS WRITTEN FOR A QUESTION ASKED COLD, because the
@@ -155,7 +162,9 @@ _USER = (
     "about. Phrase the question from these; never quote or name a "
     "heading or a title out of them, and never ask about anything "
     "here that the facts above do not state:\n"
-    "{{passages}}{{note}}"
+    "{{passages}}\n"
+    "\n"
+    "Write the question and both answers in {{language}}.{{note}}"
 )
 
 #: Appended to the conversation for a follow-up, after the facts.
@@ -408,5 +417,6 @@ class QuestionWriter:
         return (
             _USER.replace("{{facts}}", numbered)
             .replace("{{passages}}", context)
+            .replace("{{language}}", named(sample.language))
             .replace("{{note}}", again)
         )

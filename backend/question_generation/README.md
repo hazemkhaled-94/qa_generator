@@ -439,7 +439,7 @@ to read one back:
 | Where | Shows |
 |---|---|
 | The Questions page | "The prompt that wrote this", under a selected question |
-| `GET /prompts?service=questions&version=9&name=factoid` | The same, as JSON |
+| `GET /prompts?service=questions&version=10&name=factoid` | The same, as JSON |
 | Phoenix, after `make prompts-publish` | The prompt beside the traces |
 
 Each records the whole call: the system message, the user message as its

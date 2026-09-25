@@ -31,7 +31,7 @@ from database.qa_generator import (
 #: Recorded in the log beside every question written with the prompts below.
 #: Bumped whenever one changes what a question is: two prompts are two
 #: datasets, as with extraction.
-PROMPT_VERSION = "9"
+PROMPT_VERSION = "10"
 
 #: Every gate, in the order `checker.check` applies them, cheapest first.
 #: What `CheckedQuestion.gates_ran` and `questions.gates_ran` are a subset
@@ -66,6 +66,7 @@ def annotation(gate: str) -> str:
     """What one gate is called in Phoenix's Evaluations view."""
     return f"gate {GATES.index(gate) + 1}: {gate}"
 
+
 #: Who the writer is, and what one call produces. The first two RASCEF
 #: sections, shared by every type.
 _ROLE = """ROLE
@@ -89,9 +90,12 @@ _STEPS = """STEPS
 5. Write `explanation`: three to six sentences for a reader who has not seen
    the material.
 6. Read your question back against the rules. It names its subject and never
-   its source, points at nothing outside itself, asks one thing, and does not
-   contain its own answer.
-7. Check that every number, date and name in both answers is in the material.
+   its source, points at nothing outside itself, and does not contain its own
+   answer.
+7. Count the question words in it. If there is more than one, you have
+   written two questions: rewrite it as one, about one thing.
+8. Check that it is in the language named under the facts.
+9. Check that every number, date and name in both answers is in the material.
 """
 
 #: What the writer is given, and who it is writing for.
@@ -152,7 +156,23 @@ READS = """Rules, all of them mandatory:
 
 - ONE question, ending in a question mark. One thing asked.
 
-- Write in the language of the facts.
+- ONE QUESTION WORD, and one only. Count them before you answer: "who",
+  "what", "which", "when", "where", "why", "how" and their equivalents in any
+  language. Two of them is two questions however it is punctuated, and it is
+  thrown away - a chatbot answering one half is neither right nor wrong.
+  Joining them with "and", "or" or "as well as" does not make them one.
+
+    WRONG  "Who approves the request AND how long may it take?"
+    WRONG  "Why is a review required and when is it repeated?"
+
+    RIGHT  "Who approves a request for an extension?"
+    RIGHT  "How do the reply times for standard and urgent requests differ?"
+           (one question word; the "and" joins two THINGS, not two questions)
+
+- WRITE IN THE LANGUAGE NAMED UNDER THE FACTS. It is the language the
+  material is in. It is named there rather than left to you because a model
+  reading a corpus that is mostly one language writes that language for all
+  of it, and a question in the wrong language is thrown away.
 """
 
 #: What the second answer is for. Every question carries two, and they are
@@ -206,12 +226,17 @@ _FORMAT_RULES = f"""{READS}
 _SPAN = """
 THIS CALL HAS AN EXTRA REQUIREMENT:
 
-- THIS QUESTION SHOULD NEED FACTS FROM MORE THAN ONE PASSAGE, so that a
+- ONE QUESTION WORD STILL, and that comes first. Needing two passages is not
+  a licence to ask two things: this instruction is measurably where welded
+  questions come from - asked to span, a writer reaches for "and" and returns
+  two questions in one string, and they are thrown away twice as often as
+  questions drawn from a single passage.
+
+- WHAT NEEDS MORE THAN ONE PASSAGE IS THE ANSWER, NOT THE QUESTION. Ask one
+  thing whose single answer cannot be assembled without both facts, so that a
   chatbot has to find and combine two places in the material rather than one.
 
-- BUT IT IS STILL ONE QUESTION ABOUT ONE THING, and that comes first. One
-  question word, one thing asked. Do NOT weld two questions together with
-  "and":
+- Do NOT weld two questions together with "and":
 
     WRONG  "Which steps prepare a site AND how high is the fee for a permit?"
     WRONG  "Why did the backlog ease in 2025 AND how is cover assessed?"
