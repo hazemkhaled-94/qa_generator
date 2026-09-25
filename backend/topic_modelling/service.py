@@ -11,6 +11,7 @@ from opentelemetry.trace import Span
 from blob_store.seaweedfs import ExportBucket
 from stages import StageService
 from telemetry import tracer, working
+from telemetry.evaluations import current_ids
 from topic_modelling.labels import TopicLabeller
 from topic_modelling.models import FittedTopic, Fitting
 from topic_modelling.repository import TopicQueue
@@ -117,6 +118,7 @@ class TopicModellingService(StageService):
             # per topic to name it, which is minutes. Under one span a fit
             # that was slow in German reads as a fit that was slow.
             with working(span, "fit_language", {"topic_fit.language": language}):
+                trace_id, span_id = current_ids()
                 try:
                     fitting = self._fitter.fit(
                         lambda language=language: self._repository.passages(language),
@@ -129,7 +131,12 @@ class TopicModellingService(StageService):
                     fitting.topics, self._repository.labelled_topics(language)
                 )
                 fittings.append(
-                    replace(fitting, topics=self._named(carried, fitting, language))
+                    replace(
+                        fitting,
+                        topics=self._named(carried, fitting, language),
+                        trace_id=trace_id,
+                        span_id=span_id,
+                    )
                 )
 
         if not fittings:

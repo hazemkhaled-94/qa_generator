@@ -31,6 +31,25 @@ def test_a_requested_fit_writes_every_language(service, passages, english) -> No
     assert flow.failure is None, flow.failure
 
 
+def test_each_language_carries_the_span_it_was_fitted_in(
+    service, passages, english, monkeypatch
+) -> None:
+    """A topic links to its own language's fit, not to the whole run's."""
+    from opentelemetry.sdk.trace import TracerProvider
+
+    from topic_modelling import service as module
+
+    monkeypatch.setattr(module, "span", TracerProvider().get_tracer(__name__))
+    flow = service({"de": passages, "en": english})
+
+    flow.request_and_run()
+
+    spans = [one.span_id for one in flow.stored]
+    assert all(spans), spans
+    assert len(set(spans)) == 2, spans
+    assert len({one.trace_id for one in flow.stored}) == 1
+
+
 def test_a_fit_reports_what_each_language_was_over(service, passages) -> None:
     """The passage count and the vocabulary size travel with the topics."""
     flow = service({"de": passages})

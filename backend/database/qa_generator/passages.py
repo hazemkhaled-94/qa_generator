@@ -183,6 +183,24 @@ class Passage(Base):
         "cell. Only the rows this passage renders are kept. NULL unless "
         "block_type is table.",
     )
+    run_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="Which run chunked this passage out of its document, as "
+        "`settings.runs.run_id` named it.",
+    )
+    trace_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The OpenTelemetry trace this passage was chunked in, as 32 hex "
+        "characters.",
+    )
+    span_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The span the chunking ran in, as 16 hex characters. One span "
+        "per document, so every passage of one document shares it.",
+    )
 
     document: Mapped[Document] = relationship(back_populates="passages")
     # Topics attach to the passage, not the fact: inference needs enough text

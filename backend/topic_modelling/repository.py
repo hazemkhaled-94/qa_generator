@@ -259,6 +259,8 @@ class TopicQueue(StageQueue):
                     "passages_without_topics": fitting.without_topics,
                     "settings_version": self._version,
                     "run_id": run_id(),
+                    "trace_id": fitting.trace_id or None,
+                    "span_id": fitting.span_id or None,
                 }
                 for fitting in fittings
                 for topic in fitting.topics

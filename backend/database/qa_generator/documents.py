@@ -119,6 +119,24 @@ class Document(Base):
         comment="When a worker claimed this document for parsing, NULL when none "
         "holds it. What tells a live claim from one a dead worker left behind.",
     )
+    parse_run_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="Which run parsed this document, as `settings.runs.run_id` named "
+        "it. NULL for a document parsed before the run was recorded.",
+    )
+    parse_trace_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The OpenTelemetry trace this document was parsed in, as 32 hex "
+        "characters. <phoenix>/redirects/traces/<trace_id> opens it.",
+    )
+    parse_span_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The span the parse ran in, as 16 hex characters. "
+        "<phoenix>/redirects/spans/<span_id> opens it.",
+    )
     chunk_status: Mapped[str] = mapped_column(
         Text,
         server_default=Status.NEW,

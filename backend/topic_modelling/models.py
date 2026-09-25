@@ -67,6 +67,10 @@ class Fitting:
     vocabulary: int
     #: The whole fitted model, for the visualisation.
     space: TopicSpace
+    #: The trace this language was fitted and labelled in.
+    trace_id: str = ""
+    #: The span this language was fitted and labelled in.
+    span_id: str = ""
 
     @property
     def labelled(self) -> int:

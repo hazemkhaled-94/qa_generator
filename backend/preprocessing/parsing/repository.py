@@ -10,7 +10,9 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Document, Status
 from preprocessing.parsing.models import ClaimedDocument, ParsedDocument
+from settings.runs import run_id
 from stages import Columns, RowQueue
+from telemetry.evaluations import current_ids
 
 #: The next document to parse. FOR UPDATE SKIP LOCKED, so a second worker
 #: takes the following row rather than blocking on this one.
@@ -93,6 +95,7 @@ class ParseQueue(RowQueue):
             sha256: The document's digest.
             parsed: What the analyser read.
         """
+        trace_id, span_id = current_ids()
         self._finish(
             sha256,
             title=parsed.title,
@@ -100,4 +103,7 @@ class ParseQueue(RowQueue):
             content_sha256=parsed.content_sha256,
             parse_confidence=parsed.confidence,
             parse_confidence_low=parsed.confidence_low,
+            parse_run_id=run_id(),
+            parse_trace_id=trace_id or None,
+            parse_span_id=span_id or None,
         )

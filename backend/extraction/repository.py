@@ -45,6 +45,7 @@ from extraction.models import (
 from nlp.models import Sentence
 from settings.runs import run_id
 from stages import Columns, RowQueue
+from telemetry.evaluations import current_ids
 
 #: The next passage to read. This stage's own column and nothing else: it
 #: does not join documents to ask what chunking did. FOR UPDATE SKIP LOCKED
@@ -388,9 +389,12 @@ def _write(session, facts: list[CheckedFact], version: str | None = None) -> int
 
 def _row(fact: CheckedFact, version: str | None = None) -> dict:
     """Turns one checked fact into the columns the facts table holds."""
+    trace_id, span_id = current_ids()
     return {
         "settings_version": version,
         "run_id": run_id(),
+        "trace_id": trace_id or None,
+        "span_id": span_id or None,
         "kind": fact.kind,
         "statement": fact.statement,
         "evidence_text": fact.evidence_text,

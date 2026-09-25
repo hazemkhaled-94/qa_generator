@@ -178,6 +178,18 @@ class Fact(Base):
         "change against the run before it needs this column and cannot be "
         "done with that one. NULL for a row written before runs were named.",
     )
+    trace_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The OpenTelemetry trace this fact was extracted and checked in, "
+        "as 32 hex characters.",
+    )
+    span_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The span the extraction ran in, as 16 hex characters. One span "
+        "per passage, so every fact from one passage shares it.",
+    )
     statement_predicates: Mapped[int] = mapped_column(
         Integer,
         server_default="0",

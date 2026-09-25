@@ -191,6 +191,18 @@ class Topic(Base):
         "change against the run before it needs this column and cannot be "
         "done with that one. NULL for a row written before runs were named.",
     )
+    trace_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The OpenTelemetry trace this topic was fitted and labelled in, "
+        "as 32 hex characters.",
+    )
+    span_id: Mapped[str | None] = mapped_column(
+        Text,
+        index=True,
+        comment="The span the fit ran in, as 16 hex characters. One span per "
+        "language, so every topic of one language shares it.",
+    )
 
     passage_links: Mapped[list[PassageTopic]] = relationship(
         back_populates="topic", cascade="all, delete-orphan", passive_deletes=True

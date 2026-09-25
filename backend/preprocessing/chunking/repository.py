@@ -17,7 +17,9 @@ from preprocessing.chunking.models import (
     PassageDetail,
     StoredPassage,
 )
+from settings.runs import run_id
 from stages import Columns, RowQueue
+from telemetry.evaluations import current_ids
 
 #: The next document to chunk. This stage's own column and nothing else: a
 #: document queued here without a parsed form fails on the missing object.
@@ -100,6 +102,7 @@ class ChunkQueue(RowQueue):
             Passages stored.
         """
         chunks: list[Chunk] = chunking.passages
+        trace_id, span_id = current_ids()
         with self._session.begin() as session:
             session.execute(delete(Passage).where(Passage.doc_sha256 == sha256))
             if chunks:
@@ -108,6 +111,9 @@ class ChunkQueue(RowQueue):
                     [
                         {
                             "doc_sha256": sha256,
+                            "run_id": run_id(),
+                            "trace_id": trace_id or None,
+                            "span_id": span_id or None,
                             "ordinal": chunk.ordinal,
                             "text": chunk.text,
                             "language": chunk.language,
