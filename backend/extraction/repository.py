@@ -413,6 +413,8 @@ def _row(fact: CheckedFact, version: str | None = None) -> dict:
         "spacy_model": fact.spacy_model,
         "spacy_version": fact.spacy_version,
         "embedding": fact.embedding,
+        "gate_scores": fact.gate_scores or None,
+        "confidence": fact.confidence,
     }
 
 
@@ -827,6 +829,8 @@ class FactCatalog(Repository):
                     Fact.evidence_predicates,
                     Fact.units_added,
                     Fact.unresolved_references,
+                    Fact.confidence,
+                    Fact.gate_scores,
                 )
             ).order_by(Passage.doc_sha256, Passage.ordinal, Fact.id),
             document,
@@ -843,7 +847,10 @@ class FactCatalog(Repository):
             rows = session.execute(listing.limit(limit).offset(offset)).all()
             sources = self._sources(session, [row.id for row in rows])
         return total, [
-            StoredFact(**row._asdict(), passages=sources.get(row.id, []))
+            StoredFact(
+                **(row._asdict() | {"gate_scores": list(row.gate_scores or ())}),
+                passages=sources.get(row.id, []),
+            )
             for row in rows
         ]
 

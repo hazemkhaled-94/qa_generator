@@ -93,6 +93,10 @@ FACT = {
             "position": 0,
         }
     ],
+    "confidence": 0.7527,
+    "gate_scores": [
+        {"gate": "duplicate", "value": 0.23, "threshold": 0.95, "margin": 0.7579}
+    ],
 }
 
 FACT_QUALITY = {
@@ -179,6 +183,16 @@ QUESTION = {
     "prompt_version": "8",
     "trace_id": "0bdf4a87ef67fc94b435f23b2824b7e1",
     "span_id": "412b8f4d0b9073d3",
+    "confidence": 0.24,
+    "gate_scores": [
+        {
+            "gate": "near_duplicate",
+            "value": 0.71,
+            "threshold": 0.93,
+            "margin": 0.2366,
+        },
+        {"gate": "recall", "value": 0.83, "threshold": 0.6, "margin": 0.575},
+    ],
 }
 
 QUESTION_SOURCE = {
@@ -399,12 +413,76 @@ HEALTH: dict[str, Any] = {
     },
 }
 
+#: The whole pipeline, as `GET /pipeline` reports it: a corpus part way
+#: through, with something for every control to act on.
+PIPELINE: dict[str, Any] = {
+    "stages": [
+        {"stage": "parsing", "working": False, "rows": {"new": 2, "parsed": 3}},
+        {"stage": "chunking", "working": False, "rows": {"chunked": 3}},
+        {"stage": "extraction", "working": False, "rows": {"failed": 1}},
+        {"stage": "topics", "working": False, "rows": {"modelled": 4}},
+        {"stage": "questions", "working": False, "rows": {"new": 4}},
+        {"stage": "assessment", "working": False, "rows": {}},
+    ],
+    "orchestration": {
+        "available": True,
+        "running": None,
+        "recent": [],
+        "automation": {
+            "available": True,
+            "on_arrival": False,
+            "nightly": False,
+            "detail": None,
+        },
+        "detail": None,
+    },
+    "working": False,
+    "failed": 1,
+}
+
+
+def pipeline(**replaced: Any) -> dict:
+    """The pipeline state, with whatever a test needs changed."""
+    return {**PIPELINE, **replaced}
+
+
+def orchestration(**replaced: Any) -> dict:
+    """The orchestrator's half of it, with whatever a test needs changed.
+
+    An orchestrator that is not available reports its two triggers
+    unavailable too, because that is what `GET /pipeline` answers: there is
+    nothing there to have switched anything on.
+    """
+    built = {**PIPELINE["orchestration"], **replaced}
+    if not built["available"] and "automation" not in replaced:
+        built["automation"] = {
+            "available": False,
+            "on_arrival": False,
+            "nightly": False,
+            "detail": None,
+        }
+    return built
+
+
+#: What the pipeline panel answers with, before a test changes anything.
+#: The three verbs and the switch answer `(did it, what to say)`.
+PIPELINE_CLIENT: dict[str, Any] = {
+    "state": PIPELINE,
+    "run": (True, "Run abc12345 started."),
+    "act": lambda action: (True, f"{action}: 7 row(s) moved."),
+    "automate": (True, "Saved."),
+}
+
 #: The client each page outside the catalogue holds, and what it answers.
 #: `open_view` gives a page every client it reaches for, so a test naming a
 #: page never has to know which of these it is.
 OUTSIDE: dict[str, dict[str, Any]] = {
     "upload": {"upload_api": {"counts": UPLOAD_COUNTS}},
     "health": {"health_api": HEALTH},
+    # Documents carries a second client, unlike the other five listings:
+    # the Pipeline panel asks the orchestrator to run every stage, which is
+    # not a thing the catalogue can be asked for.
+    "documents": {"pipeline_api": PIPELINE_CLIENT},
 }
 
 #: The stage each page is allowed to run, and nothing else.

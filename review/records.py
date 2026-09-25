@@ -17,7 +17,7 @@ is what facts.rejection_code and questions.difficulty were for.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -54,6 +54,16 @@ class QuestionRow:
     status: str
     rejected_reason: str | None
     facts: list[str]
+    #: The sentences those facts were drawn from, and the answer said at
+    #: length. A reviewer is asked whether the answer follows from the
+    #: facts, which is a question about the material and not about the
+    #: statements somebody wrote from it.
+    evidence: list[str] = field(default_factory=list)
+    answer_explanation: str | None = None
+    #: How close the weakest measuring gate came to refusing it. What a
+    #: reviewer sorts by: the questions that survived a gate by nothing are
+    #: the ones worth an opinion first. None where nothing measured it.
+    confidence: float | None = None
 
 
 def _even(total: int, groups: int) -> int:
@@ -178,6 +188,9 @@ class ReviewRepository(Repository):
             status=one.status,
             rejected_reason=one.rejected_reason,
             facts=[link.fact.statement for link in one.fact_links],
+            evidence=[link.fact.evidence_text for link in one.fact_links],
+            answer_explanation=one.answer_explanation,
+            confidence=one.confidence,
         )
 
     def review_facts(self, verdicts: list[tuple[int, str]]) -> int:

@@ -13,6 +13,7 @@ from seed import digest, document, passage
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from confidence import Measurement
 from database.qa_generator import Status
 from telemetry.evaluations import current_ids
 
@@ -153,6 +154,10 @@ def test_a_question_records_every_gate_that_read_it(engine, database) -> None:
                     rejected_reason="leaks_source",
                     fact_ids=(fact_id,),
                     gates_ran=("structural", "near_duplicate", "phrasing"),
+                    readings=(
+                        Measurement("near_duplicate", 0.71, 0.93, high_is_safe=False),
+                        Measurement("recall", 0.80, 0.60),
+                    ),
                 )
             ]
         ],
@@ -161,6 +166,15 @@ def test_a_question_records_every_gate_that_read_it(engine, database) -> None:
     assert _rows(engine, "SELECT gates_ran, rejected_reason FROM questions") == [
         (["structural", "near_duplicate", "phrasing"], "leaks_source")
     ]
+    # The readings land as JSON with their thresholds, and `confidence` is
+    # the weakest margin of them - the duplicate probe's 0.2366, not the
+    # recall reading's 0.5.
+    (scores, margin), = _rows(
+        engine, "SELECT gate_scores, confidence FROM questions"
+    )
+    assert [one["gate"] for one in scores] == ["near_duplicate", "recall"]
+    assert scores[0]["threshold"] == 0.93
+    assert margin == pytest.approx(0.2366, abs=1e-4)
 
 
 def test_topics_record_the_span_of_their_own_language(engine, database) -> None:

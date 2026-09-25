@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
+from confidence import Measurement
 from database.qa_generator import (
     Difficulty,
     DocumentScope,
@@ -471,6 +472,11 @@ class CheckedQuestion:
     #: the sequence cannot be derived from the verdict and a fixed order.
     #: A column as well as a span attribute: the row outlives the trace.
     gates_ran: tuple[str, ...] = ()
+    #: What the gates that MEASURED something read, beside the gate list
+    #: that says which ran. Only a gate comparing a number to a threshold
+    #: writes one: an opinion has nothing to record, and a structural rule
+    #: has no scale. `confidence` is the weakest margin of them.
+    readings: tuple[Measurement, ...] = ()
     #: The trace this question was written and judged in, and the span the
     #: gates ran in - which is the span its verdict annotations hang off.
     #: Columns, unlike the two above: what they are for is getting from a
@@ -557,9 +563,25 @@ class StoredQuestion:
     rejected_reason: str | None
     created_at: str | None
     #: How many facts it cites, and the documents and topics they reach.
+    #: `documents` holds each one's title, falling back to the head of its
+    #: digest where the row has none: every reader of this is a person
+    #: checking an answer against a page, and a sha256 is not a thing
+    #: anybody can look up by hand.
     facts: int
     documents: list[str]
     topics: list[str]
+    #: What those facts assert, and the sentences they were drawn from,
+    #: folded onto the question so a reader has what it cites without
+    #: joining a second sheet by id. Empty on a question whose facts have
+    #: all been deleted.
+    #:
+    #: Two sets rather than pairs: each is aggregated and de-duplicated on
+    #: its own, so the nth statement is NOT the nth evidence. Two facts
+    #: drawn from one sentence leave one entry here and two there.
+    #: :class:`Citation` is the shape that pairs them, one row per (fact,
+    #: passage), and it carries the page number besides.
+    statements: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     #: Where it sits in its thread, and what it follows. 1 and None on a root.
     thread_position: int = 1
     follows_id: int | None = None
@@ -585,6 +607,12 @@ class StoredQuestion:
     #: before they were recorded.
     trace_id: str | None = None
     span_id: str | None = None
+    #: How close this came to the verdict that would have refused it, and
+    #: what each measuring gate read to get there. NULL and empty on every
+    #: question written before the columns existed. See `confidence.py` for
+    #: why this is a margin and not a probability.
+    confidence: float | None = None
+    gate_scores: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

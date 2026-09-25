@@ -593,6 +593,26 @@ def anchored(question: str, language: str | None) -> bool:
 OFF_TOPIC_OVERLAP = 0.3
 
 
+def shared_lemmas(
+    text: str, against: frozenset[str], language: str | None
+) -> float | None:
+    """What share of one text's content lemmas occur in a vocabulary.
+
+    None when there is nothing to measure - no content words on one side or
+    no vocabulary on the other - which is an ABSTENTION and not a zero. Two
+    gates read this and both let an abstention through, because a
+    measurement with nothing to measure is not evidence of anything.
+
+    Written once because `on_topic` and `about` are the same reading in
+    opposite directions, and because the checker records what they measured
+    beside the verdict they reached.
+    """
+    asked = content(text, language)
+    if not asked or not against:
+        return None
+    return len(asked & against) / len(asked)
+
+
 def on_topic(
     question: str,
     language: str | None,
@@ -626,10 +646,10 @@ def on_topic(
     a passage chunked before the column existed has none, and a measurement
     with nothing to measure against is not evidence of anything.
     """
-    asked = content(question, language)
-    if floor <= 0 or not asked or not lemmas:
+    if floor <= 0:
         return True
-    return len(asked & lemmas) / len(asked) >= floor
+    share = shared_lemmas(question, lemmas, language)
+    return share is None or share >= floor
 
 
 def asks_the_same(first: str, second: str, language: str | None) -> bool:
@@ -1142,13 +1162,10 @@ def about(
     the same reason a passage with no lemmas abstains there: a measurement
     with nothing to measure is not evidence of anything.
     """
-    asked = content(question, language)
-    if floor <= 0 or not asked:
+    if floor <= 0:
         return True
-    found = content("\n".join(passages), language)
-    if not found:
-        return True
-    return len(asked & found) / len(asked) >= floor
+    share = shared_lemmas(question, content("\n".join(passages), language), language)
+    return share is None or share >= floor
 
 
 def agrees(

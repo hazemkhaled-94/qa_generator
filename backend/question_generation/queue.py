@@ -13,6 +13,7 @@ from sqlalchemy import false as sa_false
 from sqlalchemy import func, insert, select
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
+from confidence import confidence, scored
 from database.qa_generator import (
     Document,
     Fact,
@@ -475,6 +476,8 @@ class QuestionQueue(RowQueue):
                             trace_id=question.trace_id or None,
                             span_id=question.span_id or None,
                             gates_ran=list(question.gates_ran),
+                            gate_scores=scored(question.readings),
+                            confidence=confidence(question.readings),
                             run_id=run_id(),
                             follows_id=follows,
                             thread_position=position,

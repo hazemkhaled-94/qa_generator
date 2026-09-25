@@ -19,7 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
@@ -60,6 +60,18 @@ class Fact(Base):
         Index("ix_facts_rejection_code", "rejection_code"),
         # Filters the listing and groups the quality report by kind.
         Index("ix_facts_kind", "kind"),
+        # A margin, so it is a share like every other one in this schema.
+        CheckConstraint(
+            "confidence IS NULL OR confidence BETWEEN 0 AND 1",
+            name="facts_confidence_is_a_share",
+        ),
+        # What a review queue orders by: the rows that survived a check by
+        # the least are the ones worth a person's time first.
+        Index(
+            "ix_facts_confidence",
+            "confidence",
+            postgresql_where=text("confidence IS NOT NULL"),
+        ),
         CheckConstraint(
             "extraction_method IN ('llm', 'deterministic')",
             name="facts_extraction_method_valid",
@@ -230,6 +242,21 @@ class Fact(Base):
     )
     validation_error: Mapped[str | None] = mapped_column(
         Text, comment="That failure in words."
+    )
+    gate_scores: Mapped[list[dict] | None] = mapped_column(
+        JSONB,
+        comment="One entry per measuring check that read this fact: the check, "
+        "the value it measured, the threshold it was read against and the margin "
+        "between them. A check that is structural rather than a measurement "
+        "records nothing here - a citation resolves or it does not. NULL for a "
+        "fact written before this column.",
+    )
+    confidence: Mapped[float | None] = mapped_column(
+        Float,
+        comment="The smallest margin in gate_scores, in [0, 1]. How close this "
+        "fact came to the verdict that would have refused it, NOT a probability. "
+        "NULL when no measuring check read it, which is most facts: nearly every "
+        "check here is structural.",
     )
     reviewed_verdict: Mapped[str | None] = mapped_column(
         Text,

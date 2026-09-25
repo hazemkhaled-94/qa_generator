@@ -13,6 +13,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -21,7 +22,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
@@ -69,6 +70,18 @@ class Question(Base):
         # The dedup probe filters to the accepted questions before it orders
         # by distance, and the quality report groups on the same column.
         Index("ix_questions_status", "status"),
+        # A margin, so it is a share like every other one in this schema.
+        CheckConstraint(
+            "confidence IS NULL OR confidence BETWEEN 0 AND 1",
+            name="questions_confidence_is_a_share",
+        ),
+        # What a review queue orders by: the rows that survived a gate by the
+        # least are the ones worth a person's time first.
+        Index(
+            "ix_questions_confidence",
+            "confidence",
+            postgresql_where=text("confidence IS NOT NULL"),
+        ),
         # Shape, not policy, as on documents.language.
         CheckConstraint(
             "language ~ '^[a-z]{2}$'", name="questions_language_is_iso_639_1"
@@ -291,6 +304,22 @@ class Question(Base):
         "each its fixed position. Two gates are conditional, so this cannot be "
         "derived from rejected_reason and a fixed order. NULL for a question "
         "written before this column; empty means no gate ran.",
+    )
+    gate_scores: Mapped[list[dict] | None] = mapped_column(
+        JSONB,
+        comment="One entry per measuring gate that read this question: the gate, "
+        "the value it measured, the threshold it was read against and the margin "
+        "between them. A gate that is a judgement rather than a measurement "
+        "records nothing here, because an opinion has no number behind it. NULL "
+        "for a question written before this column.",
+    )
+    confidence: Mapped[float | None] = mapped_column(
+        Float,
+        comment="The smallest margin in gate_scores, in [0, 1]. How close this "
+        "question came to the verdict that would have refused it, NOT a "
+        "probability: the readings are on different scales and only the margins "
+        "are comparable. NULL when no measuring gate read it, which is different "
+        "from 0.",
     )
     reviewed_verdict: Mapped[str | None] = mapped_column(
         Text,

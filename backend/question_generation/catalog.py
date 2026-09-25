@@ -178,7 +178,17 @@ def _ids(document, topic, search, status, answerable, field, **scopes) -> Select
 
 
 def _listing() -> Select:
-    """One question per row, with what it cites and where that sits."""
+    """One question per row, with what it cites and where that sits.
+
+    The facts are aggregated onto the row rather than left to a second
+    query, because every reader of a question wants what it rests on: the
+    page draws them, the workbook puts them in the cell beside the answer,
+    and a benchmark shipped without them cannot be checked. `Document` is
+    joined for the same reason its title is on a :class:`Citation` - a
+    sha256 is not a thing anybody can look up by hand - and outer, because
+    a passage whose document has just been deleted should not take the
+    question out of the listing with it.
+    """
     return (
         _joined(
             select(
@@ -206,11 +216,18 @@ def _listing() -> Select:
                 Question.prompt_version,
                 Question.trace_id,
                 Question.span_id,
+                Question.confidence,
+                Question.gate_scores,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
-                func.array_agg(func.distinct(Passage.doc_sha256)).label("documents"),
+                func.array_agg(
+                    func.distinct(func.coalesce(Document.title, Passage.doc_sha256))
+                ).label("documents"),
                 func.array_agg(func.distinct(Topic.label)).label("topics"),
+                func.array_agg(func.distinct(Fact.statement)).label("statements"),
+                func.array_agg(func.distinct(Fact.evidence_text)).label("evidence"),
             )
         )
+        .join(Document, Document.sha256 == Passage.doc_sha256, isouter=True)
         .group_by(Question.id)
         .order_by(Question.id)
     )
@@ -247,6 +264,8 @@ def _stored(row: Any) -> StoredQuestion:
         facts=row.facts,
         documents=_present(row.documents),
         topics=_present(row.topics),
+        statements=_present(row.statements),
+        evidence=_present(row.evidence),
         thread_position=row.thread_position,
         follows_id=row.follows_id,
         question_type=row.question_type,
@@ -256,6 +275,8 @@ def _stored(row: Any) -> StoredQuestion:
         prompt_version=row.prompt_version,
         trace_id=row.trace_id,
         span_id=row.span_id,
+        confidence=row.confidence,
+        gate_scores=list(row.gate_scores or ()),
     )
 
 

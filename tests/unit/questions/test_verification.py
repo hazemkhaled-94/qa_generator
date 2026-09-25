@@ -2364,9 +2364,13 @@ def test_a_gate_that_never_ran_is_absent_rather_than_scored() -> None:
 
 
 def test_the_position_orders_them_as_the_pipeline_runs_them() -> None:
-    """Phoenix sorts its columns by name, and the gates are not alphabetical."""
+    """Phoenix sorts its columns by name, and the gates are not alphabetical.
+
+    The numbered ones only. `gate` and `confidence` are summaries of the
+    whole check rather than one gate's verdict, and neither has a position.
+    """
     named = _verdicts(build(Recording(recovers="4 kg")).check(candidate()))
-    gates = sorted(name for name in named if name != "gate")
+    gates = sorted(name for name in named if name.startswith("gate "))
 
     assert gates == [
         "gate 1: structural",

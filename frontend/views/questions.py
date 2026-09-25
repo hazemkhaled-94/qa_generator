@@ -457,7 +457,10 @@ def _detail(client, question: dict) -> None:
                 "Turn": question["thread_position"],
                 "Follows": question["follows_id"],
                 "Facts cited": question["facts"],
-                "From documents": [one[:12] + "…" for one in question["documents"]],
+                # Titles now, not digests, so nothing is cut: the listing
+                # resolves each document and falls back to its sha256 only
+                # where the row carries no title.
+                "From documents": question["documents"],
                 "From topics": question["topics"],
                 "Written": question["created_at"],
                 "Question": question["question_text"],
@@ -487,6 +490,8 @@ def _detail(client, question: dict) -> None:
         if any(not source["validated"] for source in detail["sources"]):
             st.warning("A fact this question rests on no longer passes its checks.")
 
+        _confidence(question)
+
         if len(detail.get("thread") or []) > 1:
             st.caption("The thread this sits in")
             st.dataframe(
@@ -510,6 +515,50 @@ def _detail(client, question: dict) -> None:
         _trace(question)
         _prompt(client, question)
         _verdict(client, question)
+
+
+def _confidence(question: dict) -> None:
+    """What the measuring gates read, and how close the weakest came.
+
+    A verdict says a gate let this through; these say by how much. A
+    question 0.92 from an accepted twin and one 0.01 from it are both
+    `accepted` against a 0.93 ceiling, and this panel is the difference.
+
+    Absent where nothing measured anything - an opinion has no number
+    behind it and a structural rule has no scale - and saying so is better
+    than a row of dashes nobody can read a meaning into.
+    """
+    scores = question.get("gate_scores") or []
+    if not scores:
+        st.caption(
+            "No gate that read this question measured anything, so it carries "
+            "no confidence. That is not a low one."
+        )
+        return
+
+    st.caption(
+        f"Confidence {question['confidence']:.2f} — how close the weakest "
+        f"measuring gate came to refusing it. A margin, not a probability: "
+        f"the readings below are on different scales."
+    )
+    st.dataframe(
+        [
+            {
+                "Gate": one["gate"],
+                "Measured": one["value"],
+                "Threshold": one["threshold"],
+                "Margin": one["margin"],
+            }
+            for one in scores
+        ],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Margin": st.column_config.ProgressColumn(
+                "Margin", min_value=0.0, max_value=1.0, format="%.2f"
+            )
+        },
+    )
 
 
 def _trace(question: dict) -> None:

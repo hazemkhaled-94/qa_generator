@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 
+from confidence import Measurement
 from database.qa_generator import (
     Derivation,
     QuestionRejection,
@@ -75,6 +76,7 @@ from question_generation.gates import (
     periods,
     restates,
     same_material,
+    shared_lemmas,
     structural,
     subject,
 )
@@ -201,6 +203,10 @@ class QuestionChecker:
         # unanswerable question and `round_trip` only for what reaches it,
         # so the sequence is not derivable from the code that fired.
         ran: list[str] = ["structural"]
+        # Appended to beside `ran`, and for the same reason: which gates
+        # measured something is not derivable from the verdict either. Only
+        # the gates that ARE measurements write here.
+        readings: list[Measurement] = []
         failed, form = structural(
             question_text=candidate.question_text,
             target_answer=candidate.target_answer,
@@ -213,7 +219,7 @@ class QuestionChecker:
         )
         if failed:
             return self._verdict(
-                candidate, failed, None, self._long_answer_chars, form, ran
+                candidate, failed, None, self._long_answer_chars, form, ran, readings
             )
 
         # Free, and only an unanswerable question can fail it: an answerable
@@ -221,6 +227,15 @@ class QuestionChecker:
         # out of it.
         if not candidate.answerable:
             ran.append("off_topic")
+            share = shared_lemmas(
+                candidate.question_text,
+                candidate.group.lemmas,
+                candidate.group.language,
+            )
+            if share is not None and self._off_topic_overlap > 0:
+                readings.append(
+                    Measurement("off_topic", share, self._off_topic_overlap)
+                )
             if not on_topic(
                 candidate.question_text,
                 candidate.group.language,
@@ -241,6 +256,7 @@ class QuestionChecker:
                     self._long_answer_chars,
                     form,
                     ran,
+                    readings,
                 )
 
         # Free, and ahead of the embedding for that reason: each of these is
@@ -249,13 +265,26 @@ class QuestionChecker:
         failed = self._kind(candidate) or self._thread(candidate)
         if failed:
             return self._verdict(
-                candidate, failed, None, self._long_answer_chars, form, ran
+                candidate, failed, None, self._long_answer_chars, form, ran, readings
             )
 
         ran.append("near_duplicate")
         embedding = self._embedder.embed(candidate.question_text)
+        near = self._near(embedding, seen)
+        if near is not None:
+            # High is what refuses here: a question near an accepted one is
+            # the duplicate. The first question of a run has no neighbour
+            # and so no reading, which is an abstention and not a 1.0.
+            readings.append(
+                Measurement(
+                    "near_duplicate",
+                    near.similarity,
+                    self._threshold,
+                    high_is_safe=False,
+                )
+            )
         failed = near_verdict(
-            self._near(embedding, seen),
+            near,
             answerable=candidate.answerable,
             threshold=self._threshold,
             question=candidate.question_text,
@@ -263,7 +292,13 @@ class QuestionChecker:
         )
         if failed:
             return self._verdict(
-                candidate, failed, embedding, self._long_answer_chars, form, ran
+                candidate,
+                failed,
+                embedding,
+                self._long_answer_chars,
+                form,
+                ran,
+                readings,
             )
 
         # Before the round trip, because none of it reads a passage: a
@@ -273,17 +308,24 @@ class QuestionChecker:
         failed = self._phrasing(candidate)
         if failed:
             return self._verdict(
-                candidate, failed, embedding, self._long_answer_chars, form, ran
+                candidate,
+                failed,
+                embedding,
+                self._long_answer_chars,
+                form,
+                ran,
+                readings,
             )
 
         ran.append("round_trip")
         return self._verdict(
             candidate,
-            self._round_trip(candidate, form, embedding),
+            self._round_trip(candidate, form, embedding, readings),
             embedding,
             self._long_answer_chars,
             form,
             ran,
+            readings,
         )
 
     def _kind(self, candidate: Candidate) -> tuple[str, str] | None:
@@ -546,7 +588,11 @@ class QuestionChecker:
         ).recovered
 
     def _round_trip(
-        self, candidate: Candidate, form: str, embedding: list[float]
+        self,
+        candidate: Candidate,
+        form: str,
+        embedding: list[float],
+        readings: list[Measurement],
     ) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back."""
         # A derived answer is not in the passages and is not meant to be.
@@ -567,8 +613,20 @@ class QuestionChecker:
 
         if candidate.answerable:
             target = candidate.target_answer or ""
+            # What the verifier got back, against what the key claims, on
+            # the same content lemmas `agrees` compares. Recorded whichever
+            # way the verdict went, because `agrees` has several branches
+            # and no single threshold - this is the reading a reviewer
+            # wants beside the verdict, not a restatement of it.
+            if read.recovered is not None:
+                language = candidate.group.language
+                recall = shared_lemmas(
+                    target, content(read.recovered, language), language
+                )
+                if recall is not None:
+                    readings.append(Measurement("recall", recall, self._overlap))
             if read.recovered is None:
-                if self._backed(candidate, target):
+                if self._backed(candidate, target, readings):
                     return None
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
@@ -582,7 +640,7 @@ class QuestionChecker:
                 self._overlap,
                 candidate.question_text,
             ):
-                if self._backed(candidate, target):
+                if self._backed(candidate, target, readings):
                     return None
                 return (
                     QuestionRejection.NOT_RECOVERABLE,
@@ -677,7 +735,9 @@ class QuestionChecker:
             (f"{target!r} does not follow from what the cited passages state"),
         )
 
-    def _backed(self, candidate: Candidate, target: str) -> bool:
+    def _backed(
+        self, candidate: Candidate, target: str, readings: list[Measurement]
+    ) -> bool:
         """Whether the entailment pass rescues an answer recall did not find.
 
         Three guards, all of which have to hold, and the third is what the
@@ -701,17 +761,34 @@ class QuestionChecker:
         language = candidate.group.language
         if not asserted(target, passages, language):
             return False
+        if self._about_overlap > 0:
+            asks = shared_lemmas(
+                candidate.question_text,
+                content("\n".join(passages), language),
+                language,
+            )
+            if asks is not None:
+                readings.append(Measurement("about", asks, self._about_overlap))
         if not about(candidate.question_text, passages, language, self._about_overlap):
             log.info(
                 "not rescuing %r: the passages are not about what it asks",
                 candidate.question_text,
             )
             return False
-        backed = self._entailed(target, passages)
-        if backed is None:
+        entailed = self._entailed(target, passages)
+        if entailed is None:
             backed = self._verifier.supports(
                 candidate.question_text, target, passages, candidate.thread
             )
+        else:
+            # The encoder's own probability, which the threshold used to
+            # discard. It is the one reading in this pipeline a model
+            # produced rather than a rule, and the reason `nlp.entailment`
+            # returns a number instead of a verdict.
+            readings.append(
+                Measurement("entailment", entailed, self._entailment_threshold)
+            )
+            backed = entailed >= self._entailment_threshold
         if backed:
             log.info(
                 "keeping %r: recall missed it but the passages support %r",
@@ -720,11 +797,13 @@ class QuestionChecker:
             )
         return backed
 
-    def _entailed(self, target: str, passages: Sequence[str]) -> bool | None:
-        """Whether an encoder finds the answer entailed by any one passage.
+    def _entailed(self, target: str, passages: Sequence[str]) -> float | None:
+        """How strongly an encoder finds the answer entailed by any one passage.
 
-        None when no entailment model is configured, which leaves the
-        judgement to the served model exactly as before.
+        The probability rather than the verdict, so the caller can both
+        decide and record what it decided from. None when no entailment
+        model is configured, which leaves the judgement to the served model
+        exactly as before.
 
         One passage at a time, and the best of them wins. Joining them is
         what a served model is shown, because a served model reads a list;
@@ -738,7 +817,7 @@ class QuestionChecker:
         verdicts = self._entailment.judge_all(
             [(passage, target) for passage in passages]
         )
-        return any(one.supports(self._entailment_threshold) for one in verdicts)
+        return max((one.entailment for one in verdicts), default=0.0)
 
     def _corpus(
         self, candidate: Candidate, embedding: list[float]
@@ -837,6 +916,7 @@ class QuestionChecker:
         long_answer: int = LONG_ANSWER_CHARS,
         form: str | None = None,
         ran: Sequence[str] = (),
+        readings: Sequence[Measurement] = (),
     ) -> CheckedQuestion:
         """Assembles one judged question, kept whichever way it went.
 
@@ -845,7 +925,8 @@ class QuestionChecker:
         the gates read it against and a row saying otherwise could not be
         re-checked to the same verdict.
 
-        `ran` is every gate that read it. Defaulted, because the re-check
+        `ran` is every gate that read it and `readings` is what the ones
+        that MEASURED something read. Both defaulted, because the re-check
         in `service.py` builds a verdict without going through `check`.
         """
         code, reason = failed if failed else (None, "")
@@ -875,4 +956,5 @@ class QuestionChecker:
             answer_form=(form or candidate.spec.form) if candidate.answerable else None,
             planned_difficulty=candidate.planned_difficulty,
             gates_ran=tuple(ran),
+            readings=tuple(readings),
         )

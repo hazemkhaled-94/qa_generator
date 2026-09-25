@@ -82,6 +82,10 @@ _COLUMNS = (
     ("language", "Language"),
     ("status", "Status"),
     ("rejected_reason", "Gate"),
+    # How close the weakest measuring gate came to refusing it. A margin
+    # and not a probability - see `confidence.py` - and blank on a question
+    # no measuring gate read, which is not the same as a low one.
+    ("confidence", "Confidence"),
     ("reviewed_verdict", "Reviewed"),
     # Filled from the `judged` argument rather than off the row: a question
     # carries no judgement of its own, and this package cannot read the

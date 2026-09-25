@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from opentelemetry.trace import Span
 
+from confidence import confidence
 from database.qa_generator import (
     AnswerForm,
     Difficulty,
@@ -618,6 +619,14 @@ class QuestionGenerationService(StageService):
             # first rule were indistinguishable in how far they got.
             current.set_attribute("question.gates_ran", list(checked.gates_ran))
             current.set_attribute("question.accepted", checked.accepted)
+            # What the measuring gates read, so a trace can be filtered to
+            # the questions that only just survived one. Per gate as well as
+            # the aggregate: a Grafana panel charts one of these and a
+            # person reading a trace wants the other.
+            for one in checked.readings:
+                current.set_attribute(f"question.score.{one.gate}", one.value)
+            if (margin := confidence(checked.readings)) is not None:
+                current.set_attribute("question.confidence", margin)
             current.set_attribute("question.answerable", checked.answerable)
             current.set_attribute("question.language", checked.language)
             current.set_attribute("question.follows", checked.follows)
@@ -686,8 +695,14 @@ class QuestionGenerationService(StageService):
                 metadata=about | {"gates_ran": ",".join(checked.gates_ran)},
             )
         ]
+        read = {one.gate: one for one in checked.readings}
         for position, gate in enumerate(checked.gates_ran, 1):
             stopped = not checked.accepted and gate == checked.gates_ran[-1]
+            # Beside the pass or refuse, never instead of it: a Phoenix mean
+            # over one of these annotations is the gate's pass rate, and
+            # scoring the margin here would silently redefine every chart
+            # already drawn on one.
+            measured = read.get(gate)
             verdicts.append(
                 Verdict(
                     span_id=span_id,
@@ -699,7 +714,23 @@ class QuestionGenerationService(StageService):
                     # own text under every gate it passed is six copies
                     # of one string.
                     explanation=self._why(checked) if stopped else "",
-                    metadata=about | {"position": position},
+                    metadata=about
+                    | {"position": position}
+                    | (measured.recorded() if measured else {}),
+                )
+            )
+        # One more, so the Evaluations view can sort a project by what only
+        # just survived. Absent where nothing measured anything, rather
+        # than scored zero - see `confidence.py`.
+        if (margin := confidence(checked.readings)) is not None:
+            verdicts.append(
+                Verdict(
+                    span_id=span_id,
+                    name="confidence",
+                    label=checked.rejected_reason or ACCEPTED,
+                    score=margin,
+                    explanation="",
+                    metadata=about,
                 )
             )
         return verdicts

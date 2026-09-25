@@ -99,6 +99,8 @@ SHAPES = {
         "spacy_model",
         "spacy_version",
         "embedding",
+        "gate_scores",
+        "confidence",
     },
     "FactSource": {
         "passage_id",
@@ -121,6 +123,8 @@ SHAPES = {
         "units_added",
         "unresolved_references",
         "passages",
+        "confidence",
+        "gate_scores",
     },
     "FactQuality": {
         "total",

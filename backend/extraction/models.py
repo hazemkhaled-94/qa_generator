@@ -178,6 +178,12 @@ class CheckedFact:
     spacy_model: str | None = None
     spacy_version: str | None = None
     embedding: list[float] | None = None
+    #: What the dedup probe read and how close it came to refusing this, as
+    #: `confidence.py` records one. Empty and None on nearly every fact:
+    #: every other check here is structural, and a citation resolves or it
+    #: does not.
+    gate_scores: list[dict] = field(default_factory=list)
+    confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -247,6 +253,11 @@ class StoredFact:
     units_added: list[str]
     unresolved_references: list[str]
     passages: list[FactSource] = field(default_factory=list)
+    #: How close the dedup probe came to refusing this, and what it read.
+    #: None and empty on a fact extracted before the columns existed, and
+    #: on every fact this deployment did not embed.
+    confidence: float | None = None
+    gate_scores: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

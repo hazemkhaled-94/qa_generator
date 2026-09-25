@@ -9,6 +9,7 @@ from dataclasses import replace
 from itertools import zip_longest
 from typing import ClassVar
 
+from confidence import Measurement, confidence, scored
 from database.qa_generator import FactKind, Rejection
 from extraction.extractors import (
     BridgeExtractor,
@@ -864,6 +865,19 @@ class ExtractionService(StageService):
                 checked.append(fact)
                 continue
             twin = self._nearest(vector, written)
+            if twin is not None:
+                # The only reading in this service that is a measurement:
+                # every other check is structural, and a citation resolves
+                # or it does not. High is what refuses, so a statement far
+                # from anything already stored has the whole margin.
+                reading = Measurement(
+                    "duplicate", twin.similarity, threshold, high_is_safe=False
+                )
+                fact = replace(
+                    fact,
+                    gate_scores=scored([reading]),
+                    confidence=confidence([reading]),
+                )
             if twin is not None and twin.similarity >= threshold:
                 refused += 1
                 checked.append(_duplicate(fact, twin, threshold))

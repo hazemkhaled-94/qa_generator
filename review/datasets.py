@@ -255,6 +255,11 @@ def question_settings() -> rg.Settings:
             rg.TermsMetadataProperty(name="answerable", title="Answerable"),
             rg.TermsMetadataProperty(name="gate", title="What the gates said"),
             *_judge_metadata(),
+            # A margin in [0, 1], so a reviewer can open the queue at the
+            # questions that survived a gate by the least.
+            rg.FloatMetadataProperty(
+                name="confidence", title="Confidence", min=0.0, max=1.0
+            ),
             rg.IntegerMetadataProperty(name="question_id", title="Question id"),
         ],
     )
@@ -331,5 +336,10 @@ def question_record(row: QuestionRow, judge: Opinion = UNJUDGED) -> rg.Record:
             "gate": row.rejected_reason or row.status,
             **judge_metadata(judge),
             "question_id": row.id,
+            # What a reviewer sorts the queue by. Omitted rather than sent
+            # as a sentinel where nothing measured it: a filter on a range
+            # cannot tell -1 from a real reading, and a row with no
+            # confidence is not a row with a bad one.
+            **({} if row.confidence is None else {"confidence": row.confidence}),
         },
     )
