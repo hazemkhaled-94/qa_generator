@@ -14,6 +14,11 @@
   --qa-ink: currentColor;
   /* 65%, not 58%: against the light ground 58% lands at 4.29:1. */
   --qa-muted: color-mix(in srgb, currentColor 65%, transparent);
+  /* A disabled control still has to be readable to say what it would do.
+     Opaque, not a currentColor mix: this one is set on a button and every
+     element inside it, and a translucent colour would multiply itself down
+     the nesting until the label was gone. */
+  --qa-disabled: light-dark(#6E6E6E, #9A96A3);
   --qa-border: color-mix(in srgb, currentColor 14%, transparent);
 
   --qa-radius: 0.5rem;
@@ -94,13 +99,22 @@ footer { visibility: hidden; }
   height: 100%;
 }
 
-/* ── The filled primary ─────────────────────────────────────────────── */
+/* ── Buttons ────────────────────────────────────────────────────────── */
 
 /* Streamlit writes the label white whatever the fill is, and white on the
    light purple the dark ground uses is 2.1:1. */
-[data-testid^="stBaseButton-primary"],
-[data-testid^="stBaseButton-primary"] * {
+[data-testid^="stBaseButton-primary"]:not(:disabled),
+[data-testid^="stBaseButton-primary"]:not(:disabled) * {
   color: var(--qa-on-accent) !important;
+}
+
+/* Streamlit fades a disabled label to 2.51:1, which reads as an empty box.
+   The pale border and the dead hover are what say it is disabled; the label
+   is what says which control it is, and every one of them carries a tooltip
+   explaining why it cannot be used yet. */
+[data-testid^="stBaseButton"]:disabled,
+[data-testid^="stBaseButton"]:disabled * {
+  color: var(--qa-disabled) !important;
 }
 
 /* ── The state line beside a service's controls ─────────────────────── */

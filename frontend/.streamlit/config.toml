@@ -37,10 +37,15 @@ linkColor = "#7500C0"
 dataframeHeaderBackgroundColor = "#E6DCFF"
 dataframeBorderColor = "#E4E1EA"
 
+# The deep end of the brand's purple ramp, which is the colour the rule under
+# the masthead starts from. Holds the navigation and nothing else.
 [theme.light.sidebar]
-backgroundColor = "#F7F4FB"
-secondaryBackgroundColor = "#EFE9F7"
-borderColor = "#E4E1EA"
+backgroundColor = "#460073"
+secondaryBackgroundColor = "#5B1094"
+textColor = "#FFFFFF"
+primaryColor = "#C2A3FF"
+borderColor = "#6D2A9E"
+linkColor = "#C2A3FF"
 
 # Near-black carrying the brand's violet cast, rather than the flat black of
 # a cover slide. The core purple is too close to a dark ground to carry an
@@ -54,6 +59,15 @@ borderColor = "#332C45"
 linkColor = "#C2A3FF"
 dataframeHeaderBackgroundColor = "#2E1A45"
 dataframeBorderColor = "#332C45"
+
+# The same purple, which sits above the page rather than under it here.
+[theme.dark.sidebar]
+backgroundColor = "#340056"
+secondaryBackgroundColor = "#48117A"
+textColor = "#EDEAF2"
+primaryColor = "#C2A3FF"
+borderColor = "#54218A"
+linkColor = "#C2A3FF"
 
 [server]
 headless = true

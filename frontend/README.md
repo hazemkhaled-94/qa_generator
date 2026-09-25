@@ -146,8 +146,22 @@ nothing right now is greyed rather than hidden.
 Red is not in the palette. It stays because a destructive control should not
 be the first place a reader learns what the brand colours mean.
 
+The sidebar is the deep end of the brand's purple ramp, `#460073`, and holds
+the navigation and nothing else. Both sidebar palettes set their own
+`textColor` and `primaryColor`: a section that inherits them from the page
+puts dark type on a dark panel.
+
 Every colour pair here is at or above 4.5:1 against the ground it sits on, in
-both themes. `--qa-muted` is mixed at 65% rather than 58% for that reason.
+both themes, measured at the element that actually renders the text rather
+than the one the rule names. `--qa-muted` is mixed at 65% rather than 58% for
+that reason.
+
+**A translucent colour cannot be set on an element and its descendants.**
+Streamlit nests a button's label five levels deep, and `color-mix(…,
+currentColor 60%, transparent)` re-resolves against its own parent at each
+level: 0.6, then 0.36, then 0.216, down to 0.078, which is an empty button.
+`--qa-disabled` is therefore an opaque pair. Anything applied with a `*`
+has to be.
 
 The topic map stays on white in either theme: it is a pyLDAvis document
 inside an iframe, so nothing outside it can restyle it.
