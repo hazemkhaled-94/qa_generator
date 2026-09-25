@@ -474,6 +474,7 @@ class QuestionQueue(RowQueue):
                             # in closed long ago.
                             trace_id=question.trace_id or None,
                             span_id=question.span_id or None,
+                            gates_ran=list(question.gates_ran),
                             run_id=run_id(),
                             follows_id=follows,
                             thread_position=position,

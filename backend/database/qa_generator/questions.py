@@ -21,6 +21,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.qa_generator.base import Base
@@ -282,6 +283,14 @@ class Question(Base):
         comment="Which gate rejected the question, enforced by a CHECK "
         "constraint. NULL on a question a person rejected from the page, which "
         "names no gate.",
+    )
+    gates_ran: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text),
+        comment="Every gate that read this question, in the order they read it, "
+        "the one that refused it last. question_generation.checker.GATES gives "
+        "each its fixed position. Two gates are conditional, so this cannot be "
+        "derived from rejected_reason and a fixed order. NULL for a question "
+        "written before this column; empty means no gate ran.",
     )
     reviewed_verdict: Mapped[str | None] = mapped_column(
         Text,

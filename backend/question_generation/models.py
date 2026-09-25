@@ -465,12 +465,11 @@ class CheckedQuestion:
     #: the spec rather than judged, like the type itself.
     cognitive_level: str | None = None
     #: Every gate that READ this question, in the order they read it, the
-    #: one that refused it last. Not a column: it goes on the span, where
-    #: the question it answers is asked - `rejected_reason` says what
-    #: stopped a question and could never say what it got past, because
-    #: the checker returns on the first failure. Two of the gates are
-    #: conditional, so the sequence cannot be derived from the verdict and
-    #: a fixed order.
+    #: one that refused it last. `rejected_reason` says what stopped a
+    #: question and could never say what it got past, because the checker
+    #: returns on the first failure. Two of the gates are conditional, so
+    #: the sequence cannot be derived from the verdict and a fixed order.
+    #: A column as well as a span attribute: the row outlives the trace.
     gates_ran: tuple[str, ...] = ()
     #: The trace this question was written and judged in, and the span the
     #: gates ran in - which is the span its verdict annotations hang off.

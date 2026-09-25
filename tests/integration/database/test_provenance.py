@@ -110,6 +110,56 @@ def test_extraction_records_the_trace(engine, database) -> None:
     assert store.rows("trace_id", "span_id") == [(trace_id, span_id)]
 
 
+def test_a_question_records_every_gate_that_read_it(engine, database) -> None:
+    """Not only the one that stopped it, which is all `rejected_reason` says."""
+    from seed import fact, fitted, membership
+    from question_generation.models import CheckedQuestion, criteria_of
+    from question_generation.queue import QuestionQueue
+
+    sha = digest("a")
+    with Session(engine) as session:
+        session.add(document(sha))
+        held = fitted(0)
+        session.add(held)
+        session.flush()
+        at = passage(sha, ordinal=1, text="The device weighs 4 kg.", language="en")
+        session.add(at)
+        session.flush()
+        session.add(membership(at.id, held.id))
+        drawn = fact(at.id, statement="The device weighs 4 kg.")
+        session.add(drawn)
+        session.flush()
+        topic_id, fact_id = held.id, drawn.id
+        session.commit()
+
+    QuestionQueue().start()
+    QuestionQueue().claim()
+    QuestionQueue().store(
+        topic_id,
+        [
+            [
+                CheckedQuestion(
+                    question_text="What does the device weigh?",
+                    target_answer="4 kg",
+                    answerable=True,
+                    criteria=criteria_of(
+                        passages=1, documents=1, topics=1, answer_chars=4
+                    ),
+                    language="en",
+                    status="rejected",
+                    rejected_reason="leaks_source",
+                    fact_ids=(fact_id,),
+                    gates_ran=("structural", "near_duplicate", "phrasing"),
+                )
+            ]
+        ],
+    )
+
+    assert _rows(engine, "SELECT gates_ran, rejected_reason FROM questions") == [
+        (["structural", "near_duplicate", "phrasing"], "leaks_source")
+    ]
+
+
 def test_topics_record_the_span_of_their_own_language(engine, database) -> None:
     """A fit is one span per language, and each topic carries its own."""
     from dataclasses import replace as replaced
