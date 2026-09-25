@@ -136,3 +136,71 @@ def test_the_two_actions_are_exclusive_and_one_is_required(action: str) -> None:
         projects.parser().parse_args([])
     with pytest.raises(SystemExit):
         projects.parser().parse_args(["--list", "--prune"])
+
+
+# ── Reading past the first page ────────────────────────────────────────────
+
+
+class _Paged:
+    """A Phoenix holding more projects than one page returns."""
+
+    def __init__(self, pages: list[list[str]]) -> None:
+        """Answers each listing request with the next page."""
+        self.pages = pages
+        self.asked: list[dict] = []
+
+    def get(self, path: str, params: dict | None = None):
+        """Answers a listing or a span query."""
+        if path.endswith("/spans"):
+            return _Json({"data": [{"name": projects.CALL}]})
+        self.asked.append(dict(params or {}))
+        at = 0 if not params or "cursor" not in params else int(params["cursor"])
+        names = self.pages[at]
+        return _Json(
+            {
+                "data": [{"id": one, "name": one} for one in names],
+                "next_cursor": str(at + 1) if at + 1 < len(self.pages) else None,
+            }
+        )
+
+
+class _Json:
+    """A response carrying a decoded body."""
+
+    def __init__(self, body: dict) -> None:
+        """Holds the body."""
+        self.body = body
+
+    def raise_for_status(self) -> None:
+        """It succeeded."""
+
+    def json(self) -> dict:
+        """The body."""
+        return self.body
+
+
+def test_every_page_is_read_not_just_the_first() -> None:
+    """A cursor ignored is a count that is really the page size.
+
+    Phoenix answers with a page and a `next_cursor`. Reading one page
+    against a deployment holding 696 projects reported 500, pruned 497,
+    and then reported 500 again from the next page - which is
+    indistinguishable from a delete that silently failed, and is what
+    happened.
+    """
+    client = _Paged([["a", "b"], ["c", "d"], ["e"]])
+
+    found = projects.held(client)
+
+    assert [one.name for one in found] == ["a", "b", "c", "d", "e"]
+    assert len(client.asked) == 3, "one request per page, to the end"
+    assert "cursor" not in client.asked[0], "the first page asks for no cursor"
+    assert client.asked[1]["cursor"] == "1"
+
+
+def test_a_single_page_asks_once() -> None:
+    """The common case does not pay for a second request."""
+    client = _Paged([["only"]])
+
+    assert len(projects.held(client)) == 1
+    assert len(client.asked) == 1

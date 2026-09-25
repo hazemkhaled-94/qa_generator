@@ -34,6 +34,7 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -103,16 +104,38 @@ def _client():
     )
 
 
+def listed(client) -> Iterator[dict]:
+    """Every project Phoenix holds, following the cursor to the end.
+
+    **Paginated, and the first version of this was not.** Phoenix answers
+    with a page and a `next_cursor`, and a tool that reads one page reports
+    a number that is really "the page size" and prunes a slice of the
+    backlog. Against a deployment holding more than five hundred, that read
+    as 500 projects, pruned 497, and then reported 500 again from the next
+    page - which looks exactly like a delete that silently failed.
+    """
+    cursor = None
+    while True:
+        params = {"limit": PAGE}
+        if cursor:
+            params["cursor"] = cursor
+        answered = client.get("/v1/projects", params=params)
+        answered.raise_for_status()
+        page = answered.json()
+        yield from page.get("data", [])
+        cursor = page.get("next_cursor")
+        if not cursor:
+            return
+
+
 def held(client) -> list[Project]:
     """Every project Phoenix holds, and whether work happened in each.
 
-    One request per project, which is why this is a command somebody runs
-    rather than something a page polls.
+    One request per project on top of the listing, which is why this is a
+    command somebody runs rather than something a page polls.
     """
-    answered = client.get("/v1/projects", params={"limit": PAGE})
-    answered.raise_for_status()
     found = []
-    for one in answered.json().get("data", []):
+    for one in listed(client):
         spans = (
             client.get(f"/v1/projects/{one['id']}/spans", params={"limit": SAMPLE})
             .json()
