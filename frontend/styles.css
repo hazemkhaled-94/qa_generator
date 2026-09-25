@@ -1,72 +1,73 @@
-/* Two themes, one stylesheet.
+/* 2025, on top of the theme in .streamlit/config.toml.
 
-   Every pair below is written light-first with light-dark(), which resolves
-   against the `color-scheme` of the element using it. Streamlit sets that on
-   the app container to the theme it actually settled on, so these follow
-   whether the reader chose from the toolbar menu or the browser reported a
-   preference.
+   Two grounds, white and black. Every pair below is written light-first with
+   light-dark(), which resolves against the `color-scheme` of the element using
+   it; Streamlit sets that on the app container to the theme it settled on.
 
-   Two hues only: the brand purple, and a red the delete controls own.
-   Everything neutral is mixed from `currentColor` — whatever Streamlit set
-   the text to — so it follows the theme with no second value to keep in
-   step. */
+   Neutrals are mixed from `currentColor` — whatever Streamlit set the text to
+   — so they follow the theme with no second value to keep in step. */
 
 :root {
   color-scheme: light dark;
 
-  /* currentColor resolves where a var() is used, not where it is declared,
-     so each of these takes the text colour of the element using it. */
+  /* currentColor resolves where a var() is used, not where it is declared. */
   --qa-ink: currentColor;
   --qa-muted: color-mix(in srgb, currentColor 58%, transparent);
   --qa-border: color-mix(in srgb, currentColor 14%, transparent);
-  --qa-radius: 8px;
 
-  /* The brand accent, lifted on dark: #A100FF on near-black is too close to
-     the ground to serve as an accent. */
-  --qa-accent: light-dark(#A100FF, #B77DFF);
-  /* Deletion, and nothing else. */
+  /* Core purple on white, light purple on black. */
+  --qa-accent: light-dark(#A100FF, #C2A3FF);
+  --qa-on-accent: light-dark(#FFFFFF, #000000);
+  --qa-shade: light-dark(#000000, #FFFFFF);
+
+  /* Deletion, and nothing else. Not a brand colour: the palette has no red,
+     and a destructive control should not be the first place to find out. */
   --qa-danger: light-dark(#A32020, #F08A8A);
   --qa-danger-line: color-mix(in srgb, var(--qa-danger) 40%, transparent);
   --qa-danger-wash: color-mix(in srgb, var(--qa-danger) 10%, transparent);
-  --qa-on-accent: light-dark(#FFFFFF, #131019);
-  --qa-shade: light-dark(#000000, #FFFFFF);
 }
 
-.block-container { padding-top: 2rem; padding-bottom: 4rem; max-width: 1320px; }
+.block-container { padding-top: 1.4rem; padding-bottom: 4rem; max-width: 1320px; }
 header[data-testid="stHeader"] { background: transparent; }
 /* The toolbar menu stays: it is where the light/dark toggle lives. */
 footer { visibility: hidden; }
 
-/* ── Brand and page title ───────────────────────────────────────────── */
+/* ── Masthead ───────────────────────────────────────────────────────── */
 
+/* The purple bloom off the template's title slide. Square, full width of the
+   content column, and carrying no mark: the chevron is the logo. */
 .qa-brand {
-  border-bottom: 1px solid var(--qa-border);
-  padding-bottom: .7rem; margin-bottom: 1.2rem;
+  background:
+    radial-gradient(60% 88% at 26% 52%, #A93BEC 0%, rgba(169, 59, 236, 0) 62%),
+    radial-gradient(70% 95% at 30% 104%, #4F1478 0%, rgba(79, 20, 120, 0) 58%),
+    linear-gradient(100deg, #7418AE 0%, #6B10A5 42%, #63109F 100%);
+  padding: 1.35rem 1.5rem 1.45rem;
+  margin-bottom: 1.6rem;
 }
 .qa-brand-title {
-  font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em;
-  color: var(--qa-ink);
+  font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em;
+  line-height: 1.1; color: #FFFFFF;
 }
+
+/* Headlines are short, large and tight. */
 .qa-page-title {
-  font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em;
-  color: var(--qa-ink); margin: 0 0 1rem;
+  font-size: 2rem; font-weight: 700; letter-spacing: -0.03em;
+  line-height: 1.08; color: var(--qa-ink); margin: 0 0 1.1rem;
 }
 
 /* ── Panels: one per section, which is what separates them ──────────── */
 
+/* Purple sentence-case section headings, as the template writes them. */
 .qa-panel-label {
-  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.09em;
-  text-transform: uppercase; color: var(--qa-muted); margin: 0 0 .1rem;
+  font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--qa-accent); margin: 0 0 .25rem;
 }
 
-/* Streamlit draws a bordered container as a vertical block carrying its own
-   border class. Tightened: the default padding is built for a card holding a
-   form, and a page of seven of them reads as a stack of cards rather than as
-   one page with sections. */
-[data-testid="stVerticalBlockBorderWrapper"] {
-  border-radius: var(--qa-radius);
-}
-[data-testid="stVerticalBlockBorderWrapper"] > div > [data-testid="stVerticalBlock"] {
+/* A panel is the vertical block whose first element is the label, which is
+   what `page.panel` writes. Tightened: the default gap is built for a card
+   holding a form, and a page of seven of them reads as a stack of cards
+   rather than as one page with sections. */
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .qa-panel-label) {
   gap: .55rem;
 }
 
@@ -78,13 +79,22 @@ footer { visibility: hidden; }
   letter-spacing: 0.02em; color: var(--qa-muted);
 }
 [data-testid="stMetricValue"] {
-  font-size: 1.25rem !important; font-weight: 700; line-height: 1.25;
+  font-size: 1.5rem !important; letter-spacing: -0.02em; line-height: 1.2;
 }
 /* Every figure box the same height whatever its label wraps to. */
 [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
 [data-testid="stColumn"] [data-testid="stElementContainer"]:has([data-testid="stMetric"]),
 [data-testid="stMetric"] {
   height: 100%;
+}
+
+/* ── The filled primary ─────────────────────────────────────────────── */
+
+/* Streamlit writes the label white whatever the fill is, and white on the
+   light purple the dark ground uses is 2.1:1. */
+[data-testid^="stBaseButton-primary"],
+[data-testid^="stBaseButton-primary"] * {
+  color: var(--qa-on-accent) !important;
 }
 
 /* ── The state line beside a service's controls ─────────────────────── */
@@ -112,9 +122,12 @@ footer { visibility: hidden; }
 
 .qa-danger-note { color: var(--qa-danger); font-size: 0.78rem; }
 
-[data-testid="stVerticalBlockBorderWrapper"]:has(.qa-danger-note) {
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .qa-danger-note) {
   border-color: var(--qa-danger-line) !important;
   background: var(--qa-danger-wash);
+}
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .qa-danger-note) .qa-panel-label {
+  color: var(--qa-danger);
 }
 
 /* Keyed, not typed: Streamlit offers `primary` and `secondary` and neither
@@ -148,5 +161,4 @@ footer { visibility: hidden; }
 [data-testid="stIFrame"] {
   background: #FFFFFF;
   border: 1px solid var(--qa-border);
-  border-radius: var(--qa-radius);
 }

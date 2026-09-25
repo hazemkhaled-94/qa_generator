@@ -1,38 +1,59 @@
-# One palette per theme, and nothing forcing either.
+# 2025 theme.
+#
+# Theme colours: #A100FF core purple, #460073 and #7500C0 deeps, #C2A3FF and
+# #E6DCFF lights, #FF50A0 / #224BFF / #05F2DB secondaries, black and white
+# grounds, neutral greys.
 #
 # Streamlit picks between [theme.light] and [theme.dark] from the browser's
-# prefers-color-scheme, or from whatever the reader chose in the toolbar
-# menu, and records the choice per page in localStorage. Either way it sets
-# `color-scheme` on the app container to the theme it settled on, and
-# styles.css reads its own palette off that with light-dark(), so the custom
-# styling follows the chrome however the chrome was decided.
+# prefers-color-scheme or the toolbar menu, and sets `color-scheme` on the app
+# container to the one it settled on. styles.css reads its own palette off that
+# with light-dark().
 #
-# `base` is deliberately unset, and no colour is written in [theme] itself.
-# Both apply to light and dark alike, which is exactly what pinned this app
-# to light: a white backgroundColor in [theme] is white in dark mode too.
-# Only what genuinely does not vary belongs here.
+# Anything written in [theme] itself applies to both.
 
 [theme]
-font = "sans serif"
+# Graphik is licensed. Arial is the substitute the brand names; a local
+# Graphik is picked up ahead of it.
+font = "Graphik, Graphik Regular, Arial, Helvetica, sans-serif"
+headingFont = "Graphik Semibold, Graphik, Arial, Helvetica, sans-serif"
+headingFontWeights = [700, 700, 600, 600, 600, 600]
+# Square. Nothing in the template has a rounded corner.
+baseRadius = "none"
+buttonRadius = "none"
+metricValueFontWeight = 700
+showSidebarBorder = true
 
+# White ground.
 [theme.light]
 primaryColor = "#A100FF"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F2F9"
-textColor = "#1A1A1A"
-borderColor = "#E6E1EC"
+secondaryBackgroundColor = "#F2F2F2"
+textColor = "#000000"
+borderColor = "#E4E7E7"
+linkColor = "#7500C0"
+dataframeHeaderBackgroundColor = "#FFFFFF"
+dataframeBorderColor = "#E4E7E7"
 
-# Near-black carrying the same violet cast as the brand, rather than a
-# neutral grey: the accent is #A100FF, and a cool background keeps it from
-# reading as the only coloured thing on the page. The primary is lifted,
-# because #A100FF on a dark ground is too close to the background to serve
-# as an accent.
+# Black panel beside white content: the template's split layout.
+[theme.light.sidebar]
+primaryColor = "#C2A3FF"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#1A1A1A"
+textColor = "#FFFFFF"
+borderColor = "#333333"
+linkColor = "#C2A3FF"
+
+# Black ground. The core purple is too close to it to carry an accent, so the
+# light purple takes over.
 [theme.dark]
-primaryColor = "#B77DFF"
-backgroundColor = "#131019"
-secondaryBackgroundColor = "#1E1A29"
-textColor = "#E9E6F0"
-borderColor = "#332C45"
+primaryColor = "#C2A3FF"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#121212"
+textColor = "#FFFFFF"
+borderColor = "#333333"
+linkColor = "#C2A3FF"
+dataframeHeaderBackgroundColor = "#000000"
+dataframeBorderColor = "#333333"
 
 [server]
 headless = true
@@ -44,9 +65,5 @@ enableXsrfProtection = true
 gatherUsageStats = false
 
 [client]
-# "viewer", not "minimal": minimal hides the toolbar menu altogether, and the
-# theme toggle lives in it. Viewer keeps that and the print and screen-record
-# items while dropping rerun, clear-cache and deploy, which are a developer's
-# and not a reader's.
 toolbarMode = "viewer"
 showErrorDetails = "none"

@@ -21,9 +21,14 @@ over it.
 | Facts | facts | extraction | a passage | extraction |
 | Topics | topics | topic modelling | the whole corpus | topics |
 | Questions | questions | question generation | a topic | questions |
-| System health | components, and every container with a link to it | nothing | — | the platform all six share |
+| Assessment | what an LLM judge said about each artefact | the evaluation phase | one kind of artefact | assessment |
+| System health | components, and every container with a link to it | nothing | — | the platform all seven share |
 
 **Nothing on a page can reach another page's stage.**
+
+Assessment is the one page that lists an opinion rather than an artefact,
+and the one whose stage can be switched off entirely — see
+[`backend/assessment/`](../backend/assessment/README.md).
 
 System health is the one that lists something the pipeline did not produce.
 It asks `GET /services` rather than probing anything itself — the topology
@@ -95,26 +100,45 @@ on every interaction, which is why the tests run each one the same way.
 
 ## Themes and colour
 
-[`.streamlit/config.toml`](.streamlit/config.toml) gives Streamlit a palette
-under `[theme.light]` and another under `[theme.dark]`; it starts from the
-browser's `prefers-color-scheme`, and the toolbar menu switches per page.
+The 2025 brand: `#A100FF` core purple, `#460073` and `#7500C0`
+deeps, `#C2A3FF` and `#E6DCFF` lights, `#FF50A0` / `#224BFF` / `#05F2DB`
+secondaries, black and white grounds, neutral greys. Square corners
+throughout — nothing in the template has a rounded one. No logo: the wordmark
+and the `>` chevron are both the brand marks.
 
-Put a colour in `[theme]` itself, or set `theme.base`, and it applies to
-**both** themes.
+[`.streamlit/config.toml`](.streamlit/config.toml) carries most of it. It
+gives Streamlit a palette under `[theme.light]` and another under
+`[theme.dark]`, starting from the browser's `prefers-color-scheme` and
+switched per page from the toolbar menu. Light is the template's white slide,
+dark its black one; `[theme.light.sidebar]` puts a black panel beside the
+white content, which is the split the template lays out. Put a colour in
+`[theme]` itself, or set `theme.base`, and it applies to **both**.
 
-[`styles.css`](styles.css) reads its own palette off `light-dark()`, which
-resolves against the `color-scheme` Streamlit sets from the theme it settled
-on — so the custom styling follows the chrome whichever way the chrome was
-decided. Two hues are written twice, the brand purple and the red that only
-deletion uses; the neutrals are mixed from `currentColor`.
+Type is Graphik, the brand face. It is licensed and not shipped, so the stack
+falls through to Arial — the substitute the brand itself names — and picks up
+a locally installed Graphik ahead of it.
+
+[`styles.css`](styles.css) holds what the theme config cannot express: the
+masthead, the section headings, the queue state line and the delete box. It
+reads its own palette off `light-dark()`, which resolves against the
+`color-scheme` Streamlit sets from the theme it settled on — so the custom
+styling follows the chrome whichever way the chrome was decided. Two hues are
+written twice, the purple and the red that only deletion uses; the neutrals
+are mixed from `currentColor`.
 
 **Colour carries one meaning.** Purple fills the one control that commits
 something in a group — Start, Fit, Save, Accept — and red is spent only on
 deletion. Everything else is an outlined button, and a control that would do
 nothing right now is greyed rather than hidden.
 
+Red is not in the palette. It stays because a destructive control should not
+be the first place a reader learns what the brand colours mean.
+
 The topic map stays on white in either theme: it is a pyLDAvis document
 inside an iframe, so nothing outside it can restyle it.
+
+Selectors here are tied to Streamlit's DOM, which it renames between
+versions. `footer` no longer matches anything.
 
 ## Configuration
 
