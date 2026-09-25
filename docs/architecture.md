@@ -201,10 +201,12 @@ machine from a container id.
 | Signal | Path | Read with |
 |---|---|---|
 | Logs | process → `logs` volume or `./logs` (JSON, ECS fields) → Filebeat → Elasticsearch | Grafana, `make logs` |
-| Traces | process → OTLP → Phoenix, one project per `<stage>-<run id>` | Phoenix |
+| Traces | process → OTLP → Phoenix, one project per `<position>-<stage>-<run id>` | Phoenix |
 | Cost and tokens | on the span, and on the log line beside it | Phoenix, Grafana, `make spend LOG=` |
 | Gate verdicts | the row in Postgres, an attribute on the span, one annotation per gate | the Questions page, Phoenix's Evaluations view |
-| The join between them | `questions.trace_id` and `questions.span_id` | the Questions page links to both |
+| Which gates ran | `questions.gates_ran`, in the order they read it | the Questions page, `GET /lineage/question/<id>` |
+| Lineage | the link tables — `fact_passages`, `question_facts`, `passage_topics` | `GET /lineage/<kind>/<id>`, the **How this was produced** fold |
+| The join between them | `trace_id` and `span_id`, on every artefact table | every artefact page links to both |
 | Prompts | composed in the source, recorded to the `prompts` table, and on each span | the Questions page, `GET /prompts`, Phoenix after `make prompts-publish` |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
 | Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |
@@ -213,6 +215,21 @@ machine from a container id.
 
 `trace.id` is on every log line and is the join between a span and its lines.
 See [`telemetry/`](../telemetry/README.md).
+
+### One number, in all five
+
+[`telemetry/pipeline.py`](../telemetry/pipeline.py) holds the seven stages
+once, and the number in front of a name is the stage's place among them.
+All four tools sort their own names alphabetically, which is not the order
+a corpus moves, so `4-extraction` in Phoenix, `4-facts` in Argilla and
+`stage_4_extraction` in Dagster are the same step seen from three sides.
+
+Each tool then has one job no other has: **Phoenix** the calls, **Grafana**
+every line, **Argilla** what a person judged, **Dagster** which run, and the
+**application** the chain between the artefacts and the links out to the
+other four. Two static tests keep the copies of those names equal —
+`tests/static/test_tool_names.py`, because neither `orchestration` nor
+`review` can be imported from where the names are needed.
 
 Nothing is deleted until `make logs-retention` and `make logs-prune` have
 run. The first ages the Elasticsearch index, the second the files.
@@ -240,4 +257,6 @@ and the catalogue omits, and a catalogue entry nothing reads. See
 | The api loads no model or converter | `tests/static/test_api_stays_light.py` |
 | Every setting is declared once and read | `tests/static/test_settings_catalogued.py` |
 | The dashboards match the fields that serve them | `tests/static/test_dashboards.py` |
+| One stage goes by the same name in all four tools | `tests/static/test_tool_names.py` |
+| Every artefact records the run and trace that made it | `tests/integration/database/test_provenance.py` |
 | Every relative link on these pages resolves | `tests/static/test_doc_links.py` |

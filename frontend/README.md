@@ -64,6 +64,23 @@ On a question it also lists every gate that read it, at its fixed position.
 The gates after the one that refused it are **absent rather than shown as
 passed**: the checker returns on the first failure, so they never ran.
 
+It ends with **Where to look next**, one line per tool naming the one thing
+that tool answers and nothing else does:
+
+| | Opens |
+|---|---|
+| Grafana | The Run dashboard, narrowed to the run that produced this artefact |
+| Dagster | The asset that stage materialises — `facts`, `topics`, `questions` |
+| Argilla | The datasets, and the name of the one this kind is reviewed in |
+| Phoenix | Per artefact, in the tables above: the span and the trace |
+
+The addresses come from `GET /services`, which serves `SERVICE_URLS` —
+compose builds it out of the published ports, and that is the only place
+both halves of "grafana serves 3000 and is published on 3001" are written
+down. Cached for ten minutes, because that route opens a socket to every
+service to answer. A tool this deployment does not publish gets no line
+rather than an address nobody can open.
+
 Behind a selection and collapsed, like everything else not needed on
 arrival.
 
@@ -218,6 +235,7 @@ does with an answer, including the answers that are refusals.
 | [`test_views.py`](../tests/frontend/test_views.py) | The rules every page keeps, checked on every page |
 | [`test_facts_page.py`](../tests/frontend/test_facts_page.py), [`test_topics_page.py`](../tests/frontend/test_topics_page.py) | Two pages in depth, against a scripted backend |
 | [`test_configuration_panel.py`](../tests/frontend/test_configuration_panel.py) | The configuration panel |
+| [`test_lineage_panel.py`](../tests/frontend/test_lineage_panel.py) | The links the lineage panel offers into the other four tools |
 | [`pages.py`](../tests/frontend/pages.py) | One page object over every view, and the answers each view needs |
 | [`test_frontend_vocabularies.py`](../tests/static/test_frontend_vocabularies.py) | That the gate list on the Questions page is exactly what the checker can reject under |
 

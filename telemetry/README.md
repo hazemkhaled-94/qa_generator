@@ -38,6 +38,15 @@ in every one of them.
 Nothing migrates the projects and datasets written under the old names.
 They stay until they age out.
 
+`pipeline.py` also names each stage's **Dagster asset** and **Argilla
+dataset**, because the two modules those really live in cannot be imported
+from where they are needed: `orchestration` is a code location in an image
+of its own, and no container carries the Argilla client.
+[`tests/static/test_tool_names.py`](../tests/static/test_tool_names.py)
+reads both as syntax and fails if a copy has gone stale — a renamed asset
+would otherwise leave the application linking to a Dagster page that 404s,
+which looks exactly like Dagster being down.
+
 ### Where a person starts
 
 `GET /lineage/{kind}/{id}`, and the **How this was produced** fold on every

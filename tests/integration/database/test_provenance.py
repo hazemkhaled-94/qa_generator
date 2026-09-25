@@ -58,8 +58,7 @@ def test_parsing_records_the_run_and_the_trace(engine, database) -> None:
 
     assert _rows(
         engine,
-        "SELECT parse_trace_id, parse_span_id, parse_run_id IS NOT NULL "
-        "FROM documents",
+        "SELECT parse_trace_id, parse_span_id, parse_run_id IS NOT NULL FROM documents",
     ) == [(trace_id, span_id, True)]
 
 
@@ -89,10 +88,13 @@ def test_chunking_records_the_run_and_the_trace(engine, database) -> None:
         trace_id, span_id = current_ids()
         ChunkQueue().replace(sha, Chunking(passages=chunks, oversized=0))
 
-    assert _rows(
-        engine,
-        "SELECT trace_id, span_id, run_id IS NOT NULL FROM passages ORDER BY ordinal",
-    ) == [(trace_id, span_id, True)] * 2
+    assert (
+        _rows(
+            engine,
+            "SELECT trace_id, span_id, run_id IS NOT NULL FROM passages ORDER BY ordinal",
+        )
+        == [(trace_id, span_id, True)] * 2
+    )
 
 
 def test_extraction_records_the_trace(engine, database) -> None:
