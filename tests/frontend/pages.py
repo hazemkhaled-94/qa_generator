@@ -164,8 +164,12 @@ QUESTION = {
     "reviewed_verdict": None,
     "created_at": "2026-09-14T11:00:00",
     "facts": 1,
-    "documents": [SHA],
+    # The document's title, which is what the listing resolves; the digest
+    # is the fallback for a row carrying none.
+    "documents": ["Service policy"],
     "topics": ["de #0"],
+    "statements": [FACT["statement"]],
+    "evidence": [FACT["evidence_text"]],
     "thread_position": 1,
     "follows_id": None,
     "question_type": "factoid",
@@ -352,6 +356,56 @@ CATALOG: dict[str, Any] = {
     "assessment_plan": ASSESSMENT_PLAN,
 }
 
+#: What the upload page's own client reports, which is the only figure on
+#: the one page that has no listing.
+UPLOAD_COUNTS = {"documents": 3, "upload_attempts": 5}
+
+#: What the health page's own client reports. Three services, because the
+#: three states a service can be in are what the page exists to tell apart:
+#: answering, not answering, and serving no port to ask.
+HEALTH: dict[str, Any] = {
+    "reachable": (True, "Reachable."),
+    "services": [
+        {
+            "name": "argilla",
+            "purpose": "Where a person accepts or rejects.",
+            "ok": True,
+            "detail": "Listening on argilla:6900.",
+            "url": "http://localhost:6900",
+        },
+        {
+            "name": "parse-worker",
+            "purpose": "Turns a file into a document.",
+            "ok": None,
+            "detail": "Serves no port.",
+            "url": None,
+        },
+        {
+            "name": "redis",
+            "purpose": "The lock a stage takes.",
+            "ok": False,
+            "detail": "redis:6379 refused the connection.",
+            "url": None,
+        },
+    ],
+    "components": {
+        "database": {"ok": True, "detail": "Connected.", "metrics": {}},
+        "ingestion": {
+            "ok": True,
+            "detail": "Documents held.",
+            "metrics": UPLOAD_COUNTS,
+        },
+    },
+}
+
+#: The client each page outside the catalogue holds, and what it answers.
+#: `open_view` gives a page every client it reaches for, so a test naming a
+#: page never has to know which of these it is.
+OUTSIDE: dict[str, dict[str, Any]] = {
+    "upload": {"upload_api": {"counts": UPLOAD_COUNTS}},
+    "health": {"health_api": HEALTH},
+}
+
 #: The stage each page is allowed to run, and nothing else.
 OWNED = {
     "documents": "parsing",
@@ -436,18 +490,86 @@ def settings(**replaced: Any) -> dict:
     }
 
 
-class View:
-    """Any view, as a reader sees and works it."""
+class Answers:
+    """A backend client that answers from a script, and records the asks.
 
-    #: What each page's table is keyed with, which is what a row is picked
-    #: through.
-    TABLES: ClassVar[dict[str, str]] = {name: f"{name}-table" for name in LISTING}
+    Here rather than in conftest.py because a test module cannot safely say
+    `from conftest import Answers`: pytest imports every conftest under a
+    directory with no `__init__.py` as the bare name `conftest`, so the
+    first one loaded owns the name for the process. With `tests/unit` ahead
+    of `tests/frontend` in the collection order the four frontend modules
+    that imported it resolved to `tests/unit/topics/conftest.py` and failed
+    to collect. Alphabetical order was the only thing hiding it.
+    """
+
+    def __init__(self, **answers: object) -> None:
+        """Initialises the client with one answer per method name."""
+        self._answers = answers
+        self.asked: list[tuple[str, tuple, dict]] = []
+
+    def __getattr__(self, name: str):
+        """Answers whatever the page calls, or raises what it was given."""
+        if name not in self._answers:
+            raise AttributeError(name)
+
+        def answer(*args, **kwargs):
+            """Records the call and gives back the scripted answer."""
+            self.asked.append((name, args, kwargs))
+            prepared = self._answers[name]
+            if isinstance(prepared, Exception):
+                raise prepared
+            return prepared(*args, **kwargs) if callable(prepared) else prepared
+
+        return answer
+
+    def calls(self, method: str) -> list[tuple[str, tuple, dict]]:
+        """Every ask of one method, which is what most tests assert on."""
+        return [one for one in self.asked if one[0] == method]
+
+
+#: Every view that has a page class of its own, by the view it drives. A
+#: subclass registers itself here by declaring `view=`, so `open_view` can
+#: hand a test the page object for the view it asked for without a table
+#: anybody has to remember to update.
+PAGES: dict[str, type[View]] = {}
+
+
+def page_for(name: str) -> type[View]:
+    """The page class one view is worked through, or the plain one."""
+    return PAGES.get(name, View)
+
+
+class View:
+    """Any view, as a reader sees and works it.
+
+    The base holds what every page has, which is nearly everything: the
+    layout is deliberately the same on all of them. A subclass exists only
+    where a page has something no other page does, and says so by naming
+    the view it drives.
+    """
+
+    def __init_subclass__(cls, view: str, **kwargs) -> None:
+        """Registers one page class against the view it drives."""
+        super().__init_subclass__(**kwargs)
+        cls.VIEW = view
+        PAGES[view] = cls
 
     def __init__(self, app, name: str, selected: int | None = None) -> None:
         """Wraps a run of one view, remembering which row is picked."""
         self.app = app
         self.name = name
         self.selected = selected
+
+    @property
+    def table_key(self) -> str:
+        """What this page's table is keyed with, which a row is picked through.
+
+        Derived rather than tabulated: the table on every page is keyed with
+        the page's own name, and the table that listed the six catalogue
+        pages left `health` out - so the one test that picks a row there
+        wrote session state by hand instead of calling `select`.
+        """
+        return f"{self.name}-table"
 
     def _rerun(self) -> View:
         """Runs the script again, with whatever row was picked still picked.
@@ -459,10 +581,10 @@ class View:
         run that read it.
         """
         if self.selected is not None:
-            self.app.session_state[self.TABLES[self.name]] = {
+            self.app.session_state[self.table_key] = {
                 "selection": {"rows": [self.selected], "columns": []}
             }
-        return View(self.app.run(), self.name, self.selected)
+        return type(self)(self.app.run(), self.name, self.selected)
 
     # ── What the page rendered ───────────────────────────────────────────
 
@@ -549,9 +671,127 @@ class View:
     def widget_keys(self) -> set[str]:
         """Every input's key, which is how search is told from a filter."""
         found = set()
-        for kind in ("selectbox", "text_input", "number_input", "checkbox"):
+        for kind in (
+            "selectbox",
+            "text_input",
+            "number_input",
+            "checkbox",
+            "segmented_control",
+            "multiselect",
+            "radio",
+        ):
             found |= {one.key for one in getattr(self.app, kind) if one.key}
         return found
+
+    # ── The controls, by label and by key ────────────────────────────────
+
+    #: The pickers a value is chosen in, in the order `_widget` searches
+    #: them. A key is unique across all of them, so the first hit is it.
+    PICKERS: ClassVar[tuple[str, ...]] = (
+        "selectbox",
+        "segmented_control",
+        "multiselect",
+        "radio",
+    )
+
+    def _widget(self, key: str):
+        """One picker by its key, whichever kind of picker it is.
+
+        A test asks what a control offers, not which Streamlit primitive
+        draws it - and the primitive has changed under two of these already
+        (the assessment tabs are a segmented control and were a selectbox).
+
+        Through the attribute rather than `app.get`, which is keyed on the
+        proto's element name: `st.segmented_control` draws a `button_group`
+        and `app.get("segmented_control")` is empty.
+        """
+        for kind in self.PICKERS:
+            for one in getattr(self.app, kind):
+                if one.key == key:
+                    return one
+        raise AssertionError(f"no picker keyed {key!r}: {sorted(self.widget_keys())}")
+
+    def options(self, key: str) -> list[Any]:
+        """Everything one picker offers, in the order it offers them."""
+        return list(self._widget(key).options)
+
+    def chosen(self, key: str) -> Any:
+        """What one picker is currently set to."""
+        return self._widget(key).value
+
+    def explains(self, key: str) -> str:
+        """The tooltip behind one picker, which says what choosing does."""
+        return self._widget(key).help or ""
+
+    def numbers(self) -> dict[str, Any]:
+        """Every number box, by its label."""
+        return {one.label: one for one in self.app.number_input}
+
+    def texts(self) -> dict[str, Any]:
+        """Every text box, by its label."""
+        return {one.label: one for one in self.app.text_input}
+
+    def checkboxes(self) -> dict[str, Any]:
+        """Every checkbox, by its label."""
+        return {one.label: one for one in self.app.checkbox}
+
+    def pickers(self) -> dict[str, Any]:
+        """Every dropdown, by its label."""
+        return {one.label: one for one in self.app.selectbox}
+
+    def multiselects(self) -> dict[str, Any]:
+        """Every multi-choice control, by its label."""
+        return {one.label: one for one in self.app.multiselect}
+
+    def ticked(self, prefix: str) -> dict[str, bool]:
+        """Whether each checkbox under one key prefix is on.
+
+        By prefix because a page draws one per artefact kind, and what a
+        test asserts is the set of them and their states together.
+        """
+        return {
+            one.key: one.value
+            for one in self.app.checkbox
+            if one.key and one.key.startswith(prefix)
+        }
+
+    # ── What the page said, by the voice it said it in ───────────────────
+
+    def errors(self) -> list[str]:
+        """Everything drawn as an error."""
+        return [str(one.value) for one in self.app.error]
+
+    def warnings(self) -> list[str]:
+        """Everything drawn as a warning."""
+        return [str(one.value) for one in self.app.warning]
+
+    def notes(self) -> list[str]:
+        """Everything drawn as an information note."""
+        return [str(one.value) for one in self.app.info]
+
+    def captions(self) -> list[str]:
+        """Everything drawn as a caption."""
+        return [str(one.value) for one in self.app.caption]
+
+    def downloads(self) -> list[Any]:
+        """Every file the page is offering, of which there is usually none."""
+        return list(self.app.get("download_button"))
+
+    def uploader(self) -> list[Any]:
+        """The file picker, which only the upload page has."""
+        return list(self.app.get("file_uploader"))
+
+    def table_with(self, column: str):
+        """The one table carrying a named column.
+
+        By column and not by index: the Analysis fold draws its own tables
+        above the listing, so `dataframe[0]` is the queue counts on every
+        page that has one.
+        """
+        for frame in self.app.dataframe:
+            if column in getattr(frame.value, "columns", ()):
+                return frame.value
+        raise AssertionError(f"no table on {self.name} carries a {column!r} column")
 
     # ── What a reader does ───────────────────────────────────────────────
 
@@ -581,3 +821,31 @@ class View:
         """Clears one of the page's checkboxes."""
         self.app.checkbox(key).uncheck()
         return self._rerun()
+
+    def save_configuration(self) -> View:
+        """Presses Save in the configuration panel every page draws.
+
+        By label and not by position: the stage's own controls are drawn
+        above it, and which index it lands on differs from page to page.
+        """
+        return self.press("Save")
+
+
+class AssessmentPage(View, view="assessment"):
+    """The evaluation phase's page, which is the one with two verdicts a row.
+
+    Everything else about it is the shared layout. What is here is the
+    reading of a judgement: which table carries it, and which kinds the
+    page would queue for judging.
+    """
+
+    def verdicts(self):
+        """The table of judgements, which is not the first table on the page."""
+        return self.table_with("Judge")
+
+    def judging(self) -> dict[str, bool]:
+        """Which artefact kinds are ticked to be judged, by kind."""
+        return {
+            key.removeprefix("assessment-judge-"): value
+            for key, value in self.ticked("assessment-judge-").items()
+        }

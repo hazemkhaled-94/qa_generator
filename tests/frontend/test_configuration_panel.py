@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import pytest
 import requests
-from conftest import Answers
-from pages import SETTINGS, answers, settings
+from pages import SETTINGS, Answers, settings
 
 pytestmark = pytest.mark.frontend
 
@@ -29,35 +28,14 @@ PAGES = [
 ]
 
 
-def _clients(configured: Answers) -> dict:
-    """Every client any page reaches for, so one test can open all of them."""
-    return {
-        "catalog_api": Answers(**answers()),
-        "settings_api": configured,
-        "upload_api": Answers(counts={"documents": 3, "upload_attempts": 5}),
-        "health_api": Answers(
-            reachable=(True, "Reachable."), components={}, services=[]
-        ),
-    }
-
-
-def _save(app):
-    """The panel's Save button, by its label.
-
-    By label and not by position: the stage's own controls are drawn above
-    it, and which index it lands on differs from page to page.
-    """
-    return next(one for one in app.button if one.label == "Save")
-
-
 @pytest.mark.parametrize(("name", "service"), PAGES)
-def test_every_page_asks_for_the_service_it_runs(run_view, name, service) -> None:
+def test_every_page_asks_for_the_service_it_runs(open_view, name, service) -> None:
     """One page configures one service, and never another page's."""
     configured = Answers(**settings())
-    app = run_view(name, **_clients(configured))
+    view = open_view(name, configured=configured)
 
-    assert app.exception == [], app.exception
-    asked = [args[0] for method, args, _ in configured.asked if method == "settings"]
+    assert view.raised == [], view.raised
+    asked = [args[0] for _, args, _ in configured.calls("settings")]
     assert asked == [service], asked
 
 
@@ -65,7 +43,7 @@ def test_a_number_is_drawn_as_a_number(open_view) -> None:
     """Typed from what the API said it is, not from the page's own list."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.number_input}
+    drawn = view.numbers()
     assert "A_COUNT" in drawn
     assert drawn["A_COUNT"].value == 5
 
@@ -74,23 +52,21 @@ def test_a_share_is_drawn_with_the_bounds_it_has(open_view) -> None:
     """A share above one is a gate nothing passes, so the control refuses it."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.number_input}
-    assert drawn["A_SHARE"].value == 0.5
+    assert view.numbers()["A_SHARE"].value == 0.5
 
 
 def test_a_flag_is_drawn_as_a_checkbox(open_view) -> None:
     """Read the way the backend's own reader reads it."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.checkbox}
-    assert drawn["A_FLAG"].value is True
+    assert view.checkboxes()["A_FLAG"].value is True
 
 
 def test_a_closed_set_is_drawn_as_a_picker(open_view) -> None:
     """A list of two is a picker, not a box somebody can mistype into."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.selectbox}
+    drawn = view.pickers()
     assert drawn["A_MODE"].value == "fast"
     assert list(drawn["A_MODE"].options) == ["fast", "accurate"]
 
@@ -99,24 +75,21 @@ def test_a_list_with_a_closed_set_is_drawn_as_a_multiselect(open_view) -> None:
     """Each entry is checked against the list, so each entry is picked."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.multiselect}
-    assert drawn["A_LIST"].value == ["one", "two"]
+    assert view.multiselects()["A_LIST"].value == ["one", "two"]
 
 
 def test_a_setting_the_deployment_owns_is_drawn_and_disabled(open_view) -> None:
     """Visible without opening a shell, and not writable from here."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.text_input}
-    assert drawn["A_POOL"].disabled is True
+    assert view.texts()["A_POOL"].disabled is True
 
 
 def test_a_setting_whose_absence_means_something_is_drawn_empty(open_view) -> None:
     """An empty box is how one is turned off, which a number box cannot say."""
     view = open_view("topics")
 
-    drawn = {one.label: one for one in view.app.text_input}
-    assert drawn["A_MODEL"].value == ""
+    assert view.texts()["A_MODEL"].value == ""
 
 
 def test_a_changed_setting_is_marked(open_view) -> None:
@@ -124,7 +97,7 @@ def test_a_changed_setting_is_marked(open_view) -> None:
     changed = [{**one, "stored": True} for one in SETTINGS["settings"]]
     view = open_view("topics", configured=Answers(**settings(settings=changed)))
 
-    assert "A_COUNT ·" in [one.label for one in view.app.number_input]
+    assert "A_COUNT ·" in view.numbers()
 
 
 def test_saving_sends_the_version_the_panel_was_drawn_from(open_view) -> None:
@@ -132,9 +105,9 @@ def test_saving_sends_the_version_the_panel_was_drawn_from(open_view) -> None:
     configured = Answers(**settings())
     view = open_view("topics", configured=configured)
 
-    _save(view.app).click().run()
+    view.save_configuration()
 
-    sent = [call for call in configured.asked if call[0] == "change_settings"]
+    sent = configured.calls("change_settings")
     assert sent, "the save button sent nothing"
     assert sent[0][1][2] == SETTINGS["version"]
 
@@ -144,10 +117,9 @@ def test_saving_sends_every_setting_it_may_write(open_view) -> None:
     configured = Answers(**settings())
     view = open_view("topics", configured=configured)
 
-    _save(view.app).click().run()
+    view.save_configuration()
 
-    sent = next(call for call in configured.asked if call[0] == "change_settings")
-    written = sent[1][1]
+    written = configured.calls("change_settings")[0][1][1]
     assert "A_COUNT" in written
     assert "A_POOL" not in written
 
@@ -168,9 +140,9 @@ def test_a_refused_change_is_shown_in_the_words_the_api_refused_it(
     configured = Answers(settings=lambda service: SETTINGS, change_settings=refused)
     view = open_view("topics", configured=configured)
 
-    after = _save(view.app).click().run()
+    after = view.save_configuration()
 
-    assert "TOPIC_PASSES" in after.error[0].value
+    assert "TOPIC_PASSES" in after.errors()[0]
 
 
 def test_a_change_that_stales_something_says_so_and_it_stays(open_view) -> None:
@@ -189,9 +161,9 @@ def test_a_change_that_stales_something_says_so_and_it_stays(open_view) -> None:
     )
     view = open_view("topics", configured=configured)
 
-    after = _save(view.app).click().run()
+    after = view.save_configuration()
 
-    assert "rerun" in after.warning[0].value
+    assert "rerun" in after.warnings()[0]
 
 
 def test_an_unreachable_backend_leaves_the_rest_of_the_page_working(

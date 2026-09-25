@@ -9,8 +9,7 @@ reading.
 from __future__ import annotations
 
 import pytest
-from conftest import Answers
-from pages import FACT, FACT_QUALITY, View, answers, changed, resting
+from pages import FACT, FACT_QUALITY, Answers, answers, changed, resting
 
 pytestmark = pytest.mark.frontend
 
@@ -20,15 +19,8 @@ def page_of(*facts: dict) -> dict:
     return {"total": len(facts), "facts": list(facts)}
 
 
-@pytest.fixture
-def page(open_view):
-    """Runs the Facts view against whatever the backend is scripted to say."""
-
-    def run(**replaced) -> View:
-        """Runs the page with these answers replacing the defaults."""
-        return open_view("facts", **replaced)
-
-    return run
+#: The view this module is about. `page` in conftest.py reads it.
+VIEW = "facts"
 
 
 # ── The four readings ─────────────────────────────────────────────────────
@@ -36,7 +28,7 @@ def page(open_view):
 
 def test_every_reading_is_offered_as_a_filter(page) -> None:
     """Atomic, summary, outline and bridge, each choosable on its own."""
-    offered = page().app.selectbox("facts-kind").options
+    offered = page().options("facts-kind")
 
     assert offered == [
         "All readings",
@@ -49,7 +41,7 @@ def test_every_reading_is_offered_as_a_filter(page) -> None:
 
 def test_each_reading_is_explained_where_it_is_chosen(page) -> None:
     """A reader picking one should not have to know what it means."""
-    said = page().app.selectbox("facts-kind").help
+    said = page().explains("facts-kind")
 
     for reading in ("Atomic", "Summary", "Outline", "Bridge"):
         assert reading in said
@@ -214,4 +206,4 @@ def test_the_listing_carries_the_passages_so_none_are_asked_for(open_view) -> No
 
     open_view("facts", client).select(0)
 
-    assert not [one for one in client.asked if one[0] == "passage"]
+    assert not client.calls("passage")

@@ -14,6 +14,12 @@ from nlp.embedding import WIDTH, Embedder, cosine
 
 MODEL = "intfloat/multilingual-e5-large"
 
+#: Everything taking `embedder` loads 2.2 GB of weights, which is what the
+#: marker is for: `make test-fast` is `-m "not nlp"` and used to spend its
+#: time here. On the tests rather than on the module, because `cosine` is
+#: arithmetic over two lists and belongs in the layer that runs every time.
+loads_the_model = pytest.mark.nlp
+
 
 @pytest.fixture(scope="module")
 def embedder() -> Embedder:
@@ -27,11 +33,13 @@ def embedder() -> Embedder:
     return Embedder(MODEL, max_tokens=512)
 
 
+@loads_the_model
 def test_a_question_embeds_at_the_width_the_column_holds(embedder) -> None:
     """questions.embedding is vector(1024); a mismatch fails at insert."""
     assert len(embedder.embed("What does the device weigh?")) == WIDTH
 
 
+@loads_the_model
 def test_an_embedding_is_a_unit_vector(embedder) -> None:
     """Which is what lets the gates compare by dot product."""
     vector = embedder.embed("What does the device weigh?")
@@ -39,6 +47,7 @@ def test_an_embedding_is_a_unit_vector(embedder) -> None:
     assert cosine(vector, vector) == pytest.approx(1.0, abs=1e-5)
 
 
+@loads_the_model
 def test_a_paraphrase_scores_above_an_unrelated_question(embedder) -> None:
     """The whole basis of the dedup gate, in one comparison."""
     asked = embedder.embed("What does the device weigh?")
@@ -48,6 +57,7 @@ def test_a_paraphrase_scores_above_an_unrelated_question(embedder) -> None:
     assert cosine(asked, same) > cosine(asked, other)
 
 
+@loads_the_model
 def test_the_same_question_in_two_languages_is_close(embedder) -> None:
     """The model is multilingual because this corpus is."""
     english = embedder.embed("Who must produce the risk report?")
@@ -57,6 +67,7 @@ def test_the_same_question_in_two_languages_is_close(embedder) -> None:
     assert cosine(english, german) > cosine(english, unrelated)
 
 
+@loads_the_model
 def test_the_model_is_as_wide_as_the_column_that_holds_it(embedder) -> None:
     """The guard in the constructor, seen from the other side.
 

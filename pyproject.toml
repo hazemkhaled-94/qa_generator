@@ -174,6 +174,17 @@ dev = [
     # the line ran; this says flipping it fails something. Nightly, never a
     # pull-request gate.
     "mutmut (>=3.2.0,<4.0.0)",
+    # What `starlette.testclient` imports. It tries httpx2 first and falls
+    # back to httpx with a StarletteDeprecationWarning, so without this the
+    # every-warning-is-an-error rule below has to carry an ignore for a
+    # deprecation the project can simply not have. Nothing here imports it
+    # by name: TestClient does.
+    #
+    # Not a move off httpx onto `requests`, which is not on offer -
+    # starlette's TestClient dropped requests in 0.21. The first-party HTTP
+    # in frontend/lib/backend and orchestration/client.py is requests, and
+    # stays requests.
+    "httpx2 (>=2.12.0,<3.0.0)",
 ]
 
 
@@ -322,7 +333,9 @@ pythonpath = [".", "backend", "frontend", "tests", "tests/integration", "tests/f
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
-    "nlp: loads a spaCy pipeline",
+    # Was "loads a spaCy pipeline", which left the embedder's 2.2 GB of
+    # weights outside the only marker that would have excluded them.
+    "nlp: loads a spaCy pipeline or a sentence-transformer",
     "types: shells out to pyright",
     "integration: needs a container runtime",
     "frontend: runs a Streamlit view",
@@ -330,6 +343,26 @@ markers = [
     "smoke: builds images and reads the compose file",
     "eval: scores a real served model; never gates",
     "perf: times the ceilings the code names; never gates",
+]
+
+# A deprecation nothing fails on is a deprecation nobody reads. The
+# StarletteDeprecationWarning about httpx sat in every run's summary until
+# somebody went looking for it; `error` is what would have surfaced it on
+# the commit that introduced it.
+#
+# Every ignore below is third-party and unfixable from here, and each is
+# pinned to the module that raises it rather than to the category, so the
+# same category from OUR code still fails. Delete one and see whether it
+# still fires: that is how they leave.
+filterwarnings = [
+    "error",
+    # starlette/testclient.py reads `anyio.abc.BlockingPortal` to build a
+    # type alias. Fixed upstream in starlette's own time, not ours.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+    # The SWIG runtime types pymupdf's C extension registers. Python 3.13
+    # wants a __module__ on a builtin type and SWIG does not set one.
+    "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
 ]
 
 # Measured over every package a deployment runs, not just the backend: the

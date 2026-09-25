@@ -8,8 +8,7 @@ to run or delete one topic at a time, and a name a person gives one.
 from __future__ import annotations
 
 import pytest
-from conftest import Answers
-from pages import FIT, LANGUAGE_FIT, TOPIC, View, answers, changed, status
+from pages import FIT, LANGUAGE_FIT, TOPIC, Answers, answers, changed, status
 
 pytestmark = pytest.mark.frontend
 
@@ -23,15 +22,8 @@ def fit(languages: list[dict] | None = None, **replaced) -> dict:
     }
 
 
-@pytest.fixture
-def page(open_view):
-    """Runs the Topics view against whatever the backend is scripted to say."""
-
-    def run(**replaced) -> View:
-        """Runs the page with these answers replacing the defaults."""
-        return open_view("topics", **replaced)
-
-    return run
+#: The view this module is about. `page` in conftest.py reads it.
+VIEW = "topics"
 
 
 # ── An empty deployment ───────────────────────────────────────────────────
@@ -300,7 +292,7 @@ def test_confirming_the_deletion_removes_the_topics(open_view) -> None:
     page = open_view("topics", client).press("Delete all topics")
     page.press("Yes, delete")
 
-    assert [one for one in client.asked if one[0] == "delete_topics"]
+    assert client.calls("delete_topics")
 
 
 def test_cancelling_the_deletion_removes_nothing(open_view) -> None:
@@ -310,7 +302,7 @@ def test_cancelling_the_deletion_removes_nothing(open_view) -> None:
     page = open_view("topics", client).press("Delete all topics")
     page.press("Cancel")
 
-    assert not [one for one in client.asked if one[0] == "delete_topics"]
+    assert not client.calls("delete_topics")
 
 
 def test_the_deletion_warning_is_different_when_there_is_nothing_to_delete(
