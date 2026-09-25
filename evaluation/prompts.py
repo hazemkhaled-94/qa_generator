@@ -105,8 +105,9 @@ def aside(model: ModelSettings) -> str:
 
     The window and the patience, and the reasoning effort when it is
     Ollama's `off` rather than one of the six Phoenix knows. Written into
-    the description, which is free text, because a parameter shown nowhere
-    is one somebody reproducing a run has to go and read the deployment for.
+    the VERSION's description, which is free text and is written fresh on
+    every publish, because a parameter shown nowhere is one somebody
+    reproducing a run has to go and read the deployment for.
     """
     written = [f"timeout {model.timeout_seconds:g}s"]
     if model.window:
@@ -206,14 +207,24 @@ def publish(
         try:
             client.prompts.create(
                 name=named(row.service, row.name),
+                # Nothing that goes stale. Phoenix sets this when it CREATES
+                # the prompt and ignores it on every version after, so a
+                # version or a digest written here is frozen at whichever
+                # one was published first and then quietly wrong.
                 prompt_description=(
-                    f"{row.service}: {row.name}, at PROMPT_VERSION {row.version} "
-                    f"({row.digest}). Also sent: {also}. Composed in the source "
-                    f"and recorded by the stage that sends it; an edit here "
+                    f"{row.service}: {row.name}. Composed in the source and "
+                    f"recorded by the stage that sends it; an edit here "
                     f"reaches nothing."
                 ),
                 version=PromptVersion.from_openai(
                     call,  # type: ignore[arg-type] - a plain dict of the same keys
+                    # What DOES move, on the version, which is written fresh
+                    # every publish: the version it came from, its digest,
+                    # and the parameters Phoenix has no field for.
+                    description=(
+                        f"PROMPT_VERSION {row.version} ({row.digest}). "
+                        f"Also sent: {also}."
+                    ),
                     # MUSTACHE, so the `{{name}}` in a user template reads as
                     # the variable it is. Safe for the system half: no prompt
                     # in the source carries a double brace, and the single
