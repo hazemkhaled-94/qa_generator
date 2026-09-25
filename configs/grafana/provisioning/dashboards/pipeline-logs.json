@@ -1,6 +1,6 @@
 {
   "uid": "qa-pipeline-logs",
-  "title": "Pipeline logs",
+  "title": "4 · Every line every process wrote",
   "description": "Every line the api, the four workers and the frontend logged. Filter by service and level at the top; the panels below all follow those.",
   "tags": ["qa_generator"],
   "timezone": "utc",
@@ -37,12 +37,20 @@
   },
   "panels": [
     {
+      "id": 0,
+      "type": "text",
+      "title": "What this dashboard is for",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": { "mode": "markdown", "content": "**What this answers:** what any process actually logged, per service, joined to its trace and its run.\n\nNothing is aggregated and nothing is dropped. This is the only store that holds every line — **Phoenix** holds the calls, not the lines beneath them." }
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Lines per level",
       "description": "How much each service is saying, and at what severity. A step up in error while info stays flat is a stage failing every row it claims rather than a busier pipeline.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "bars", "fillOpacity": 70, "stacking": { "mode": "normal" }, "lineWidth": 0 },
@@ -79,7 +87,7 @@
       "title": "Errors in range",
       "description": "Lines at error or critical over the selected window, whatever the Level filter above is set to. Zero is what this should read.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -117,7 +125,7 @@
       "title": "What failed, and where",
       "description": "One row per error, with the exception type and the first of its traceback. The whole traceback is in error.stack_trace on the log line below.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 8 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 12 },
       "fieldConfig": {
         "defaults": { "custom": { "align": "left", "cellOptions": { "type": "auto", "wrapText": true } } },
         "overrides": [
@@ -165,7 +173,7 @@
       "title": "Every line",
       "description": "The stream itself, newest first. Expand a line to see its fields: trace.id ties it to the span in Phoenix, and error.stack_trace carries the whole traceback.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 17 },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 21 },
       "options": {
         "showTime": true,
         "showLabels": false,

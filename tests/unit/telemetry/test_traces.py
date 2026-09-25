@@ -65,7 +65,11 @@ def test_a_run_exports(exporters) -> None:
 
 
 def test_a_run_is_filed_under_its_own_project(monkeypatch) -> None:
-    """`<service>-<run>`, which is what joins it to `run.id` in the logs."""
+    """`<position>-<service>-<run>`, which joins it to `run.id` in the logs.
+
+    Numbered, because Phoenix sorts its projects by name and a corpus moves
+    extraction, topics, questions - which sorts the other way round.
+    """
     seen: dict = {}
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(traces.trace, "set_tracer_provider", lambda _p: None)
@@ -74,7 +78,7 @@ def test_a_run_is_filed_under_its_own_project(monkeypatch) -> None:
     )
     traces.configure("extraction", run="abc123")
 
-    assert seen[traces.PROJECT] == "extraction-abc123"
+    assert seen[traces.PROJECT] == "4-extraction-abc123"
 
 
 def test_nothing_instruments_http_or_the_object_store() -> None:

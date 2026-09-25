@@ -1,6 +1,6 @@
 {
   "uid": "qa-pipeline-runs",
-  "title": "Run",
+  "title": "3 · One run, end to end",
   "description": "One run, from all three stores at once. A run is `RUN_ID`, and it is spelled the same in each: `questions.run_id` on the rows, a Phoenix project named `<stage>-<run id>` on the spans, `run.id` on every log line. The rows say what the run produced and which gate stopped the rest; the spans say what the logic did and what it cost; the logs say literally everything else. Pick a run at the top.",
   "tags": ["qa_generator"],
   "editable": true,
@@ -48,12 +48,20 @@
   },
   "panels": [
     {
+      "id": 0,
+      "type": "text",
+      "title": "What this dashboard is for",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": { "mode": "markdown", "content": "**What this answers:** everything one `RUN_ID` did — what it produced, what it cost, its Phoenix projects and every line it wrote.\n\n**The join between the three stores.** One run is `questions.run_id` on the rows, `<position>-<stage>-<run>` as a Phoenix project, and `run.id` on every log line." }
+    },
+    {
       "id": 1,
       "type": "stat",
       "title": "What the run produced",
       "description": "Counted off the rows, which is where the truth about them is. Only live rows: a rerun deletes what it replaces, and a deleted run answers `make questions-diff` and not this.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 4 },
       "fieldConfig": {
         "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
         "overrides": [
@@ -94,7 +102,7 @@
       "title": "What the run cost",
       "description": "The half SQL cannot answer. Every model call the run made, from its Phoenix projects. Spend is zero for a locally served model, which is the point of moving a judgement onto one.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
-      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 4 },
       "fieldConfig": {
         "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
         "overrides": [
@@ -135,7 +143,7 @@
       "title": "Where the questions went",
       "description": "Every gate that refused something, and `accepted`. The last gate that ran is the one that refused it, because the checker returns on the first failure.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 5 },
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
         "defaults": { "unit": "short", "min": 0, "color": { "mode": "continuous-BlYlRd" } },
         "overrides": [
@@ -168,7 +176,7 @@
       "title": "What the calls were for",
       "description": "The Pydantic shape each call asked for, which is what `tag.tags` carries. This is the query `make spend-by-shape` reads log prose to answer. Empty for a run made before the shape was put on the span.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
-      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 5 },
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 9 },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
         "overrides": [
@@ -205,7 +213,7 @@
       "title": "Its Phoenix projects",
       "description": "One per stage that ran under this id, with the span count and the window it covers. A run of the whole pipeline is several rows; one restarting worker used to be thousands.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
         "overrides": []
@@ -227,7 +235,7 @@
       "title": "Gate verdicts recorded in Phoenix",
       "description": "The annotations behind Phoenix's Evaluations view, which is the half that is easy to lose: they are best-effort, and one refusal disables them for the rest of the run. Empty here against a non-empty panel on the left means the run produced questions and recorded no verdicts.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-phoenix" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
       "fieldConfig": {
         "defaults": { "unit": "short", "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
         "overrides": [
@@ -254,7 +262,7 @@
       "title": "Every line this run wrote",
       "description": "The run's own lines, across every process it crossed, at every level. This is the other half of the separation: Phoenix holds what the logic did, and this holds everything — the HTTP, the SQL, the object store, the retries. A line's `trace.id` opens its span in Phoenix.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 28 },
       "options": {
         "showTime": true,
         "showLabels": false,

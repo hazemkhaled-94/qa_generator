@@ -68,12 +68,13 @@ def _dataset(client: rg.Argilla, settings: Settings, name: str) -> rg.Dataset:
     and a push that dropped it would throw away every verdict not yet
     pulled.
     """
-    found = client.datasets(name=name, workspace=settings.workspace)
+    held = datasets.dataset_name(name)
+    found = client.datasets(name=held, workspace=settings.workspace)
     if found is not None:
         return found
-    log.info("creating dataset %s in %s", name, settings.workspace)
+    log.info("creating dataset %s in %s", held, settings.workspace)
     return rg.Dataset(
-        name=name,
+        name=held,
         workspace=settings.workspace,
         settings=datasets.SETTINGS[name](),
         client=client,
@@ -155,7 +156,9 @@ def pull(name: str, settings: Settings, catalogs: Catalogs) -> int:
         How many rows were written.
     """
     client = connect(settings)
-    dataset = client.datasets(name=name, workspace=settings.workspace)
+    dataset = client.datasets(
+        name=datasets.dataset_name(name), workspace=settings.workspace
+    )
     if dataset is None:
         log.info("%s: no such dataset; nothing has been pushed yet", name)
         return 0

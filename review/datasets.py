@@ -24,12 +24,30 @@ import argilla as rg
 
 from review.judged import UNJUDGED, Opinion
 from review.records import FactRow, QuestionRow
+from telemetry import pipeline
 
-#: The dataset names, which are also what the CLI takes.
+#: What the CLI takes, and what the code branches on.
 FACTS = "facts"
 TOPIC_LABELS = "topic-labels"
 QUESTIONS = "questions"
 NAMES = (FACTS, TOPIC_LABELS, QUESTIONS)
+
+#: Which stage produces each kind. What Argilla shows is numbered with the
+#: stage's place in the pipeline, because Argilla sorts its datasets by
+#: name and `facts, questions, topic-labels` is not the order they are
+#: produced in. The number means what it means in Phoenix's projects and
+#: Dagster's groups: the same step seen from another side.
+STAGES = {
+    FACTS: "extraction",
+    TOPIC_LABELS: "topic_modelling",
+    QUESTIONS: "question_generation",
+}
+
+
+def dataset_name(name: str) -> str:
+    """What Argilla holds one kind under, numbered by its stage."""
+    return pipeline.numbered(name, STAGES.get(name))
+
 
 #: The one question every verdict dataset asks. Two labels and no middle:
 #: "unsure" is where a review goes to not happen, and a reviewer who
@@ -81,6 +99,19 @@ _JUDGE_GUIDELINE = (
     "is in front of you: one of the two is wrong and only you can say which."
 )
 
+#: Added after it. Argilla's job is the artefacts a person judges, and a
+#: reviewer who needs the calls behind one has to be told where they are.
+_WHERE_GUIDELINE = (
+    "\n\n"
+    "The number in this dataset's name is the stage that produced it: "
+    "4 extraction, 5 topic modelling, 6 question generation. Argilla holds "
+    "the artefacts and your verdicts on them, and nothing else. The calls "
+    "that produced a row are in Phoenix under a project numbered the same "
+    "way, every line the run wrote is in Grafana, and which run it was is "
+    "in Dagster. The application's own pages show one artefact's whole "
+    'chain under "How this was produced".'
+)
+
 
 def judge_metadata(opinion: Opinion) -> dict[str, str]:
     """The two metadata terms one artefact's verdict becomes."""
@@ -103,7 +134,9 @@ def fact_settings() -> rg.Settings:
             "paraphrase of the passage rather than a claim drawn from it.\n\n"
             "`rejection_code` is what the automatic checker decided. You are "
             "judging the statement, not agreeing with the checker - the "
-            "disagreements are the point of the exercise." + _JUDGE_GUIDELINE
+            "disagreements are the point of the exercise."
+            + _JUDGE_GUIDELINE
+            + _WHERE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="statement", title="The fact as written"),
@@ -137,7 +170,7 @@ def topic_settings() -> rg.Settings:
             "is right. A topic that is an artefact of the fitting rather than "
             "a subject - boilerplate, page furniture, a mix of everything - "
             "should be marked out of coverage, which means no questions are "
-            "written about it at all." + _JUDGE_GUIDELINE
+            "written about it at all." + _JUDGE_GUIDELINE + _WHERE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="terms", title="Its strongest terms"),
@@ -184,7 +217,7 @@ def question_settings() -> rg.Settings:
             "those facts cite, and `explanation` is why the writer says "
             "that is the answer. Judge the answer against the evidence: a "
             "fact can be a fair reading of a sentence that does not say "
-            "what the answer claims." + _JUDGE_GUIDELINE
+            "what the answer claims." + _JUDGE_GUIDELINE + _WHERE_GUIDELINE
         ),
         fields=[
             rg.TextField(name="question", title="The question"),

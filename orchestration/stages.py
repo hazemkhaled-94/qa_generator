@@ -37,6 +37,25 @@ from dagster import (
 
 from orchestration.client import Backend
 from orchestration.settings import Settings
+from telemetry import pipeline
+
+
+def group(stage: str) -> str:
+    """What Dagster files one stage's asset under.
+
+    A group per stage rather than one `pipeline` group holding all seven.
+    Dagster sorts both its asset list and its group list by name, and
+    `assessments, facts, parsed_documents, passages, questions, topics` is
+    not the order a corpus moves through them.
+
+    The number is the stage's place in the pipeline and means what it means
+    in Phoenix's project names and Argilla's dataset names. `stage_` in
+    front because a Dagster group name must be a valid Python identifier
+    and an identifier may not begin with a digit.
+    """
+    at = pipeline.POSITION.get(stage)
+    return f"stage_{at}_{stage}" if at else stage
+
 
 #: The stages, in the order a document moves through them, as
 #: (asset name, route prefix, what its queue counts).
@@ -86,7 +105,7 @@ def _stage_asset(name: str, stage: str, unit: str, deps: list[str]):
     @asset(
         name=name,
         deps=[AssetKey(one) for one in deps],
-        group_name="pipeline",
+        group_name=group(stage),
         description=f"Runs {stage} over everything not asked for yet, and "
         f"waits for the workers to drain it.",
         compute_kind="queue",
@@ -135,7 +154,7 @@ facts, facts_check = _BUILT[2]
 
 @asset(
     deps=[AssetKey("facts")],
-    group_name="pipeline",
+    group_name=group("topic_modelling"),
     description="Fits one topic model per language over the whole corpus, "
     "replacing every topic there was.",
     compute_kind="queue",
@@ -187,7 +206,7 @@ def topics_check() -> AssetCheckResult:
 
 @asset(
     deps=[AssetKey("topics")],
-    group_name="pipeline",
+    group_name=group("question_generation"),
     description="Writes the test questions, one topic at a time.",
     compute_kind="queue",
 )
@@ -223,7 +242,7 @@ def questions_check() -> AssetCheckResult:
 @asset(
     name="assessments",
     deps=[AssetKey("questions")],
-    group_name="pipeline",
+    group_name=group("assessment"),
     description="The evaluation phase: an LLM judge over every fact, topic "
     "and question the pipeline produced. Records an opinion beside the "
     "checker's verdict and changes nothing.",

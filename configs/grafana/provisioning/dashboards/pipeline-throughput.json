@@ -1,6 +1,6 @@
 {
   "uid": "qa-pipeline-throughput",
-  "title": "Pipeline throughput",
+  "title": "2 · What each stage is doing",
   "description": "How fast the corpus is moving and what the model is costing, read off the fields the stages bind to their lines. The companion to \"Pipeline state\": that one says what is held, this one says at what rate it got there. Empty panels on a stack that has been idle are correct.",
   "tags": ["qa_generator"],
   "editable": true,
@@ -26,12 +26,20 @@
   },
   "panels": [
     {
+      "id": 0,
+      "type": "text",
+      "title": "What this dashboard is for",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": { "mode": "markdown", "content": "**What this answers:** how fast each stage works through its queue, what the model calls cost, and which way the accept rate is moving.\n\nThe stages are numbered here the way they are numbered everywhere: 1 ingestion, 2 parsing, 3 chunking, 4 extraction, 5 topic modelling, 6 question generation, 7 assessment." }
+    },
+    {
       "id": 1,
       "type": "timeseries",
       "title": "Units finished per interval, by stage",
       "description": "One line is one unit of work a stage finished - a document parsed, a passage read, a topic written. Counted from the lines that carry a `stage`, so a stage nothing has run in the window is absent rather than flat at zero.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
@@ -64,7 +72,7 @@
       "title": "Model call latency",
       "description": "The pipeline's bottleneck, not the pipeline. A median passage was measured at 473 s on a 31B model. The 99th is what the extraction lease is derived from, so a p99 climbing towards LLM_TIMEOUT_SECONDS is the warning that healthy workers are about to start looking abandoned.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 9 },
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 13 },
       "fieldConfig": {
         "defaults": { "unit": "ms", "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5 } },
         "overrides": []
@@ -93,7 +101,7 @@
       "title": "Model calls, and what they cost",
       "description": "Every call the three model-calling stages made in the window: how many, the time spent waiting, the tokens the provider billed for and what it charged. Cost is missing rather than zero for a model litellm has no price for, which is every self-hosted one — a stack serving its own model shows tokens and no money, which is the truth about it.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 9 },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 13 },
       "fieldConfig": {
         "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } },
         "overrides": [
@@ -180,7 +188,7 @@
       "title": "Facts extracted, accepted against refused",
       "description": "Summed from the line each passage logs when it is stored. The gap between the two is the checker's drop rate over time, which is the number that moves when a prompt or a gate is changed.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
@@ -227,7 +235,7 @@
       "title": "Questions written, accepted against refused",
       "description": "The same shape for the stage at the other end. A topic yielding nothing is not a failure and logs no counts, so a flat stretch here with the queue draining is topics that had nothing left to ask about.",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0, "stacking": { "mode": "normal" } },
@@ -274,7 +282,7 @@
       "title": "Who asked for what",
       "description": "Every queue verb asked for over HTTP - the Start button, a route, the orchestrator - and how many rows each moved. The command line logs its own and is not here. This is the panel that answers \"why did the corpus start moving\".",
       "datasource": { "type": "elasticsearch", "uid": "qa-logs" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
       "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
       "options": { "showHeader": true },
       "targets": [

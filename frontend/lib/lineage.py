@@ -44,7 +44,7 @@ def _phoenix(artifact: dict) -> str:
     if not trace_id and not span_id:
         return "—"
     if not config.PHOENIX_BASE_URL:
-        return f"`{(span_id or trace_id)[:12]}`"
+        return f"`{(span_id or trace_id or '')[:12]}`"
     return ", ".join(
         f"[{label}]({config.PHOENIX_BASE_URL}/redirects/{kind}/{one})"
         for label, kind, one in (

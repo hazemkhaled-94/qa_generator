@@ -29,6 +29,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+from telemetry import pipeline
+
 if TYPE_CHECKING:
     # Behind TYPE_CHECKING: this package is shared with the frontend, which
     # does not install SQLAlchemy.
@@ -71,7 +73,8 @@ def configure(service_name: str, run: str | None = None) -> None:
 
     `run` does two things, and they are the same thing said twice: it puts
     this process's spans in a Phoenix project of their own,
-    `<service>-<run>`, and it is what decides there is an exporter at all.
+    `<position>-<service>-<run>`, and it is what decides there is an
+    exporter at all.
     A process that names no run is a service, a host command or a query
     against the database - none of them the logic Phoenix is for - and it
     gets a provider that records and sends nothing.
@@ -88,7 +91,8 @@ def configure(service_name: str, run: str | None = None) -> None:
         # Named for the service too, so one run of the whole pipeline is
         # five projects that sort together rather than one heap in which
         # extraction's calls and question generation's are indistinguishable.
-        attributes[PROJECT] = f"{service_name}-{run}"
+        # Numbered so they sort in the order the stages run, not by name.
+        attributes[PROJECT] = pipeline.project(service_name, run)
     provider = TracerProvider(resource=Resource.create(attributes))
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") if run else None

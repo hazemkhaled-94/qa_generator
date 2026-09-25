@@ -1,6 +1,6 @@
 {
   "uid": "qa-pipeline-state",
-  "title": "Pipeline state",
+  "title": "1 · Where the corpus is now",
   "description": "What the pipeline holds right now, counted off the tables that hold it. The logs say what happened once; these say what is true. A row a worker died holding logged nothing and is still counted here, which is the difference that matters when something has gone quiet.",
   "tags": ["qa_generator"],
   "editable": true,
@@ -11,12 +11,20 @@
   "templating": { "list": [] },
   "panels": [
     {
+      "id": 0,
+      "type": "text",
+      "title": "What this dashboard is for",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "transparent": true,
+      "options": { "mode": "markdown", "content": "**What this answers:** how far every stage has got, and what it refused. Counted off the tables, so a row a dead worker was holding is still counted here.\n\n**Grafana's job is state and logs.** For the *calls* behind a step go to **Phoenix**; for *which run* produced it, **Dagster**; for *what a person said about it*, **Argilla**; for *how one artefact was produced*, the \"How this was produced\" fold on the application's own pages." }
+    },
+    {
       "id": 1,
       "type": "bargauge",
       "title": "Queue depth by stage",
       "description": "Every stage's queue in one shape. `new` is a row nobody has asked for yet and is not waiting on a worker - it is waiting on a person. `pending` is claimable and is the only thing a worker takes. A pending column that does not fall is a stage with no worker behind it, which reads exactly like a broken one.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
       "fieldConfig": {
         "defaults": { "unit": "short", "min": 0, "color": { "mode": "palette-classic" } },
         "overrides": [
@@ -52,7 +60,7 @@
       "title": "Failed, by stage",
       "description": "A failed row is recoverable and stays where it is until something returns it: `retry` on that stage, or the Retry button beside it. Nothing sweeps them up on its own, so a number here that never moves is a number nobody has looked at.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 6, "w": 10, "x": 0, "y": 9 },
+      "gridPos": { "h": 6, "w": 10, "x": 0, "y": 13 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -85,7 +93,7 @@
       "title": "Why a fact was refused",
       "description": "Grouped on the stored code rather than on the English beside it, because the message carries a measurement and would make one bucket per fact. A shift in the mix between runs is the checker or the model changing its mind, and is worth more than the overall rate.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 6, "w": 14, "x": 10, "y": 9 },
+      "gridPos": { "h": 6, "w": 14, "x": 10, "y": 13 },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
@@ -108,7 +116,7 @@
       "title": "Facts held, by kind",
       "description": "Extraction reads a passage four ways. The share of each is what EXTRACTION_KINDS and the atomic cap were set to control, so this is the panel that says whether they did.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
       "fieldConfig": {
         "defaults": { "custom": { "align": "auto" } },
         "overrides": [
@@ -136,7 +144,7 @@
       "title": "Questions, and the gate that refused them",
       "description": "A rejected question keeps its row: the share thrown away is the evidence behind the coverage report, and a deleted row is a drop nobody can count. `draft` is written and not yet decided.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
       "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
       "options": { "showHeader": true },
       "targets": [
@@ -154,7 +162,7 @@
       "title": "Topics, and how much of the corpus each holds",
       "description": "One model per language over that language's passages only. A topic nobody put in coverage is written no questions at all, which is a decision and not a gap - `include_in_coverage` says which.",
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "qa-pipeline" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 23 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
       "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
       "options": { "showHeader": true },
       "targets": [
