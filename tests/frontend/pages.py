@@ -187,6 +187,7 @@ QUESTION_SOURCE = {
     "evidence_text": FACT["evidence_text"],
     "validated": True,
     "passage_id": 11,
+    "doc_sha256": SHA,
     "ordinal": 3,
 }
 

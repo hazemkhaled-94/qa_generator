@@ -39,7 +39,7 @@ silently never runs.
 
 | Marker | Means |
 |---|---|
-| `nlp` | Loads a spaCy pipeline |
+| `nlp` | Loads a spaCy pipeline or a sentence-transformer |
 | `types` | Shells out to pyright |
 | `integration` | Needs a container runtime |
 | `frontend` | Runs a Streamlit view |
@@ -113,9 +113,19 @@ accepts everything cannot be told from no gate**.
 ## Two tests that skip rather than download 2.2 GB
 
 - [`unit/nlp/test_embedding.py`](unit/nlp/test_embedding.py) skips unless
-  `EMBEDDING_MODEL` is already in the Hugging Face cache.
+  `EMBEDDING_MODEL` is already in the Hugging Face cache. The five tests that
+  take the embedder are marked `nlp`; `cosine` is arithmetic over two lists
+  and is not, so it still runs in the fast layer.
 - [`e2e/test_pipeline.py`](e2e/test_pipeline.py) stands the embedder in for
   with a digest.
+
+## Every warning is an error
+
+`filterwarnings = error`, with three ignores in
+[`pyproject.toml`](../pyproject.toml) pinned to the third-party module that
+raises each — not to the category, so the same category from this code still
+fails. Nothing failed on a deprecation before, which is how a
+`StarletteDeprecationWarning` sat unread in every run's summary.
 
 ## How the tests are written
 
@@ -131,6 +141,18 @@ Non-UI tests follow the same **page-object** structure the UI tests do: one
 | [`frontend/pages.py`](frontend/pages.py) | One page object over every view, and the answers each view needs |
 
 Only the database, the buckets and the served model are ever stood in for.
+
+Two static gates keep that structure from eroding, because it already had:
+
+- [`static/test_pages_are_the_only_way_in.py`](static/test_pages_are_the_only_way_in.py)
+  refuses a frontend test that reads `view.app.<widget>` past the page
+  object, and one that imports from the bare name `conftest` — which
+  resolves to whichever `conftest.py` pytest loaded first, and silently
+  changes with the collection order.
+- [`static/test_fake_backend_matches_the_api.py`](static/test_fake_backend_matches_the_api.py)
+  compares every fake response in `frontend/pages.py` against the dataclass
+  the API actually serialises. Sixteen shapes and the settings builder: a
+  field the API gains and the fake does not is what it exists to catch.
 
 ## Continuous integration
 
