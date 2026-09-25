@@ -70,9 +70,16 @@ x-service-env: &service-env
 
 # Object store readers and writers.
 x-store-env: &store-env
-  S3_ENDPOINT: http://seaweedfs-s3:8333
+  # The gateway as a CONTAINER reaches it, the way the OTLP endpoint and
+  # Phoenix's API are. .env's value is the host's and resolves to nothing
+  # from in here. Overridable because the store need not be this one: a
+  # deployment pointing at AWS or R2 sets S3_CONTAINER_ENDPOINT to the same
+  # address its host uses, or to nothing at all for AWS.
+  S3_ENDPOINT: ${S3_CONTAINER_ENDPOINT-http://seaweedfs-s3:8333}
   S3_ACCESS_KEY: ${S3_ACCESS_KEY}
   S3_SECRET_KEY: ${S3_SECRET_KEY}
+  S3_REGION: ${S3_REGION-local}
+  S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE-path}
 
 # Which model, and where it is served. Its mode, temperature, timeout and
 # attempt count are in backend.env; these stay here, because that is one
@@ -93,6 +100,27 @@ x-model-env: &model-env
   # The second model, which checks what the first wrote. Optional, and its
   # absence means something: the writer then marks its own work.
   QUESTIONS_VERIFIER_MODEL: ${QUESTIONS_VERIFIER_CONTAINER_MODEL-}
+  # Whether the evaluation phase may run, and who judges. Both are read by
+  # the api, which serves them as settings and answers /assessment/plan
+  # with them, and by assess-worker, which is the process that asks.
+  #
+  # The flag passes straight through from .env: it is a decision rather
+  # than an address, and it means the same thing on the host and in here.
+  ASSESSMENT_ENABLED: ${ASSESSMENT_ENABLED:-false}
+  # The judge does NOT pass through, for the reason LLM_MODEL above does
+  # not: a container is given Ollama, and .env's ASSESSMENT_JUDGE_MODEL is
+  # the HOST's - `make assess` uses it and reaches a hosted provider from
+  # a shell that has the credential.
+  #
+  # Unset here, so the judge falls back to LLM_MODEL above and the worker
+  # judges with the container's own Ollama. Set
+  # ASSESSMENT_JUDGE_CONTAINER_MODEL to point the worker somewhere else,
+  # including at a hosted provider - provider.env is already given to the
+  # processes that call a model, so it will authenticate. That is a
+  # deliberate decision to make, not a default to inherit: inheriting a
+  # hosted model is how a stale container spent 2,019 restarts failing to
+  # authenticate to Azure.
+  ASSESSMENT_JUDGE_MODEL: ${ASSESSMENT_JUDGE_CONTAINER_MODEL-}
 
 # Whatever env vars the configured provider needs, credentials included:
 # ANTHROPIC_API_KEY or GEMINI_API_KEY for a hosted one, AZURE_TENANT_ID and
