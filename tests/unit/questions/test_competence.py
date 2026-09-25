@@ -191,6 +191,10 @@ def test_a_derived_question_is_sent_to_its_own_gate(kind: str, gate: str) -> Non
     result = build(recording).check(reasoned(kind))
 
     assert gate in recording.asked
+    # Not merely that its verdict is unused: recall must not be ASKED. It
+    # was, and the answer was thrown away a line later - one full verifier
+    # call per derived candidate, 582 of them over one corpus.
+    assert "read" not in recording.asked, "recall was asked and then discarded"
     assert result.status == "accepted"
 
 

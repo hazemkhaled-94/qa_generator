@@ -134,8 +134,9 @@ class QuestionChecker:
         independent holder: a writer marking its own work rejected `According
         to the ECB and NCAs, who conducts the due diligence check?` for
         naming nothing. The factory turns it off when QUESTIONS_VERIFIER_MODEL
-        is unset, and the verdict is logged either way. Recoverability stays
-        on regardless, because that one is checkable against the passage.
+        is unset, and then the judgements are not asked for at all - see
+        `_opinion`. Recoverability stays on regardless, because that one is
+        checkable against the passage.
 
         `elsewhere` is the corpus-wide passage probe the unanswerable gate
         reads, taking the question's lemmas, its language, the passages it
@@ -163,6 +164,23 @@ class QuestionChecker:
         self._about_overlap = about_overlap
         self._extractive = extractive
         self._extractive_confidence = extractive_confidence
+
+    @property
+    def _opinion(self):
+        """The phrasing judge, or None when its answer could not be used.
+
+        The three judgements are opinions, so `judge_phrasing` decides
+        whether one may reject a question - and when it may not, what comes
+        back can only be written to the log. That was the intent, and it
+        costs a call per question to keep: measured over one corpus, 1.18
+        calls for every candidate reaching this stage, none of which could
+        change a verdict.
+
+        A rule is unaffected. `cites_source` settles what a pattern can
+        settle and still rejects on its own, because a measurement is not an
+        opinion and needs no independent holder.
+        """
+        return self._phrasing_judge if self._judge_phrasing else None
 
     def check(
         self, candidate: Candidate, seen: Sequence[CheckedQuestion] = ()
@@ -418,16 +436,14 @@ class QuestionChecker:
         # conversation is allowed, naming the file is not.
         cited = cites_source(question, language)
         ruled = cited is not None
-        if cited is None and self._phrasing_judge is not None:
-            cited = self._phrasing_judge.names_its_source(question)
+        if cited is None and (judge := self._opinion) is not None:
+            cited = judge.names_its_source(question)
         if cited:
             reason = (
                 "it names the material the answer is in, so it asks a question "
                 "and answers half of it" + ("" if ruled else ", the verifier says")
             )
-            if ruled or self._judge_phrasing:
-                return QuestionRejection.LEAKS_SOURCE, reason
-            log.info("keeping %r: %s, but the writer judged itself", question, reason)
+            return QuestionRejection.LEAKS_SOURCE, reason
 
         # Never for a follow-up. `And for an urgent one?` names nothing and
         # is exactly the question a person asks second; leaning on the thread
@@ -448,25 +464,20 @@ class QuestionChecker:
         # names, where the model used to be asked to copy it out inside a
         # call about the passages. Over the labelled cases the parse is
         # right 19 times out of 19 and that field managed 16.
-        if not anchored(question, language):
-            named = (
-                None
-                if self._phrasing_judge is None
-                else self._phrasing_judge.names_something(question)
+        judge = self._opinion
+        if (
+            judge is not None
+            and not anchored(question, language)
+            and judge.names_something(question) is False
+        ):
+            reason = (
+                f"it names nothing a person searching would know - the "
+                f"parse finds {subject(question, language)!r} - and it "
+                f"names no name, no number and fewer than "
+                f"{NAMES_SOMETHING} things, so it could not have been "
+                f"asked without the passage"
             )
-            if named is False:
-                reason = (
-                    f"it names nothing a person searching would know - the "
-                    f"parse finds {subject(question, language)!r} - and it "
-                    f"names no name, no number and fewer than "
-                    f"{NAMES_SOMETHING} things, so it could not have been "
-                    f"asked without the passage"
-                )
-                if self._judge_phrasing:
-                    return QuestionRejection.UNANCHORED, reason
-                log.info(
-                    "keeping %r: %s, but the writer judged itself", question, reason
-                )
+            return QuestionRejection.UNANCHORED, reason
 
         # The other way a question fails to stand on its own: not naming too
         # little, but pointing at something the asker cannot see. The
@@ -474,17 +485,15 @@ class QuestionChecker:
         # and refers back to it carries a pointer and is fine - so it only
         # ever asks the question, and the verdict is the model's.
         pointers = pointing(question, language)
-        if not pointers or self._phrasing_judge is None:
+        if not pointers or judge is None:
             return None
-        if self._phrasing_judge.self_contained(question, pointers) is False:
+        if judge.self_contained(question, pointers) is False:
             reason = (
                 f"it points outward with {', '.join(repr(one) for one in pointers)} "
                 f"and there is nothing in the question to point at, so only "
                 f"somebody holding the passage could have asked it"
             )
-            if self._judge_phrasing:
-                return QuestionRejection.UNANCHORED, reason
-            log.info("keeping %r: %s, but the writer judged itself", question, reason)
+            return QuestionRejection.UNANCHORED, reason
         return None
 
     def _recovered(self, candidate: Candidate) -> str | None:
@@ -540,18 +549,24 @@ class QuestionChecker:
         self, candidate: Candidate, form: str, embedding: list[float]
     ) -> tuple[str, str] | None:
         """Asks whether the passages give the answer back."""
+        # A derived answer is not in the passages and is not meant to be.
+        # Asking recall for it is asking the verifier to contradict the
+        # type's own directive - `aggregation` says the total must be
+        # something the material does not write down - and it did: 7 of its
+        # 12 questions went as not_recoverable, and the type accepted at 8%
+        # where the rest of them averaged 40%.
+        #
+        # Ahead of the recall call and not behind it, because `_computable`
+        # does not read what that call returns. Measured over one corpus,
+        # 582 derived candidates reached this and each paid a full verifier
+        # read whose answer was then thrown away.
+        if candidate.answerable and candidate.spec.derived:
+            return self._computable(candidate, candidate.target_answer or "")
+
         read = Reading(recovered=self._recovered(candidate))
 
         if candidate.answerable:
             target = candidate.target_answer or ""
-            # A derived answer is not in the passages and is not meant to
-            # be. Asking recall for it is asking the verifier to contradict
-            # the type's own directive - `aggregation` says the total must
-            # be something the material does not write down - and it did:
-            # 7 of its 12 questions went as not_recoverable, and the type
-            # accepted at 8% where the rest of them averaged 40%.
-            if candidate.spec.derived:
-                return self._computable(candidate, target)
             if read.recovered is None:
                 if self._backed(candidate, target):
                     return None

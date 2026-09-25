@@ -710,8 +710,9 @@ def test_a_writer_marking_its_own_work_cannot_reject_on_phrasing() -> None:
     A 4B model judging its own questions rejected `According to the ECB and
     NCAs, who conducts the due diligence check for an outsourcing
     arrangement?` for naming nothing. A gate losing questions that good is
-    worse than no gate, so without an independent verifier the verdict is
-    logged and the question kept.
+    worse than no gate, so without an independent verifier the question is
+    kept - and the judgement is not asked for at all, because an opinion
+    that may not reject is a call per question buying a log line.
     """
     recording = Recording(recovers="4 kg", stands_alone=False)
     checker = QuestionChecker(
@@ -720,11 +721,13 @@ def test_a_writer_marking_its_own_work_cannot_reject_on_phrasing() -> None:
         nearest=lambda embedding: None,
         threshold=0.93,
         judge_phrasing=False,
+        phrasing=recording,
     )
 
     result = checker.check(candidate())
 
     assert result.accepted, "a self-judged opinion rejected a question"
+    assert recording.phrased == 0, "paid for a judgement that could not gate"
 
 
 def test_recoverability_is_judged_even_when_phrasing_is_not() -> None:

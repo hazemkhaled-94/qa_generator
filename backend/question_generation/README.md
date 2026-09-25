@@ -262,7 +262,9 @@ measured is the dataset, not a retriever.
 `unanchored` and `leaks_source` ride on the same call. Each is a judgement
 rather than a measurement, and they are the only gates here that are
 **opinions** — so the factory turns them off when no second model is named,
-and logs the verdict instead. Recoverability stays on regardless.
+and then they are not asked for at all: a verdict that may not reject is a
+call per question buying a log line. The rule half of `leaks_source` still
+fires, because a pattern is a measurement. Recoverability stays on regardless.
 
 `unanchored` covers two ways of failing to stand alone: naming too little,
 which `anchored()` counts, and naming plenty while **pointing outward**. The
