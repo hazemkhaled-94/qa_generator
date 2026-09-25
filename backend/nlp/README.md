@@ -8,68 +8,22 @@ One of the three packages that load something expensive; the others are
 [`blob_store/`](../blob_store/README.md). A caller asks for a sentence split;
 it never loads a pipeline.
 
-**No model is SERVED from here.** Everything in this package is local and
-deterministic — spaCy, a language detector, and three encoders that run in
-the worker's own process. That is what lets the fact checks run without a
-served model, and it is why `make extract-revalidate` costs seconds rather
-than hours.
+**No model is served from here.** Everything is local and deterministic, which
+is what lets the fact checks run without a served model and why
+`make extract-revalidate` costs seconds rather than hours.
 
-Four of the files load weights, and nothing outside a worker may import
-them: [`embedding.py`](embedding.py), [`entailment.py`](entailment.py),
-[`qa.py`](qa.py) and the spaCy pipelines.
-`tests/static/test_api_stays_light.py` pins that the API process loads none
-of them.
+Four files load weights, and nothing outside a worker may import them:
 
 | File | Loads | Asked |
 |---|---|---|
-| [`embedding.py`](embedding.py) | `EMBEDDING_MODEL` | one text's vector, for every column that holds one |
+| [`embedding.py`](embedding.py) | `EMBEDDING_MODEL` | one text's vector |
 | [`entailment.py`](entailment.py) | `NLI_MODEL` | whether one premise entails one hypothesis |
 | [`qa.py`](qa.py) | `QA_MODEL` | where in a passage the answer is, or that there is none |
 
 Each is held to its own window by [`windows.py`](windows.py):
 `ENCODER_MAX_TOKENS` is the ceiling a deployment asks for, and a checkpoint
 that cannot read that far is given what it can.
-
-## One call, one judgement
-
-[`entailment.py`](entailment.py) answers **one** question about **one**
-premise and **one** hypothesis, and a caller wanting two makes two calls. The
-thing it replaces is a prompt that asked a served model for four judgements
-at once and confused them — see
-[question generation](../question_generation/README.md#what-that-one-call-was-carrying-and-where-those-judgements-went).
-
-Two kinds of head are accepted and each score is read off the **label the
-model put beside it**, never off a position: a three-way NLI model naming
-entailment/neutral/contradiction, and a two-way zero-shot head naming
-entailment/not_entailment. Assuming an order silently inverts every verdict
-on half the models anybody would configure, and mDeBERTa-xnli and bart-mnli
-are ordered opposite ways round.
-
-The forward pass, the softmax and a table built from `id2label` used to be
-written out here. `transformers`' own text-classification pipeline hands
-back the label names, so there are no indices to get the wrong way round;
-what is left is the one thing the pipeline does not do, which is refuse a
-checkpoint whose labels are not an NLI model's. A sentiment head scores
-every pair fluently and means nothing by it.
-
-[`embedding.py`](embedding.py) is `sentence-transformers` for the same
-reason. The mean-pool-then-normalise it used to spell out is what that
-library is, and it reads the checkpoint's own `1_Pooling` config rather
-than assuming the mean — a model trained to be read off its CLS token was
-being averaged.
-
-The two-way heads are wanted rather than tolerated. `bge-m3-zeroshot-v2.0`
-reads **8,192 tokens** where `mDeBERTa-v3-base-xnli` reads 512, and a premise
-here is a passage this pipeline already sized to 512 of its own — so the
-three-way model would truncate exactly the text the judgement rests on. What
-a two-way head cannot do is tell "says something different" from "does not
-address it", and both are refusals here, so it costs this caller nothing.
-
-What the encoder returns is a **probability**, which is the other reason to
-prefer it to a served model answering true or false: a boolean carries no
-confidence, so a deployment cannot decide how sure it wants a gate to be.
-`NLI_ENTAILMENT_THRESHOLD` is that decision, and `QA_ANSWER_CONFIDENCE` is
-the same decision for the extractive reader.
+`tests/static/test_api_stays_light.py` pins that the API loads none of them.
 
 ## What it does
 
@@ -77,12 +31,10 @@ the same decision for the extractive reader.
 
 Chunking splits every passage into numbered sentences and stores them. A fact
 **cites one of those numbers** rather than quoting text, so its source span is
-exact by construction: there is no quote to search for, nothing to match
-character for character, and no near miss. A citation is either a sentence the
-passage has or one it does not.
+exact by construction — a citation is either a sentence the passage has or one
+it does not.
 
-Everything downstream rests on this numbering being stable. It is computed
-once, by chunking, and stored — not recomputed by each reader.
+It is computed once, by chunking, and stored. Nothing recomputes it.
 
 ### Counting claims
 
@@ -90,62 +42,72 @@ once, by chunking, and stored — not recomputed by each reader.
 **finite-verb count**. A statement with more than one carries several claims;
 one with none carries nothing.
 
-That replaced a similarity threshold, and the replacement is the point.
-Counting finite verbs is what "one claim" actually means; measuring how many
-words a statement shares with its source rejected genuine narrowings — a
-statement that drops a qualifier and keeps the subject's wording scored as a
-reword — and let a paraphrase through for swapping a noun.
-
 The same reading is what lets the passage gate skip a heading, a caption or a
-navigation line **before** the model is called rather than sending it and
-rejecting the answer afterwards. At a median 473 s per passage, that is the
-cheapest saving in the pipeline.
+navigation line **before** the model is called.
 
 ### Vocabulary
 
-Lemmas, with the stop words and the punctuation dropped. Written onto every
-passage by chunking, and read by the topic model as the document it is fitted
-over. A topic fit reads a column instead of re-tokenising the corpus.
+Lemmas with the stop words and punctuation dropped, written onto every passage
+by chunking and read by the topic model as the document it is fitted over.
 
 `NLP_CAPITALISED_NOUNS` names the languages where capitalisation says nothing
-about whether a noun is proper — German, where every noun is capitalised — so
-the vocabulary is not cluttered with false proper nouns.
+about whether a noun is proper — German, where every noun is capitalised.
 
 ### Language detection
 
-Detected on the **passage**, not inherited from its document. 45 of this
-corpus's passages are German inside an English-labelled file, and a
-document-wide label read every one of them with the wrong pipeline.
+Detected on the **passage**, not inherited from its document. The detector may
+only answer with a language `NLP_MODELS` names, because an answer with no
+pipeline behind it is a passage nothing can read. `NLP_DEFAULT_LANGUAGE` is
+what a passage too short to judge falls back to.
 
-The detector may only answer with a language `NLP_MODELS` names, because an
-answer with no pipeline behind it is a passage nothing can read.
-`NLP_DEFAULT_LANGUAGE` is what a passage too short to judge falls back to.
+### One call, one judgement
+
+[`entailment.py`](entailment.py) answers one question about one premise and
+one hypothesis; a caller wanting two makes two calls.
+
+Two kinds of head are accepted and each score is read off the **label the
+model put beside it**, never off a position: a three-way NLI model naming
+entailment/neutral/contradiction, and a two-way zero-shot head naming
+entailment/not_entailment. mDeBERTa-xnli and bart-mnli are ordered opposite
+ways round, so assuming an order inverts every verdict on half the models
+anybody would configure.
+
+`transformers`' own text-classification pipeline hands back the label names,
+so what is left here is the one thing it does not do: refuse a checkpoint
+whose labels are not an NLI model's. A sentiment head scores every pair
+fluently and means nothing by it.
+
+The two-way heads are wanted rather than tolerated. `bge-m3-zeroshot-v2.0`
+reads 8,192 tokens where `mDeBERTa-v3-base-xnli` reads 512, and a premise here
+is a passage already sized to 512.
+
+What the encoder returns is a **probability**, so a deployment can decide how
+sure it wants a gate to be. `NLI_ENTAILMENT_THRESHOLD` is that decision, and
+`QA_ANSWER_CONFIDENCE` is the same for the extractive reader.
+
+[`embedding.py`](embedding.py) is `sentence-transformers`, which reads the
+checkpoint's own `1_Pooling` config rather than assuming the mean.
 
 ## Adding a language
 
-German and English are configured. The pipeline is not bound to them, but it
-is not free of them either: most readings are Universal Dependencies features
-that every tagset marks, and a handful are lemma lists that only two
-languages are in. This is all of it.
+German and English are configured. Most readings are Universal Dependencies
+features every tagset marks; a handful are lemma lists. This is all of it.
 
 ### 1. Configure it
 
 | Where | What |
 |---|---|
-| `NLP_MODELS` | `xx:xx_core_news_md`. One list, naming both the pipeline a language is read with and the languages the detector may answer with. `make install` and the Dockerfile download whatever it names |
-| `NLP_CAPITALISED_NOUNS` | Add the code **only** if the language writes every noun with a capital, as German does. In one of those a lower-case word tagged a noun is a word from another language |
-| `EMBEDDING_MODEL` | Check the new language is one the model covers. The default, `multilingual-e5-large`, covers about a hundred |
+| `NLP_MODELS` | `xx:xx_core_news_md`. Names both the pipeline a language is read with and the languages the detector may answer with |
+| `NLP_CAPITALISED_NOUNS` | Add the code **only** if the language writes every noun with a capital |
+| `EMBEDDING_MODEL` | Check the new language is one the model covers |
 
 **Medium, not small.** `de_core_news_sm` does not tag a German modal as a
-finite verb, so the atomicity check refused 11% of German facts for a parser
-limitation: measured over eight sentences, `sm` got 3 and `md` got 8.
+finite verb, which silently changes what `not_atomic` means.
 
 ### 2. Add the language to five lemma lists
 
-These are the readings no feature marks, so they are words. Each is small,
-each is per-language, and a language missing from one means that gate
-**silently never fires** for it — no error, no log, just a judgement nothing
-makes.
+These are the readings no feature marks. A language missing from one means
+that gate **silently never fires** for it — no error, no log.
 
 | List | Where | What goes in it | Example |
 |---|---|---|---|
@@ -155,92 +117,64 @@ makes.
 | `_AGENTS` | same | The interrogatives that ask after a **party** rather than a thing | `wer`, `who` |
 | `_ANAPHORIC` | [`analysis.py`](analysis.py) | Adjectives pointing back at something already said | `besagt`, `aforementioned` |
 
-Read by **lemma and never as a substring**, and German compounding is why:
-`Risikobericht` is a thing a corpus is about and `Bericht` is a thing a corpus
-IS, and a substring test cannot tell them apart.
+Read by **lemma and never as a substring**: `Risikobericht` is a thing a
+corpus is about and `Bericht` is a thing a corpus IS.
 
-`_AGENTS` is the one that could not be a feature. No tagset marks animacy on
-an interrogative — `wer` and `was` are both `PRON` with `PronType=Int`, as
-`who` and `what` are — so a list is the only reading available.
+`_AGENTS` could not be a feature — no tagset marks animacy on an
+interrogative.
 
 ### 3. Check three things the language has to support
 
-Not edits. A language failing one of these needs code, and the first is a
-crash rather than a gap:
+Not edits. A language failing one of these needs code:
 
-| | Needed by | What happens without it |
+| | Needed by | Without it |
 |---|---|---|
-| **`noun_chunks`** | `phrases()`, and so `subject`, `anchored`, `enumerates`, `compares` | **Raises.** spaCy implements the syntax iterator per language and Russian, Chinese and Ukrainian have none; Japanese needs SudachiPy |
-| **An NER component with `PER` or `PERSON`** | `names_parties`, the credits-page reading | Density is always 0, so the reading never fires and nothing says so |
-| **`like_num` on spelled-out numerals** | `claim().units` | Asymmetric rather than broken: `de_core_news_md` tags `zwei` as `NUM` with `like_num` FALSE where `en_core_web_md` gives `two` both, so `units` collects English number words and not German ones |
-
-That third one is a trap rather than a bug, and it already bit: the
-circularity gate first read numbers off `claim().units` and therefore fired
-on German numerals and not English ones, in a corpus that is German. It reads
-the `NUM` part of speech now.
+| `noun_chunks` | `phrases()`, and so `subject`, `anchored`, `enumerates`, `compares` | **Raises.** Russian, Chinese and Ukrainian have no syntax iterator; Japanese needs SudachiPy |
+| An NER component with `PER` or `PERSON` | `names_parties`, the credits-page reading | Density is always 0, so the reading never fires and nothing says so |
+| `like_num` on spelled-out numerals | `claim().units` | Asymmetric: `de_core_news_md` tags `zwei` `like_num` FALSE where `en_core_web_md` gives `two` both |
 
 ### 4. One pattern that is Gregorian
 
 `_DATED` in [`question_generation/gates.py`](../question_generation/gates.py)
 reads a period off a four-digit year in 1800–2099 or a `DD.MM`-style pair. It
-matches `2024`, `2024-03-15`, `15.03.2024` and `Q1 2024`, and misses an era
-year, a Hijri year, Arabic-Indic digits and `FY24`. Only `temporal` questions
-read it, and that type ships weighted `0`.
+misses an era year, a Hijri year, Arabic-Indic digits and `FY24`. Only
+`temporal` questions read it, and that type ships weighted `0`.
 
-### What needs no edit at all
-
-Most of it, because most readings are features rather than words:
+### What needs no edit
 
 | Reading | Feature |
 |---|---|
-| Question words, for `compound` | `PronType=Int`, or a Penn/STTS tag prefix as a fallback |
+| Question words, for `compound` | `PronType=Int`, or a tag prefix as a fallback |
 | Content words and lemmas | `NOUN`, `PROPN`, `ADJ` |
 | A number, for the circularity exemption | `NUM` |
-| Pointing outward | `PronType=Dem`, and `Definite=Def` with `NumType=Card` for the definite-and-counted case |
+| Pointing outward | `PronType=Dem`, and `Definite=Def` with `NumType=Card` |
 | Everything measured on an embedding | `EMBEDDING_MODEL`, which is multilingual |
 | Every length, share and citation reading | no language at all |
 
-## Tools, and where each is used
-
-| Tool | Where | Why this one |
-|---|---|---|
-| **spaCy** | [`pipelines.py`](pipelines.py), [`analysis.py`](analysis.py) | Sentence boundaries, the POS tags the finite-verb count reads, and the lemmas. One pipeline per language, loaded once per process |
-| **lingua** | [`language.py`](language.py) | Answers from a closed set of languages and is confident on short text, which a passage often is |
-| **sentence-transformers** | [`embedding.py`](embedding.py) | Reads the checkpoint's own `1_Pooling` config rather than assuming the mean, which the hand-written pooling did |
-| **transformers** | [`entailment.py`](entailment.py), [`qa.py`](qa.py) | Its text-classification pipeline hands back label names, so no NLI verdict is read off an index. The QA task was removed in transformers 5, so that span decode is written out here |
-
-spaCy and lingua are baked into the backend image, because the runtime has
-no network. The encoder weights are not: they are fetched on first use into
-the `models` volume.
-
 ## Configuration
 
-Only the first three are read here. The rest are the caller's — the stage
-that wants an encoder loads it and passes the name in — and they are
-catalogued under `platform`, because one model serves every stage.
+Only the first three are read here. The rest are the caller's, and all are
+catalogued under `platform`.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `NLP_MODELS` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, **and** the languages the detector may answer with. One list, so the two cannot disagree |
+| `NLP_MODELS` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, **and** the languages the detector may answer with |
 | `NLP_DEFAULT_LANGUAGE` | `en` | What a passage too short to judge is read as |
 | `NLP_CAPITALISED_NOUNS` | `de` | Languages where capitalisation is not evidence of a proper noun |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | The one embedding model, and the tokenizer chunking sizes a passage by |
 | `NLI_MODEL` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | The entailment encoder. Absent asks the verifier instead |
-| `NLI_ENTAILMENT_THRESHOLD` | `0.7` | How sure it must be before it rescues an answer recall did not find |
-| `QA_MODEL` | unset | The extractive reader asked for a span before the verifier is. Absent asks the verifier for every question |
-| `QA_ANSWER_CONFIDENCE` | `0.9` | How sure that reader must be before its span is taken and no model is called |
-| `ENCODER_MAX_TOKENS` | `8192` | The longest pair an encoder reads. A **ceiling**: a checkpoint that cannot read that far is held to its own window |
+| `NLI_ENTAILMENT_THRESHOLD` | `0.7` | How sure it must be before it rescues an answer |
+| `QA_MODEL` | unset | The extractive reader asked for a span before the verifier is |
+| `QA_ANSWER_CONFIDENCE` | `0.9` | How sure that reader must be before its span is taken |
+| `ENCODER_MAX_TOKENS` | `8192` | The longest pair an encoder reads. A **ceiling** |
 
-**Medium, not small.** The small German model does not tag a modal as a finite
-verb, which silently changes what `not_atomic` means.
+Changing `NLP_MODELS` changes what a fact is, in the same way changing the
+prompt does. Both are recorded on every fact — `spacy_model`,
+`spacy_version`, `extraction_model`, `prompt_version`.
 
-**Changing `NLP_MODELS` changes what a fact is**, in the same way changing the
-prompt does. Both are recorded on every fact — `spacy_model`, `spacy_version`,
-`extraction_model`, `prompt_version` — so two generations of the dataset can
-be told apart.
-
-A model named here must be in the image. `make install` downloads the
-pipelines `NLP_MODELS` names for the host as well.
+spaCy and lingua are baked into the backend image because the runtime has no
+network. The encoder weights are fetched on first use into the `models`
+volume. A model named here must be in the image.
 
 ## Tests
 
@@ -254,31 +188,21 @@ poetry run pytest tests/unit/nlp -m nlp
 | [`test_claims.py`](../../tests/unit/nlp/test_claims.py) | How many claims a sentence reads as |
 | [`test_language.py`](../../tests/unit/nlp/test_language.py) | Reading the language a passage is written in |
 | [`test_pointing.py`](../../tests/unit/nlp/test_pointing.py) | What a claim points at, and what it does not |
-| [`test_entailment.py`](../../tests/unit/nlp/test_entailment.py) | A verdict read off the label rather than off a position, and the refusal of a head that is not an NLI model's |
+| [`test_entailment.py`](../../tests/unit/nlp/test_entailment.py) | A verdict read off the label, and the refusal of a head that is not an NLI model's |
 | [`test_qa.py`](../../tests/unit/nlp/test_qa.py) | The span decode, the no-answer head, and the window that slides |
-| [`test_embedding.py`](../../tests/unit/nlp/test_embedding.py) | The vector, when `EMBEDDING_MODEL` is already cached. Skips rather than downloading 2.2 GB |
+| [`test_embedding.py`](../../tests/unit/nlp/test_embedding.py) | The vector, when `EMBEDDING_MODEL` is already cached |
 
 `test_sentences`, `test_claims`, `test_pointing` and `test_entailment` carry
-the `nlp` marker, and `make test-fast` excludes them. **No encoder weights
-are loaded by any of these** — the entailment and QA tests stand the model in
-for and cover the label handling and the span decode, which is the half that
-is ours. The encoders against real weights are `tests/eval/`, which needs a
-served model.
+the `nlp` marker, and `make test-fast` excludes them. No encoder weights are
+loaded by any of these.
 
-## Known edges
+## Limits
 
-Things that are true, are not bugs, and have surprised somebody.
-
-- **The small spaCy models change what a fact is.** `de_core_news_sm` does not
-  tag a modal as a finite verb, so `not_atomic` starts accepting statements it
-  should refuse. Use the medium pipelines.
+- **The small spaCy models change what a fact is.** Use the medium pipelines.
 - **The detector cannot answer with a language `NLP_MODELS` does not name.**
-  A French passage in a German corpus is read as German or English, whichever
-  it scores higher as. Adding French means adding its pipeline.
+  A French passage in a German corpus is read as German or English.
 - **Sentence numbering is stored, not recomputed.** Changing `NLP_MODELS`
-  after a corpus is chunked leaves every stored citation resolving against the
-  old split. `make chunk-revocabulary` re-reads language and lemmas; the
+  after a corpus is chunked leaves every stored citation resolving against
+  the old split. `make chunk-revocabulary` re-reads language and lemmas; the
   sentence offsets need `chunk-rerun`.
-- **Nothing here calls a served model.** If a check seems to need one, it is
-  in [`extraction/`](../extraction/README.md) or
-  [`question_generation/`](../question_generation/README.md), not here.
+- **Nothing here calls a served model.**

@@ -54,6 +54,14 @@ constructor takes a message list, a model name and a template format and
 nothing else, so a version built that way carries an empty
 invocation-parameters block and no response format.
 
+Versions are published **oldest first**, because Phoenix keeps the one
+created last as the prompt's current version.
+
+The version and the digest go in the **version's** description, not the
+prompt's: `prompt_description` is set when Phoenix creates a prompt and
+ignored on every version after it. The prompt's description carries only
+what never changes.
+
 It reads from the **database**, not from the code, which is what makes it
 work for a version the source has moved past and keeps the stages out of it —
 a publisher that asked `question_generation.prompts` would load litellm to

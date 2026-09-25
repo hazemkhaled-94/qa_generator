@@ -1,6 +1,6 @@
 # Operations
 
-Running the stack, watching it, and the things that go wrong.
+Running the stack, watching it, and what goes wrong.
 
 ## The services
 
@@ -8,130 +8,100 @@ Once `make dev` reports ready:
 
 | Service | URL | Purpose |
 |---|---|---|
-| Frontend | <http://localhost:8501> | Run each stage, browse what it produced, view system status |
+| Frontend | <http://localhost:8501> | Run each stage, browse what it produced |
 | API | <http://localhost:8000/docs> | OpenAPI documentation |
-| Phoenix | <http://localhost:6006> | Traces, gate verdicts, prompts, golden-set experiments, and the playground — sign in as `admin@localhost` with `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` |
-| Grafana | <http://localhost:3001> | Logs and pipeline dashboards — `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` |
-| Argilla | <http://localhost:6900> | Review what the models decided — `ARGILLA_USERNAME` / `ARGILLA_PASSWORD` |
+| Phoenix | <http://localhost:6006> | Traces, gate verdicts, prompts, experiments, the playground |
+| Grafana | <http://localhost:3001> | Logs and pipeline dashboards |
+| Argilla | <http://localhost:6900> | Review what the models decided |
 | Adminer | <http://localhost:9001> | Database browser |
 | Dagster | <http://localhost:3000> | The asset graph and run history |
 
-Behind them: PostgreSQL, SeaweedFS (master, two volumes, filer, S3 gateway,
-UI), Elasticsearch, Redis, Filebeat, the Dagster daemon, and the five stage
-workers — twenty-three containers in all.
+Behind them: PostgreSQL, SeaweedFS, Elasticsearch, Redis, Filebeat, the
+Dagster daemon and the five stage workers — twenty-three containers in all.
 
-This table is written down twice and the other copy is the one that cannot
-drift: `make services` and the **System health** page both ask
-`GET /services`, which is the catalogue in
-[`backend/api/services.py`](../backend/api/services.py) probed live. Use
-that for what is actually up; this is here for the seven addresses worth
-knowing before anything is running.
+`make services` and the System health page both ask `GET /services`, which
+probes the catalogue in
+[`backend/api/services.py`](../backend/api/services.py) live. Use that for
+what is actually up.
+
+Credentials are `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` for Phoenix (sign in
+as `admin@localhost`), `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`, and
+`ARGILLA_USERNAME` / `ARGILLA_PASSWORD`.
 
 ## Scaling
 
-`parse-worker`, `chunk-worker` and `extract-worker` all scale horizontally:
-each claims one row at a time with `FOR UPDATE SKIP LOCKED`, so two workers
-never take the same row.
+`parse-worker`, `chunk-worker` and `extract-worker` scale horizontally — each
+claims one row at a time with `FOR UPDATE SKIP LOCKED`:
 
 ```bash
 podman compose up -d --scale extract-worker=4
 ```
 
-`topic-worker` can be scaled too, though there is no point: a fit is one
-request row, and only one worker can claim it.
+`question-worker` scales the same way but has less to divide: its queue is
+one row per topic. `topic-worker` can be scaled and there is no point — a fit
+is one request row.
 
-`question-worker` scales the same way and has far less to divide. Its queue
-is one row per topic, and how many topics there are follows the corpus:
-`TOPIC_PASSAGES_PER_TOPIC` is 40, so a 1400-passage language is 35 rows and
-a 51-passage one is 2. A worker past the total has nothing to claim.
-
-**Its first start is slow and looks like nothing happening.** It downloads
-`EMBEDDING_MODEL` before it claims anything — 2.2 GB into the `models` volume.
-The topics sit `pending` until that finishes, and `make logs` is where it says
-so. Later starts read the volume and claim immediately. `question-worker` is
-given 6 GB because of it, and the weights are **per container, not per lane**.
-
-### The one that reads like a broken worker
-
-A stage added since a stack came up has no container until `make up` creates
-one. The queue fills, `/{stage}/status` reports it, and nothing drains it —
-which reads exactly like a broken worker rather than an absent one.
+`question-worker`'s first start downloads `EMBEDDING_MODEL`, 2.2 GB into the
+`models` volume, before it claims anything. The topics sit `pending` until it
+finishes and `make logs` says so. The container is given 6 GB because of it,
+and the weights are per container, not per lane.
 
 ## What the model costs
 
-The model is the bottleneck, not the pipeline: a median passage measured at
-**473 s** on a 31B model. A passage whose sentences carry no finite verb — a
-heading, a caption, a navigation line — is skipped before the call rather than
-sent and rejected afterwards.
+A median passage measured at 473 s on a 31B model. A passage whose sentences
+carry no finite verb is skipped before the call rather than sent.
 
-Live, that is the **Pipeline throughput** dashboard below and Phoenix, each
-per run. Over a run that is already finished, off a log that was captured
-while it ran:
+Live, that is the **Pipeline throughput** dashboard and Phoenix. Over a
+finished run, off a captured log:
 
 ```bash
-make spend LOG=run.log                      # calls, tokens and cost
+make spend LOG=run.log
 make spend LOG=run.log SINCE=2026-09-19
 ```
 
-`LOG` is required. There is no default: the shipped files are JSON inside a
-container, and the pattern this reads is the text one a terminal saw.
+`LOG` is required and names the text log a terminal saw, not the shipped
+JSON.
 
 ## Replaying a call in the Phoenix playground
 
-Open any `completion` span in Phoenix and replay it: the prompt as it was
-sent, against a model you pick. That is "what would another model have said
-about this question" one click from the trace, instead of a run of
-`make second-opinion`.
+Open any `completion` span in Phoenix and replay it against a model you pick
+— the prompt as it was sent.
 
-**Against Ollama, and only Ollama.** Every other provider Phoenix offers
-wants an API key; Ollama wants none, which is why `credentialsSet` is
-already true for it. This deployment's hosted model authenticates through
-an interactive `az login` that leaves a token in `~/.azure`, and a
-container has no way to read it — the same wall a worker hits, and the
-reason `LLM_CONTAINER_MODEL` exists.
+Against Ollama only: every other provider Phoenix offers wants an API key.
+Wired by two lines on the `phoenix` service — `OLLAMA_BASE_URL` set to
+`OLLAMA_CONTAINER_URL`, and an `extra_hosts` entry so
+`host.docker.internal` resolves. With `OLLAMA_CONTAINER_URL` unset, Phoenix
+falls back to `localhost:11434`, which inside that container is Phoenix.
 
-Wired by two lines on the `phoenix` service: `OLLAMA_BASE_URL` set to
-`OLLAMA_CONTAINER_URL`, the container's view of the host, and an
-`extra_hosts` entry so `host.docker.internal` resolves there at all. With
-`OLLAMA_CONTAINER_URL` unset, Phoenix falls back to `localhost:11434`,
-which inside that container is Phoenix.
-
-`make prompts-publish` is what makes a prompt selectable there rather than
-pasted in.
+`make prompts-publish` makes a prompt selectable there rather than pasted in.
 
 ## Dashboards
 
-Four, provisioned into Grafana from `configs/grafana/`, over three
-datasources.
+Four, provisioned from `configs/grafana/` over three datasources.
 
 | Dashboard | Reads | Shows |
 |---|---|---|
-| Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact acceptance by rejection code, question acceptance by gate, topics and their coverage |
-| Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused, and which queue verb was asked for over HTTP |
-| Pipeline logs | Elasticsearch | Lines per level, what failed and where, every line |
-| Run | all three | **One run on one page.** What it produced, what it cost, where the questions went, what the calls were for, its Phoenix projects, the gate verdicts recorded there, and every line it wrote |
+| Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact and question acceptance, topic coverage |
+| Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused |
+| Pipeline logs | Elasticsearch | Lines per level, what failed and where |
+| Run | all three | One run on one page: what it produced, what it cost, its Phoenix projects, the gate verdicts, every line it wrote |
 
-**The split is the point.** Logs say what happened once; the tables say what
-is true now. A row a worker died holding logged nothing and is still counted
-in Pipeline state, which is the difference that matters when a stage has gone
-quiet.
+Logs say what happened once; the tables say what is true now. A row a worker
+died holding logged nothing and is still counted in Pipeline state.
 
-**Run** is the one that crosses the split deliberately, and it is why there
-is a third datasource. A run is `questions.run_id` on the application side
-and a Phoenix project named `<stage>-<run id>` on the other; the gate counts
-are rows and the calls, tokens, latency and spend are in the spans. The
-`Phoenix` datasource is the same PostgreSQL server as `Pipeline`, a
-different database, read by the same `grafana_reader` role.
+**Run** crosses that split, which is why there is a third datasource: a run
+is `questions.run_id` on one side and a Phoenix project named
+`<stage>-<run id>` on the other. The `Phoenix` datasource is the same
+PostgreSQL server, a different database, read by the same `grafana_reader`.
 
-The panel worth watching during a long run is the **model latency p99**. The
-extraction lease is derived from `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`,
-so a p99 climbing towards the timeout is healthy workers about to start
-looking abandoned.
+The panel worth watching during a long run is **model latency p99**. The
+extraction lease derives from `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`,
+so a p99 climbing towards the timeout is healthy workers about to look
+abandoned.
 
-Grafana reads the application database as `grafana_reader`, which holds
-`SELECT` and nothing else. The role is created by `configs/postgres/init.sh`,
-which only runs on the first boot of an empty volume; on a stack that already
-has one, re-run it by hand:
+`grafana_reader` holds `SELECT` and nothing else. It is created by
+`configs/postgres/init.sh`, which only runs on the first boot of an empty
+volume. On a stack that already has one:
 
 ```bash
 podman compose exec postgres bash /docker-entrypoint-initdb.d/init.sh
@@ -142,59 +112,50 @@ podman compose exec postgres bash /docker-entrypoint-initdb.d/init.sh
 ```bash
 make logs                # everything, from the container engine
 make logs-api
-make logs-shipper        # why nothing is arriving, when nothing is arriving
+make logs-shipper        # why nothing is arriving
 make logs-retention      # how long Elasticsearch keeps them. Run once
-make logs-prune          # delete the files on the volume nothing writes to
+make logs-prune          # delete the files on the volume
 ```
 
-Only this project's processes are shipped to Elasticsearch — but all of
-them, wherever they ran. A container writes to the `logs` volume and a host
-command to `./logs`; filebeat reads both into one data stream, so
-`make extract` on your laptop is in Grafana beside `extract-worker`, on the
-same trace. `host.name` is what separates them.
+Only this project's processes are shipped to Elasticsearch, but all of them
+wherever they ran: a container writes to the `logs` volume and a host command
+to `./logs`, and filebeat reads both into one data stream. `host.name`
+separates them.
 
-Postgres, SeaweedFS, Redis and Elasticsearch itself keep the `json-file`
-driver and are read with `make logs`.
+Postgres, SeaweedFS, Redis and Elasticsearch keep the `json-file` driver and
+are read with `make logs`.
 
-**Until `make logs-retention` has run, nothing is ever deleted.** That is the
-state the stack ships in.
+Retention has two halves. `make logs-retention` ages what Elasticsearch
+holds; `make logs-prune` ages the files. Until the first has run, nothing is
+deleted. Each process writes `{service}-{host}-{pid}.log`, so nothing else
+removes one.
 
-Retention has two halves, and that target is one of them. It ages what
-**Elasticsearch** holds; `make logs-prune` ages the **files** the shipper
-read them out of, in both directories. Each process writes
-`{service}-{host}-{pid}.log`, so a recreated container and a host command
-each leave a file behind for ever — nothing else deletes one.
+See [`telemetry/`](../telemetry/README.md) for the field names.
 
-See [`telemetry/`](../telemetry/README.md) for the field names, the data
-stream, and the two Filebeat settings that are load-bearing.
+## Failure
 
-## Failure, and why every one is recoverable
+A row a worker died holding is failed by the next run of that stage with the
+reason recorded, and `retry` returns it to the queue. There is no state a row
+can reach that nothing can move it out of.
 
-A row a worker died holding is failed by the next run of that stage, with the
-reason recorded, rather than being left claimed and invisible; `retry` then
-returns it to the queue.
-
-**There is no state a row can reach that nothing can move it out of.**
-
-A stage's failure is never an HTTP 500. It is recorded against the row and
-read back through `/{stage}/status` — a document that failed to parse is a 200
-with a reason in it.
+A stage's failure is never an HTTP 500 — it is recorded against the row and
+read back through `/{stage}/status`.
 
 ## Things that go wrong
 
 | Symptom | Usually |
 |---|---|
-| Topics sit `pending`, nothing in the logs | `question-worker` is downloading 2.2 GB of embedding weights. `make logs` says so |
+| Topics sit `pending`, nothing in the logs | `question-worker` is downloading 2.2 GB of embedding weights |
 | A queue fills and nothing drains it | That stage has no container. `make up` |
 | Grafana panels are empty | The shipper. `make logs-shipper` |
-| A panel that groups by `stage` finds nothing | A field missing from `append_fields` in `filebeat.yml`, arriving as analysed text |
-| An edit to `filebeat.yml` changed nothing | `setup.template.overwrite` is false, so Filebeat left the existing template alone |
-| Grafana cannot read the database | `init.sh` has not run on this volume. Re-run it by hand |
+| A panel that groups by `stage` finds nothing | A field missing from `append_fields` in `filebeat.yml` |
+| An edit to `filebeat.yml` changed nothing | `setup.template.overwrite` is false |
+| Grafana cannot read the database | `init.sh` has not run on this volume |
 | Streamlit refuses a file the API would accept | `server.maxUploadSize` is below `MAX_FILE_SIZE_MB` |
-| The frontend will not start, naming a variable | It is in `.env` but not in the `streamlit` service's `environment` in `compose.yaml` |
-| Argilla refuses the key | `ARGILLA_API_KEY` is under "My settings" in the UI. It is not `ARGILLA_PASSWORD` |
-| A p99 climbing towards `LLM_TIMEOUT_SECONDS` | Healthy workers about to start looking abandoned. Raise the timeout, or the lease follows it |
-| A scanned PDF is refused rather than parsed | OCR is not enabled. See the placeholder in `backend/preprocessing/parsing/pipelines/pdf.py` |
+| The frontend will not start, naming a variable | It is in `.env` but not in the `streamlit` service's `environment` |
+| Argilla refuses the key | `ARGILLA_API_KEY` is under "My settings". It is not `ARGILLA_PASSWORD` |
+| A p99 climbing towards `LLM_TIMEOUT_SECONDS` | Healthy workers about to look abandoned. Raise the timeout |
+| A scanned PDF is refused rather than parsed | OCR is not enabled |
 
 ## Deleting things
 
@@ -205,32 +166,27 @@ make wipe                         # every document, then the topics
 make topics-delete                # every topic, membership and figure
 ```
 
-Each of those is the **first of two deletions**. An AFTER DELETE trigger on
-every table copies the row into `archived_rows`, and the removal paths move
-the objects into the `archive` bucket instead of dropping them:
+Each is the first of two deletions. An AFTER DELETE trigger copies the row
+into `archived_rows`, and the removal paths move objects into the `archive`
+bucket:
 
 ```bash
 make archive                      # what is held, by table, with its age
 make archive-purge DAYS=30        # the second deletion. This one is final
 ```
 
-Nothing purges itself, so the archive grows — on ordinary runs too, because a
-re-extraction and a re-chunk delete what they replace. `make archive` is how
-you see it. See [`backend/archive/`](../backend/archive/README.md).
+Nothing purges itself, so the archive grows on ordinary runs too — a
+re-extraction and a re-chunk delete what they replace. See
+[`backend/archive/`](../backend/archive/README.md).
 
-These two are still irreversible, and archive nothing — `TRUNCATE` and a
-dropped volume fire no row trigger:
+These two archive nothing, because `TRUNCATE` and a dropped volume fire no
+row trigger:
 
 ```bash
 make down-volumes                 # the containers' data, all of it
 make schema-reset                 # every table, rebuilt from the revisions
 ```
 
-Deleting a document takes **everything derived from it**: its passages, their
-topic memberships, the facts on them, and — through the trigger on
-`question_facts` — the questions resting on those facts.
-
-What it does **not** take is `topics`. A fit is over the corpus rather than
-over a file, so deleting every document leaves the topics standing, describing
-passages that are gone. Nothing is broken by that — the next fit replaces
-every row — but it is why `make wipe` is one command that runs both.
+Deleting a document takes everything derived from it. What it does **not**
+take is `topics`: a fit is over the corpus rather than over a file, so
+`make wipe` is one command that runs both.

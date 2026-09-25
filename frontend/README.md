@@ -4,13 +4,12 @@ A Streamlit application: one page per stage, and a page runs that stage and no
 other.
 
 It holds **one address it calls** — `BACKEND_URL` — and no knowledge of the
-database, the object store, or the services behind the API. Everything it
-shows, it asked the API for.
+database, the object store, or the services behind the API.
 
 `PHOENIX_BASE_URL` is a second address and not a second exception: nothing
-here calls it. It is written into a link a **browser** follows, which is
-why compose leaves it as the host sees it rather than setting a container
-name over it.
+here calls it. It is written into a link a **browser** follows, which is why
+compose leaves it as the host sees it rather than setting a container name
+over it.
 
 ## The pages
 
@@ -24,42 +23,27 @@ name over it.
 | Questions | questions | question generation | a topic | questions |
 | System health | components, and every container with a link to it | nothing | — | the platform all six share |
 
-A page lists what its stage produces and runs the stage that produced it.
 **Nothing on a page can reach another page's stage.**
 
-System health is the one that lists something the pipeline did not produce:
-every container the deployment runs, whether it is listening, and a link to
-it. It asks `GET /services` for that rather than probing anything itself —
-the topology puts the api between the browser and everything else, and a
-page reaching twenty-odd hosts of its own would be the one thing on the
-network that ignores it.
-
-### A picked question links out to what produced it
-
-Two things the row carries that nothing else on a page does:
-
-| | From | Opens |
-|---|---|---|
-| The calls | `questions.span_id` and `questions.trace_id` | Phoenix. **Two links**, because they answer different questions: the span is the gate decision, the trace is the whole topic — the writer call with its prompt, the verifier's, and the phrasing judgements |
-| The prompt | `questions.prompt_version` and `question_type`, through `GET /prompts` | The prompt **as it was sent**, inline — both halves, system then user |
-
-Both degrade rather than break. A question written before the columns
-existed says so; a deployment with no `PHOENIX_BASE_URL` on the
-`streamlit` service shows the ids as text instead of links, because an
-unreachable link is worse than none.
-
-`PHOENIX_BASE_URL` is the one address here that compose does **not** set
-over to a container name: it is written into a link a *browser* follows,
-not called from the container.
-
-"Which prompt wrote this?" used to be answered by a git checkout. The row
-names a version and the table resolves it, which is the whole point of
-recording them — see [`backend/stages/`](../backend/stages/README.md).
+System health is the one that lists something the pipeline did not produce.
+It asks `GET /services` rather than probing anything itself — the topology
+puts the api between the browser and everything else.
 
 The queue's unit is not always the row: chunking replaces all of a document's
 passages at once, and extraction reads a passage and writes all of its facts
 together, so a row picked on those pages is run through the thing its stage
 actually queues over. The page says so where it offers the control.
+
+### A picked question links out to what produced it
+
+| | From | Opens |
+|---|---|---|
+| The calls | `questions.span_id` and `questions.trace_id` | Phoenix. **Two links**: the span is the gate decision, the trace is the whole topic |
+| The prompt | `questions.prompt_version` and `question_type`, through `GET /prompts` | The prompt as it was sent, inline — both halves, system then user |
+
+Both degrade rather than break. A question written before the columns existed
+says so; a deployment with no `PHOENIX_BASE_URL` on the `streamlit` service
+shows the ids as text instead of links.
 
 ## The shape of every page
 
@@ -76,9 +60,9 @@ the table
 everything held about that row, as one table of every field it has
 ```
 
-The configuration is where it is because **the remedy for changing it is
-directly above it**: a setting that stales what the stage already produced is
-rebuilt by the Redo button in the same panel.
+The configuration is where it is because the remedy for changing it is
+directly above it: a setting that stales what the stage produced is rebuilt
+by the Redo button in the same panel.
 
 Its controls are drawn from what the API says each setting is, so the page
 holds no list of settings — adding one to
@@ -86,19 +70,12 @@ holds no list of settings — adding one to
 
 Two pages carry a delete box, because two things can be deleted: a document,
 with or without what was derived from it, and the topics, all at once. A
-passage, a fact and a question have no delete — a passage belongs to its
-document, and a rejected question is kept because the share that was thrown
-away is the evidence behind the coverage report.
-
-### While a stage is running
-
-Each stage can be run over everything it owns or over the one row picked. **No
-verb does the work**: they move rows between statuses, and a worker picks up
-what became claimable.
+passage, a fact and a question have no delete.
 
 While a stage has anything queued or in hand, its panel carries a spinner and
-its counts, and redraws every few seconds until the queue is empty. The page
-stays usable throughout, and Stop stays live.
+its counts and redraws every few seconds until the queue is empty. **No verb
+does the work**: they move rows between statuses, and a worker picks up what
+became claimable. The page stays usable throughout, and Stop stays live.
 
 ## Layout
 
@@ -108,8 +85,8 @@ stays usable throughout, and Stop stays live.
 | [`views/`](views/) | One module per page, run top to bottom on every interaction |
 | [`lib/page.py`](lib/page.py) | The shared layout every view calls |
 | [`lib/stage.py`](lib/stage.py) | The one service a page runs, and the controls that move its queue |
-| [`lib/catalog.py`](lib/catalog.py) | The search panel, the filter panel and the pager they share |
-| [`lib/configure.py`](lib/configure.py) | The configuration panel, beside the controls that run the service |
+| [`lib/catalog.py`](lib/catalog.py) | The search panel, the filter panel and the pager |
+| [`lib/configure.py`](lib/configure.py) | The configuration panel |
 | [`lib/backend/`](lib/backend/) | The API clients, one module per group of calls |
 | [`styles.css`](styles.css) | The custom styling, on top of the theme |
 
@@ -118,35 +95,26 @@ on every interaction, which is why the tests run each one the same way.
 
 ## Themes and colour
 
-The app comes in light and dark.
 [`.streamlit/config.toml`](.streamlit/config.toml) gives Streamlit a palette
 under `[theme.light]` and another under `[theme.dark]`; it starts from the
-browser's `prefers-color-scheme`, and the toolbar menu switches between them
-per page.
+browser's `prefers-color-scheme`, and the toolbar menu switches per page.
 
 Put a colour in `[theme]` itself, or set `theme.base`, and it applies to
-**both** themes — which is what pinned this app to light before. Only what
-genuinely does not vary belongs there.
+**both** themes.
 
 [`styles.css`](styles.css) reads its own palette off `light-dark()`, which
-resolves against the `color-scheme` Streamlit sets on the app container from
-the theme it actually settled on. So the custom styling follows the chrome
-whichever way the chrome was decided — a `prefers-color-scheme` media query
-would have got the menu wrong, staying light while everything around it went
-dark.
-
-Two hues are written twice, the brand purple and the red that only deletion
-uses; the neutrals are mixed from `currentColor`, so they need no second
-value.
+resolves against the `color-scheme` Streamlit sets from the theme it settled
+on — so the custom styling follows the chrome whichever way the chrome was
+decided. Two hues are written twice, the brand purple and the red that only
+deletion uses; the neutrals are mixed from `currentColor`.
 
 **Colour carries one meaning.** Purple fills the one control that commits
 something in a group — Start, Fit, Save, Accept — and red is spent only on
 deletion. Everything else is an outlined button, and a control that would do
-nothing right now is greyed rather than hidden, so a row keeps its shape.
+nothing right now is greyed rather than hidden.
 
-The topic map stays on white in either theme. It is a pyLDAvis document inside
-an iframe, so nothing outside it can restyle it; it is framed and given a
-background of its own so it reads as a figure printed on white.
+The topic map stays on white in either theme: it is a pyLDAvis document
+inside an iframe, so nothing outside it can restyle it.
 
 ## Configuration
 
@@ -154,16 +122,15 @@ background of its own so it reads as a figure printed on white.
 |---|---|---|
 | `BACKEND_URL` | `.env` | The one address. `http://api:8000` from a container |
 | `PAGE_SIZE` | `.env` | Rows per page in the listings |
-| `PHOENIX_BASE_URL` | `.env` | Where a **browser** reaches Phoenix, for the trace and span links on a picked question. Optional: unset shows the ids as text. Taken as it stands rather than set over to a container name |
+| `PHOENIX_BASE_URL` | `.env` | Where a **browser** reaches Phoenix. Optional: unset shows the ids as text |
 | `LOG_LEVEL` | `.env` | The frontend logs through the same telemetry configuration as every other process |
 
-Both of the first two are **required**, and the error names the trap: being in
-`.env` alone is not enough — the variable also has to be listed in the
-`streamlit` service's `environment` in `compose.yaml`.
+The first two are **required**, and the error names the trap: being in `.env`
+alone is not enough — the variable also has to be listed in the `streamlit`
+service's `environment` in `compose.yaml`.
 
 `server.maxUploadSize` in [`.streamlit/config.toml`](.streamlit/config.toml)
-must be kept in step with `MAX_FILE_SIZE_MB`, or Streamlit rejects the file
-before the API sees it.
+must be kept in step with `MAX_FILE_SIZE_MB`.
 
 ## Tests
 
@@ -173,31 +140,27 @@ poetry run pytest tests/frontend
 
 Each view is a script Streamlit runs top to bottom, so an `AppTest` runs it
 the same way. **The backend is stubbed**: what these cover is what the page
-does with an answer, including the answers that are refusals, which is the
-half no integration test reaches.
+does with an answer, including the answers that are refusals.
 
 | File | Covers |
 |---|---|
 | [`test_views.py`](../tests/frontend/test_views.py) | The rules every page keeps, checked on every page |
 | [`test_facts_page.py`](../tests/frontend/test_facts_page.py), [`test_topics_page.py`](../tests/frontend/test_topics_page.py) | Two pages in depth, against a scripted backend |
-| [`test_configuration_panel.py`](../tests/frontend/test_configuration_panel.py) | The configuration panel, on the page that runs the service it configures |
+| [`test_configuration_panel.py`](../tests/frontend/test_configuration_panel.py) | The configuration panel |
 | [`pages.py`](../tests/frontend/pages.py) | One page object over every view, and the answers each view needs |
-| [`tests/static/test_frontend_vocabularies.py`](../tests/static/test_frontend_vocabularies.py) | That the gate list on the Questions page is exactly what the checker can reject under |
+| [`test_frontend_vocabularies.py`](../tests/static/test_frontend_vocabularies.py) | That the gate list on the Questions page is exactly what the checker can reject under |
 
 These need no container and no spaCy. `make test-fast` runs them.
 
-## Known edges
-
-Things that are true, are not bugs, and have surprised somebody.
+## Limits
 
 - **A variable in `.env` that is not in `compose.yaml` does not reach the
-  frontend.** The error says so by name, because it has caught people.
+  frontend.** The error says so by name.
 - **`MAX_FILE_SIZE_MB` and `server.maxUploadSize` are two numbers for one
-  limit.** Streamlit enforces its own first, and rejects the file before the
-  API is asked.
-- **A page that shows a spinner is not doing the work.** It moved rows and is
-  polling `/status`. Closing the tab does not stop the worker.
-- **Every listing filters server-side** — apart from `/topics`, which returns
-  every topic at once, because one fit produces a list a person can read.
+  limit.** Streamlit enforces its own first.
+- **A page that shows a spinner is not doing the work.** Closing the tab does
+  not stop the worker.
+- **Every listing filters server-side** apart from `/topics`, which returns
+  every topic at once.
 - **A rejected question stays visible on purpose.** The share that was thrown
   away is the evidence behind the coverage report.

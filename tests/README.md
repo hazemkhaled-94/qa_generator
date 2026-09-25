@@ -20,17 +20,17 @@ make mutation       # change a gate and ask whether a test notices. Hours
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the extensions the schema needs, the locks, the workflows, the provisioned dashboards against the datasources and fields that serve them, the pinned surface of three services, **every prompt pinned to its version by digest**, the frontend's gate list, the two import contracts, every relative link and heading a README names, and pyright at zero | nothing |
-| [`unit/`](unit/) | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators, none of which reach a network | spaCy, for some |
+| [`static/`](static/) | The repository against itself: settings declared where they are read, the migration chain, the schema extensions, the locks, the workflows, the dashboards, the pinned surface of three services, every prompt pinned by digest, the frontend's gate list, the two import contracts, every relative link and heading a README names, and pyright at zero | nothing |
+| [`unit/`](unit/) | One module at a time, no I/O. Includes the Dagster code location, the review round trip and the experiment evaluators | spaCy, for some |
 | [`property/`](property/) | Invariants over generated input, with hypothesis | spaCy, for some |
 | [`regression/`](regression/) | The verdicts the checks have always reached, pinned as a table | spaCy |
-| [`contract/`](contract/) | The OpenAPI surface, the paths the frontend builds, the refusals each route declares, and **generated calls against every read route** checked back against the document | a container |
+| [`contract/`](contract/) | The OpenAPI surface, the paths the frontend builds, the refusals each route declares, and generated calls against every read route | a container |
 | [`integration/`](integration/) | The database, the object store and the HTTP surface, against the images compose runs | a container |
 | [`e2e/`](e2e/) | One document through every stage in this process, with the converter and the model stood in for | a container |
 | [`frontend/`](frontend/) | Each Streamlit page against a scripted backend | nothing |
-| [`smoke/`](smoke/) | Both images built and looked inside, and the compose file resolved: no service behind a profile, and the orchestrator holding no database credential | a container engine |
-| [`eval/`](eval/) | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions. The cases are in [`evaluation/cases.py`](../evaluation/cases.py), read by this and by `make eval-score` | a served model |
-| [`perf/`](perf/) | The ceilings the code already names in a comment — the combination search in `adds_up`, the release draw, the composition report — as loose wall-clock budgets. They fail on a change of order, not on a slow laptop | nothing |
+| [`smoke/`](smoke/) | Both images built and looked inside, and the compose file resolved | a container engine |
+| [`eval/`](eval/) | How a real served model reads the golden passages, and whether the round-trip gate splits the golden questions | a served model |
+| [`perf/`](perf/) | The ceilings the code names in a comment, as loose wall-clock budgets | nothing |
 
 ## The markers
 
@@ -54,89 +54,73 @@ silently never runs.
 prompt a stage sends by **digest**, under the `PROMPT_VERSION` its module
 declares.
 
-"Two prompts are two datasets" is what the version is for, and nothing
-checked it: a rule could be added to `types.py`, every question written
-after it would differ from every question written before, and both would
-carry version 8. Changing a prompt now fails this file, and the only way to
-make it pass is to bump the version and write the new digest down — which
-is the decision the version exists to record.
-
-The digest and not the text, because the prompts run to hundreds of lines.
-It is spelled the way `stages/prompts.py` spells it, so a pin and a stored
-row compare without converting either.
+Changing a prompt fails this file, and the only way to make it pass is to
+bump the version and write the new digest down — which is the decision the
+version exists to record. The digest and not the text, because the prompts
+run to hundreds of lines, spelled the way `stages/prompts.py` spells it.
 
 ## Two checks that are a tool rather than a test
 
-Both run in `make test` through a thin wrapper in `static/`, and both have
-a target of their own that prints the finding itself rather than a pytest
-assertion:
+Both run in `make test` through a thin wrapper in `static/`, and both have a
+target of their own that prints the finding itself:
 
 | | Runs | Covers |
 |---|---|---|
-| `make lint-imports` | import-linter, over [`.importlinter`](../.importlinter) | The two architecture rules the root README states: a stage sits above what it shares, and **no backend service imports another**. Both were prose until now |
-| `make deps` | deptry | A declared dependency nothing imports, an import nothing declares, and a package reached only through somebody else's. It found twelve of the first on its first run |
+| `make lint-imports` | import-linter, over [`.importlinter`](../.importlinter) | A stage sits above what it shares, and no backend service imports another |
+| `make deps` | deptry | A declared dependency nothing imports, an import nothing declares, and a package reached only through somebody else's |
 
 `.importlinter` does **not** replace
 [`static/test_api_stays_light.py`](static/test_api_stays_light.py), and
-cannot: grimp counts an import inside a function body, and deferring a
-heavy import into one is exactly how the topic service keeps pyLDAvis out
-of the api. That distinction is the whole of what the api's weight rests
-on, so the two checks live side by side.
+cannot: grimp counts an import inside a function body, and deferring a heavy
+import into one is exactly how the topic service keeps pyLDAvis out of the
+api.
 
-## Generated calls, and what they found
+## Generated calls
 
 [`contract/test_openapi_conformance.py`](contract/test_openapi_conformance.py)
 reads the published document and sends calls derived from it, checking each
 answer back against what was promised. Four checks only — a 5xx, an
 undeclared status, a body that does not match its schema, and a media type
-that does not. `unsupported_method` is off: `POST /questions/{action}` is a
-real route, so a POST to `/questions/quality` genuinely matches it and is
-refused 422, and leaving that check on failed 30 of 33 operations on it.
+that does not.
 
-It earned its place on the first run, finding two classes of real defect
-that are now fixed in [`backend/api/params.py`](../backend/api/params.py):
+`unsupported_method` is off: `POST /questions/{action}` is a real route, so a
+POST to `/questions/quality` genuinely matches it and is refused 422.
 
-- an **id or an offset above `bigint`** reached PostgreSQL and came back
-  500 — `GET /passages/9223372036854775808`, and `?offset=` the same;
-- a **NUL byte in a search term** reached psycopg, which refuses one, and
-  came back 500 — `?q=%00`.
-
-Both are now 422 from FastAPI's own validation, which every route already
-declares.
+It found two classes of real defect on its first run, now fixed in
+[`backend/api/params.py`](../backend/api/params.py): an id or offset above
+`bigint` reaching PostgreSQL, and a NUL byte in a search term reaching
+psycopg. Both are now 422 from FastAPI's own validation.
 
 ## Containers
 
-The integration layers start a PostgreSQL and a SeaweedFS of their own through
-testcontainers and **skip, with a reason**, where no container engine answers.
-Nothing they do touches a running stack.
+The integration layers start a PostgreSQL and a SeaweedFS of their own
+through testcontainers and **skip, with a reason**, where no container engine
+answers. Nothing they do touches a running stack.
 
-## What never gates, and why
+## What never gates
 
-`tests/eval/` prints its numbers and asserts almost nothing. A model's answers
-move between versions and between runs at the same temperature, so a threshold
-there would fail on somebody else's Tuesday rather than on a regression.
+`tests/eval/` prints its numbers and asserts almost nothing: a model's
+answers move between versions and between runs at the same temperature.
 
-`tests/perf/` does assert, but never on a pull request: a wall-clock budget
-on a shared runner measures the runner. It runs nightly, and by hand with
-`make test-perf`.
+`tests/perf/` does assert, but never on a pull request — a wall-clock budget
+on a shared runner measures the runner. It runs nightly and by hand.
 
-The one thing it does assert is that the round-trip gate splits its golden
-questions the right way round — not a measurement of the model's taste, but
-whether the gate is wired up at all. **A gate that accepts everything cannot
-be told from no gate.**
+The one thing `eval` does assert is that the round-trip gate splits its
+golden questions the right way round. That is not a measurement of the
+model's taste; it is whether the gate is wired up at all, and **a gate that
+accepts everything cannot be told from no gate**.
 
 ## Two tests that skip rather than download 2.2 GB
 
-- [`unit/nlp/test_embedding.py`](unit/nlp/test_embedding.py) skips
-  unless `EMBEDDING_MODEL` is already in the Hugging Face cache.
+- [`unit/nlp/test_embedding.py`](unit/nlp/test_embedding.py) skips unless
+  `EMBEDDING_MODEL` is already in the Hugging Face cache.
 - [`e2e/test_pipeline.py`](e2e/test_pipeline.py) stands the embedder in for
   with a digest.
 
 ## How the tests are written
 
 Non-UI tests follow the same **page-object** structure the UI tests do: one
-*driver* per thing under test, exposing the operations a reader cares about
-and holding the wiring out of the test body.
+*driver* per thing under test, holding the wiring out of the test body.
 
 | File | Holds |
 |---|---|
@@ -146,13 +130,12 @@ and holding the wiring out of the test body.
 | [`integration/seed.py`](integration/seed.py) | Rows to test against, with only the columns the schema insists on |
 | [`frontend/pages.py`](frontend/pages.py) | One page object over every view, and the answers each view needs |
 
-Only the database, the buckets and the served model are ever stood in for. The
-checks, the readers and the orderings are the real code.
+Only the database, the buckets and the served model are ever stood in for.
 
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every pull
-request and on every push to `main`:
+request and every push to `main`:
 
 | Job | Runs |
 |---|---|
@@ -161,39 +144,28 @@ request and on every push to `main`:
 | `unit` | Everything that needs neither a container nor a served model |
 | `integration` | The container layers, against pulled images |
 | `smoke` | Builds both images and looks inside them |
-| `coverage` | Combines the three jobs' shares into one figure, and puts it in the job summary |
+| `coverage` | Combines the three jobs' shares into one figure |
 | `gate` | Waits for the rest. **This is the one a branch protection rule needs to require** |
 
-`smoke` is the slow one. It is also the only layer that can see what an image
-contains, and a lock that does not install is not worth finding out about
-after the merge.
-
 [`.github/workflows/nightly.yml`](../.github/workflows/nightly.yml) runs at
-03:00 what is worth knowing but not worth blocking on:
+03:00:
 
 | Job | Runs |
 |---|---|
 | `audit` | Known advisories against both locks |
 | `everything` | Every layer, images included |
-| `mutation` | `make mutation`, and puts the survivors in the job summary |
+| `mutation` | `make mutation`, with the survivors in the job summary |
 | `ceilings` | `make test-perf` |
-| `evaluate` | The model evaluation — skips itself unless `LLM_MODEL` and `LLM_BASE_URL` are set as repository variables |
+| `evaluate` | The model evaluation — skips unless `LLM_MODEL` and `LLM_BASE_URL` are repository variables |
 
-The first run of any job installs the dependencies and caches the virtualenv
-against `poetry.lock` and the Makefile. Later runs restore it.
-
-## Known edges
-
-Things that are true, are not bugs, and have surprised somebody.
+## Limits
 
 - **A skipped integration test is not a passing one.** With no container
   engine the whole layer skips with a reason. Read the reason.
-- **`make test` excludes `smoke`, `eval` and `perf`.** Those are
-  `make test-smoke`, `make test-eval` and `make test-perf`; CI runs `smoke`
-  as its own job and the nightly run takes the other two.
+- **`make test` excludes `smoke`, `eval` and `perf`.**
 - **`tests/contract/openapi.json` is a committed fixture.** A route added
-  without updating it fails the contract test. That is the point.
+  without updating it fails the contract test.
 - **`make test-fast` skips spaCy, pyright and every container.** It is a
-  smoke-check while editing, not a substitute for `make test`.
-- **Coverage figures quoted in a service README are a snapshot.** Nothing
-  asserts them; `make test-coverage` is what re-measures.
+  smoke-check while editing.
+- **Coverage figures quoted in a service README are a snapshot.**
+  `make test-coverage` is what re-measures.

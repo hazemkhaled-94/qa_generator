@@ -3,49 +3,39 @@
 The HTTP surface the frontend and the orchestrator call, and the only address
 either of them holds.
 
-It does two things and deliberately not a third. It **reads back** what the
-stages produced — documents, passages, facts, topics, questions — and it
-**moves rows on and off a stage's queue**. It never runs a stage. There is no
-`run` route, and that is not an omission: a conversion running inside the
-process that serves JSON held it for sixteen minutes at a stretch.
-
-The work happens in the stage's worker container, off the queue this API
-writes to. See [`backend/stages/`](../stages/README.md) for the queue and the
-worker that drains it.
+It **reads back** what the stages produced and **moves rows on and off a
+stage's queue**. It never runs a stage: there is no `run` route, because a
+conversion running inside the process that serves JSON held one request for
+sixteen minutes. The work happens in the stage's worker container, off the
+queue this API writes to — see [`backend/stages/`](../stages/README.md).
 
 ## What it does
 
-### The shape of the process
-
 One FastAPI application, assembled in [`main.py`](main.py): tracing is
 attached to the instance, the refusal handler is installed, and every router
-in [`routes/`](routes/) is included. Wiring — the repositories and buckets a
-route needs — is built once in [`dependencies.py`](dependencies.py) and
-injected; a route module builds nothing itself.
+in [`routes/`](routes/) is included. Wiring is built once in
+[`dependencies.py`](dependencies.py) and injected; a route module builds
+nothing itself.
 
 The process **loads no model, no converter and no inference library**. It
 imports a stage's catalogue for a read route and a stage's queue for a queue
 route, and nothing else of that stage. Because a service package re-exports
 nothing, importing `extraction.repository` does not drag litellm, Docling,
-gensim or spaCy into this process. `tests/static/test_api_stays_light.py`
-pins that.
+gensim or spaCy into this process.
+`tests/static/test_api_stays_light.py` pins that.
 
 ### The two kinds of route
 
 **Read routes** are a noun: `/documents`, `/passages`, `/facts`, `/topics`,
-`/questions`. Each answers a page of rows with the filters that page offers.
+`/questions`. **Queue routes** are a verb under a stage's name: `/parsing`,
+`/chunking`, `/extraction`, `/questions`, `/topics`. Four of the five are
+built by one factory — [`stage_router`](routes/stage.py) — so a verb cannot
+mean two things depending on which stage answered it.
 
-**Queue routes** are a verb under a stage's name: `/parsing`, `/chunking`,
-`/extraction`, `/questions`, `/topics`. Four of the five are built by one
-factory — [`stage_router`](routes/stage.py) — so a verb cannot mean two things
-depending on which stage answered it.
-
-`/questions` is the one path that is both. Every other stage is a verb with
-its product under a different noun — `/extraction` produces `/facts` — but a
-question is both what generation produces and what it is called, so the queue
-routes and the read routes share a router. The queue routes are declared
-first, which is what keeps `/questions/status` from being read as a question
-with the id `status`.
+`/questions` is the one path that is both, because a question is what
+generation produces and what it is called. The queue routes are declared
+first, which keeps `/questions/status` from being read as a question with the
+id `status`.
 
 ### The queue surface every stage shares
 
@@ -56,25 +46,22 @@ GET  /{stage}/{scope}/{value}/status      the same, for one item
 POST /{stage}/{scope}/{value}/{action}    the same verb, against fewer rows
 ```
 
-Every verb comes twice. The narrowed form is a `WHERE` on the stage's own
-table and nothing more, so a narrowed verb and a whole-queue one cannot
-disagree about what they do. It is what the frontend's per-item controls
-call.
+The narrowed form is a `WHERE` on the stage's own table and nothing more, so
+a narrowed verb and a whole-queue one cannot disagree.
 
 | Verb | Moves |
 |---|---|
-| `start` | `new` → `pending`, which is the only status a worker claims |
-| `stop` | `pending` → `new`, taking back whatever has not begun |
+| `start` | `new` → `pending`, the only status a worker claims |
+| `stop` | `pending` → `new` |
 | `retry` | a failed row back to `pending`, clearing the reason |
-| `rerun` | every row to `pending`, finished ones included, skipping what a worker holds right now |
+| `rerun` | every row to `pending`, skipping what a worker holds right now |
 
-All four answer **202** and return at once. None of them does the work.
+All four answer **202** and return at once. None does the work.
 
-There is a fifth verb on the command line and **deliberately not here**:
+There is a fifth verb on the command line and deliberately not here:
 `reclaim` moves an `in_progress` row back to `pending` without waiting out
 its lease, which is safe only when a person knows the worker holding it is
-gone. The API cannot know that, so it does not offer it. See
-[`backend/stages/`](../stages/README.md#reclaim-and-why-it-is-not-automatic).
+gone. See [`backend/stages/`](../stages/README.md).
 
 | Stage | Narrows to | Example |
 |---|---|---|
@@ -84,11 +71,10 @@ gone. The API cannot know that, so it does not offer it. See
 | `questions` | `topic` | `POST /questions/topic/{id}/rerun` |
 | `topics` | — | a fit is all-or-nothing over one vocabulary |
 
-Topic modelling has no `start` and no `rerun`, and its routes are written out
-in [`routes/topics.py`](routes/topics.py) rather than built by the factory.
-Asking is what creates the work: `POST /topics/discover` writes a request row,
-and `/topics/stop` and `/topics/retry` are the only other verbs that mean
-anything over one.
+Topic modelling's routes are written out in
+[`routes/topics.py`](routes/topics.py) rather than built by the factory:
+`POST /topics/discover` writes a request row, and `/topics/stop` and
+`/topics/retry` are the only other verbs that mean anything.
 
 ## The full surface
 
@@ -101,14 +87,14 @@ anything over one.
 | `GET /documents/names` | Digests and filenames, for a picker |
 | `GET /documents/{sha256}/file` | The stored bytes back |
 | `DELETE /documents/{sha256}` | The document and everything derived from it |
-| `DELETE /documents/{sha256}/derived` | Only its passages and facts; chunking returns to `new` |
+| `DELETE /documents/{sha256}/derived` | Only its passages and facts |
 
 **Passages** — served by [chunking](../preprocessing/chunking/README.md).
 
 | Route | Answers |
 |---|---|
 | `GET /passages` | Passages, with their heading trail, pages and tables |
-| `GET /passages/types` | The block types the corpus actually holds |
+| `GET /passages/types` | The block types the corpus holds |
 | `GET /passages/{id}` | One passage in full, its numbered sentences and cell grids |
 
 **Facts** — served by [extraction](../extraction/README.md).
@@ -116,8 +102,8 @@ anything over one.
 | Route | Answers |
 |---|---|
 | `GET /facts` | Facts, accepted and rejected alike, with what they cite |
-| `GET /facts/quality` | How many hold up, how far the passages were decomposed, and why the rest were rejected |
-| `GET /facts/{fact_id}/passages` | The passages one fact rests on, and the span it cited in each |
+| `GET /facts/quality` | How many hold up, and why the rest were rejected |
+| `GET /facts/{fact_id}/passages` | The passages one fact rests on, and the span it cited |
 
 **Topics** — served by [topic modelling](../topic_modelling/README.md).
 
@@ -126,7 +112,7 @@ anything over one.
 | `GET /topics` | Every topic, its terms, and how much of the corpus it holds |
 | `PATCH /topics/{id}` | Name a topic, or take it out of coverage reporting |
 | `GET /topics/fit` | When the topics were fitted, over what, and whether they still describe the corpus |
-| `GET /topics/visualisation/{language}` | One language's model as a self-contained pyLDAvis page |
+| `GET /topics/visualisation/{language}` | One language's model as a pyLDAvis page |
 | `DELETE /topics` | Every topic and membership |
 
 **Questions** — served by
@@ -134,65 +120,52 @@ anything over one.
 
 | Route | Answers |
 |---|---|
-| `GET /questions` | Questions, accepted and rejected alike, with what each cites |
+| `GET /questions` | Questions, accepted and rejected alike |
 | `GET /questions/{id}` | One question with the facts it was written from |
-| `GET /questions/plan` | What a topic is planned to be asked, before anything is written |
-| `GET /questions/quality` | How many hold up, which gate stopped the rest, and how much of the subject matter is covered |
-| `GET /questions/export` | The questions a filter selects, as an `.xlsx` workbook. Same filters as the listing, and no default scope |
+| `GET /questions/plan` | What a topic is planned to be asked |
+| `GET /questions/quality` | How many hold up, which gate stopped the rest, and coverage |
+| `GET /questions/export` | The questions a filter selects, as an `.xlsx`. No default scope |
 | `PATCH /questions/{id}` | Accept or reject one question |
 
-**Prompts** — served by [`backend/stages/`](../stages/README.md), which
-holds the write every stage records its own prompts through.
+**Prompts** — served by [`backend/stages/`](../stages/README.md).
 
 | Route | Answers |
 |---|---|
-| `GET /prompts` | Every recorded prompt, narrowed by `service`, `version` and `name`, each with the text as it was composed |
+| `GET /prompts` | Every recorded prompt, narrowed by `service`, `version` and `name` |
 
 `facts.prompt_version` and `questions.prompt_version` name a version, and
-until this table nothing in the deployment resolved one: the span carrying
-the prompt belongs to a Phoenix project with a retention of its own, and
-the row outlives it. A dataset exported six months later pointed at
-version 5 and could not say what version 5 asked for.
+until this table nothing resolved one: the span carrying the prompt belongs
+to a Phoenix project with a retention of its own, and the row outlives it.
 
-**Read-only, and there is no route that writes one.** A prompt is changed
-in the source and recorded by the stage that sends it. It serves the table
-rather than asking the code, which is what keeps litellm out of this
-process — the modules that compose these prompts import the model client.
-
-The text comes with the listing rather than behind a second call: it is
-what the caller wanted, a prompt is a few kilobytes, and a listing that
-made you ask twice for the only interesting column would be two round
-trips to read one thing.
+Read-only, and there is no route that writes one. A prompt is changed in the
+source and recorded by the stage that sends it. It serves the table rather
+than asking the code, which is what keeps litellm out of this process. The
+text comes with the listing rather than behind a second call.
 
 **Settings** — served by [`backend/settings/`](../settings/README.md).
 
 | Route | Answers |
 |---|---|
-| `GET /settings/{service}` | Each setting's value, what the files say it would be, its type, its bounds, and whether somebody changed it |
-| `PATCH /settings/{service}` | Change it. A null value returns one setting to what the files say |
+| `GET /settings/{service}` | Each setting's value, what the files say, its type, its bounds, and whether somebody changed it |
+| `PATCH /settings/{service}` | Change it. A null value returns one setting to the file |
 
-**The platform itself.**
+**The platform.**
 
 | Route | Answers |
 |---|---|
 | `GET /health` | That the process is up, for the container healthcheck |
 | `GET /status` | Every component behind the API, and what each service holds |
-| `GET /services` | Every container the deployment runs, whether it is listening, and where to open it |
+| `GET /services` | Every container, whether it is listening, and where to open it |
 
-`/status` and `/services` are beside each other rather than one inside the
-other, and the split is deliberate: `/status` reports what the pipeline
-**holds**, counted out of the database, and `/services` reports what is
-**up**. A page wanting both asks twice and says which is which.
+`/status` reports what the pipeline **holds**, counted out of the database;
+`/services` reports what is **up**. A page wanting both asks twice.
 
 What `/services` proves is that something accepted a TCP connection on the
 port — one code path for a web UI, a database and a broker, with no auth and
-no TLS. A service can listen and be broken; the pipeline pages are where
-that shows. The alternative was nine health protocols, nine sets of
-credentials, and a page reporting Argilla as failed because it answered 401.
-A worker serves no port and is reported as neither up nor down.
-
-`SERVICE_URLS` is where the links come from, built by compose out of the
-**published** ports. A service nobody published simply gets no link.
+no TLS. The alternative was nine health protocols, nine sets of credentials,
+and a page reporting Argilla as failed because it answered 401. A worker
+serves no port and is reported as neither up nor down. `SERVICE_URLS` is
+where the links come from; a service nobody published gets no link.
 
 `GET /docs` is FastAPI's own OpenAPI page. Nothing else is served.
 
@@ -200,28 +173,15 @@ A worker serves no port and is reported as neither up nor down.
 
 `/documents`, `/passages`, `/facts` and `/questions` all take `q` for a
 case-insensitive substring and `limit`/`offset` to page. The last three also
-take `document` to narrow to one digest, and `/questions` takes `topic` as
-well. Each takes the filters its page offers — `parse_status` on
-`/documents`, `block_type` on `/passages`, `kind` and `method` on `/facts`,
-and every column a question is classified by on `/questions`: its status,
-whether it is answerable, the three scopes, the band and the band it was
-planned at, its type, its cognitive level, its answer form, and whether it
-follows another question.
+take `document`, and `/questions` takes `topic` as well. Each takes the
+filters its page offers — `parse_status`, `block_type`, `kind` and `method`,
+and on `/questions` every column a question is classified by.
 
-Each of those is spelled as a `Literal` so the OpenAPI document lists its
-values and the frontend's pickers cannot drift from what the backend will
-accept. That is two copies of one vocabulary, and
-`tests/static/test_api_vocabularies.py` is what keeps them equal — a column
-that can hold a value no filter offers is a column nothing can be read by,
-which is how `implication` and `application` were written, stored and
-constrained for a day before the route's list knew about them.
+Each is spelled as a `Literal` so the OpenAPI document lists its values and
+the frontend's pickers cannot drift.
+`tests/static/test_api_vocabularies.py` keeps those two copies equal.
 
-`/topics` takes none and returns every topic at once, because one fit produces
-a list a person can read.
-
-The frontend renders each of these as a page and filters nothing itself.
-`tests/static/test_api_vocabularies.py` checks the filters the API offers
-against the values the database can actually hold.
+`/topics` takes none and returns every topic at once.
 
 ## Refusals
 
@@ -244,34 +204,21 @@ a caller branches on the code rather than on English:
 | `unknown_scope` | 404 | A stage was narrowed to a scope it does not accept |
 | `unknown_setting` | 404 | A service has no setting by that name |
 
-Two things keep their own shape. FastAPI's 422 for a malformed query is left
-alone, and **a stage's own failures are not answered here at all** — they are
-recorded against the row and read back through `/{stage}/status`. A document
-that failed to parse is a 200 with a reason in it, not a 500.
+FastAPI's 422 for a malformed query is left alone, and **a stage's own
+failures are not answered here at all** — they are recorded against the row
+and read back through `/{stage}/status`.
 
 Each refusal is logged once, in the handler rather than at each `raise`, at
-**warning** — a 404 for an unknown id is the API working. That is what makes
-the refusal a caller branched on also a refusal a dashboard can count.
-
-## Tools, and where each is used
-
-| Tool | Where | Why this one |
-|---|---|---|
-| **FastAPI** | [`main.py`](main.py), [`routes/`](routes/) | Generates the OpenAPI document the frontend and the contract test both read, from the annotations the routes already carry |
-| **Pydantic** | route signatures | Validates a query before a repository sees it, and is what answers 422 |
-| **SQLAlchemy** | through each stage's catalogue | The API writes no SQL of its own; it calls the stage that owns the table |
-| **OpenTelemetry** | [`main.py`](main.py) | Attached to the instance after it exists, so a caller's trace continues here rather than a new one beginning |
+**warning**.
 
 ## Configuration
 
-The API reads the same [`configs/env/backend.env`](../../configs/env/backend.env)
-the workers do, because it serves the same settings they read. It holds no
-configuration of its own.
-
-Its own address and pool sizes are the deployment's:
-`DATABASE_POOL_SIZE` and `DATABASE_POOL_OVERFLOW` are served read-only and
-marked `fixed`, because they are read before a service could ask a database
-for anything. See [docs/configuration.md](../../docs/configuration.md).
+The API reads the same
+[`configs/env/backend.env`](../../configs/env/backend.env) the workers do and
+holds no configuration of its own. Its address and pool sizes are the
+deployment's: `DATABASE_POOL_SIZE` and `DATABASE_POOL_OVERFLOW` are served
+read-only and marked `fixed`. See
+[docs/configuration.md](../../docs/configuration.md).
 
 ## Tests
 
@@ -282,37 +229,28 @@ poetry run pytest tests/unit/api tests/static/test_api_stays_light.py
 
 | File | Covers |
 |---|---|
-| [`tests/contract/test_openapi.py`](../../tests/contract/test_openapi.py) | The published surface against [`openapi.json`](../../tests/contract/openapi.json): every path, its parameters and the refusals it declares |
+| [`tests/contract/test_openapi.py`](../../tests/contract/test_openapi.py) | The published surface against [`openapi.json`](../../tests/contract/openapi.json) |
 | [`tests/unit/api/test_errors.py`](../../tests/unit/api/test_errors.py) | The shape every deliberate refusal takes |
 | [`tests/integration/api/test_stages.py`](../../tests/integration/api/test_stages.py) | The queue surface every stage shares, over HTTP |
-| [`tests/integration/api/test_catalogue.py`](../../tests/integration/api/test_catalogue.py) | Reading back what the stages produced, and the platform's own routes |
+| [`tests/integration/api/test_catalogue.py`](../../tests/integration/api/test_catalogue.py) | Reading back what the stages produced, and the platform's routes |
 | [`tests/integration/api/test_documents.py`](../../tests/integration/api/test_documents.py), [`test_facts.py`](../../tests/integration/api/test_facts.py), [`test_questions.py`](../../tests/integration/api/test_questions.py), [`test_topics.py`](../../tests/integration/api/test_topics.py) | Each noun's routes against the database that answers them |
-| [`tests/integration/api/test_settings.py`](../../tests/integration/api/test_settings.py) | Reading and changing what a service is configured to do, over HTTP |
-| [`tests/static/test_api_stays_light.py`](../../tests/static/test_api_stays_light.py) | That this process loads no model, no converter and no inference library |
+| [`tests/integration/api/test_settings.py`](../../tests/integration/api/test_settings.py) | Reading and changing what a service is configured to do |
+| [`tests/static/test_api_stays_light.py`](../../tests/static/test_api_stays_light.py) | That this process loads no model, converter or inference library |
 | [`tests/static/test_api_vocabularies.py`](../../tests/static/test_api_vocabularies.py) | The filters offered against the values the database holds |
 
-`tests/contract/openapi.json` is a committed fixture. A route added without
-updating it fails the contract test, which is the point: the frontend and the
-orchestrator both build paths against this surface.
+`tests/contract/openapi.json` is a committed fixture: a route added without
+updating it fails the contract test.
 
-## Known edges
-
-Things that are true, are not bugs, and have surprised somebody.
+## Limits
 
 - **A queue verb answering 202 has done nothing yet.** It moved rows between
-  statuses. The worker picks them up on its next poll, and `/status` is the
-  only thing that says whether it has.
+  statuses; `/status` is the only thing that says whether a worker picked
+  them up.
 - **`POST /{stage}/{action}` accepts any of the four verbs as a path
-  segment.** An unknown one is FastAPI's own 422 against the `Action`
-  literal, not an `ApiError` with a code.
+  segment.** An unknown one is FastAPI's own 422, not an `ApiError`.
 - **`rerun` skips what a worker holds right now.** It is not a way to
-  interrupt a running conversion; it queues everything a worker is not
-  already in the middle of.
+  interrupt a running conversion.
 - **`GET /topics/visualisation/{language}` 404s for a language fitted before
-  the figure was drawn.** The figure is written during a fit, not on demand,
-  because it needs the weight of every term in every topic and the database
-  keeps only a topic's top terms.
+  the figure was drawn.** The figure is written during a fit, not on demand.
 - **The API can be reached while no worker exists.** A stage added since the
-  stack came up has no container until `make up` creates one: the queue
-  fills, `/status` reports it, and nothing drains it — which reads exactly
-  like a broken worker rather than an absent one.
+  stack came up has no container until `make up` creates one.
