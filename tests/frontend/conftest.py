@@ -86,25 +86,25 @@ def open_view(run_view):
         to answer `health_api`, and a health page with its real stub still
         attached.
         """
+        named = [one for one in replaced if one.endswith("_api")]
         held = {
             factory: Answers(**scripted)
             for factory, scripted in OUTSIDE.get(name, {}).items()
         }
-        held |= {
-            factory: replaced.pop(factory)
-            for factory in [one for one in replaced if one.endswith("_api")]
-        }
-        return page_for(name)(
-            run_view(
-                name,
-                catalog_api=client or Answers(**answers(**replaced)),
-                settings_api=configured or Answers(**settings()),
-                **held,
-            ),
-            name,
-        )
+        held["catalog_api"] = client or Answers(**answers(**_without(replaced, named)))
+        held["settings_api"] = configured or Answers(**settings())
+        # Last, so naming a client outright beats both the default above and
+        # the page's own stub - and so `catalog_api=` is one client rather
+        # than the same keyword passed to run_view twice.
+        held |= {factory: replaced[factory] for factory in named}
+        return page_for(name)(run_view(name, **held), name)
 
     return opened
+
+
+def _without(given: dict, names: list[str]) -> dict:
+    """Whatever is left once the clients are taken out of the answers."""
+    return {key: value for key, value in given.items() if key not in names}
 
 
 @pytest.fixture
