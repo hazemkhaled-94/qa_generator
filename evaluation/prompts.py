@@ -116,6 +116,22 @@ def aside(model: ModelSettings) -> str:
     return ", ".join(written)
 
 
+def order(version: str) -> tuple[int, str]:
+    """Where one version goes in the publish order, OLDEST FIRST.
+
+    Phoenix keeps the version created LAST as the prompt's current one, and
+    `stored` hands its rows back newest first - so publishing in the order
+    they arrive makes the oldest recorded version the one Phoenix shows,
+    and the prompt somebody opens beside a trace is the one the source has
+    moved past. This is what turns that round.
+
+    Numerically where the version is a number, because these are counted
+    and compared as text: `10` sorts before `9` and the newest prompt would
+    be buried again the tenth time one is bumped.
+    """
+    return (int(version), "") if version.isdigit() else (0, version)
+
+
 def _response_format(row: Prompt) -> dict[str, Any] | None:
     """One row's shape, as an OpenAI `response_format`.
 
@@ -143,6 +159,9 @@ def publish(
     version - which is Phoenix's own model and this table's, lined up: it
     keeps the history and shows the diff between two.
 
+    OLDEST FIRST, so the newest recorded version is the one created last
+    and Phoenix shows it as current. See `order`.
+
     BOTH MESSAGES, the parameters and the shape. `PromptVersion(...)` takes
     a message list, a model name and a template format and nothing else, so
     a version built that way carries an EMPTY invocation-parameters block
@@ -168,7 +187,10 @@ def publish(
     asked = parameters(model)
     also = aside(model)
     named_provider = provider(model.model)
-    rows = sorted(stored(service=service), key=lambda row: (row.service, row.name))
+    rows = sorted(
+        stored(service=service),
+        key=lambda row: (row.service, row.name, order(row.version)),
+    )
     sent = 0
     for row in rows:
         messages: list[dict[str, str]] = [{"role": "system", "content": row.text}]

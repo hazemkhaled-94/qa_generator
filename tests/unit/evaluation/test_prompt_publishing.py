@@ -22,7 +22,14 @@ from typing import ClassVar
 import pytest
 from phoenix.client.types import PromptVersion
 
-from evaluation.prompts import _response_format, aside, named, parameters, provider
+from evaluation.prompts import (
+    _response_format,
+    aside,
+    named,
+    order,
+    parameters,
+    provider,
+)
 from llm.config import Settings as ModelSettings
 
 
@@ -164,3 +171,19 @@ def test_a_prompt_name_survives_the_punctuation_in_it() -> None:
     """Phoenix takes an identifier, and these carry colons and brackets."""
     assert named("questions", "phrasing: source") == "questions-phrasing-source"
     assert named("questions", "factoid (spans)") == "questions-factoid-spans"
+
+
+def test_versions_are_published_oldest_first() -> None:
+    """Phoenix shows the version created LAST as the prompt's current one.
+
+    `stored` returns newest first, so publishing in the order it hands them
+    over makes the OLDEST recorded version the current one - and a prompt
+    opened beside a trace is then the one the source has moved past, which
+    is the opposite of what the table is for.
+    """
+    assert sorted(["9", "8", "2"], key=order) == ["2", "8", "9"]
+
+
+def test_the_tenth_version_is_newer_than_the_ninth() -> None:
+    """These are compared as text, where `10` sorts before `9`."""
+    assert sorted(["9", "10", "8"], key=order) == ["8", "9", "10"]
