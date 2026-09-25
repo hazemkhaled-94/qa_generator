@@ -172,23 +172,42 @@ def engine(postgres: str):
     built.dispose()
 
 
+def _release() -> None:
+    """Drops the cached engine, giving its pooled connections back first.
+
+    `cache_clear` on its own drops the only reference to the Engine, and a
+    pool that is garbage collected rather than disposed leaves every
+    connection it was holding open. psycopg notices in `__del__` and warns,
+    which under `filterwarnings = error` fails the test that comes next -
+    and before that rule existed it was a leaked connection per test
+    against a container that has a limit on them.
+
+    Guarded on the cache being populated: calling `connect()` to dispose an
+    engine nothing built would build one first, against whatever
+    DATABASE_URL happened to be set.
+    """
+    from database.qa_generator.engine import engine as connect
+    from database.qa_generator.engine import sessions
+
+    if connect.cache_info().currsize:
+        connect().dispose()
+    connect.cache_clear()
+    sessions.cache_clear()
+
+
 @pytest.fixture
 def database(postgres: str, engine, monkeypatch) -> Iterator[None]:
     """Points the repositories at the container, and empties it afterwards.
 
     The repositories reach the database through the cached engine in
     `database.qa_generator.engine`, which reads DATABASE_URL once per
-    process. Both caches are cleared either side so a test never inherits
+    process. Both caches are released either side so a test never inherits
     the connection of whatever ran before it.
     """
     from sqlalchemy import text
 
-    from database.qa_generator.engine import engine as connect
-    from database.qa_generator.engine import sessions
-
     monkeypatch.setenv("DATABASE_URL", postgres)
-    connect.cache_clear()
-    sessions.cache_clear()
+    _release()
     try:
         yield
     finally:
@@ -204,8 +223,7 @@ def database(postgres: str, engine, monkeypatch) -> Iterator[None]:
                     "RESTART IDENTITY CASCADE"
                 )
             )
-        connect.cache_clear()
-        sessions.cache_clear()
+        _release()
 
 
 #: The credentials the gateway is given, and the ones the buckets use.
@@ -285,7 +303,7 @@ def s3(runtime) -> Iterator[dict[str, str]]:
 
 #: What S3_BUCKETS names, which configs/seaweedfs/bucket-init.sh creates at
 #: start-up. Nothing in the application creates a bucket.
-BUCKETS = ("documents", "parsed", "export", "archive")
+BUCKETS = ("documents", "parsed", "models", "export", "archive")
 
 
 @pytest.fixture
@@ -296,8 +314,8 @@ def buckets(s3: dict[str, str], monkeypatch) -> Iterator[None]:
     so that is emptied too: two tests in the same second would otherwise
     read each other's total.
     """
-    from blob_store.seaweedfs import client
-    from blob_store.seaweedfs.bucket import _COUNTS
+    from blob_store.s3 import client
+    from blob_store.s3.bucket import _COUNTS
 
     for name, value in s3.items():
         monkeypatch.setenv(name, value)
@@ -379,17 +397,13 @@ def application(postgres: str, s3: dict[str, str]):
     developer's own database: the API tests then read and write there while
     the fixtures set up a container nothing touches.
     """
-    from database.qa_generator.engine import engine as connect
-    from database.qa_generator.engine import sessions
-
     os.environ["DATABASE_URL"] = postgres
     os.environ.update(s3)
     # Model identity, which compose gives the api and configs/env/backend.env
     # does not carry: the settings routes serve these and refuse a bad value
     # for one, and both need the value the workers are reading.
     os.environ.setdefault("LLM_MODEL", "ollama_chat/test-model")
-    connect.cache_clear()
-    sessions.cache_clear()
+    _release()
 
     from api.main import app
 
