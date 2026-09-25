@@ -774,8 +774,14 @@ class QuestionGenerationService(StageService):
             if note is None:
                 break
             log.info("asking again for %r: %s", drafts[-1].question_text, note)
+            # Numbered as it is written, not as it is stored: the best draft
+            # is moved to the end below, so a row's position in this list
+            # stops saying which attempt produced it the moment it moves.
             drafts.append(
-                self._checked(self._writer.write(sample, plan, note), accepted)
+                replace(
+                    self._checked(self._writer.write(sample, plan, note), accepted),
+                    attempt=len(drafts) + 1,
+                )
             )
         best = max(range(len(drafts)), key=lambda one: (drafts[one].accepted, one))
         drafts.append(drafts.pop(best))

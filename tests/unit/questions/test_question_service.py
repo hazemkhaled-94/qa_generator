@@ -819,3 +819,65 @@ def test_a_density_of_zero_asks_about_every_passage() -> None:
     service.process_next()
 
     assert queue.written, "nothing was written at all"
+
+
+class RetryingWriter(StubWriter):
+    """A writer that takes a retry note and says which draft it wrote."""
+
+    def write(self, group, plan, note: str = ""):
+        """The base writer, with the note recorded and the text varied."""
+        written = super().write(group, plan)
+        self.notes.append(note)
+        return replace(
+            written, question_text=f"draft {len(self.notes)}: {written.question_text}"
+        )
+
+    def __init__(self) -> None:
+        """Initialises the writer with nothing asked yet."""
+        super().__init__()
+        self.notes: list[str] = []
+
+
+class RefusesTheFirstDraft(StubChecker):
+    """Refuses the first draft under a gate a retry can answer, then accepts."""
+
+    def check(self, candidate, seen=()) -> CheckedQuestion:
+        """Rejects draft one as compound, which `again` has a note for."""
+        checked = super().check(candidate, seen)
+        if candidate.question_text.startswith("draft 1"):
+            return replace(
+                checked,
+                status="rejected",
+                rejected_reason=QuestionRejection.COMPOUND,
+            )
+        return checked
+
+
+def test_a_retry_is_numbered_by_the_draft_that_wrote_it() -> None:
+    """And keeps that number after the best draft is moved to the end.
+
+    `_attempt` reorders its drafts so the kept one is written last, which
+    is what makes a row's position in the list stop saying which attempt
+    produced it. Without the column nothing does: both drafts are stored
+    and neither says whether the retry was the one that worked.
+    """
+    service, queue = build(
+        topic(),
+        [source(1, passage_id=1, language="en")],
+        writer=RetryingWriter(),
+        checker=RefusesTheFirstDraft(),
+        settings=replace(SETTINGS, retries=1, per_topic=1, followup_share=0.0),
+    )
+
+    service.process_next()
+
+    drafts = [
+        (one.attempt, one.status)
+        for one in queue.written
+        if one.question_text.startswith("draft ")
+    ]
+    assert (1, "rejected") in drafts, "the first draft was not recorded as attempt 1"
+    assert (2, "accepted") in drafts, "the retry was not recorded as attempt 2"
+    # The accepted one is stored last, so position and attempt disagree -
+    # which is the whole reason the column exists.
+    assert drafts[-1][0] == 2

@@ -472,6 +472,12 @@ class CheckedQuestion:
     #: the sequence cannot be derived from the verdict and a fixed order.
     #: A column as well as a span attribute: the row outlives the trace.
     gates_ran: tuple[str, ...] = ()
+    #: Which attempt at this slot produced it: 1 is the first draft and
+    #: anything above it is a retry QUESTIONS_RETRIES paid for. Stored on
+    #: every draft, kept and refused alike, because what a retry BOUGHT is
+    #: the acceptance rate of the second attempt against the first, and
+    #: that is not answerable from a run that records only the winner.
+    attempt: int = 1
     #: What the gates that MEASURED something read, beside the gate list
     #: that says which ran. Only a gate comparing a number to a threshold
     #: writes one: an opinion has nothing to record, and a structural rule
@@ -613,6 +619,9 @@ class StoredQuestion:
     #: why this is a margin and not a probability.
     confidence: float | None = None
     gate_scores: list[dict] = field(default_factory=list)
+    #: Which attempt at its slot wrote it. 1 on every question written
+    #: before the column existed, and on every first draft.
+    attempt: int = 1
 
 
 @dataclass(frozen=True)

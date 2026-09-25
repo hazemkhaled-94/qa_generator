@@ -75,6 +75,7 @@ class Question(Base):
             "confidence IS NULL OR confidence BETWEEN 0 AND 1",
             name="questions_confidence_is_a_share",
         ),
+        CheckConstraint("attempt >= 1", name="questions_attempt_is_positive"),
         # What a review queue orders by: the rows that survived a gate by the
         # least are the ones worth a person's time first.
         Index(
@@ -304,6 +305,14 @@ class Question(Base):
         "each its fixed position. Two gates are conditional, so this cannot be "
         "derived from rejected_reason and a fixed order. NULL for a question "
         "written before this column; empty means no gate ran.",
+    )
+    attempt: Mapped[int] = mapped_column(
+        Integer,
+        server_default=text("1"),
+        comment="Which attempt at this question's slot wrote it: 1 is the first "
+        "draft and anything above it is a retry QUESTIONS_RETRIES paid for. Every "
+        "draft is stored, refused ones included, so this is what makes the yield "
+        "of a retry a query rather than a guess.",
     )
     gate_scores: Mapped[list[dict] | None] = mapped_column(
         JSONB,

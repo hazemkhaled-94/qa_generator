@@ -476,6 +476,7 @@ class QuestionQueue(RowQueue):
                             trace_id=question.trace_id or None,
                             span_id=question.span_id or None,
                             gates_ran=list(question.gates_ran),
+                            attempt=question.attempt,
                             gate_scores=scored(question.readings),
                             confidence=confidence(question.readings),
                             run_id=run_id(),

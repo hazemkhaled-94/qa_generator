@@ -77,6 +77,7 @@ _COLUMNS = (
     ("passage_scope", "Passage scope"),
     ("document_scope", "Document scope"),
     ("topic_scope", "Topic scope"),
+    ("attempt", "Attempt"),
     ("thread_position", "Turn"),
     ("follows_id", "Follows"),
     ("language", "Language"),

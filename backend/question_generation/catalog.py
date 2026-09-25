@@ -218,6 +218,7 @@ def _listing() -> Select:
                 Question.span_id,
                 Question.confidence,
                 Question.gate_scores,
+                Question.attempt,
                 func.count(func.distinct(QuestionFact.fact_id)).label("facts"),
                 func.array_agg(
                     func.distinct(func.coalesce(Document.title, Passage.doc_sha256))
@@ -277,6 +278,7 @@ def _stored(row: Any) -> StoredQuestion:
         span_id=row.span_id,
         confidence=row.confidence,
         gate_scores=list(row.gate_scores or ()),
+        attempt=row.attempt,
     )
 
 
