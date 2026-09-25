@@ -113,12 +113,20 @@ class AssessmentService(StageService):
             self._done(current)
 
             current.set_attribute("assessment.approved", assessed.approved)
-            current.set_attribute("assessment.refused", list(assessed.refused))
+            # `str` per item, not the JudgeMetric members themselves.
+            # OpenTelemetry type-checks a sequence attribute by `type()`
+            # rather than by isinstance, so a StrEnum - which IS a str -
+            # is refused and the whole attribute is DROPPED with a warning
+            # and no error. The run looks fine and the one attribute
+            # naming what the judge refused is missing from every span.
+            current.set_attribute(
+                "assessment.refused", [str(one) for one in assessed.refused]
+            )
             for one in judgements:
                 # One attribute per metric, so a trace can be filtered on
                 # `assessment.hallucination = hallucinated` without anybody
                 # joining to Postgres.
-                current.set_attribute(f"assessment.{one.metric}", one.label)
+                current.set_attribute(f"assessment.{one.metric}", str(one.label))
 
             self._record(artifact, assessed, span_id)
             log.info(

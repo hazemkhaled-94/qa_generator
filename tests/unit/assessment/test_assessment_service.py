@@ -279,3 +279,42 @@ def test_the_phase_writes_no_column_a_stage_reads(judgements) -> None:
         "trace_id",
         "span_id",
     }
+
+
+def test_the_refused_metrics_reach_the_span_as_plain_strings() -> None:
+    """OpenTelemetry drops a sequence attribute holding a StrEnum.
+
+    It type-checks each item with `type()` rather than `isinstance`, so a
+    `JudgeMetric` - which IS a `str` - is refused, and the whole attribute
+    is dropped with a warning and no error. The run looks fine and the one
+    span attribute naming what the judge refused is simply absent.
+    """
+    recorded: dict = {}
+
+    class _Span:
+        """A span that records what was set on it."""
+
+        def set_attribute(self, key, value):
+            """Records one attribute."""
+            recorded[key] = value
+
+        def __enter__(self):
+            """Enters the span."""
+            return self
+
+        def __exit__(self, *_):
+            """Leaves it."""
+            return False
+
+    queue = _Queue(_fact())
+    service = _service(queue, _Judge(*REFUSING))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            "assessment.service.working",
+            lambda *a, **k: _Span(),
+        )
+        service.process_next()
+
+    assert recorded["assessment.refused"] == ["hallucination"]
+    assert all(type(one) is str for one in recorded["assessment.refused"])
+    assert type(recorded["assessment.hallucination"]) is str

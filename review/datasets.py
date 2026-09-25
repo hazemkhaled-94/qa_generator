@@ -59,16 +59,26 @@ _VERDICT = ["accepted", "rejected"]
 def _judge_metadata() -> list[rg.TermsMetadataProperty]:
     """What the evaluation phase said, as the two terms it is filtered by.
 
-    Two properties rather than one: `judge` is the verdict and is what a
-    reviewer narrows by, and `judge_disagrees` is the pair worth a sitting
-    of their own - the artefacts the pipeline kept and the judge refused.
+    Two properties rather than one: `judge_verdict` is the verdict and is
+    what a reviewer narrows by, and `judge_disagrees` is the pair worth a
+    sitting of their own - the artefacts the pipeline kept and the judge
+    refused.
+
+    `judge_verdict` rather than `judge`, because the FIELD carrying the
+    reasoning is called that and **Argilla requires every name in a
+    dataset's settings to be unique across fields, questions and metadata
+    together**. Two of them called `judge` is refused at dataset creation
+    with `SettingsError`, which reaches a person as a push that will not
+    run. See `tests/static/test_review_datasets.py`.
 
     A function and not a constant, like every other declaration in this
     module: building an `rg.` object reaches for the default client, so one
     at import time makes importing this module require a running Argilla.
     """
     return [
-        rg.TermsMetadataProperty(name="judge", title="What the LLM judge said"),
+        rg.TermsMetadataProperty(
+            name="judge_verdict", title="What the LLM judge said"
+        ),
         rg.TermsMetadataProperty(
             name="judge_disagrees", title="Judge disagrees with the pipeline"
         ),
@@ -92,7 +102,8 @@ def _judge_field() -> rg.TextField:
 _JUDGE_GUIDELINE = (
     "\n\n"
     "The `judge` field is what an LLM judge said about this row, and the "
-    "`judge` metadata is its verdict in one word. It is NOT the answer. It "
+    "`judge_verdict` metadata is its verdict in one word. It is NOT the "
+    "answer. It "
     "is a second machine opinion recorded beside the checker's, and it "
     "gates nothing - one was measured at chance on German text. Where it "
     "says it disagrees with the pipeline, that pair is the reason this row "
@@ -116,7 +127,7 @@ _WHERE_GUIDELINE = (
 def judge_metadata(opinion: Opinion) -> dict[str, str]:
     """The two metadata terms one artefact's verdict becomes."""
     return {
-        "judge": opinion.verdict,
+        "judge_verdict": opinion.verdict,
         "judge_disagrees": "yes" if opinion.disagrees else "no",
     }
 

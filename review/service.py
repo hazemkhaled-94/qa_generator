@@ -61,16 +61,64 @@ def connect(settings: Settings) -> rg.Argilla:
     return client
 
 
+def _warn_if_stale(found: rg.Dataset, name: str) -> None:
+    """Says so when a dataset predates something the records now carry.
+
+    Argilla drops a field or a metadata term a record sets and the dataset
+    does not declare. It does not refuse the push and it does not warn: the
+    records arrive, and the part the dataset never heard of is simply not
+    there.
+
+    That is how the judge's verdict went missing the first time it was
+    pushed. The datasets had been created before the evaluation phase
+    existed, `_dataset` reuses what it finds rather than recreating it -
+    deliberately, because recreating throws away every answer not yet
+    pulled - and the push reported 38 records written with nothing on them.
+
+    Warned rather than fixed automatically, for the same reason: what to do
+    about it depends on whether anybody has answered, and only a person
+    knows that. `make review-status` is the question, and deleting the
+    dataset in Argilla is the answer when nothing is waiting to be pulled.
+    """
+    try:
+        declared = {one.name for one in found.settings.fields} | {
+            one.name for one in found.settings.metadata
+        }
+        wanted = {one.name for one in datasets.SETTINGS[name]().fields} | {
+            one.name for one in datasets.SETTINGS[name]().metadata
+        }
+        missing = sorted(wanted - declared)
+    except Exception as unreadable:  # noqa: BLE001 - any of them means quiet
+        # Best-effort, like every other diagnostic in this repository: a
+        # warning that cannot be worked out must not fail the push it was
+        # only ever commenting on.
+        log.debug("could not compare %s against its settings: %s", name, unreadable)
+        return
+    if not missing:
+        return
+    log.warning(
+        "the Argilla dataset %s was created before %s existed, so Argilla "
+        "will DROP %s from every record this push writes. Check "
+        "`make review-status` for answers not yet pulled, then delete the "
+        "dataset in Argilla and push again.",
+        found.name,
+        ", ".join(missing),
+        ", ".join(missing),
+    )
+
+
 def _dataset(client: rg.Argilla, settings: Settings, name: str) -> rg.Dataset:
     """The dataset by that name, created on first push.
 
     Not recreated if it is there: a dataset holds the answers given so far,
     and a push that dropped it would throw away every verdict not yet
-    pulled.
+    pulled. What that costs when the settings have moved on is
+    :func:`_warn_if_stale`.
     """
     held = datasets.dataset_name(name)
     found = client.datasets(name=held, workspace=settings.workspace)
     if found is not None:
+        _warn_if_stale(found, name)
         return found
     log.info("creating dataset %s in %s", held, settings.workspace)
     return rg.Dataset(
