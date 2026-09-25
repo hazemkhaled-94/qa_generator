@@ -193,3 +193,49 @@ def _noop():
     from contextlib import nullcontext
 
     return nullcontext()
+
+
+def test_the_exporter_is_left_configurable_by_the_environment(monkeypatch) -> None:
+    """No batching argument is passed, so OTEL_BSP_* still reaches it.
+
+    OpenTelemetry reads the queue size, the schedule delay and the batch
+    size from the environment itself, and an argument passed here would
+    override them silently. That would turn the one thing a deployment can
+    tune about span export into a value requiring a rebuild.
+
+    The defaults are generous for this workload - a passage takes a median
+    473 s, so spans arrive minutes apart against a queue of 2,048 - and a
+    queue that did fill logs "Queue full, dropping spans" rather than
+    losing them quietly.
+    """
+    passed: dict = {}
+
+    class _Processor:
+        """Records how the processor was built."""
+
+        def __init__(self, exporter, *args, **kwargs):
+            """Records the sizing arguments, if any."""
+            passed["args"] = args
+            passed["kwargs"] = kwargs
+
+        def shutdown(self) -> None:
+            """The provider calls this at exit."""
+
+        def force_flush(self, timeout_millis: int = 0) -> bool:
+            """And this."""
+            return True
+
+        def on_start(self, span, parent_context=None) -> None:
+            """Spans are not recorded here."""
+
+        def on_end(self, span) -> None:
+            """Nor here."""
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://phoenix:4317")
+    monkeypatch.setattr(traces, "BatchSpanProcessor", _Processor)
+    monkeypatch.setattr(traces.trace, "set_tracer_provider", lambda _p: None)
+
+    traces.configure("extraction", run="8f2c1e")
+
+    assert passed["args"] == (), "no positional sizing"
+    assert passed["kwargs"] == {}, "no keyword sizing"

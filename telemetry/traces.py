@@ -116,6 +116,25 @@ def configure(
             )
 
             provider.add_span_processor(
+                # No sizing passed, on purpose. OpenTelemetry reads
+                # OTEL_BSP_MAX_QUEUE_SIZE, OTEL_BSP_SCHEDULE_DELAY and
+                # OTEL_BSP_MAX_EXPORT_BATCH_SIZE itself, and an argument
+                # here would OVERRIDE them - turning the one escape hatch a
+                # deployment has into a value nobody can change without a
+                # rebuild.
+                #
+                # The defaults suit this pipeline by a wide margin. A queue
+                # of 2,048 drained every 5 s is sized for a service
+                # answering requests; the unit of work here is a passage at
+                # a median 473 s, so a worker produces a span every few
+                # minutes and the queue never approaches full. Measured
+                # against a real judging run: 5 artefacts, 5 `assess` spans
+                # and 18 `completion` spans in Phoenix, nothing lost.
+                #
+                # A queue that did fill would say so - the SDK logs
+                # "Queue full, dropping spans" per overflow - so this is a
+                # loud failure rather than a silent one, and `make logs`
+                # is where it would appear.
                 BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
             )
         except Exception as exc:  # noqa: BLE001

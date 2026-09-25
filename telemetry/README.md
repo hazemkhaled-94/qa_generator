@@ -217,6 +217,32 @@ The span carries the prompt **filled in**. What a version *asked for* — the
 template — is the `prompts` table; see
 [`backend/stages/prompts.py`](../backend/stages/prompts.py).
 
+### How much reaches Phoenix, and when
+
+Three channels, three mechanisms, and they fail differently.
+
+| | Carries | Sent |
+|---|---|---|
+| **Spans** | a stage's unit of work, and one `completion` per model call | batched — every **5 s** or **512 spans**, whichever comes first |
+| **Annotations** | the gate verdicts and the judge's, per span | batched at **100**, flushed when a queue empties and at the end of a drain |
+| **Prompts, datasets** | what a version asked for, and the golden cases | only when `make prompts-publish` or `make eval-upload` is run |
+
+The span batching is **OpenTelemetry's own**, configured by
+`OTEL_BSP_MAX_QUEUE_SIZE`, `OTEL_BSP_SCHEDULE_DELAY` and
+`OTEL_BSP_MAX_EXPORT_BATCH_SIZE`. Nothing is passed in code, because an
+argument would override the environment and take that escape hatch away.
+
+The defaults suit this pipeline by a wide margin: a queue of 2,048 drained
+every 5 s is sized for a service answering requests, and the unit of work
+here is a passage at a median 473 s. Measured against a real judging run —
+5 artefacts judged, 5 `assess` spans and 18 `completion` spans in Phoenix,
+nothing lost. A queue that did fill would log `Queue full, dropping spans`
+per overflow, so that is a loud failure rather than a quiet one.
+
+**A span is dropped and an annotation is not, when Phoenix is down.** The
+exporter discards what it cannot send; `evaluations.py` warns once per run
+and stops trying, and the verdict is in Postgres either way.
+
 ## Verdicts
 
 A gate verdict is written three times. The **row** in Postgres is the truth.
