@@ -42,10 +42,15 @@ from pydantic import BaseModel, Field
 
 from database.qa_generator import ArtifactKind, JudgeMetric
 
-#: Bumped whenever a template below changes what it asks for. Recorded on
-#: every assessment, because two templates are two judgements the way two
-#: extraction prompts are two datasets.
-PROMPT_VERSION = "1"
+#: Bumped whenever a template below changes what it asks for, or when the
+#: SET a kind is asked changes. Recorded on every assessment, because two
+#: template versions are two judgements the way two extraction prompts are
+#: two datasets.
+#:
+#: Version 2 added `toxicity`, `conciseness` and `refusal`. A row judged
+#: under version 1 carries three metrics fewer, and that is readable rather
+#: than mysterious because the version is on the row.
+PROMPT_VERSION = "2"
 
 #: Each metric's labels and the score phoenix-evals gives them, and which
 #: label is the good one. Taken from that package's own evaluator configs:
@@ -59,6 +64,15 @@ _CHOICES: dict[str, tuple[dict[str, float], str]] = {
     JudgeMetric.RELEVANCE: ({"relevant": 1.0, "unrelated": 0.0}, "relevant"),
     JudgeMetric.QA_CORRECTNESS: ({"correct": 1.0, "incorrect": 0.0}, "correct"),
     JudgeMetric.SUMMARIZATION: ({"good": 1.0, "bad": 0.0}, "good"),
+    JudgeMetric.TOXICITY: ({"toxic": 1.0, "non-toxic": 0.0}, "non-toxic"),
+    JudgeMetric.CONCISENESS: ({"concise": 1.0, "verbose": 0.0}, "concise"),
+    # `refused` is the 1.0 and `answered` is what approves, which is the
+    # second metric here whose good label scores zero. phoenix-evals calls
+    # its direction NEUTRAL - a refusal is not a defect in a chat assistant
+    # - but in a reference dataset it is exactly one: an answerable
+    # question whose stored answer is "the document does not say" is a row
+    # nothing else in this pipeline rejects.
+    JudgeMetric.REFUSAL: ({"refused": 1.0, "answered": 0.0}, "answered"),
 }
 
 #: How each metric is optimised, as phoenix-evals declares it. Recorded on
@@ -69,6 +83,15 @@ _DIRECTION: dict[str, str] = {
     JudgeMetric.RELEVANCE: "maximize",
     JudgeMetric.QA_CORRECTNESS: "maximize",
     JudgeMetric.SUMMARIZATION: "maximize",
+    JudgeMetric.TOXICITY: "minimize",
+    JudgeMetric.CONCISENESS: "maximize",
+    #: phoenix-evals' own word for this one. Kept rather than corrected to
+    #: `minimize`: the name, the labels, the scores and the direction are
+    #: that package's vocabulary, and a reader who knows `refusal` there
+    #: should not find it declaring something else here. What this
+    #: repository thinks of a refusal is in `_CHOICES` above, where
+    #: `answered` is the label that approves.
+    JudgeMetric.REFUSAL: "neutral",
 }
 
 #: The sentence every template carries, because the corpus is not in one
@@ -470,6 +493,163 @@ unrelated: question asks what a term means; facts use the term and never
 FORMAT
 Return `label`, one of `relevant` or `unrelated`, and `explanation`."""
 
+_QUESTION_REFUSAL = f"""ROLE
+You are an examiner. You judge ONE property of ONE expected answer and
+nothing else about it.
+
+ACTION
+Say whether the expected answer actually answers, or whether it is a
+refusal written down as though it were an answer.
+
+STEPS
+1. Read the expected answer on its own.
+2. Decide whether somebody reading it learns the thing the question asked
+   for.
+3. Answer `answered` when they do, even if the answer is short, hedged or
+   wrong. Answer `refused` when the text declines, deflects, or says the
+   material does not cover it.
+
+CONTEXT
+This question is marked as one the material DOES answer. So a stored answer
+that says the material is silent is not a careful answer - it is a failure
+that got written into the dataset, and a benchmark carrying it would score
+a chatbot against "the document does not specify".
+
+Being wrong is not refusing. An answer that confidently states the wrong
+number has answered, and a different judgement decides whether it is right.
+
+{_ANY_LANGUAGE}
+
+EXAMPLES
+answered: "Five working days."
+answered: "Around thirty, though the figure is given as an estimate."
+answered: "Twelve." (even where the material says eleven)
+refused:  "The document does not specify a period."
+refused:  "This information is not available in the provided context."
+refused:  "I could not determine the answer from the passages."
+refused:  "See the relevant section of the manual." (points, does not answer)
+
+FORMAT
+Return `label`, one of `answered` or `refused`, and `explanation`."""
+
+_QUESTION_CONCISENESS = f"""ROLE
+You are an examiner. You judge ONE property of ONE expected answer and
+nothing else about it.
+
+ACTION
+Say whether the answer gives what was asked for and stops.
+
+STEPS
+1. Read the question and decide exactly what it asks for.
+2. Read the expected answer.
+3. Strike out everything that is not that.
+4. Answer `concise` when little or nothing goes. Answer `verbose` when the
+   answer carries pleasantries, restatement of the question, hedging,
+   meta-commentary, or an explanation nobody asked for.
+
+CONTEXT
+This answer is the target a chatbot is scored against. Every word in it
+that was not asked for is a word a correct chatbot can be marked down for
+missing, so padding here is not a matter of taste - it makes the benchmark
+measure the wrong thing.
+
+Length is not the test. A question asking for four conditions wants all
+four, and an answer listing them is concise. A one-line answer that spends
+half its line apologising is not.
+
+{_ANY_LANGUAGE}
+
+EXAMPLES
+concise: "Five working days."
+concise: "A visual check, a pressure test and a sign-off." (three asked for)
+verbose: "Great question! The reply period is five working days."
+verbose: "The reply period, which is an important part of the process, is
+         five working days, though this may vary."
+verbose: "As stated in the question about reply periods, the answer is five
+         working days."
+
+FORMAT
+Return `label`, one of `concise` or `verbose`, and `explanation`."""
+
+_QUESTION_TOXICITY = f"""ROLE
+You are a reviewer. You judge ONE property of ONE question-and-answer pair
+and nothing else about it.
+
+ACTION
+Say whether the text is unacceptable to put in front of somebody.
+
+STEPS
+1. Read the question and the answer.
+2. Look for content that is racist, sexist, demeaning, harassing, violent,
+   or otherwise abusive.
+3. Answer `toxic` only when the text ITSELF is such content. Answer
+   `non-toxic` otherwise.
+
+CONTEXT
+This is about what the pipeline WROTE, not about what the source material
+is about. A corpus may document discrimination, describe an assault, or
+quote abusive language as evidence, and a neutral question about that
+material is not toxic - describing a subject is not being one.
+
+What this catches is a model that produced something offensive of its own,
+which is rare and worth knowing about before a dataset is published.
+
+{_ANY_LANGUAGE}
+
+EXAMPLES
+non-toxic: "What must a manager do after a harassment complaint?"
+non-toxic: "Which categories does the anti-discrimination policy name?"
+non-toxic: "How are injuries from an assault recorded?"
+toxic:     a question or answer that insults a group of people
+toxic:     an answer that recommends harming somebody
+
+FORMAT
+Return `label`, one of `non-toxic` or `toxic`, and `explanation`."""
+
+_FACT_TOXICITY = f"""ROLE
+You are a reviewer. You judge ONE property of ONE statement and nothing
+else about it.
+
+ACTION
+Say whether the statement is unacceptable to put in front of somebody.
+
+STEPS
+1. Read the statement.
+2. Look for content that is racist, sexist, demeaning, harassing, violent,
+   or otherwise abusive.
+3. Answer `toxic` only when the statement ITSELF is such content. Answer
+   `non-toxic` otherwise.
+
+CONTEXT
+This is about what the pipeline WROTE, not about what the source material
+is about. A fact drawn from a document describing discrimination, injury or
+abusive conduct is a neutral report of what that document says, and
+reporting a subject is not being one.
+
+{_ANY_LANGUAGE}
+
+EXAMPLES
+non-toxic: "A complaint must be recorded within two working days."
+non-toxic: "The policy lists harassment as grounds for dismissal."
+non-toxic: "Injuries are reported to the site supervisor."
+toxic:     a statement that insults a group of people
+toxic:     a statement recommending harm
+
+FORMAT
+Return `label`, one of `non-toxic` or `toxic`, and `explanation`."""
+
+#: Toxicity reads the artefact and nothing else: there is no evidence to
+#: compare it against, because the question is not whether the text is
+#: supported but whether it should have been written.
+_FACT_TEXT_ONLY = """STATEMENT
+{{statement}}"""
+
+_QUESTION_TEXT_ONLY = """QUESTION
+{{question}}
+
+EXPECTED ANSWER
+{{answer}}"""
+
 _QUESTION_USER = """QUESTION
 {{question}}
 
@@ -504,6 +684,13 @@ TEMPLATES: dict[str, tuple[Template, ...]] = {
             system=_FACT_RELEVANCE,
             user=_FACT_USER,
             fields=("statement", "evidence"),
+        ),
+        Template(
+            metric=JudgeMetric.TOXICITY,
+            kind=ArtifactKind.FACT,
+            system=_FACT_TOXICITY,
+            user=_FACT_TEXT_ONLY,
+            fields=("statement",),
         ),
     ),
     ArtifactKind.TOPIC: (
@@ -543,6 +730,27 @@ TEMPLATES: dict[str, tuple[Template, ...]] = {
             system=_QUESTION_RELEVANCE,
             user=_QUESTION_NO_ANSWER_USER,
             fields=("question", "facts"),
+        ),
+        Template(
+            metric=JudgeMetric.REFUSAL,
+            kind=ArtifactKind.QUESTION,
+            system=_QUESTION_REFUSAL,
+            user=_QUESTION_TEXT_ONLY,
+            fields=("question", "answer"),
+        ),
+        Template(
+            metric=JudgeMetric.CONCISENESS,
+            kind=ArtifactKind.QUESTION,
+            system=_QUESTION_CONCISENESS,
+            user=_QUESTION_TEXT_ONLY,
+            fields=("question", "answer"),
+        ),
+        Template(
+            metric=JudgeMetric.TOXICITY,
+            kind=ArtifactKind.QUESTION,
+            system=_QUESTION_TOXICITY,
+            user=_QUESTION_TEXT_ONLY,
+            fields=("question", "answer"),
         ),
     ),
 }

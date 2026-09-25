@@ -21,7 +21,7 @@ that stage's queue is empty again.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import streamlit as st
 
@@ -64,15 +64,32 @@ def busy(counts: dict[str, int]) -> bool:
     return bool(counts.get("pending", 0) or counts.get("in_progress", 0))
 
 
-def service(client, queue: Queue, scope: tuple[str, str] | None = None) -> None:
+def service(
+    client,
+    queue: Queue,
+    scope: tuple[str, str] | None = None,
+    scopes: Sequence[tuple[str, str]] | None = None,
+) -> None:
     """Draws one stage's four verbs, each live only when it would act.
 
     `scope` is what to narrow to, as the pair the route takes: ("document",
     sha256), ("passage", id) or ("topic", id). Without one every verb acts
     on everything the stage owns, which is how a whole corpus is started at
     once.
+
+    `scopes` is SEVERAL of those, and it is the evaluation phase's: a
+    person choosing to judge the questions and the facts and not the
+    topics is choosing a set rather than an item, which is a question no
+    other stage's queue is ever asked. Each verb then runs once per scope
+    and the counts are summed, so the line beside the buttons reads as
+    the selection rather than as the corpus.
+
+    The two are exclusive. `scopes` covering every kind is not the same
+    request as `scope` of None - the first names three things and the
+    second names the queue - but they act identically, and the caller that
+    can tell them apart is the one drawing the checkboxes.
     """
-    _polling(lambda: _verbs(client, queue, scope))
+    _polling(lambda: _verbs(client, queue, scope, scopes))
 
 
 def fit(client, queue: Queue) -> None:
@@ -100,15 +117,35 @@ def _polling(draw: Callable[[], None]) -> None:
     drawn()
 
 
-def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
+def _counts(client, queue: Queue, scope, scopes) -> dict[str, int]:
+    """This queue's depth, over one scope, several, or all of it."""
+    if scopes is None:
+        return client.stage_status(queue.name, scope)["rows"]
+    summed: dict[str, int] = {}
+    for one in scopes:
+        for state, count in client.stage_status(queue.name, one)["rows"].items():
+            summed[state] = summed.get(state, 0) + count
+    return summed
+
+
+def _verbs(
+    client,
+    queue: Queue,
+    scope: tuple[str, str] | None,
+    scopes: Sequence[tuple[str, str]] | None = None,
+) -> None:
     """Draws the four queue verbs once, for whatever scope was given."""
-    counts = client.stage_status(queue.name, scope)["rows"]
+    counts = _counts(client, queue, scope, scopes)
     total = sum(counts.values())
     waiting = counts.get("new", 0)
     queued = counts.get("pending", 0)
     failed = counts.get("failed", 0)
-    everything = scope is None
+    everything = scope is None and scopes is None
     unit = queue.unit
+
+    def act(action: str) -> None:
+        """Runs one verb over whatever this control is pointed at."""
+        _act(client, queue.name, scope, action, scopes)
 
     begun, halted, retried, redone, state = st.columns(
         _CONTROLS, vertical_alignment="center"
@@ -124,7 +161,7 @@ def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
         if waiting
         else f"No {unit} are waiting.",
     ):
-        _act(client, queue.name, scope, "start")
+        act("start")
 
     if halted.button(
         "Stop",
@@ -135,7 +172,7 @@ def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
         if queued
         else f"No {unit} are queued.",
     ):
-        _act(client, queue.name, scope, "stop")
+        act("stop")
 
     if retried.button(
         "Retry",
@@ -146,7 +183,7 @@ def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
         if failed
         else f"No {unit} have failed.",
     ):
-        _act(client, queue.name, scope, "retry")
+        act("retry")
 
     if redone.button(
         "Redo all" if everything else "Redo",
@@ -158,7 +195,7 @@ def _verbs(client, queue: Queue, scope: tuple[str, str] | None) -> None:
         if total
         else f"There are no {unit} to redo.",
     ):
-        _act(client, queue.name, scope, "rerun")
+        act("rerun")
 
     _state(state, queue, counts, failed)
 
@@ -218,18 +255,42 @@ def _state(into, queue: Queue, counts: dict[str, int], failed: int) -> None:
 
 
 def _key(action: str, queue: Queue, scope: tuple[str, str] | None) -> str:
-    """Names a button uniquely, so two scopes of one verb are two widgets."""
+    """Names a button uniquely, so two scopes of one verb are two widgets.
+
+    A selection of scopes is NOT in the key. Streamlit identifies a widget
+    by it, and a key that moved when somebody ticked a checkbox would make
+    the button a different button mid-interaction - which loses the click
+    that did the ticking.
+    """
     return "-".join((action, queue.name, *(scope or ())))
 
 
-def _act(client, stage: str, scope: tuple[str, str] | None, action: str) -> None:
+def _act(
+    client,
+    stage: str,
+    scope: tuple[str, str] | None,
+    action: str,
+    scopes: Sequence[tuple[str, str]] | None = None,
+) -> None:
     """Sends one queue action and says what it did.
 
     The whole app, not just this fragment: the figures at the top of the
     page count the same queue these verbs just moved.
+
+    One call per scope where several were given, because the route narrows
+    to one value. They are reported as one line: somebody who ticked two
+    kinds asked for one thing.
     """
-    answer = client.stage_action(stage, action, scope)
-    st.toast(answer.get("detail") or f"{stage}: {action}")
+    if scopes is None:
+        answer = client.stage_action(stage, action, scope)
+        st.toast(answer.get("detail") or f"{stage}: {action}")
+        st.rerun(scope="app")
+        return
+    moved = sum(
+        client.stage_action(stage, action, one).get("rows", 0) for one in scopes
+    )
+    named = ", ".join(value for _, value in scopes)
+    st.toast(f"{stage}: {action} moved {moved:,} row(s) for {named}")
     st.rerun(scope="app")
 
 

@@ -17,7 +17,7 @@ from llm.config import Settings as ModelSettings
 #: A complete set of values, for the reader to vary one of.
 VALUES = {
     "ASSESSMENT_ENABLED": "true",
-    "ASSESSMENT_JUDGE_MODEL": "ollama_chat/qwen3:14b",
+    "ASSESSMENT_JUDGE_MODEL": "azure/gpt-5.4",
     "ASSESSMENT_KINDS": "fact,topic,question",
     "ASSESSMENT_SAMPLE": "200",
 }
@@ -28,17 +28,22 @@ def settings(**changed: str) -> Settings:
     return Settings.load({**VALUES, **changed})
 
 
-def model() -> ModelSettings:
-    """Model settings a lease can be derived from."""
-    return ModelSettings.load(
-        {
-            "LLM_MODEL": "ollama_chat/gemma4:31b",
-            "LLM_STRUCTURED_MODE": "JSON",
-            "LLM_TEMPERATURE": "0",
-            "LLM_TIMEOUT_SECONDS": "60",
-            "LLM_MAX_ATTEMPTS": "3",
-        }
-    )
+#: A self-hosted writer, which is what makes the judge below a
+#: CROSS-PROVIDER override rather than a change of model.
+_SHARED = {
+    "LLM_MODEL": "ollama_chat/gemma4:31b",
+    "LLM_BASE_URL": "http://localhost:11434",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "LLM_STRUCTURED_MODE": "JSON",
+    "LLM_TEMPERATURE": "0",
+    "LLM_TIMEOUT_SECONDS": "60",
+    "LLM_MAX_ATTEMPTS": "3",
+}
+
+
+def model(**changed: str) -> ModelSettings:
+    """The shared model settings, with whatever a test needs changed."""
+    return ModelSettings.load({**_SHARED, **changed})
 
 
 def test_the_flag_is_read() -> None:
@@ -63,11 +68,45 @@ def test_the_kinds_are_checked_against_the_templates() -> None:
 
 def test_the_judge_is_the_model_the_setting_names() -> None:
     """And is the shared model when it names nothing, which is warned about."""
-    assert judge_model(settings(), model()).model == "ollama_chat/qwen3:14b"
+    assert judge_model(settings(), model()).model == "azure/gpt-5.4"
     assert (
         judge_model(settings(ASSESSMENT_JUDGE_MODEL=""), model()).model
         == "ollama_chat/gemma4:31b"
     )
+
+
+def test_a_hosted_judge_does_not_keep_the_local_runtime_address() -> None:
+    """The deployment this is pointed at judges on Azure and writes locally.
+
+    `overridden` drops a base URL it can prove belongs to the runtime being
+    left, which is when it is the one OLLAMA_BASE_URL names. Kept, an Azure
+    request would be sent to Ollama's port - which is the failure that
+    argument exists to stop, in the other direction.
+    """
+    asked = judge_model(settings(), model())
+
+    assert asked.model == "azure/gpt-5.4"
+    assert asked.base_url is None, "litellm reads AZURE_API_BASE instead"
+    assert asked.window is None, "a hosted provider sizes its own context"
+
+
+def test_a_judge_on_the_writers_own_provider_keeps_the_address() -> None:
+    """A same-provider judge is the one-thing change this always was.
+
+    Naming another deployment of the provider already configured moves the
+    model and nothing else.
+    """
+    asked = judge_model(
+        settings(),
+        model(
+            LLM_MODEL="azure/gpt-4.1",
+            LLM_BASE_URL="https://example.openai.azure.com",
+            OLLAMA_BASE_URL="",
+        ),
+    )
+
+    assert asked.model == "azure/gpt-5.4"
+    assert asked.base_url == "https://example.openai.azure.com"
 
 
 def test_the_command_line_stops_when_the_phase_is_off(monkeypatch, caplog) -> None:

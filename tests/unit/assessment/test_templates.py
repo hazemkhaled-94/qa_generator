@@ -42,6 +42,41 @@ PHOENIX = pytest.importorskip(
 )
 
 
+def phoenix_labels(metric: str) -> set[str]:
+    """The labels arize-phoenix-evals gives one metric, from its own source.
+
+    Two places to look, because that package holds its metrics in two: the
+    older ones are rails on `EvalCriteria`, and the newer ones are
+    generated `ClassificationEvaluatorConfig` modules with a `choices`
+    map. Read rather than written down, which is the whole point - an
+    upgrade that renames a label fails this file instead of leaving a
+    column that looks like the one a reader knows and holds something
+    else.
+    """
+    criteria = {
+        JudgeMetric.HALLUCINATION: "HALLUCINATION",
+        JudgeMetric.RELEVANCE: "RELEVANCE",
+        JudgeMetric.QA_CORRECTNESS: "QA",
+        JudgeMetric.SUMMARIZATION: "SUMMARIZATION",
+        JudgeMetric.TOXICITY: "TOXICITY",
+    }.get(metric)
+    if criteria is not None:
+        return set(PHOENIX.EvalCriteria[criteria].value.rails)
+
+    generated = pytest.importorskip("phoenix.evals.__generated__")
+    import pathlib as _pathlib
+    import re as _re
+
+    source = (
+        _pathlib.Path(generated.__file__).parent
+        / "classification_evaluator_configs"
+        / f"_{metric}_classification_evaluator_config.py"
+    ).read_text()
+    found = _re.search(r"choices=\{([^}]*)\}", source)
+    assert found, f"phoenix-evals has no generated config for {metric}"
+    return set(_re.findall(r'"([a-z-]+)":', found.group(1)))
+
+
 def test_every_kind_is_judged() -> None:
     """A kind with no template is a kind the queue would claim and drop."""
     assert set(TEMPLATES) == {
@@ -94,15 +129,11 @@ def test_the_labels_are_the_ones_phoenix_uses(one) -> None:
     A label of ours outside that set is a Phoenix column that looks like
     the one a reader knows and holds something else.
     """
-    criteria = {
-        JudgeMetric.HALLUCINATION: "HALLUCINATION",
-        JudgeMetric.RELEVANCE: "RELEVANCE",
-        JudgeMetric.QA_CORRECTNESS: "QA",
-        JudgeMetric.SUMMARIZATION: "SUMMARIZATION",
-    }[one.metric]
-    theirs = set(PHOENIX.EvalCriteria[criteria].value.rails)
+    theirs = phoenix_labels(one.metric)
 
-    assert set(one.labels) == theirs, f"{one.metric} is not phoenix-evals' {criteria}"
+    assert set(one.labels) == theirs, (
+        f"{one.metric} does not carry phoenix-evals' own labels"
+    )
     assert one.good in theirs
 
 
@@ -143,11 +174,53 @@ def test_hallucination_is_scored_the_way_phoenix_scores_it() -> None:
 
 @pytest.mark.parametrize(
     "metric",
-    [JudgeMetric.RELEVANCE, JudgeMetric.QA_CORRECTNESS, JudgeMetric.SUMMARIZATION],
+    [
+        JudgeMetric.RELEVANCE,
+        JudgeMetric.QA_CORRECTNESS,
+        JudgeMetric.SUMMARIZATION,
+        JudgeMetric.CONCISENESS,
+    ],
 )
-def test_every_other_metric_is_maximised(metric: str) -> None:
+def test_every_maximised_metric_says_so(metric: str) -> None:
     """So a mean read as "how much the judge backed" is right for these."""
     assert direction_of(metric) == "maximize"
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [JudgeMetric.HALLUCINATION, JudgeMetric.TOXICITY],
+)
+def test_the_minimised_metrics_score_one_for_the_bad_label(metric: str) -> None:
+    """Both of them, so neither is averaged in with the rest by accident."""
+    one = next(t for group in TEMPLATES.values() for t in group if t.metric == metric)
+
+    assert direction_of(metric) == "minimize"
+    assert one.scores[one.good] == 0.0
+
+
+def test_a_refusal_approves_on_the_label_that_scores_zero() -> None:
+    """phoenix-evals calls this one NEUTRAL, and here it is not.
+
+    A refusal is not a defect in a chat assistant, which is what that
+    package is usually pointed at. In a reference dataset it is exactly
+    one: an answerable question whose stored answer is "the document does
+    not say" is a row every gate passes and no benchmark should carry.
+
+    So the direction stays theirs - a reader who knows `refusal` should
+    not find it declaring something else - and `answered` is what
+    approves.
+    """
+    one = next(
+        t
+        for group in TEMPLATES.values()
+        for t in group
+        if t.metric == JudgeMetric.REFUSAL
+    )
+
+    assert direction_of(JudgeMetric.REFUSAL) == "neutral"
+    assert one.good == "answered"
+    assert one.scores["answered"] == 0.0
+    assert one.scores["refused"] == 1.0
 
 
 def test_a_shape_is_named_after_its_metric() -> None:
@@ -175,10 +248,14 @@ def test_a_question_is_judged_on_more_than_a_fact() -> None:
         JudgeMetric.HALLUCINATION,
         JudgeMetric.QA_CORRECTNESS,
         JudgeMetric.RELEVANCE,
+        JudgeMetric.REFUSAL,
+        JudgeMetric.CONCISENESS,
+        JudgeMetric.TOXICITY,
     )
     assert metrics_of(ArtifactKind.FACT) == (
         JudgeMetric.HALLUCINATION,
         JudgeMetric.RELEVANCE,
+        JudgeMetric.TOXICITY,
     )
 
 

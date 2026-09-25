@@ -43,15 +43,50 @@ already puts in front of a person. A passage and a parsed document are
 absent: judging a conversion needs the source page rendered beside it, and
 nothing here keeps one.
 
-| Artefact | Judged on | Asked |
-|---|---|---|
-| `fact` | `hallucination` | Do the cited sentences support every part of the statement? |
-| | `relevance` | Are those sentences *about* what the statement is about? |
-| `topic` | `summarization` | Is the label a good short name for these terms? |
-| | `relevance` | Are these terms a subject, or the document's furniture? |
-| `question` | `hallucination` | Do the facts support every part of the answer? |
-| | `qa_correctness` | Does the answer answer the question that was asked? |
-| | `relevance` | Do the facts contain what the question needs? |
+| Artefact | Judged on | Asked | Calls |
+|---|---|---|---|
+| `fact` | `hallucination` | Do the cited sentences support every part of the statement? | 3 |
+| | `relevance` | Are those sentences *about* what the statement is about? | |
+| | `toxicity` | Did the pipeline write something offensive of its own? | |
+| `topic` | `summarization` | Is the label a good short name for these terms? | 2 |
+| | `relevance` | Are these terms a subject, or the document's furniture? | |
+| `question` | `hallucination` | Do the facts support every part of the answer? | 6 |
+| | `qa_correctness` | Does the answer answer the question that was asked? | |
+| | `relevance` | Do the facts contain what the question needs? | |
+| | `refusal` | Is the answer an answer, or a refusal written down as one? | |
+| | `conciseness` | Does the answer give what was asked for and stop? | |
+| | `toxicity` | Did the pipeline write something offensive of its own? | |
+
+### `refusal` is the one no gate makes
+
+A question marked answerable whose stored answer is *"the document does not
+specify"* is well formed, the right length, cites its facts and leaks no
+source. **Every gate passes it**, and a benchmark built from it scores a
+chatbot against a non-answer. Nothing else in this repository looks for it.
+
+`conciseness` is the same shape one step down: `QUESTIONS_ANSWER_CHARS`
+refuses an answer that is too long, and nothing refused one that spent its
+allowance apologising.
+
+`toxicity` is about what the pipeline **wrote**, not what the corpus is
+about. A corpus may document harassment, and a neutral question about it is
+not toxic — the templates say so at length, because a judge that conflates
+the two would flag the most careful part of a difficult corpus.
+
+### What is deliberately not asked
+
+phoenix-evals ships 26 evaluators. The seven above are the ones that apply.
+
+| Not asked | Why |
+|---|---|
+| `faithfulness`, `correctness` | Near-duplicates of `hallucination` and `qa_correctness` — the same judgement with different rails. A second call asking the same question. |
+| `hallucination_span_level`, `qa_span_level` | Span-level variants of two already asked. |
+| `code_readability`, `code_functionality`, `sql_gen_eval` | No code and no SQL is produced. |
+| `tool_calling`, `tool_selection`, `tool_parameter_extraction`, `tool_invocation`, `tool_response_handling` | Nothing here calls a tool. |
+| `reference_link_correctness` | Artefacts carry no links. |
+| `human_vs_ai` | Needs a human-written reference answer. `review/` stores a human **verdict**, not a human answer. |
+| `user_frustration` | Needs a user conversation. |
+| `document_relevance` | This *is* `relevance` above. |
 
 **An artefact is approved only when every one of its metrics approves.** Not
 a majority: an answer that is well-sourced and answers the wrong question is
@@ -118,7 +153,7 @@ Six places, which is the point of it being a phase rather than a script.
 | **Postgres** | `assessments` and `assessment_metrics`. The truth. |
 | **Phoenix** | One annotation per metric, named as above, plus an `assessment` summary. `annotator_kind` is **LLM**, against **CODE** for the gates. |
 | **The API** | `/assessment`, `/assessment/quality`, `/assessment/plan`, and the five queue verbs. |
-| **The UI** | The Assessment page, and the `Judge` columns on an export. |
+| **The UI** | The Assessment page — a tab per artefact kind, a search over the judge's own reasoning, and a checkbox per kind deciding what the queue verbs act on. |
 | **Dagster** | The `assessments` asset, last in the graph, with a `judge_agrees_with_the_checker` check that never fails. |
 | **Argilla** | A `judge` field and two metadata terms on all three datasets. |
 | **The export** | Two columns on the Questions sheet and an Assessment sheet of its own. |
@@ -173,8 +208,8 @@ this codebase does nowhere else.
 
 ## Cost
 
-A model call per metric: two per fact, two per topic, three per question. A
-corpus of twenty thousand facts is forty thousand calls, which is why the
+A model call per metric: **three per fact, two per topic, six per question.**
+A corpus of twenty thousand facts is sixty thousand calls, which is why the
 default is a **sample of 200 per kind, newest first** and why the phase ships
 off.
 
@@ -242,6 +277,10 @@ poetry run pytest tests/unit/assessment
 - **`hallucination` scores 1.0 for the bad label.** Read the direction.
 - **A sample is the default.** `ASSESSMENT_SAMPLE=0` judges the corpus, and
   on a large one that is tens of thousands of model calls.
+- **A question costs six calls and a fact three.** Judging questions alone
+  is the setting that buys the most.
+- **A row judged under template version 1 carries three metrics fewer.**
+  The version is on the row; `make assess-rerun` re-judges it.
 - **Enrolment ignores `--only`.** The requeue after it does not.
 - **A judge that is `LLM_MODEL` is marking its own work.** Warned, not
   refused.

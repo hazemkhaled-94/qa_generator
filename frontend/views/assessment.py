@@ -59,7 +59,99 @@ _METRICS = {
         "good",
         "The label stands in for the terms beneath it.",
     ),
+    "refusal": (
+        "Refusal",
+        "answered",
+        "The answer answers, rather than declining to. Caught by nothing else.",
+    ),
+    "conciseness": (
+        "Conciseness",
+        "concise",
+        "The answer gives what was asked for and stops.",
+    ),
+    "toxicity": (
+        "Toxicity",
+        "non-toxic",
+        "The pipeline wrote nothing offensive of its own.",
+    ),
 }
+
+#: The tab strip, as (what a person picks, what /assessment takes). `None`
+#: is every kind, and it is first because arriving at a page that has
+#: silently narrowed to one third of the corpus is arriving at a lie.
+_TABS: dict[str, str | None] = {
+    "All artefacts": None,
+    "Facts": "fact",
+    "Topics": "topic",
+    "Questions": "question",
+}
+
+
+def _tabs() -> None:
+    """Draws the artefact selector that everything below it answers to."""
+    st.segmented_control(
+        "Artefact",
+        list(_TABS),
+        key="assessment-tab",
+        default=next(iter(_TABS)),
+        label_visibility="collapsed",
+        help="Which artefact this page is about. The figures, the analysis, "
+        "the search and the table all narrow with it.",
+    )
+
+
+def _looking_at() -> str | None:
+    """Which kind the page is showing, or None for all of them.
+
+    Read from session state rather than from the control's return value,
+    because the control is drawn inside the Overview panel and this is
+    needed before it, to fetch what that panel is going to report.
+    """
+    return _TABS.get(st.session_state.get("assessment-tab") or "", None)
+
+
+def _judging(plan: dict) -> list[tuple[str, str]]:
+    """Draws the kind checkboxes and returns what they select.
+
+    Separate from the tab above, and the two answer different questions:
+    the tab is what a person is LOOKING at, and these are what they are
+    asking to JUDGE. Reading one corpus while queueing another is a
+    reasonable thing to want, and merging the two controls would make it
+    impossible.
+
+    Defaults to what ASSESSMENT_KINDS names, so the page opens agreeing
+    with what the worker and the Dagster asset would do on their own.
+    """
+    configured = set(plan.get("kinds") or _KINDS)
+    st.caption("Judge:")
+    picked = []
+    for column, (kind, (label, _)) in zip(
+        st.columns(len(_KINDS)), _KINDS.items(), strict=True
+    ):
+        metrics = len(plan.get("metrics", {}).get(kind, ()))
+        if column.checkbox(
+            label,
+            key=f"assessment-judge-{kind}",
+            value=kind in configured,
+            help=f"{metrics} model call(s) per {label.lower().rstrip('s')}.",
+        ):
+            picked.append(("kind", kind))
+    return picked
+
+
+def _scopes(picked: list[tuple[str, str]]) -> list[tuple[str, str]] | None:
+    """What the queue verbs should act on, given what is ticked.
+
+    None is the whole queue, and it is the right answer to two different
+    tickings: every kind, which is the same request said the long way and
+    is cheaper as one call than three, and none, which is somebody who has
+    not chosen and should not be given controls that do nothing.
+
+    The two read differently to a person, which is what the caption beside
+    this says, and identically to the queue - so they are one return value
+    here and two sentences there.
+    """
+    return None if len(picked) in (0, len(_KINDS)) else picked
 
 
 def view() -> None:
@@ -71,27 +163,24 @@ def view() -> None:
 
     plan = client.assessment_plan()
 
+    looking_at = _looking_at()
+
     words, field = catalog.search("assessment", _FIELDS)
     chosen, pager = catalog.filters(
         "assessment",
         {
-            "kind": (
-                "Artefacts",
-                list(_KINDS),
-                "Which artefact the verdict is about. "
-                + " ".join(f"{label}: {asks}" for label, asks in _KINDS.values()),
-            ),
             "metric": (
                 "Refused by",
                 list(_METRICS),
-                "Show only the artefacts one named judgement did NOT approve.",
+                "Show only the artefacts one named judgement did NOT approve. "
+                + " ".join(f"{name}: {what}" for name, _, what in _METRICS.values()),
             ),
         },
     )
 
     only_disagreements = st.session_state.get("assessment-disagreements", False)
     where = {
-        "kind": chosen["kind"],
+        "kind": looking_at,
         "metric": chosen["metric"],
         "q": words,
         "field": field,
@@ -107,10 +196,11 @@ def view() -> None:
         ),
         "assessments",
     )
-    quality = client.assessment_quality(kind=chosen["kind"])
+    quality = client.assessment_quality(kind=looking_at)
     counts = client.stage_status("assessment")["rows"]
 
     with overview, page.panel("Overview"):
+        _tabs()
         if not plan["enabled"]:
             st.info(
                 "The evaluation phase is switched off. Set "
@@ -153,7 +243,7 @@ def view() -> None:
         )
 
     with analysis, st.expander("Analysis"):
-        page.findings(_checks(quality, counts))
+        page.findings(_checks(quality, counts, plan, looking_at))
         st.caption(
             "A judgement is never a gate. What decides whether a fact is "
             "kept is the checker, and what decides a question is the gates; "
@@ -163,7 +253,19 @@ def view() -> None:
         )
 
     with service, page.panel("Assessment — the evaluation phase"):
-        stage.service(client, _ASSESSMENT)
+        judging = _judging(plan)
+        stage.service(client, _ASSESSMENT, scopes=_scopes(judging))
+        if not judging:
+            st.caption(
+                "Nothing is ticked, so the controls act on every artefact. "
+                "Tick one or more to judge those alone."
+            )
+        elif len(judging) < len(_KINDS):
+            st.caption(
+                "The controls act on "
+                + " and ".join(_KINDS[kind][0].lower() for _, kind in judging)
+                + " only."
+            )
         st.caption(
             f"Judging {', '.join(plan['kinds'])} with "
             f"{plan['judge_model'] or 'LLM_MODEL, which is marking its own work'}"
@@ -218,21 +320,45 @@ def _disagrees(row: dict) -> bool:
     return row["approved"] is False and row["verdict"] == "accepted"
 
 
-def _checks(quality: dict, counts: dict[str, int]) -> list[dict]:
+def _asked_of(plan: dict, looking_at: str | None) -> set[str]:
+    """Which metrics apply to whatever the page is showing.
+
+    Read off the plan rather than listed here, so a metric added to a kind
+    appears without an edit. With no tab chosen it is every metric any
+    kind is asked, because the table below is then showing all of them.
+    """
+    metrics = plan.get("metrics") or {}
+    if looking_at:
+        return set(metrics.get(looking_at, ()))
+    return {one for asked in metrics.values() for one in asked}
+
+
+def _checks(
+    quality: dict, counts: dict[str, int], plan: dict, looking_at: str | None
+) -> list[dict]:
     """Builds the fold: the queue, then one row per metric and per kind."""
     rows = page.queue_rows(
         "Artifacts", counts, ("new", "pending", "in_progress", "assessed", "failed")
     )
     measured = {one["metric"]: one for one in quality.get("metrics", ())}
+    asked = _asked_of(plan, looking_at)
+    # Every metric, the ones that do not apply included and marked as
+    # such: a check missing from a list cannot be told apart from a check
+    # nobody wrote, and `summarization` being absent from the Questions
+    # tab is a fact about the design rather than a gap in the run.
     rows += [
         {
             "Check": name,
             "Value": page.share(measured[code]["approved"], measured[code]["judged"])
             if code in measured
-            else "—",
-            "Should be": f"all {approves}",
+            else ("—" if code in asked else "not asked"),
+            "Should be": f"all {approves}" if code in asked else "—",
             "State": "—",
-            "What it means": f"{what} Phoenix files this as `{code}`.",
+            "What it means": (
+                f"{what} Phoenix files this as `{code}`."
+                if code in asked
+                else f"Not asked of this artefact. {what}"
+            ),
         }
         for code, (name, approves, what) in _METRICS.items()
     ]

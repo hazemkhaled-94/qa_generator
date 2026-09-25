@@ -49,11 +49,60 @@ def test_the_page_renders(page) -> None:
     assert not page().app.exception
 
 
-def test_every_artefact_kind_is_offered_as_a_filter(page) -> None:
-    """Facts, topics and questions, each readable on its own."""
-    offered = page().app.selectbox("assessment-kind").options
+def test_every_artefact_kind_is_a_tab(page) -> None:
+    """Facts, topics and questions, each readable on its own.
 
-    assert offered == ["All artefacts", "fact", "topic", "question"]
+    A tab rather than a dropdown in the filter panel, because "show me the
+    questions only" is what somebody arrives at this page wanting, and a
+    control buried three panels down does not read as an answer to it.
+    """
+    offered = page().app.segmented_control("assessment-tab").options
+
+    assert offered == ["All artefacts", "Facts", "Topics", "Questions"]
+
+
+def test_the_page_opens_on_every_artefact(page) -> None:
+    """The tab strip opens on all of them.
+
+    Arriving at a page silently narrowed to a third of the corpus is
+    arriving at a lie about how much has been judged.
+    """
+    assert page().app.segmented_control("assessment-tab").value == "All artefacts"
+
+
+def test_every_kind_can_be_ticked_for_judging(page) -> None:
+    """Which is a different question from which kind is being looked at.
+
+    Reading one corpus while queueing another is a reasonable thing to
+    want, and one control for both would make it impossible.
+    """
+    ticked = {
+        one.key: one.value
+        for one in page().app.checkbox
+        if one.key.startswith("assessment-judge-")
+    }
+
+    assert set(ticked) == {
+        "assessment-judge-fact",
+        "assessment-judge-topic",
+        "assessment-judge-question",
+    }
+    assert all(ticked.values()), "the page opens agreeing with ASSESSMENT_KINDS"
+
+
+def test_a_kind_the_deployment_does_not_judge_opens_unticked(page) -> None:
+    """So the page says what the worker would actually do."""
+    drawn = page(
+        assessment_plan={**ASSESSMENT_PLAN, "kinds": ["question"]},
+    )
+    ticked = {
+        one.key: one.value
+        for one in drawn.app.checkbox
+        if one.key.startswith("assessment-judge-")
+    }
+
+    assert ticked["assessment-judge-question"] is True
+    assert ticked["assessment-judge-fact"] is False
 
 
 def test_every_metric_is_offered_as_a_filter(page) -> None:
@@ -66,6 +115,9 @@ def test_every_metric_is_offered_as_a_filter(page) -> None:
         "qa_correctness",
         "relevance",
         "summarization",
+        "refusal",
+        "conciseness",
+        "toxicity",
     ]
 
 

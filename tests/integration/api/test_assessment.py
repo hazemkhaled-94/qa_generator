@@ -26,6 +26,9 @@ def test_the_plan_says_whether_the_phase_is_on(client) -> None:
         "hallucination",
         "qa_correctness",
         "relevance",
+        "refusal",
+        "conciseness",
+        "toxicity",
     ]
     assert plan["prompt_version"]
 

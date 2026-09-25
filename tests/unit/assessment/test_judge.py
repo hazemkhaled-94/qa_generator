@@ -69,16 +69,21 @@ def test_every_metric_of_a_kind_is_asked() -> None:
     same call was answered well in both. Asking separately is the fix, and
     it is the fix here for the same reason.
     """
-    client = _Answering("factual", "relevant")
+    client = _Answering("factual", "relevant", "non-toxic")
 
     judged = Judge(client).judge(_fact())
 
     assert [one.metric for one in judged] == [
         JudgeMetric.HALLUCINATION,
         JudgeMetric.RELEVANCE,
+        JudgeMetric.TOXICITY,
     ]
-    assert len(client.asked) == 2
-    assert {shape for shape, _ in client.asked} == {"_Hallucination", "_Relevance"}
+    assert len(client.asked) == 3
+    assert {shape for shape, _ in client.asked} == {
+        "_Hallucination",
+        "_Relevance",
+        "_Toxicity",
+    }
 
 
 def test_the_artefact_reaches_the_prompt() -> None:
@@ -93,7 +98,7 @@ def test_the_artefact_reaches_the_prompt() -> None:
 
 def test_a_label_carries_the_score_and_the_side_phoenix_gives_it() -> None:
     """`factual` approves and scores 0.0, which is the confusable pair."""
-    judged = Judge(_Answering("factual", "relevant")).judge(_fact())
+    judged = Judge(_Answering("factual", "relevant", "non-toxic")).judge(_fact())
     by_metric = {one.metric: one for one in judged}
 
     assert by_metric[JudgeMetric.HALLUCINATION].approved is True
@@ -104,7 +109,7 @@ def test_a_label_carries_the_score_and_the_side_phoenix_gives_it() -> None:
 
 def test_a_hallucinated_label_does_not_approve() -> None:
     """And scores 1.0, because the metric is minimised."""
-    judged = Judge(_Answering("hallucinated", "relevant")).judge(_fact())
+    judged = Judge(_Answering("hallucinated", "relevant", "non-toxic")).judge(_fact())
 
     assert judged[0].approved is False
     assert judged[0].score == 1.0
@@ -123,9 +128,12 @@ def test_one_metric_failing_still_records_the_others() -> None:
     Losing one opinion must not fail a row the rest of the metrics judged,
     so what comes back is short rather than empty.
     """
-    judged = Judge(_Answering("relevant", fails=1)).judge(_fact())
+    judged = Judge(_Answering("relevant", "non-toxic", fails=1)).judge(_fact())
 
-    assert [one.metric for one in judged] == [JudgeMetric.RELEVANCE]
+    assert [one.metric for one in judged] == [
+        JudgeMetric.RELEVANCE,
+        JudgeMetric.TOXICITY,
+    ]
 
 
 def test_no_metric_answering_is_a_failed_row_and_not_a_refusal() -> None:
@@ -141,9 +149,16 @@ def test_no_metric_answering_is_a_failed_row_and_not_a_refusal() -> None:
         Judge(client).judge(_fact())
 
 
-def test_a_question_is_asked_its_three() -> None:
-    """Including the one with no counterpart upstream."""
-    client = _Answering("factual", "correct", "relevant")
+def test_a_question_is_asked_every_metric_its_kind_declares() -> None:
+    """Six of them, and three have no counterpart anywhere upstream.
+
+    `qa_correctness` asks whether the answer answers the question,
+    `refusal` whether it is an answer at all, and `conciseness` whether it
+    is only the answer. No gate asks any of those.
+    """
+    client = _Answering(
+        "factual", "correct", "relevant", "answered", "concise", "non-toxic"
+    )
     question = ArtifactToJudge(
         assessment_id=2,
         kind=ArtifactKind.QUESTION,
@@ -161,5 +176,37 @@ def test_a_question_is_asked_its_three() -> None:
         JudgeMetric.HALLUCINATION,
         JudgeMetric.QA_CORRECTNESS,
         JudgeMetric.RELEVANCE,
+        JudgeMetric.REFUSAL,
+        JudgeMetric.CONCISENESS,
+        JudgeMetric.TOXICITY,
     ]
     assert all(one.approved for one in judged)
+
+
+def test_an_answer_that_declines_to_answer_is_caught_by_nothing_else() -> None:
+    """The judgement this phase added that no gate makes.
+
+    A question marked answerable whose stored answer is "the document does
+    not specify" is well formed, the right length, cites its facts and
+    leaks no source. Every gate passes it, and a benchmark built from it
+    scores a chatbot against a non-answer.
+    """
+    client = _Answering(
+        "factual", "correct", "relevant", "refused", "concise", "non-toxic"
+    )
+    question = ArtifactToJudge(
+        assessment_id=3,
+        kind=ArtifactKind.QUESTION,
+        artifact_id=11,
+        fields={
+            "question": "How long is allowed for a reply?",
+            "answer": "The document does not specify a period.",
+            "facts": "- A reply is due in five days.",
+        },
+    )
+
+    judged = {one.metric: one for one in Judge(client).judge(question)}
+
+    assert judged[JudgeMetric.REFUSAL].label == "refused"
+    assert judged[JudgeMetric.REFUSAL].approved is False
+    assert judged[JudgeMetric.REFUSAL].score == 1.0

@@ -235,12 +235,22 @@ class JudgeMetric(StrEnum):
     RELEVANCE      is the evidence about what the artefact claims it is?
     QA_CORRECTNESS is the expected answer the right answer to the question?
     SUMMARIZATION  does this name stand in for what it summarises?
+    TOXICITY       would this be unacceptable to put in front of somebody?
+    CONCISENESS    does the answer say only what was asked for?
+    REFUSAL        is the "answer" a refusal to answer, written down as one?
+
+    The last three were added after the first four. A row judged before
+    them carries only the metrics its template version asked for, which is
+    what `assessments.prompt_version` is for.
     """
 
     HALLUCINATION = "hallucination"
     RELEVANCE = "relevance"
     QA_CORRECTNESS = "qa_correctness"
     SUMMARIZATION = "summarization"
+    TOXICITY = "toxicity"
+    CONCISENESS = "conciseness"
+    REFUSAL = "refusal"
 
 
 class Rejection(StrEnum):
