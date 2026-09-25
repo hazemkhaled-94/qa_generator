@@ -70,6 +70,50 @@ def _hypothesis() -> None:
 
 _hypothesis()
 
+
+def pytest_sessionstart() -> None:
+    """Refuses a run where two test modules share a basename.
+
+    `tests/` holds no `__init__.py`, so pytest imports each module under its
+    bare basename and two files called `test_pipeline.py` are one name. What
+    it says when that happens is
+
+        import file mismatch: imported module 'test_pipeline' has this
+        __file__ attribute: .../e2e/test_pipeline.py
+
+    followed by advice about deleting __pycache__, which is not the problem
+    and does not fix it. It is raised while collecting, so it takes the
+    whole run down with it - the gating layers included, none of which
+    contain either file.
+
+    Said here instead, before collection, naming both paths. The rule is the
+    one the conftest collision came from: under a directory that is not a
+    package, a module's basename is its full name and has to be unique.
+
+    Ends the session rather than failing a test: a test that reported this
+    would sit in a layer the collision had already stopped from collecting.
+    """
+    seen: dict[str, Path] = {}
+    clashing: list[str] = []
+    for found in sorted(ROOT.rglob("test_*.py")):
+        if "__pycache__" in found.parts:
+            continue
+        first = seen.setdefault(found.name, found)
+        if first != found:
+            clashing.append(
+                f"  {found.name}: {first.relative_to(ROOT)} and "
+                f"{found.relative_to(ROOT)}"
+            )
+    if clashing:
+        pytest.exit(
+            "two test modules share a basename, and tests/ is not a package, "
+            "so pytest cannot import both:\n"
+            + "\n".join(clashing)
+            + "\nRename one of each pair.",
+            returncode=4,
+        )
+
+
 #: The same images compose runs.
 POSTGRES_IMAGE = "pgvector/pgvector:pg18"
 SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.44"
