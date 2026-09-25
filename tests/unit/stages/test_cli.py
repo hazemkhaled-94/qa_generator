@@ -132,3 +132,78 @@ def test_a_drain_that_starts_installs_the_exporter(monkeypatch) -> None:
     assert [one.get("tracing", True) for one in configured] == [False, True]
     assert configured[-1]["run"] == "8f2c1e"
     assert configured[-1]["named"] is None
+
+
+# ── What a worker says while its model is down ─────────────────────────────
+
+
+def _waiting(monkeypatch, *, failures: int):
+    """Runs `_ready` as a watching worker whose model is down for a while."""
+    from stages import cli
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(
+        cli.time, "sleep", lambda s: clock.__setitem__("now", clock["now"] + s)
+    )
+    monkeypatch.setattr(cli.time, "monotonic", lambda: clock["now"])
+
+    said: list[tuple[str, str]] = []
+    for level in ("error", "warning", "info"):
+        monkeypatch.setattr(
+            cli.log,
+            level,
+            lambda msg, *a, _l=level: said.append((_l, msg % a if a else msg)),
+        )
+
+    tries = {"n": 0}
+
+    def preflight() -> None:
+        """Refuses `failures` times, then answers."""
+        tries["n"] += 1
+        if tries["n"] <= failures:
+            raise RuntimeError("Connection refused")
+
+    assert cli._ready("extraction", preflight, True) is True
+    return said
+
+
+def test_a_model_that_is_down_is_reported_once_and_then_counted(monkeypatch) -> None:
+    """Not once per attempt.
+
+    A worker polling every 60s wrote a line every 60s, and the client,
+    instructor and a credential library wrote around it: 836 lines in four
+    minutes about one unreachable address. How often it TRIES is unchanged;
+    how often it says so is not.
+    """
+    said = _waiting(monkeypatch, failures=40)
+
+    errors = [one for one in said if one[0] == "error"]
+    warnings = [one for one in said if one[0] == "warning"]
+
+    assert len(errors) == 1, "the reason is given once, in full"
+    assert "Connection refused" in errors[0][1]
+    assert len(warnings) < 10, "the repeats are counted, not narrated"
+
+
+def test_the_first_line_says_it_will_keep_trying(monkeypatch) -> None:
+    """So nobody restarts a worker that is already recovering by itself."""
+    said = _waiting(monkeypatch, failures=3)
+
+    assert "keep trying" in said[0][1]
+
+
+def test_coming_back_is_worth_a_line(monkeypatch) -> None:
+    """A recovery gets a line of its own.
+
+    Otherwise the log goes quiet and a reader cannot tell a worker that
+    started working from one that stopped complaining.
+    """
+    said = _waiting(monkeypatch, failures=3)
+
+    assert said[-1][0] == "info"
+    assert "reached its model" in said[-1][1]
+
+
+def test_a_model_that_answers_at_once_says_nothing(monkeypatch) -> None:
+    """The common case stays silent."""
+    assert _waiting(monkeypatch, failures=0) == []

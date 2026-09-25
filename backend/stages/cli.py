@@ -41,9 +41,25 @@ _ACTIONS = {
 Extra = tuple[str, str, Callable[[Any], int]]
 
 #: How long a watching worker waits before asking the model again, and the
-#: ceiling it doubles towards.
+#: ceiling it doubles towards. Unchanged by the quietening below: how often
+#: a worker TRIES decides how fast it recovers, and a model that comes back
+#: should be noticed within the minute.
 _RETRY_SECONDS = 5.0
 _RETRY_CEILING = 60.0
+
+#: How often a worker that still cannot reach its model says so again.
+#:
+#: How often it SHOUTS is a different question from how often it tries, and
+#: they used to be the same one. A worker polling every 60s wrote a line
+#: every 60s, and around it the client wrote a traceback, instructor wrote
+#: its attempts and a credential library listed every identity it had: 836
+#: lines in four minutes, from one worker, about one unreachable address.
+#:
+#: So the first refusal is reported in full and the repeats are counted.
+#: Ten minutes is long enough that an overnight outage is a handful of
+#: lines and short enough that `make logs` on a broken deployment still
+#: says what is wrong without scrolling.
+_RETRY_REPORT_SECONDS = 600.0
 
 
 def parser(module: str, actions: dict[str, str]) -> argparse.ArgumentParser:
@@ -240,9 +256,23 @@ def _ready(name: str, preflight: Callable[[], None], watching: bool) -> bool:
     and it needs nobody to run `make up` again.
     """
     delay = _RETRY_SECONDS
+    attempts = 0
+    began = time.monotonic()
+    said = 0.0
     while True:
         try:
             preflight()
+            if attempts:
+                # The recovery is worth a line of its own. Without it the
+                # log goes quiet and a reader cannot tell a worker that
+                # started working from one that stopped complaining.
+                log.info(
+                    "%s reached its model after %d attempt(s) over %s, and is "
+                    "claiming work",
+                    name,
+                    attempts + 1,
+                    _for(time.monotonic() - began),
+                )
             return True
         except Exception as refusal:  # noqa: BLE001 - any of them means wait
             # One line rather than a traceback: this is a deployment that is
@@ -251,11 +281,38 @@ def _ready(name: str, preflight: Callable[[], None], watching: bool) -> bool:
             if not watching:
                 log.error("%s will not start: %s", name, refusal)
                 return False
-            log.error(
-                "%s cannot reach its model, and will try again in %.0fs: %s",
-                name,
-                delay,
-                refusal,
-            )
+            waited = time.monotonic() - began
+            if not attempts:
+                log.error(
+                    "%s cannot reach its model and will keep trying every "
+                    "%.0fs, reporting again every %.0f minutes until it can: "
+                    "%s",
+                    name,
+                    _RETRY_CEILING,
+                    _RETRY_REPORT_SECONDS / 60,
+                    refusal,
+                )
+                said = waited
+            elif waited - said >= _RETRY_REPORT_SECONDS:
+                # Counted rather than repeated. The reason is in the first
+                # line; what a reader needs now is whether it is still
+                # happening and for how long.
+                log.warning(
+                    "%s still cannot reach its model: %d attempt(s) over %s",
+                    name,
+                    attempts + 1,
+                    _for(waited),
+                )
+                said = waited
+            attempts += 1
             time.sleep(delay)
             delay = min(delay * 2, _RETRY_CEILING)
+
+
+def _for(seconds: float) -> str:
+    """How long something has been going on, for a person to read."""
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.1f}h"

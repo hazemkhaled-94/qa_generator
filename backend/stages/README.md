@@ -18,9 +18,39 @@ are thin wrappers over the parser built here. See
 `start` moves it to `pending`, which is the only status a worker claims, and
 `stop` moves it back. A stage never sets another stage going.
 
-A stage **selects on its own status column and on nothing else**. Chunking
-never reads `parse_status`, which is what lets two stages own different
-columns of the same `documents` row.
+Something still has to decide that a stage should run, and there are four
+things that do: a `make` target, the Start button, `POST /{stage}/start`, and
+the orchestrator. Only the last can run the stages **in order**, because only
+it can wait for one to drain before starting the next — see
+[`orchestration/`](../../orchestration/README.md) and `POST /pipeline/run`.
+
+A stage **claims on its own status column and on nothing else**, which is
+what lets two stages own different columns of the same `documents` row.
+
+### The one thing read beside it
+
+Queueing is not claiming, and one stage needs the difference. A passage
+exists because chunking made it and a topic because a fit did, so for four
+of the five stages "this row exists" already means "the stage before me
+produced it". Chunking queues over `documents`, and a document exists from
+the moment somebody uploaded one.
+
+So `start` over a corpus half way through parsing used to queue the unparsed
+half, and every row of it failed on the missing parsed object — a `Start all`
+on the Passages page, pressed while parsing ran, turned into a column of
+failures that then needed `retry`.
+
+`RowQueue.ready` is the answer, and chunking is the only stage that declares
+one:
+
+```python
+ready = Document.parse_status == Status.PARSED
+```
+
+It is carried by `start` and `reset` and by nothing else. **It says which
+rows may enter the queue, not which a worker may take** — a row already
+`pending` is a row somebody queued, and it is claimed, worked, failed and
+swept exactly as before whatever `ready` says.
 
 ```
 new  ──start──▶  pending  ──claimed──▶  running  ──▶  done
@@ -100,7 +130,7 @@ The actions are **mutually exclusive**.
 | `--stop` | Take back what has not begun | yes |
 | `--retry` | Return failed rows to the queue | yes |
 | `--rerun` | Queue every row again, finished ones included | yes |
-| `--reclaim` | Return a row a dead worker still holds, without waiting out its lease | **no** |
+| `--reclaim` | Return a row a dead worker still holds, without waiting out its lease | yes |
 | `--only SCOPE=VALUE` | Narrow the action to one item | — |
 | `--watch` | Drain, and keep draining | — |
 | no flag | Drain the queue once, in the foreground, and stop | — |
@@ -146,6 +176,19 @@ make questions-reclaim TOPIC=473   # one topic, while a worker may be up
 make questions-reclaim             # every one the stage holds. Only when it is stopped
 ```
 
+It **has a route now**, and used not to. The argument for leaving it out was
+that the API cannot know a worker is gone — but neither can the command line,
+which a person runs just as blindly, so the asymmetry protected nobody and
+cost anyone driving this over HTTP the single stuck row that `retry`, `rerun`
+and `stop` all step over. What the danger needs is the narrowing this section
+already asks for, so that is what the route enforces:
+
+```bash
+curl -X POST localhost:8000/questions/topic/473/reclaim   # one topic
+curl -X POST localhost:8000/questions/reclaim             # 400, confirm it
+curl -X POST 'localhost:8000/questions/reclaim?confirm=true'
+```
+
 ### Two things done once, before the first claim
 
 `queue_main` takes two optional callables, both run after the queue verbs and
@@ -155,6 +198,19 @@ before anything is drained.
 three that call a model, that the model answers. It raises, and the process
 stops with nothing taken. A watching worker retries instead of dying, backing
 off from 5 seconds towards 60.
+
+**It says so once.** How often a worker tries and how often it says so used
+to be the same number, and around each attempt the client wrote a
+traceback, instructor wrote its attempts and a credential library listed
+every identity it had tried: **836 lines in four minutes, from one worker,
+about one unreachable address**. The check now silences those for the
+length of its own call, the first refusal is reported in full with the
+reason, and the repeats are counted every ten minutes. Coming back is a
+line of its own, so a log going quiet is not mistaken for a worker that
+started working. Same four minutes, after: **two lines.**
+
+The retry interval is deliberately unchanged. How fast a worker recovers
+is a different question from how loud it is while it waits.
 
 **`prompts`** records what this stage sends, so the version stamped on each
 row can be resolved to the text that produced it. It runs after preflight and
@@ -214,8 +270,11 @@ poetry run pytest tests/unit/stages tests/integration/database/test_queue.py
 - **`rerun` skips what a worker holds right now.** It is not a way to
   interrupt a running item. `reclaim` is, and it is the one verb that can
   hand a live worker's row to a second one.
-- **`reclaim` has no route, on purpose.** The API cannot know a worker is
-  gone.
+- **`reclaim` over a whole stage needs `?confirm=true`.** Neither the route
+  nor the command line can tell a dead claim from a live one; narrowed to
+  one item it is the ordinary way out of a killed worker.
+- **`ready` gates queueing, never claiming.** Chunking is the only stage
+  that declares one, and a row already `pending` is worked whatever it says.
 - **A worker that cannot call its model does not start.** A watching worker
   backs off and waits.
 - **A `make` target and a worker container can drain the same queue at the

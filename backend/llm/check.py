@@ -20,6 +20,8 @@ stage authenticates this.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 
 import litellm
@@ -37,6 +39,34 @@ log = logging.getLogger(__name__)
 #: worker's log wants and not what somebody reading a one-line verdict
 #: does. The refusal is reported here instead, in one line.
 QUIET = ("llm.client", "LiteLLM", "instructor", "azure.identity", "azure.core")
+
+
+@contextmanager
+def quiet() -> Iterator[None]:
+    """Silences the libraries that narrate a refusal, for one call.
+
+    Applied around the CHECK rather than only around `make doctor`, which
+    is where it used to be. A worker asks this same question before every
+    poll, and a worker whose Ollama is down produced 836 log lines in four
+    minutes - 20 tracebacks, 96 litellm lines and every identity
+    DefaultAzureCredential tried - for a fact that fits in one sentence
+    and that `stages.cli` was already writing.
+
+    Restored afterwards, so the narration a real call needs survives: this
+    is about the health check, not about the pipeline.
+    """
+    held = {name: logging.getLogger(name).level for name in QUIET}
+    was = litellm.suppress_debug_info
+    for name in QUIET:
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+    litellm.suppress_debug_info = True
+    try:
+        yield
+    finally:
+        for name, level in held.items():
+            logging.getLogger(name).setLevel(level)
+        litellm.suppress_debug_info = was
+
 
 #: Long enough for a cold local model to load, short enough that a wrong
 #: address is a failure rather than a wait. LLM_TIMEOUT_SECONDS is the
@@ -72,11 +102,12 @@ def reachable(settings: Settings) -> None:
         settings, timeout_seconds=TIMEOUT_SECONDS, max_attempts=1, num_ctx=None
     )
     try:
-        Client(once).answer(
-            system="You answer with a JSON object and nothing else.",
-            user="Set ok to true.",
-            shape=Reachable,
-        )
+        with quiet():
+            Client(once).answer(
+                system="You answer with a JSON object and nothing else.",
+                user="Set ok to true.",
+                shape=Reachable,
+            )
     except Exception as refusal:
         where = settings.base_url or "the provider's own address"
         raise Unreachable(
@@ -112,9 +143,6 @@ def main() -> int:
         The process exit code: 0 if the model answered in shape.
     """
     telemetry.configure("doctor")
-    for noisy in QUIET:
-        logging.getLogger(noisy).setLevel(logging.CRITICAL)
-    litellm.suppress_debug_info = True
 
     settings = Settings.load()
     log.info("model    %s", settings.model)
