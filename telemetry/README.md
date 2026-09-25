@@ -8,10 +8,43 @@ called before anything else.
 
 | Tool | Holds | Does not hold |
 |---|---|---|
+| **The application** | The **artefacts and the chain between them**: what one question was produced from, which gates read it, and a link into each of the four below | Anything about a run it did not store on a row |
 | **Phoenix** | The **logic**: every stage's spans, every model call with its shape and prompt version, and every validation as an annotation of its own | Services. No HTTP, no SQL, no object store, no frontend |
 | **Grafana** | **Every line every process writes**, per service, joined to its trace and its run | Container logs of the infrastructure |
-| **Argilla** | The **artefacts**, one dataset per kind | |
+| **Argilla** | The **artefacts a person judged**, one dataset per kind | |
 | **Dagster** | The **workflow**: what ran, what it produced, in what order, whoever started it | Row-level lineage |
+
+### One number, in all five
+
+[`pipeline.py`](pipeline.py) holds the seven stages once, and the number in
+front of a name is the stage's place among them:
+
+| Stage | Phoenix project | Argilla dataset | Dagster group |
+|---|---|---|---|
+| 1 ingestion | — | — | — |
+| 2 parsing | `2-parsing-<run>` | — | `stage_2_parsing` |
+| 3 chunking | `3-chunking-<run>` | — | `stage_3_chunking` |
+| 4 extraction | `4-extraction-<run>` | `4-facts` | `stage_4_extraction` |
+| 5 topic modelling | `5-topic_modelling-<run>` | `5-topic-labels` | `stage_5_topic_modelling` |
+| 6 question generation | `6-question_generation-<run>` | `6-questions` | `stage_6_question_generation` |
+| 7 assessment | `7-assessment-<run>` | — | `stage_7_assessment` |
+
+All four tools sort their own names alphabetically, which put Argilla's
+`facts, questions, topic-labels` and Phoenix's `assessment-, extraction-,
+questions-, topics-` in an order no corpus moves in. The number is what
+makes each tool's own ordering the pipeline's, and it means the same thing
+in every one of them.
+
+Nothing migrates the projects and datasets written under the old names.
+They stay until they age out.
+
+### Where a person starts
+
+`GET /lineage/{kind}/{id}`, and the **How this was produced** fold on every
+artefact page. It walks a question up to its facts, a fact to its passages,
+a passage to its document, reports each step under the stage that produced
+it, and links each artefact to its own span. That is the one question none
+of the four tools answers on its own, because each holds one slice of it.
 
 Two rules in [`traces.py`](traces.py) keep that line:
 

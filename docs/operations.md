@@ -85,20 +85,30 @@ falls back to `localhost:11434`, which inside that container is Phoenix.
 
 Four, provisioned from `configs/grafana/` over three datasources.
 
+Numbered in reading order, and each opens with what it answers and which
+tool to use for the rest.
+
 | Dashboard | Reads | Shows |
 |---|---|---|
-| Pipeline state | PostgreSQL | Queue depth per stage, failures with reasons, fact and question acceptance, topic coverage |
-| Pipeline throughput | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused |
-| Pipeline logs | Elasticsearch | Lines per level, what failed and where |
-| Run | all three | One run on one page: what it produced, what it cost, its Phoenix projects, the gate verdicts, every line it wrote |
+| 1 · Where the corpus is now | PostgreSQL | Queue depth per stage, failures with reasons, fact and question acceptance, topic coverage |
+| 2 · What each stage is doing | Elasticsearch | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused |
+| 3 · One run, end to end | all three | One run on one page: what it produced, what it cost, its Phoenix projects, the gate verdicts, every line it wrote |
+| 4 · Every line every process wrote | Elasticsearch | Lines per level, what failed and where |
 
 Logs say what happened once; the tables say what is true now. A row a worker
-died holding logged nothing and is still counted in Pipeline state.
+died holding logged nothing and is still counted in **1 · Where the corpus
+is now**.
 
-**Run** crosses that split, which is why there is a third datasource: a run
-is `questions.run_id` on one side and a Phoenix project named
-`<stage>-<run id>` on the other. The `Phoenix` datasource is the same
-PostgreSQL server, a different database, read by the same `grafana_reader`.
+**3 · One run, end to end** crosses that split, which is why there is a
+third datasource: a run is `questions.run_id` on one side and a Phoenix
+project named `<position>-<stage>-<run id>` on the other. The `Phoenix`
+datasource is the same PostgreSQL server, a different database, read by the
+same `grafana_reader`.
+
+Grafana holds state and logs and nothing else. For how one artefact was
+produced, open it on its own page in the application and read the **How
+this was produced** fold; for the calls behind a step, Phoenix; for which
+run produced it, Dagster.
 
 The panel worth watching during a long run is **model latency p99**. The
 extraction lease derives from `LLM_TIMEOUT_SECONDS` and `LLM_MAX_ATTEMPTS`,

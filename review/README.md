@@ -4,9 +4,20 @@ Human review of what the models decided, through Argilla.
 
 | Dataset | The decision | Lands in |
 |---|---|---|
-| `facts` | Does the statement follow from the evidence, and stand on its own? | `facts.reviewed_verdict` |
-| `topic-labels` | Is this a good name for these terms, and is it a subject worth asking about? | `topics.label`, `topics.include_in_coverage` |
-| `questions` | Would somebody ask this, and is the answer right? | `questions.status` |
+| `4-facts` | Does the statement follow from the evidence, and stand on its own? | `facts.reviewed_verdict` |
+| `5-topic-labels` | Is this a good name for these terms, and is it a subject worth asking about? | `topics.label`, `topics.include_in_coverage` |
+| `6-questions` | Would somebody ask this, and is the answer right? | `questions.status` |
+
+The number is the stage that produced the kind, and it is the same number
+Phoenix's projects and Dagster's groups carry —
+[`telemetry/pipeline.py`](../telemetry/pipeline.py) holds it once. Argilla
+sorts its datasets by name, and `facts, questions, topic-labels` is not the
+order they are produced in.
+
+**The CLI still takes the bare name.** `--push facts`, not `--push 4-facts`:
+the number is what Argilla shows, not what anybody types. Datasets pushed
+under the old names are not migrated and stay beside the new ones until
+they are deleted.
 
 Argilla holds a **copy** of the rows put in front of somebody and the answers
 they gave. A pull brings the answers home and the copy is disposable —

@@ -50,6 +50,23 @@ Both degrade rather than break. A question written before the columns existed
 says so; a deployment with no `PHOENIX_BASE_URL` on the `streamlit` service
 shows the ids as text instead of links.
 
+### Every artefact says how it was produced
+
+Documents, Passages, Facts, Topics and Questions each carry a **How this
+was produced** fold, from [`lib/lineage.py`](lib/lineage.py) over
+`GET /lineage/{kind}/{id}`. It shows the chain the artefact came out of —
+the document, the passages cut from it, the facts read out of those, the
+topics they sit in, the questions written from them — each step numbered by
+the stage that produced it, with that stage's verdict, what the judge made
+of it, and a link to its own span.
+
+On a question it also lists every gate that read it, at its fixed position.
+The gates after the one that refused it are **absent rather than shown as
+passed**: the checker returns on the first failure, so they never ran.
+
+Behind a selection and collapsed, like everything else not needed on
+arrival.
+
 ## The shape of every page
 
 The same sequence of panels, on all seven:
@@ -92,6 +109,7 @@ became claimable. The page stays usable throughout, and Stop stays live.
 | [`lib/stage.py`](lib/stage.py) | The one service a page runs, and the controls that move its queue |
 | [`lib/catalog.py`](lib/catalog.py) | The search panel, the filter panel and the pager |
 | [`lib/configure.py`](lib/configure.py) | The configuration panel |
+| [`lib/lineage.py`](lib/lineage.py) | The "How this was produced" panel |
 | [`lib/backend/`](lib/backend/) | The API clients, one module per group of calls |
 | [`styles.css`](styles.css) | The custom styling, on top of the theme |
 

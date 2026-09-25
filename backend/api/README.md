@@ -182,6 +182,30 @@ where the links come from; a service nobody published gets no link.
 
 `GET /docs` is FastAPI's own OpenAPI page. Nothing else is served.
 
+### How one artefact was produced
+
+| Route | Answers |
+|---|---|
+| `GET /lineage/{kind}/{id}` | Everything one document, passage, fact, topic or question was produced from, in pipeline order |
+
+The one route that crosses every service, and the only one whose query
+lives here rather than in a stage's repository — [`lineage.py`](lineage.py)
+reads the same models the service repositories read, and the api is
+already the only layer above all seven.
+
+It walks **upwards**: a question to its facts, a fact to its passages, a
+passage to its document. What came of an artefact is the listing each page
+already answers with a filter.
+
+Each step is numbered by the stage that produced it, carries that stage's
+verdict and what the judge made of it, and links each artefact to its own
+span. A step is capped at twenty artefacts and reports its own total,
+because one topic in a real corpus holds hundreds of passages.
+
+For a question it also reports `gates_ran` — every gate that read it, at
+its fixed position. `gates_recorded` is false for a question written
+before that column existed.
+
 ### Filtering and paging
 
 `/documents`, `/passages`, `/facts` and `/questions` all take `q` for a

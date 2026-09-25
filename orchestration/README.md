@@ -18,6 +18,17 @@ parsed_documents → passages → facts → topics → questions
 
 Materialising one starts that stage and waits for the workers to drain it.
 
+Each asset is in a **group of its own, numbered by its stage**:
+`stage_2_parsing` through `stage_7_assessment`. Dagster sorts both its
+asset list and its group list by name, and the assets alphabetically are
+`assessments, facts, parsed_documents, passages, questions, topics` — which
+is not the order a corpus moves through them. The number is the same one
+Phoenix's projects and Argilla's datasets carry;
+[`telemetry/pipeline.py`](../telemetry/pipeline.py) holds it once.
+
+The asset **keys** are unchanged, so every materialisation recorded so far
+still belongs to the asset that produced it.
+
 Failed rows are an **asset check** rather than an exception: a failed row is
 not a failed run — the rest of the corpus went through, the reason is
 recorded against the row, and `retry` is what moves it. Raising would stop
