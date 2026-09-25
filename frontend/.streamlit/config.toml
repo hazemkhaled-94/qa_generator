@@ -1,15 +1,17 @@
 # 2025 theme.
 #
 # Theme colours: #A100FF core purple, #460073 and #7500C0 deeps, #C2A3FF and
-# #E6DCFF lights, #FF50A0 / #224BFF / #05F2DB secondaries, black and white
-# grounds, neutral greys.
+# #E6DCFF lights, #FF50A0 / #224BFF / #05F2DB secondaries, neutral greys.
+#
+# The template's content slides are white with black type and purple carrying
+# the structure: filled table headers, deep purple figures, purple section
+# headings. The black slides are covers and dividers, which an application
+# does not have.
 #
 # Streamlit picks between [theme.light] and [theme.dark] from the browser's
 # prefers-color-scheme or the toolbar menu, and sets `color-scheme` on the app
 # container to the one it settled on. styles.css reads its own palette off that
 # with light-dark().
-#
-# Anything written in [theme] itself applies to both.
 
 [theme]
 # Graphik is licensed. Arial is the substitute the brand names; a local
@@ -17,43 +19,41 @@
 font = "Graphik, Graphik Regular, Arial, Helvetica, sans-serif"
 headingFont = "Graphik Semibold, Graphik, Arial, Helvetica, sans-serif"
 headingFontWeights = [700, 700, 600, 600, 600, 600]
-# Square. Nothing in the template has a rounded corner.
-baseRadius = "none"
-buttonRadius = "none"
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
 metricValueFontWeight = 700
 showSidebarBorder = true
 
-# White ground.
 [theme.light]
 primaryColor = "#A100FF"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F2F2F2"
-textColor = "#000000"
-borderColor = "#E4E7E7"
+secondaryBackgroundColor = "#F7F4FB"
+textColor = "#1A1A1A"
+borderColor = "#E4E1EA"
 linkColor = "#7500C0"
-dataframeHeaderBackgroundColor = "#FFFFFF"
-dataframeBorderColor = "#E4E7E7"
+# The template's table, in its light-header variant. The grid draws its
+# header text on a canvas, so the fill has to be one the text reads on and
+# no stylesheet can correct it.
+dataframeHeaderBackgroundColor = "#E6DCFF"
+dataframeBorderColor = "#E4E1EA"
 
-# Black panel beside white content: the template's split layout.
 [theme.light.sidebar]
-primaryColor = "#C2A3FF"
-backgroundColor = "#000000"
-secondaryBackgroundColor = "#1A1A1A"
-textColor = "#FFFFFF"
-borderColor = "#333333"
-linkColor = "#C2A3FF"
+backgroundColor = "#F7F4FB"
+secondaryBackgroundColor = "#EFE9F7"
+borderColor = "#E4E1EA"
 
-# Black ground. The core purple is too close to it to carry an accent, so the
-# light purple takes over.
+# Near-black carrying the brand's violet cast, rather than the flat black of
+# a cover slide. The core purple is too close to a dark ground to carry an
+# accent, so the light purple takes over.
 [theme.dark]
 primaryColor = "#C2A3FF"
-backgroundColor = "#000000"
-secondaryBackgroundColor = "#121212"
-textColor = "#FFFFFF"
-borderColor = "#333333"
+backgroundColor = "#16121D"
+secondaryBackgroundColor = "#1F1A2A"
+textColor = "#EDEAF2"
+borderColor = "#332C45"
 linkColor = "#C2A3FF"
-dataframeHeaderBackgroundColor = "#000000"
-dataframeBorderColor = "#333333"
+dataframeHeaderBackgroundColor = "#2E1A45"
+dataframeBorderColor = "#332C45"
 
 [server]
 headless = true

@@ -12,13 +12,19 @@
 
   /* currentColor resolves where a var() is used, not where it is declared. */
   --qa-ink: currentColor;
-  --qa-muted: color-mix(in srgb, currentColor 58%, transparent);
+  /* 65%, not 58%: against the light ground 58% lands at 4.29:1. */
+  --qa-muted: color-mix(in srgb, currentColor 65%, transparent);
   --qa-border: color-mix(in srgb, currentColor 14%, transparent);
 
-  /* Core purple on white, light purple on black. */
+  --qa-radius: 0.5rem;
+
+  /* Core purple on the light ground, light purple on the dark one. */
   --qa-accent: light-dark(#A100FF, #C2A3FF);
-  --qa-on-accent: light-dark(#FFFFFF, #000000);
+  --qa-on-accent: light-dark(#FFFFFF, #16121D);
   --qa-shade: light-dark(#000000, #FFFFFF);
+  /* The deep purple the template sets its figures in. */
+  --qa-deep: light-dark(#460073, #C2A3FF);
+  --qa-title: light-dark(#000000, #FFFFFF);
 
   /* Deletion, and nothing else. Not a brand colour: the palette has no red,
      and a destructive control should not be the first place to find out. */
@@ -34,25 +40,23 @@ footer { visibility: hidden; }
 
 /* ── Masthead ───────────────────────────────────────────────────────── */
 
-/* The purple bloom off the template's title slide. Square, full width of the
-   content column, and carrying no mark: the chevron is the logo. */
+/* The name over the brand rule, and no mark: the wordmark and the chevron
+   are both the brand's. */
 .qa-brand {
-  background:
-    radial-gradient(60% 88% at 26% 52%, #A93BEC 0%, rgba(169, 59, 236, 0) 62%),
-    radial-gradient(70% 95% at 30% 104%, #4F1478 0%, rgba(79, 20, 120, 0) 58%),
-    linear-gradient(100deg, #7418AE 0%, #6B10A5 42%, #63109F 100%);
-  padding: 1.35rem 1.5rem 1.45rem;
-  margin-bottom: 1.6rem;
+  padding-bottom: .75rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, #460073 0%, #A100FF 45%, #C2A3FF 100%) 1;
 }
 .qa-brand-title {
-  font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em;
-  line-height: 1.1; color: #FFFFFF;
+  font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em;
+  line-height: 1.2; color: var(--qa-title);
 }
 
 /* Headlines are short, large and tight. */
 .qa-page-title {
   font-size: 2rem; font-weight: 700; letter-spacing: -0.03em;
-  line-height: 1.08; color: var(--qa-ink); margin: 0 0 1.1rem;
+  line-height: 1.08; color: var(--qa-title); margin: 0 0 1.1rem;
 }
 
 /* ── Panels: one per section, which is what separates them ──────────── */
@@ -78,8 +82,10 @@ footer { visibility: hidden; }
   font-size: 0.7rem !important; font-weight: 600;
   letter-spacing: 0.02em; color: var(--qa-muted);
 }
+/* Figures are set in the deep purple, as the template sets its stat numerals. */
 [data-testid="stMetricValue"] {
   font-size: 1.5rem !important; letter-spacing: -0.02em; line-height: 1.2;
+  color: var(--qa-deep);
 }
 /* Every figure box the same height whatever its label wraps to. */
 [data-testid="stColumn"] > [data-testid="stVerticalBlock"],
@@ -161,4 +167,5 @@ footer { visibility: hidden; }
 [data-testid="stIFrame"] {
   background: #FFFFFF;
   border: 1px solid var(--qa-border);
+  border-radius: var(--qa-radius);
 }
