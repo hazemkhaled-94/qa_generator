@@ -165,8 +165,8 @@ make questions RUN_ID=a-gpt-4.1     # 6-question_generation-a-gpt-4.1
 ```
 
 A project per run was the original design and it does not survive a
-worker: `run_id` mints a uuid per PROCESS, `restart: unless-stopped` makes
-a process per restart, and this deployment reached **five hundred
+worker: `run_id` fell back to a uuid per PROCESS, `restart: unless-stopped`
+makes a process per restart, and this deployment reached **five hundred
 projects** — 497 of them holding one span, the model call a preflight made
 before giving up. The comparison that design existed for is still there
 and is now the thing you ask for by name.
@@ -174,6 +174,12 @@ and is now the thing you ask for by name.
 Two runs sharing a project are still separable: `run.id` is a resource
 attribute on every span, the same id the logs and the rows carry. Telling
 them apart is a filter rather than a hunt through a sidebar.
+
+**The id a row carries is the run that asked for it**, not the worker that
+took it — a Dagster run, a Start button or a `make …-start`, whichever
+queued the row. See [`settings/README.md`](../backend/settings/README.md).
+The span attribute is the same value, so a fact, its log lines and its
+model calls all filter on one id whoever set the stage going.
 
 **The exporter is installed after the preflight, not before.** A project
 is created by the first span filed under it, and a stage's first span is

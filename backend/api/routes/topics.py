@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from uuid import uuid4
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
@@ -36,6 +37,9 @@ class TopicDiscovery:
 
     fit: int
     detail: str
+    #: The run the fit was asked for under, adopted by the worker that takes
+    #: it and written on every topic it produces. See `settings.runs`.
+    run: str | None = None
 
 
 class TopicDescription(BaseModel):
@@ -114,16 +118,22 @@ def visualisation(language: str) -> Response:
 
 
 @router.post("/discover", status_code=202)
-def discover() -> TopicDiscovery:
+def discover(run: str | None = None) -> TopicDiscovery:
     """Queues a fit over the whole corpus.
 
     Returns at once. Every existing topic and membership is replaced when the
     fit succeeds, and left alone when it does not. Asking twice queues one
     fit; asking while a fit runs queues one behind it.
+
+    This stage's `start`: asking is what creates the work, so this is where
+    the run that asked is recorded. Left out, one is minted and answered
+    back.
     """
-    fit_id = topics_queue.request()
+    trigger = run or uuid4().hex
+    fit_id = topics_queue.request(trigger)
     return TopicDiscovery(
         fit=fit_id,
+        run=trigger,
         detail=(
             f"fit {fit_id} queued; the worker will pick it up and replace every "
             "existing topic."
@@ -138,9 +148,10 @@ def stop() -> StageAction:
 
 
 @router.post("/retry")
-def retry() -> StageAction:
+def retry(run: str | None = None) -> StageAction:
     """Returns a failed fit to the queue."""
-    return answered("topics", "retry", topics_queue.retry())
+    trigger = run or uuid4().hex
+    return answered("topics", "retry", topics_queue.retry(trigger=trigger), run=trigger)
 
 
 @router.delete("")

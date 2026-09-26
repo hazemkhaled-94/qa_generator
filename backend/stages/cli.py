@@ -192,11 +192,17 @@ def queue_main(
         log.info("%s queue: %s", name, act(lambda q, w: q.counts_by_status(w)))
         return 0
 
+    # Every verb that queues rows stamps them with this process's run, so
+    # the drain that picks them up - a different process, or a container
+    # started weeks ago - writes what it produces under the id of whatever
+    # asked. RUN_ID names it where somebody named it; see settings.runs.
+    asking = run_id()
+
     for chosen, verb, run in (
-        (args.start, "queued", lambda q, w: q.start(w)),
+        (args.start, "queued", lambda q, w: q.start(w, trigger=asking)),
         (args.stop, "taken off the queue", lambda q, w: q.stop(w)),
-        (args.retry, "returned to the queue", lambda q, w: q.retry(w)),
-        (args.reclaim, "reclaimed", lambda q, w: q.reclaim(w)),
+        (args.retry, "returned to the queue", lambda q, w: q.retry(w, trigger=asking)),
+        (args.reclaim, "reclaimed", lambda q, w: q.reclaim(w, trigger=asking)),
     ):
         if chosen:
             log.info("%s: %d row(s) %s", name, act(run), verb)
@@ -208,7 +214,11 @@ def queue_main(
             return 0
 
     if args.rerun:
-        log.info("%s: %d row(s) queued again", name, act(lambda q, w: q.reset(w)))
+        log.info(
+            "%s: %d row(s) queued again",
+            name,
+            act(lambda q, w: q.reset(w, trigger=asking)),
+        )
 
     # Here rather than inside the loop below, which logs an exception and
     # polls again: that is right for a drain that failed and wrong for a

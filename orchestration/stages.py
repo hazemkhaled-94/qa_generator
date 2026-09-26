@@ -39,6 +39,12 @@ from orchestration.client import Backend
 from orchestration.settings import Settings
 from telemetry import pipeline
 
+#: The check every stage carries: whether it left any row failed. Named
+#: once because the `progress` sensor files one of these for work no run
+#: of this code location did, and a name that drifted would file it
+#: against a check Dagster does not have.
+NOTHING_FAILED = "nothing_failed"
+
 
 def group(stage: str) -> str:
     """What Dagster files one stage's asset under.
@@ -79,7 +85,7 @@ def _run(context: AssetExecutionContext, stage: str, unit: str) -> Output[int]:
     settings = Settings.load()
     backend = Backend(settings.backend_url)
 
-    queued = backend.act(stage, "start")
+    queued = backend.act(stage, "start", context.run_id)
     context.log.info("%s: %d %s(s) queued", stage, queued, unit)
 
     queue = backend.drain(
@@ -116,7 +122,7 @@ def _stage_asset(name: str, stage: str, unit: str, deps: list[str]):
 
     @asset_check(
         asset=name,
-        name="nothing_failed",
+        name=NOTHING_FAILED,
         description=f"Whether {stage} left any row failed.",
     )
     def _check() -> AssetCheckResult:
@@ -170,7 +176,7 @@ def topics(context: AssetExecutionContext) -> Output[int]:
     settings = Settings.load()
     backend = Backend(settings.backend_url)
 
-    fit = backend.discover()
+    fit = backend.discover(context.run_id)
     context.log.info("topics: fit %s asked for", fit)
 
     queue = backend.drain(
@@ -186,9 +192,7 @@ def topics(context: AssetExecutionContext) -> Output[int]:
     )
 
 
-@asset_check(
-    asset="topics", name="nothing_failed", description="Whether the fit failed."
-)
+@asset_check(asset="topics", name=NOTHING_FAILED, description="Whether the fit failed.")
 def topics_check() -> AssetCheckResult:
     """Reports whether the fit succeeded.
 
@@ -222,7 +226,7 @@ def questions(context: AssetExecutionContext) -> Output[int]:
 
 @asset_check(
     asset="questions",
-    name="nothing_failed",
+    name=NOTHING_FAILED,
     description="Whether question generation left any topic failed.",
 )
 def questions_check() -> AssetCheckResult:
@@ -278,7 +282,7 @@ def assessments(context: AssetExecutionContext) -> Output[int]:
             },
         )
 
-    queued = backend.act("assessment", "start")
+    queued = backend.act("assessment", "start", context.run_id)
     context.log.info("assessment: %d artifact(s) queued", queued)
 
     queue = backend.drain(
@@ -301,7 +305,7 @@ def assessments(context: AssetExecutionContext) -> Output[int]:
 
 @asset_check(
     asset="assessments",
-    name="nothing_failed",
+    name=NOTHING_FAILED,
     description="Whether the judge could not be reached for any artefact.",
 )
 def assessments_check() -> AssetCheckResult:

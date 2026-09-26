@@ -124,13 +124,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.retry:
-        log.info("returned %d fit(s) to the queue", TopicQueue().retry())
+        log.info(
+            "returned %d fit(s) to the queue",
+            TopicQueue().retry(trigger=run_id()),
+        )
         return 0
 
     service = build()
 
     if args.discover:
-        log.info("queued topic fit %d", service.request())
+        log.info("queued topic fit %d", service.request(run_id()))
 
     # As `stages/cli.queue_main` does for the other four. Only when a model
     # is configured: this stage names topics with one where it has one, and

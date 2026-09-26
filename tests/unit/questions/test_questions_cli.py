@@ -31,7 +31,7 @@ class Queue:
         self.calls.append("counts")
         return {"new": 2}
 
-    def start(self, within=None) -> int:
+    def start(self, within=None, *, trigger: str | None = None) -> int:
         """Queues what was never asked for."""
         self.calls.append("start")
         return 1
@@ -41,12 +41,12 @@ class Queue:
         self.calls.append("stop")
         return 1
 
-    def retry(self, within=None) -> int:
+    def retry(self, within=None, *, trigger: str | None = None) -> int:
         """Returns failed rows."""
         self.calls.append("retry")
         return 1
 
-    def reset(self, within=None) -> int:
+    def reset(self, within=None, *, trigger: str | None = None) -> int:
         """Queues every row again."""
         self.calls.append("rerun")
         return 1

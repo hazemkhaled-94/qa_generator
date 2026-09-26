@@ -162,6 +162,7 @@ class AssessmentQueue(RowQueue):
         status=Assessment.assess_status,
         error=Assessment.assess_error,
         claimed_at=Assessment.assess_claimed_at,
+        trigger=Assessment.assess_trigger,
     )
     #: Narrowed to one kind, which is how `--only kind=question` judges the
     #: questions without paying for twenty thousand facts.
@@ -272,16 +273,16 @@ class AssessmentQueue(RowQueue):
             .returning(Assessment.id)
         )
 
-    def start(self, within: Any = None) -> int:
+    def start(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Enrols whatever has no assessment, then queues everything new.
 
         Both halves, because a `start` that only requeued would do nothing
         at all the first time: there would be no row to move.
         """
         self.enrol()
-        return super().start(within)
+        return super().start(within, trigger=trigger)
 
-    def reset(self, within: Any = None) -> int:
+    def reset(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Enrols anything new, then queues every row again.
 
         A re-run under a changed template is what this serves. The verdicts
@@ -290,7 +291,7 @@ class AssessmentQueue(RowQueue):
         template versions with nothing saying which is current.
         """
         self.enrol()
-        return super().reset(within)
+        return super().reset(within, trigger=trigger)
 
     # ── Claiming and recording ───────────────────────────────────────────
 
@@ -310,11 +311,13 @@ class AssessmentQueue(RowQueue):
         )
         if taken is None:
             return None
-        assessment_id, kind, fact_id, topic_id, question_id = taken
+        # By name rather than by position: `_claim` appends the row's
+        # trigger to whatever a stage asked it to return.
+        assessment_id, kind = taken.id, taken.artifact_kind
         held: dict[str, int] = {
-            ArtifactKind.FACT: fact_id,
-            ArtifactKind.TOPIC: topic_id,
-            ArtifactKind.QUESTION: question_id,
+            ArtifactKind.FACT: taken.fact_id,
+            ArtifactKind.TOPIC: taken.topic_id,
+            ArtifactKind.QUESTION: taken.question_id,
         }
         artifact_id = held[kind]
         with self._session() as session:

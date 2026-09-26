@@ -73,26 +73,34 @@ class Backend:
         body = self._call("GET", f"/{stage}/status")
         return Queue(stage=stage, working=body["working"], rows=body["rows"])
 
-    def act(self, stage: str, action: str) -> int:
+    def act(self, stage: str, action: str, run: str | None = None) -> int:
         """Runs one queue verb over everything a stage owns.
+
+        Args:
+            stage: The route prefix.
+            action: The verb.
+            run: The Dagster run asking, written onto every row the verb
+                queues and adopted by the worker that claims one - so the
+                facts a run produced carry that run's id and not the id of
+                whichever long-lived worker happened to take them.
 
         Returns:
             How many rows it moved. None of them does the work: the verb
             moves rows between statuses and whichever worker is watching
             picks up what became claimable.
         """
-        moved = self._call("POST", f"/{stage}/{action}")["rows"]
+        moved = self._call("POST", f"/{stage}/{action}", run=run)["rows"]
         log.info("%s: %s moved %d row(s)", stage, action, moved)
         return moved
 
-    def discover(self) -> int:
+    def discover(self, run: str | None = None) -> int:
         """Asks for a topic fit over the whole corpus.
 
         Topic modelling's own verb. It has no `new` rows and so no `start`:
         every topic is estimated jointly over one vocabulary, so asking is
         what creates the work.
         """
-        fit = self._call("POST", "/topics/discover")["fit"]
+        fit = self._call("POST", "/topics/discover", run=run)["fit"]
         log.info("topics: fit %s queued", fit)
         return fit
 
@@ -141,7 +149,7 @@ class Backend:
                 )
             time.sleep(poll)
 
-    def _call(self, method: str, path: str) -> dict:
+    def _call(self, method: str, path: str, **params: str | None) -> dict:
         """Sends one request and returns the parsed body.
 
         Raises:
@@ -149,7 +157,10 @@ class Backend:
                 an error status, whose body carries the reason.
         """
         response = self._session.request(
-            method, f"{self._base_url}{path}", timeout=_TIMEOUTS[method]
+            method,
+            f"{self._base_url}{path}",
+            params={name: value for name, value in params.items() if value is not None},
+            timeout=_TIMEOUTS[method],
         )
         response.raise_for_status()
         return response.json()

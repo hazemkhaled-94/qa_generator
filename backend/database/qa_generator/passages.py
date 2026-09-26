@@ -109,6 +109,11 @@ class Passage(Base):
         DateTime(timezone=True),
         comment="When a worker claimed this passage, NULL when none holds it.",
     )
+    extract_trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for this passage to be read. See "
+        "`documents.parse_trigger`.",
+    )
     text: Mapped[str] = mapped_column(
         Text,
         comment="The passage content. The evidence offsets in fact_passages are "

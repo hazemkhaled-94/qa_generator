@@ -143,6 +143,11 @@ class Assessment(Base):
     assess_claimed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="When a worker took this row."
     )
+    assess_trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for this artefact to be judged. See "
+        "`documents.parse_trigger`.",
+    )
     approved: Mapped[bool | None] = mapped_column(
         Boolean,
         comment="Whether every metric landed on its good side. NULL until "

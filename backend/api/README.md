@@ -137,7 +137,18 @@ that is down, answers `available: false` on the reads and **503
 `no_orchestrator`** on `run`, while `start`, `stop` and `retry` go on
 working — those are queue verbs, and the queue is the backend's own. A
 second run is refused with **409 `already_running`** rather than racing the
-first through the same queues.
+first through the same queues. That refusal is an affordance and not the
+guarantee: it reads the run list and then launches, and `make pipeline` and
+Dagster's own Materialize button never reach it. What actually caps the
+corpus at one run is `max_concurrent_runs: 1` in
+[`configs/dagster/dagster.yaml`](../../configs/dagster/dagster.yaml).
+
+**Every verb that queues rows names a run.** `start`, `retry`, `rerun` and
+`reclaim` answer with `run`, write it onto the rows they queued, and the
+worker that claims one adopts it — so what the rows record is the thing
+that asked rather than the worker that happened to take them. Pass `?run=`
+to supply one (Dagster passes its own run id); leave it out and one is
+minted. `stop` queues nothing and so names nothing.
 
 ## The full surface
 

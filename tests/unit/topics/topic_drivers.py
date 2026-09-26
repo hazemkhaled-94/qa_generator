@@ -215,7 +215,7 @@ class RecordingQueue:
         self.refuses: Exception | None = None
         self._next_id = 1
 
-    def request(self) -> int:
+    def request(self, trigger: str | None = None) -> int:
         """Queues a fit, replacing any unclaimed one."""
         self.pending = [self._next_id]
         self._next_id += 1
@@ -367,7 +367,7 @@ class CommandDriver:
                 driver.calls.append("stop")
                 return 1
 
-            def retry(self) -> int:
+            def retry(self, within=None, *, trigger: str | None = None) -> int:
                 """Returns a failed fit to the queue."""
                 driver.calls.append("retry")
                 return 1
@@ -442,7 +442,7 @@ class CommandDriver:
         class Service:
             """The worker."""
 
-            def request(self) -> int:
+            def request(self, trigger: str | None = None) -> int:
                 """Queues a fit."""
                 driver.queued.append(1)
                 return len(driver.queued)
@@ -551,9 +551,9 @@ class ServiceDriver:
             labeller=labeller.labeller if labeller else None,
         )
 
-    def request(self) -> int:
+    def request(self, trigger: str | None = None) -> int:
         """Asks for a fit."""
-        return self.service.request()
+        return self.service.request(trigger)
 
     def run(self) -> int | None:
         """Runs one queued fit."""

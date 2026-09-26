@@ -7,6 +7,9 @@ was uploaded, so what it declines to do matters as much as what it does.
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 pytest.importorskip("dagster", reason="the pipeline group is not installed")
@@ -236,3 +239,98 @@ def test_it_watches_without_being_switched_on(monkeypatch) -> None:
     A watcher nobody switched on is an asset graph that is quietly wrong.
     """
     assert orchestration.progress.default_status.value == "RUNNING"
+
+
+# ── What the orchestrator did not start and could not do ───────────────────
+
+
+def test_a_stage_that_failed_everything_is_reported_red(monkeypatch) -> None:
+    """The state worth interrupting somebody over, and the one it missed.
+
+    Counting only what was produced reported silence for a stage that
+    failed every row: nothing was produced, so nothing was materialised,
+    so the asset read exactly as it did before the corpus arrived.
+    """
+    _watching(monkeypatch, parsing={"failed": 3})
+
+    result = orchestration.progress(build_sensor_context())
+
+    (check,) = result.asset_events
+    assert check.asset_key.to_user_string() == "parsed_documents"
+    assert check.check_name == "nothing_failed"
+    assert not check.passed
+
+
+def test_clearing_the_failures_turns_it_green_again(monkeypatch) -> None:
+    """Filed on a move in either direction, not only upwards.
+
+    A check filed only when failures appear leaves the asset red until
+    some Dagster run happens to evaluate it, which on a pipeline nobody
+    drives from Dagster is never.
+    """
+    _watching(monkeypatch, parsing={"failed": 3})
+    context = build_sensor_context()
+    orchestration.progress(context)
+
+    _watching(monkeypatch, parsing={"parsed": 3})
+    result = orchestration.progress(build_sensor_context(cursor=context.cursor))
+
+    (materialised, check) = result.asset_events
+    assert materialised.asset_key.to_user_string() == "parsed_documents"
+    assert check.passed
+
+
+def test_an_unchanged_failure_count_reports_nothing(monkeypatch) -> None:
+    """The same three failures every 30 seconds is not three checks a minute."""
+    _watching(monkeypatch, parsing={"parsed": 8, "failed": 3})
+    context = build_sensor_context()
+    orchestration.progress(context)
+
+    again = orchestration.progress(build_sensor_context(cursor=context.cursor))
+
+    assert isinstance(again, SkipReason)
+
+
+def test_a_cursor_written_before_failures_were_watched_is_read(monkeypatch) -> None:
+    """A deployment upgrading into this must not re-report its whole corpus.
+
+    The cursor used to hold one number per stage and now holds two. Read
+    as absent, the first tick after the upgrade would materialise every
+    stage again for work it had already recorded.
+    """
+    _watching(monkeypatch, parsing={"parsed": 8})
+
+    answer = orchestration.progress(
+        build_sensor_context(cursor=json.dumps({"parsing": 8}))
+    )
+
+    assert isinstance(answer, SkipReason)
+
+
+def test_every_stage_is_asked_at_once(monkeypatch) -> None:
+    """Six stages at the client's 15s timeout is 90s, and a tick is given 60.
+
+    Asked one after another, a backend answering slowly switches the
+    watcher off exactly when the asset graph most needs it.
+    """
+    held = 0.2
+
+    class Slow:
+        """Answers every stage, slowly."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """Accepts whatever the sensor passes."""
+
+        def status(self, stage: str) -> Queue:
+            """Answers after a wait, as a loaded backend would."""
+            time.sleep(held)
+            return Queue(stage=stage, working=False, rows={})
+
+    monkeypatch.setattr(orchestration, "Backend", Slow)
+    stages = len(orchestration.stages.ALL_STAGES)
+
+    began = time.monotonic()
+    orchestration.progress(build_sensor_context())
+    took = time.monotonic() - began
+
+    assert took < held * stages / 2

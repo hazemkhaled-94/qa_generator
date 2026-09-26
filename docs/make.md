@@ -423,8 +423,8 @@ make review-push-questions IDS=12,34,56
 
 A Phoenix project is created by whatever sends the first span to it and
 removed by nothing. While a project meant a run somebody asked for that was
-fine — but `run_id` mints a uuid **per process**, a `--watch` worker is a
-process per restart, and a credential that has expired restarts it every
+fine — but `run_id` fell back to a uuid **per process**, a `--watch` worker
+is a process per restart, and a credential that has expired restarts it every
 minute. This deployment reached **five hundred projects, 497 of them
 holding one span**: the model call a preflight made before giving up.
 

@@ -70,13 +70,17 @@ class TopicModellingService(StageService):
         self._labeller = labeller
         self._min_fact_share = min_fact_share
 
-    def request(self) -> int:
+    def request(self, trigger: str | None = None) -> int:
         """Asks for a fit, without doing it.
+
+        Args:
+            trigger: Which run is asking, adopted by the worker that takes
+                the fit.
 
         Returns:
             The id of the request row.
         """
-        fit_id = self._repository.request()
+        fit_id = self._repository.request(trigger)
         log.info("requested topic fit %d", fit_id)
         return fit_id
 

@@ -74,6 +74,35 @@ def test_starting_a_stage_answers_202_with_what_moved(corpus, stage) -> None:
 
 
 @pytest.mark.parametrize("stage", STAGES)
+def test_a_verb_that_queues_answers_with_the_run_it_queued_under(corpus, stage) -> None:
+    """Minted here when the caller names none, and answered back.
+
+    Somebody who pressed a button has to be able to find the rows it
+    produced afterwards, and the row carries this and not the id of the
+    worker that happens to claim it.
+    """
+    answered = corpus.post(f"/{stage}/start").json()
+
+    assert answered["run"]
+
+
+@pytest.mark.parametrize("stage", STAGES)
+def test_a_caller_that_already_has_a_run_keeps_it(corpus, stage) -> None:
+    """Dagster passes its own, which is what joins a run to its rows."""
+    answered = corpus.post(f"/{stage}/start?run=dagster-run-7").json()
+
+    assert answered["run"] == "dagster-run-7"
+
+
+@pytest.mark.parametrize("stage", STAGES)
+def test_stop_queues_nothing_and_so_names_no_run(corpus, stage) -> None:
+    """There is nothing to attribute: the rows went back to `new`."""
+    corpus.post(f"/{stage}/start")
+
+    assert corpus.post(f"/{stage}/stop").json()["run"] is None
+
+
+@pytest.mark.parametrize("stage", STAGES)
 def test_a_verb_that_moves_nothing_says_so(corpus, stage) -> None:
     """The count and the wording come from the same place."""
     answered = corpus.post(f"/{stage}/retry")

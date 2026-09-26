@@ -264,6 +264,7 @@ class QuestionQueue(RowQueue):
         status=Topic.question_status,
         error=Topic.question_error,
         claimed_at=Topic.question_claimed_at,
+        trigger=Topic.question_trigger,
     )
     #: Only the topics. `topics` also holds the fit requests, which are not a
     #: unit of anything here; every inherited operation carries this.

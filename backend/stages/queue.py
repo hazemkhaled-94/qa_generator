@@ -27,6 +27,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from database.qa_generator import Status
 from database.qa_generator.repository import Repository
+from settings.runs import triggered_by
 
 #: Recorded against a row whose worker never came back.
 ABANDONED = "the worker did not finish; the run was interrupted"
@@ -56,6 +57,10 @@ class Columns:
     status: InstrumentedAttribute
     error: InstrumentedAttribute
     claimed_at: InstrumentedAttribute
+    #: Which run asked for this row, written by whatever queued it and read
+    #: back when a worker claims it. Optional so a queue can be declared
+    #: without one; every stage here has one.
+    trigger: InstrumentedAttribute | None = None
 
 
 @dataclass(frozen=True)
@@ -137,7 +142,14 @@ class StageQueue(Repository):
         )
 
     def _claim(self, *returning: InstrumentedAttribute):
-        """Takes the next pending row and marks it in progress."""
+        """Takes the next pending row and marks it in progress.
+
+        Also adopts whatever run queued the row, so everything this worker
+        writes while it holds it is stamped with the run that asked rather
+        than with the worker's own process. See `settings.runs`.
+        """
+        trigger = self.columns.trigger
+        asked = () if trigger is None else (trigger,)
         # A short transaction, not a held row lock: the work runs for seconds
         # or minutes. The claim is timestamped so a later run can tell it from
         # a live one.
@@ -151,12 +163,19 @@ class StageQueue(Repository):
                         self.columns.claimed_at: func.now(),
                     }
                 )
-                .returning(*returning)
+                .returning(*returning, *asked)
             ).one_or_none()
         # Every caller returns its key column first, which is what `touch`
         # refreshes. Read by name rather than by position, so a stage that
         # returns its columns in another order still beats.
         self._held = None if claimed is None else getattr(claimed, self.columns.key.key)
+        # Set on every claim, including to None: a row queued by nobody must
+        # not inherit the trigger of the row this worker held before it.
+        triggered_by(
+            None
+            if claimed is None or trigger is None
+            else getattr(claimed, trigger.key)
+        )
         return claimed
 
     def _finish(self, key: Any, *, session: Any = None, **values: Any) -> None:
@@ -293,11 +312,13 @@ class StageQueue(Repository):
                 .values({self.columns.status: Status.NEW})
             ).rowcount
 
-    def retry(self, within: Any = None) -> int:
+    def retry(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns every failed row to the queue, clearing its error."""
-        return self._requeue(self.columns.status == Status.FAILED, within)
+        return self._requeue(
+            self.columns.status == Status.FAILED, within, trigger=trigger
+        )
 
-    def reclaim(self, within: Any = None) -> int:
+    def reclaim(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns a row a dead worker still holds, without waiting it out.
 
         The gap between `retry` and `rerun`, and the only verb that moves
@@ -320,15 +341,25 @@ class StageQueue(Repository):
         the lease exists to prevent, and this is the verb that can cause
         it.
         """
-        return self._requeue(self.columns.status == Status.IN_PROGRESS, within)
+        return self._requeue(
+            self.columns.status == Status.IN_PROGRESS, within, trigger=trigger
+        )
 
-    def _requeue(self, *where: Any) -> int:
-        """Moves the rows a condition selects to pending, clearing the error."""
+    def _requeue(self, *where: Any, trigger: str | None = None) -> int:
+        """Moves the rows a condition selects to pending, clearing the error.
+
+        Writes the trigger too, None included: a row requeued by a caller
+        that named no run must stop claiming the one that queued it last.
+        """
+        queued: dict[Any, Any] = {
+            self.columns.status: Status.PENDING,
+            self.columns.error: None,
+        }
+        if self.columns.trigger is not None:
+            queued[self.columns.trigger] = trigger
         with self._session.begin() as session:
             return session.execute(
-                update(self.columns.entity)
-                .where(*self._where(*where))
-                .values({self.columns.status: Status.PENDING, self.columns.error: None})
+                update(self.columns.entity).where(*self._where(*where)).values(queued)
             ).rowcount
 
     def queue_state(self, within: Any = None) -> QueueState:
@@ -382,18 +413,23 @@ class RowQueue(StageQueue, abstract=True):
     #: may take, and a row already queued is worked whatever this says.
     ready: ClassVar[Any] = None
 
-    def start(self, within: Any = None) -> int:
+    def start(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Queues the rows this stage has never been asked to do.
 
         Skips rows the stage before this one has not produced an input for.
         """
-        return self._requeue(self.columns.status == Status.NEW, within, self.ready)
+        return self._requeue(
+            self.columns.status == Status.NEW, within, self.ready, trigger=trigger
+        )
 
-    def reset(self, within: Any = None) -> int:
+    def reset(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns every row to the queue, finished ones included.
 
         Skips rows a worker holds right now, and rows with no input to redo.
         """
         return self._requeue(
-            self.columns.status != Status.IN_PROGRESS, within, self.ready
+            self.columns.status != Status.IN_PROGRESS,
+            within,
+            self.ready,
+            trigger=trigger,
         )

@@ -56,7 +56,8 @@
     "post": {
       "parameters": [
         "action",
-        "confirm"
+        "confirm",
+        "run"
       ],
       "responses": [
         "202",
@@ -84,6 +85,7 @@
     "post": {
       "parameters": [
         "action",
+        "run",
         "scope",
         "value"
       ],
@@ -107,7 +109,8 @@
     "post": {
       "parameters": [
         "action",
-        "confirm"
+        "confirm",
+        "run"
       ],
       "responses": [
         "202",
@@ -135,6 +138,7 @@
     "post": {
       "parameters": [
         "action",
+        "run",
         "scope",
         "value"
       ],
@@ -228,7 +232,8 @@
     "post": {
       "parameters": [
         "action",
-        "confirm"
+        "confirm",
+        "run"
       ],
       "responses": [
         "202",
@@ -256,6 +261,7 @@
     "post": {
       "parameters": [
         "action",
+        "run",
         "scope",
         "value"
       ],
@@ -343,7 +349,8 @@
     "post": {
       "parameters": [
         "action",
-        "confirm"
+        "confirm",
+        "run"
       ],
       "responses": [
         "202",
@@ -371,6 +378,7 @@
     "post": {
       "parameters": [
         "action",
+        "run",
         "scope",
         "value"
       ],
@@ -599,7 +607,8 @@
     "post": {
       "parameters": [
         "action",
-        "confirm"
+        "confirm",
+        "run"
       ],
       "responses": [
         "202",
@@ -649,6 +658,7 @@
     "post": {
       "parameters": [
         "action",
+        "run",
         "scope",
         "value"
       ],
@@ -715,9 +725,12 @@
   },
   "/topics/discover": {
     "post": {
-      "parameters": [],
+      "parameters": [
+        "run"
+      ],
       "responses": [
-        "202"
+        "202",
+        "422"
       ]
     }
   },
@@ -731,9 +744,12 @@
   },
   "/topics/retry": {
     "post": {
-      "parameters": [],
+      "parameters": [
+        "run"
+      ],
       "responses": [
-        "200"
+        "200",
+        "422"
       ]
     }
   },

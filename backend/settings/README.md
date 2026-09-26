@@ -128,12 +128,26 @@ make questions-runs                     # what there is
 make questions-diff RUNS="a b"          # the two, gate by gate
 ```
 
-Per **process**, not per drain: a `--watch` worker drains whenever something
-arrives, and an id per drain would be thousands of them in a week.
+Three things can name it, and the order is what matters:
+
+| | |
+|---|---|
+| `RUN_ID` | Somebody named this run and means it. Always wins |
+| The row's trigger | Whoever queued the row carried an id — a Dagster run, a Start button, a `make …-start` — and the worker adopts it for as long as it holds that row |
+| A uuid | Nobody named it, and nobody asked by name. One per process |
+
+The middle one is what joins a corpus to whatever set it going, and it is
+the reason a run is no longer per **process**. A `--watch` worker is
+long-lived and drains whatever arrives, so an id per process named the
+container and not the work: a Dagster run, the Start button and
+`make extract` all produced rows stamped with the same worker. `start`
+writes its own id onto the rows it queues, `StageQueue._claim` reads it
+back into a `ContextVar`, and `run_id` answers with it — so nothing had to
+be threaded through the six services that write a row.
 
 Unlike the version, it is not threaded through the factories. A version can
 change while a process runs — that is what `reloading` in `stages/cli.py`
-watches for — and a run cannot.
+watches for — and a run cannot change under the row it belongs to.
 
 ## Configuration
 

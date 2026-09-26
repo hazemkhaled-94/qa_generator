@@ -86,7 +86,7 @@ deployment whose operators never open this UI at all.
 
 | | |
 |---|---|
-| The `progress` sensor | Polls every stage's `/status` every 30 seconds and files an `AssetMaterialization` whenever a stage's worked count has risen |
+| The `progress` sensor | Polls every stage's `/status` every 30 seconds and files an `AssetMaterialization` when a stage's worked count has risen, and an `AssetCheckEvaluation` when its failed count has moved at all |
 
 Without it Dagster saw only its **own** runs. Every other way of setting a
 stage going — `make extract`, `POST /extraction/start`, the Start button, a
@@ -97,13 +97,68 @@ It ships running, unlike the other three, because those three *decide that
 work should happen* and this one only watches: a watcher nobody switched on
 is a graph that is quietly wrong.
 
-Its cursor holds the last count seen per stage, so a tick that finds nothing
-new reports nothing. The first tick after an empty cursor records every stage
-that has produced anything.
+**The check is what makes the graph go red.** A materialisation alone cannot:
+a stage that failed every row produced nothing, so counting only what was
+produced reported silence for the one state worth interrupting somebody
+over. The check is filed on a move in either direction, so a `retry` that
+clears the failures turns the asset green again rather than leaving it red
+until a Dagster run happens to evaluate it. It is filed under
+`nothing_failed`, which is the check every asset already carries — named
+once in [`stages.py`](stages.py) so a rename cannot file an evaluation
+against a check Dagster has never heard of.
+
+Its cursor holds the last worked and failed counts per stage, so a tick that
+finds neither moved reports nothing. The first tick after an empty cursor
+records every stage that has produced or failed anything. A cursor written
+before failures were watched holds one number per stage and is read as the
+worked count, so an upgrade does not re-report the whole corpus.
+
+**The six `/status` reads go out at once.** Sequentially they are six GETs at
+the client's 15s timeout and Dagster gives a sensor tick 60, so a backend
+answering slowly used to switch the watcher off exactly when the graph
+needed it. One `Backend` per thread: a requests `Session` is a connection
+pool and is not documented thread-safe.
 
 `make up` starts the webserver and the daemon with everything else, and the
 UI is at <http://localhost:3000>. Both triggers ship stopped, so the daemon
 ticks nothing until one is switched on.
+
+## One corpus run at a time
+
+`max_concurrent_runs: 1` on a `QueuedRunCoordinator`, in
+[`configs/dagster/dagster.yaml`](../configs/dagster/dagster.yaml).
+
+The `corpus` job drives the stage queues in order, so two of them racing
+through the same queues interleave: one can ask for a topic fit while the
+other is still draining extraction, and the fit then describes half a
+corpus. `POST /pipeline/run` refuses a second run with a 409, but that
+check reads the run list and then launches — two requests can pass it
+together — and it is not on the path at all for `make pipeline`, for
+`dagster job launch`, or for the Materialize button in Dagster's own UI.
+
+The 409 stays, because a second run **queued behind** one that may take
+hours is not what somebody pressing Run wants to be told nothing about. It
+is now the affordance and the coordinator is the guarantee.
+
+## The run that asked, on the rows it produced
+
+Every asset passes `context.run_id` to the stage route it starts, the
+backend writes it onto the rows that verb queues, and the worker that
+claims one adopts it for as long as it holds it. So a fact produced by a
+Dagster run carries that **run's** id, and `GET /lineage` leads from the
+fact back to it.
+
+It used to carry the worker's. `settings.runs.run_id` was one uuid per
+PROCESS and a stage worker is long-lived, so a Dagster run, the Start
+button and `make extract` all produced rows stamped with the same
+container, and nothing in the data said which of them had asked.
+
+The edge is the one already there — a `?run=` on the stage routes — so this
+package still holds no credential and still reaches nothing but HTTP.
+Surfaces that are not Dagster get the same treatment: the API mints an id
+when a caller names none and answers with it, so pressing Start is also
+followable. `RUN_ID` overrides both, which is what keeps the A/B in
+[`evaluation/README.md`](../evaluation/README.md) working.
 
 ## Why the stages did not move into Dagster
 
@@ -153,9 +208,9 @@ poetry run pytest tests/unit/orchestration
 
 | File | Covers |
 |---|---|
-| [`test_definitions.py`](../tests/unit/orchestration/test_definitions.py) | The code location as Dagster loads it: the assets, the job, and that both triggers ship stopped |
-| [`test_orchestration_client.py`](../tests/unit/orchestration/test_orchestration_client.py) | The stage routes as the orchestrator reads them |
-| [`test_sensor.py`](../tests/unit/orchestration/test_sensor.py) | When the orchestrator decides the pipeline should start |
+| [`test_definitions.py`](../tests/unit/orchestration/test_definitions.py) | The code location as Dagster loads it: the assets, the job, that both triggers ship stopped, and that the instance caps the corpus at one run |
+| [`test_orchestration_client.py`](../tests/unit/orchestration/test_orchestration_client.py) | The stage routes as the orchestrator reads them, and the run it carries into them |
+| [`test_sensor.py`](../tests/unit/orchestration/test_sensor.py) | When the orchestrator decides the pipeline should start, and what it records for the work it did not |
 | [`tests/smoke/test_compose.py`](../tests/smoke/test_compose.py) | That the orchestrator holds no database credential |
 
 None of these reaches a network.
@@ -168,7 +223,15 @@ None of these reaches a network.
 - **The two triggers ship stopped and stay stopped across a restart.** The
   `progress` sensor is the exception and ships running: it starts nothing.
 - **A materialisation no longer means Dagster ran it.** `progress` files one
-  for work any surface set going.
+  for work any surface set going, and a check evaluation beside it when the
+  failures move.
+- **A runless event is not a run.** Work Dagster did not launch shows on the
+  asset page and never in the run list: there is no timeline and no step log
+  to open, because Dagster OSS has no run to attach them to. What joins that
+  work to its logs is the run id on the rows, not a Dagster run.
+- **A second corpus run waits rather than racing.** `max_concurrent_runs: 1`
+  queues it; it is not refused, except at `POST /pipeline/run`, which still
+  answers 409 rather than leaving somebody watching a queued run.
 - **Deleting this directory changes nothing about the pipeline.** It takes
   away the Run button and `POST /pipeline/run`, both of which then report
   themselves unavailable; every queue verb on every surface is untouched.

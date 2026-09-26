@@ -125,6 +125,12 @@ class Document(Base):
         comment="Which run parsed this document, as `settings.runs.run_id` named "
         "it. NULL for a document parsed before the run was recorded.",
     )
+    parse_trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for this document to be parsed, written by "
+        "whatever queued it and adopted by the worker that claims it. NULL "
+        "where nobody named a run, and the worker's own id is used instead.",
+    )
     parse_trace_id: Mapped[str | None] = mapped_column(
         Text,
         index=True,
@@ -151,6 +157,10 @@ class Document(Base):
         DateTime(timezone=True),
         comment="When a worker claimed this document for chunking, NULL when none "
         "holds it.",
+    )
+    chunk_trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for this document to be chunked. See `parse_trigger`.",
     )
     oversized: Mapped[int | None] = mapped_column(
         Integer,

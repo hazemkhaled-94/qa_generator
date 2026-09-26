@@ -13,8 +13,11 @@ import pytest
 pytest.importorskip("dagster", reason="the pipeline group is not installed")
 
 from dagster import AssetKey, Definitions
+from dagster._core.instance.ref import InstanceRef
+from dagster._core.run_coordinator import QueuedRunCoordinator
 
-from orchestration import arrivals, corpus, defs, nightly
+from orchestration import arrivals, corpus, defs, nightly, stages
+from tests.conftest import ROOT
 
 #: The order a document moves through the pipeline. Each waits for the one
 #: before it, which is what makes the graph a pipeline rather than six
@@ -76,6 +79,38 @@ def test_every_stage_has_a_check_for_its_failed_rows() -> None:
     }
 
     assert checked == set(ORDER)
+
+
+def test_the_watcher_files_its_check_under_a_name_that_exists() -> None:
+    """`progress` files a check for work no run of this code location did.
+
+    It names the check rather than holding one, so a rename here and not
+    there would file an evaluation against a check Dagster has never
+    heard of - which it accepts and nothing ever shows.
+    """
+    named = {
+        (key.asset_key.to_user_string(), key.name)
+        for key in defs.resolve_asset_graph().asset_check_keys
+    }
+
+    assert {(asset, stages.NOTHING_FAILED) for asset in ORDER} <= named
+
+
+def test_only_one_corpus_run_may_go_at_a_time() -> None:
+    """Two runs racing through the same queues interleave.
+
+    One can ask for a topic fit while the other is still draining
+    extraction, and the fit then describes half a corpus. The API's 409
+    reads the run list and then launches, and `make pipeline` and the
+    Materialize button do not pass it at all - so the limit has to be
+    here, where every launcher goes through.
+    """
+    instance = InstanceRef.from_dir(str(ROOT / "configs/dagster"))
+
+    # Rehydrated as well as read, because a class path Dagster cannot
+    # resolve is a limit that is in the file and not in the deployment.
+    assert isinstance(instance.run_coordinator, QueuedRunCoordinator)
+    assert instance.run_coordinator_data.config_dict["max_concurrent_runs"] == 1
 
 
 def test_the_schedule_and_the_sensor_ship_stopped() -> None:

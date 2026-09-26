@@ -36,6 +36,7 @@ class ParseQueue(RowQueue):
         status=Document.parse_status,
         error=Document.parse_error,
         claimed_at=Document.parse_claimed_at,
+        trigger=Document.parse_trigger,
     )
     #: The narrowings this stage accepts.
     scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}

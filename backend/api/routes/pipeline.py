@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter
 
@@ -102,6 +103,12 @@ class PipelineAction:
     detail: str
     #: Set by `stop` when it also stopped a run in flight.
     run: Run | None = None
+    #: The run every row this verb queued was stamped with - the same value
+    #: `StageAction.run` carries for one stage, minted once here so a
+    #: corpus-wide verb is one run across every queue it touched. Named
+    #: apart from `run` above because that one is a Dagster run and this is
+    #: an id written on rows. Absent for `stop`, which queues nothing.
+    queued_as: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,24 +141,30 @@ def _queues() -> list[StageStatus]:
     return [status_of(name, queue) for name, queue in STAGES]
 
 
-def _fan(action: Fanned, names: tuple[str, ...]) -> tuple[list[StageMoved], int]:
+def _fan(
+    action: Fanned, names: tuple[str, ...], trigger: str | None = None
+) -> tuple[list[StageMoved], int]:
     """Runs one queue verb over several stages and records what each moved.
 
     Looked up by name rather than through a dict of bound methods: topic
     modelling answers `stop` and `retry` and has no `start` at all, and
     building that dict would read the attribute for every verb whichever one
     was asked for. The three verbs are named for the methods they call.
+
+    One `trigger` for every stage it reaches, because this is one act: a
+    person who pressed Start once should not have to find five ids to see
+    what it did. `stop` passes none - it queues nothing.
     """
     moved = []
     for name, queue in STAGES:
         if name not in names:
             continue
-        rows = getattr(queue, action)()
+        rows = getattr(queue, action)(**({"trigger": trigger} if trigger else {}))
         # Through the stage router's own logger, so a corpus-wide verb leaves
         # the same line per stage that pressing the button on that stage's
         # page would have left. Without this a fan-out would be invisible in
         # the one place somebody looks to find out who moved a row.
-        answered(name, action, rows)
+        answered(name, action, rows, run=trigger)
         moved.append(StageMoved(stage=name, rows=rows))
     return moved, sum(one.rows for one in moved)
 
@@ -234,11 +247,13 @@ def start() -> PipelineAction:
     every topic and the judge costs model calls a deployment opts into, so
     both are asked for rather than swept into a fan-out.
     """
-    moved, rows = _fan("start", STARTABLE)
+    queued_as = uuid4().hex
+    moved, rows = _fan("start", STARTABLE, queued_as)
     return PipelineAction(
         action="start",
         rows=rows,
         stages=moved,
+        queued_as=queued_as,
         detail=(
             f"{rows} row(s) queued; the workers will pick them up. Call this "
             f"again when they have drained to take the corpus its next "
@@ -297,11 +312,13 @@ def retry() -> PipelineAction:
     and this is the one call that clears them. It queues them; it does not
     work them, and it starts nothing that has not been asked for.
     """
-    moved, rows = _fan("retry", tuple(name for name, _ in STAGES))
+    queued_as = uuid4().hex
+    moved, rows = _fan("retry", tuple(name for name, _ in STAGES), queued_as)
     return PipelineAction(
         action="retry",
         rows=rows,
         stages=moved,
+        queued_as=queued_as,
         detail=(
             f"{rows} failed row(s) returned to the queue."
             if rows

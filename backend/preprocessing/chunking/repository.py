@@ -70,6 +70,7 @@ class ChunkQueue(RowQueue):
         status=Document.chunk_status,
         error=Document.chunk_error,
         claimed_at=Document.chunk_claimed_at,
+        trigger=Document.chunk_trigger,
     )
     #: The narrowings this stage accepts.
     scopes: ClassVar[dict[str, InstrumentedAttribute]] = {"document": Document.sha256}

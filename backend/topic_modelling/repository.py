@@ -87,6 +87,7 @@ class TopicQueue(StageQueue):
         status=Topic.status,
         error=Topic.error,
         claimed_at=Topic.claimed_at,
+        trigger=Topic.trigger,
     )
     done = Status.MODELLED
     next_pending = _NEXT_PENDING
@@ -101,13 +102,18 @@ class TopicQueue(StageQueue):
         super().__init__(lease)
         self._version = version
 
-    def request(self) -> int:
+    def request(self, trigger: str | None = None) -> int:
         """Asks for a fit by putting a request row on the queue.
 
         Deletes any request no worker holds first, so asking twice queues one
         fit and asking after a failure clears that failure. A request made
         while a fit is running is queued behind it. The topics themselves stay
         readable until a fit succeeds.
+
+        Args:
+            trigger: Which run is asking, adopted by the worker that takes
+                the fit. This stage's `start`, since asking is what creates
+                the work.
 
         Returns:
             The id of the new request row.
@@ -118,7 +124,7 @@ class TopicQueue(StageQueue):
             )
             return session.scalar(
                 insert(Topic)
-                .values(top_terms=[], status=Status.PENDING)
+                .values(top_terms=[], status=Status.PENDING, trigger=trigger)
                 .returning(Topic.id)
             )
 

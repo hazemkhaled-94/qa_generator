@@ -22,12 +22,14 @@ class Session:
         """Initialises with one queue of replies per path."""
         self._replies = {path: list(bodies) for path, bodies in replies.items()}
         self.asked: list[tuple[str, str]] = []
+        self.sent: list[dict] = []
 
-    def request(self, method: str, url: str, timeout: float):
+    def request(self, method: str, url: str, params: dict, timeout: float):
         """Answers one call."""
         del timeout
         path = url[len(BASE) :]
         self.asked.append((method, path))
+        self.sent.append(params)
         bodies = self._replies[path]
         # The last reply stands for every call after it, which is what
         # lets a drain be given "busy, busy, idle" and then be left alone.
@@ -132,6 +134,38 @@ def test_a_fit_is_asked_for_rather_than_started() -> None:
     assert session.asked == [("POST", "/topics/discover")]
 
 
+def test_a_verb_carries_the_run_that_asked_for_it() -> None:
+    """What joins a Dagster run to the rows the run produced.
+
+    The backend writes this onto every row the verb queues and the worker
+    that claims one adopts it, so a fact carries the id of the run that
+    asked rather than the id of whichever worker happened to take it.
+    """
+    session = Session({"/parsing/start": [{"stage": "parsing", "rows": 12}]})
+
+    Backend(BASE, session).act("parsing", "start", "dagster-run-7")
+
+    assert session.sent == [{"run": "dagster-run-7"}]
+
+
+def test_a_fit_carries_it_too() -> None:
+    """Asking is this stage's `start`, so it is where the run is recorded."""
+    session = Session({"/topics/discover": [{"fit": 7, "detail": "queued"}]})
+
+    Backend(BASE, session).discover("dagster-run-7")
+
+    assert session.sent == [{"run": "dagster-run-7"}]
+
+
+def test_nothing_is_sent_where_no_run_asked() -> None:
+    """A query string naming nothing is a query string worth not sending."""
+    session = Session({"/parsing/status": [{"working": False, "rows": {}}]})
+
+    Backend(BASE, session).status("parsing")
+
+    assert session.sent == [{}]
+
+
 def test_the_backend_url_comes_from_the_environment(monkeypatch) -> None:
     """One address, given by compose, and no default anywhere."""
     monkeypatch.setenv("BACKEND_URL", "http://api:8000/")
@@ -146,7 +180,7 @@ def test_an_error_status_is_raised_rather_than_read(monkeypatch) -> None:
     class Refusing(Session):
         """Raises the way requests does on an error status."""
 
-        def request(self, method, url, timeout):
+        def request(self, method, url, params, timeout):
             """Refuses."""
             raise requests.exceptions.HTTPError("503 Service Unavailable")
 

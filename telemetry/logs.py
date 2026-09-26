@@ -77,6 +77,29 @@ _BOUND: ContextVar[Mapping[str, Any]] = ContextVar(
 )
 
 
+#: The run the work in this context belongs to, where that is not the
+#: process's own. Set when a stage claims a row: the row names the run that
+#: asked for it, and a worker is long-lived enough that its own id names the
+#: container rather than the work. Here rather than in `settings` because
+#: this is the layer that writes `run.id`, and the value has to be the one
+#: on the rows or a lineage page's link into Grafana finds nothing.
+_RUN: ContextVar[str | None] = ContextVar("run", default=None)
+
+
+def running_as(run: str | None) -> None:
+    """Names the run the work in this context belongs to.
+
+    None puts it back to the process's own, which is what a claim that
+    found no run on the row records.
+    """
+    _RUN.set(run)
+
+
+def running() -> str | None:
+    """The run this context is working for, or None for the process's own."""
+    return _RUN.get()
+
+
 @contextmanager
 def bind(fields: Mapping[str, Any]) -> Iterator[None]:
     """Puts fields on every record logged inside this block.
@@ -168,9 +191,11 @@ class JsonFormatter(logging.Formatter):
             "log.origin.function": record.funcName,
             "trace.id": getattr(record, "otelTraceID", ""),
             "span.id": getattr(record, "otelSpanID", ""),
-            # Empty for a process that is not a run: the api, the frontend,
-            # the orchestrator and every host command.
-            "run.id": self._run,
+            # The run the claimed row belongs to where there is one, and the
+            # process's own otherwise. Empty for a process that is not a run
+            # at all: the api, the frontend, the orchestrator and every host
+            # command.
+            "run.id": _RUN.get() or self._run,
         }
 
         if record.exc_info and record.exc_info[0] is not None:

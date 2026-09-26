@@ -20,9 +20,20 @@ from database.qa_generator import Status
 from extraction.repository import PassageQueue
 from preprocessing.chunking.repository import ChunkQueue
 from preprocessing.parsing.repository import ParseQueue
+from settings.runs import run_id, triggered_by
 from stages.queue import ABANDONED
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def unasked():
+    """No run is asking until a claim says one is.
+
+    The trigger a claim adopts lives in a ContextVar, so a test that left
+    one set would name the rows of the test after it.
+    """
+    triggered_by(None)
 
 
 @pytest.fixture
@@ -485,3 +496,69 @@ def test_a_row_another_worker_holds_is_skipped_rather_than_waited_for(
 
     assert claimed is not None, "the second row was never claimed"
     assert claimed.sha256 == second, "the locked row should have been skipped"
+
+
+# ── The run that asked, carried from the queueing verb to the worker ───────
+
+
+def test_start_records_which_run_asked(documents, engine) -> None:
+    """Written on every row the verb queued, and on no other.
+
+    This is what a produced row's `run_id` becomes, and without it that
+    column named the long-lived worker that happened to claim the row
+    rather than the thing that asked for the work.
+    """
+    documents(new=2, parsed=1)
+
+    ParseQueue().start(trigger="dagster-run-7")
+
+    with engine.connect() as connection:
+        asked = dict(
+            connection.execute(
+                text("SELECT parse_status, parse_trigger FROM documents")
+            ).all()
+        )
+    assert asked[Status.PENDING] == "dagster-run-7"
+    assert asked[Status.PARSED] is None
+
+
+def test_a_claim_adopts_the_run_that_asked(documents) -> None:
+    """So everything written while the row is held belongs to that run."""
+    documents(new=1)
+    ParseQueue().start(trigger="dagster-run-7")
+
+    ParseQueue().claim()
+
+    assert run_id() == "dagster-run-7"
+
+
+def test_a_row_nobody_asked_for_leaves_the_worker_its_own_name(documents) -> None:
+    """A claim sets the run on every row, including to nothing.
+
+    Rows queued before this column existed carry NULL, and a worker that
+    kept the previous row's trigger would file them under a run that never
+    asked for them.
+    """
+    documents(new=1)
+    ParseQueue().start(trigger="dagster-run-7")
+    queue = ParseQueue()
+    queue.claim()
+
+    # Taken back and queued again by nobody, which is what clears it.
+    ParseQueue().reclaim()
+    queue.claim()
+
+    assert run_id() != "dagster-run-7"
+
+
+def test_requeueing_without_a_run_clears_the_one_before_it(documents, engine) -> None:
+    """A row retried by nobody must stop claiming whoever queued it last."""
+    documents(new=1)
+    ParseQueue().start(trigger="dagster-run-7")
+
+    ParseQueue().stop()
+    ParseQueue().start()
+
+    with engine.connect() as connection:
+        asked = connection.execute(text("SELECT parse_trigger FROM documents")).scalar()
+    assert asked is None

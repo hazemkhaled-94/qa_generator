@@ -223,6 +223,7 @@ class PassageQueue(RowQueue):
         status=Passage.extract_status,
         error=Passage.extract_error,
         claimed_at=Passage.extract_claimed_at,
+        trigger=Passage.extract_trigger,
     )
     #: This stage queues over passages, so it answers for one of those and for
     #: every passage of one document - which is the unit a person thinks in.

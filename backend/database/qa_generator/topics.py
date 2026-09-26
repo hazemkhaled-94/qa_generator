@@ -132,6 +132,10 @@ class Topic(Base):
         DateTime(timezone=True),
         comment="When a worker claimed this fit, NULL when none holds it.",
     )
+    trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for this fit. See `documents.parse_trigger`.",
+    )
     question_status: Mapped[str] = mapped_column(
         Text,
         server_default=Status.NEW,
@@ -149,6 +153,11 @@ class Topic(Base):
         DateTime(timezone=True),
         comment="When a worker claimed this topic for question generation, NULL "
         "when none holds it.",
+    )
+    question_trigger: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Which run asked for questions on this topic. See "
+        "`documents.parse_trigger`.",
     )
     requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Protocol
+from uuid import uuid4
 
 from fastapi import APIRouter
 
@@ -101,7 +102,7 @@ class StageRepository(StageQueueState, Protocol):
     a condition selects instead of the whole queue.
     """
 
-    def start(self, within: Any = None) -> int:
+    def start(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Queues the rows never asked for."""
         ...
 
@@ -109,15 +110,15 @@ class StageRepository(StageQueueState, Protocol):
         """Takes back the rows not started yet."""
         ...
 
-    def retry(self, within: Any = None) -> int:
+    def retry(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns failed rows to the queue."""
         ...
 
-    def reset(self, within: Any = None) -> int:
+    def reset(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns every row to the queue, finished ones included."""
         ...
 
-    def reclaim(self, within: Any = None) -> int:
+    def reclaim(self, within: Any = None, *, trigger: str | None = None) -> int:
         """Returns a row a dead worker still holds."""
         ...
 
@@ -155,6 +156,10 @@ class StageAction:
     detail: str
     scope: str | None = None
     value: str | None = None
+    #: Which run this verb queued the rows under, written on each of them
+    #: and adopted by the worker that claims one. Absent for `stop`, which
+    #: queues nothing. See `settings.runs`.
+    run: str | None = None
 
 
 def status_of(
@@ -203,6 +208,7 @@ def answered(
     *,
     scope: str | None = None,
     value: str | None = None,
+    run: str | None = None,
 ) -> StageAction:
     """Says what one verb moved, in the words every route uses for it.
 
@@ -227,6 +233,7 @@ def answered(
             "queue.action": action,
             "queue.rows": rows,
             **({"queue.scope": scope, "queue.value": value} if scope else {}),
+            **({"run.id": run} if run else {}),
         },
     )
     return StageAction(
@@ -240,6 +247,7 @@ def answered(
         ),
         scope=scope,
         value=value,
+        run=run,
     )
 
 
@@ -251,20 +259,30 @@ def acted(
     within: Any = None,
     scope: str | None = None,
     value: str | None = None,
+    run: str | None = None,
 ) -> StageAction:
     """Runs one queue verb and says what it moved.
 
     Shared by the whole-queue route and the narrowed one, so the same verb
     cannot describe itself two ways depending on which was called.
+
+    Every verb that queues rows stamps them with a run, minting one where
+    the caller named none. That is what lets somebody who pressed a button
+    find the rows it produced afterwards: without it a row carried the id
+    of the long-lived worker that happened to claim it, which names a
+    container and not a piece of work. `stop` is the exception - it queues
+    nothing, so there is nothing to attribute.
     """
+    queues = action != "stop"
+    trigger = (run or uuid4().hex) if queues else None
     rows = {
         "start": repository.start,
         "stop": repository.stop,
         "retry": repository.retry,
         "rerun": repository.reset,
         "reclaim": repository.reclaim,
-    }[action](within)
-    return answered(name, action, rows, scope=scope, value=value)
+    }[action](within, **({"trigger": trigger} if queues else {}))
+    return answered(name, action, rows, scope=scope, value=value, run=trigger)
 
 
 def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
@@ -280,13 +298,20 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
         return status_of(name, repository)
 
     @router.post("/{action}", status_code=202, responses=refusals)
-    def whole_queue(action: Action, confirm: bool = False) -> StageAction:
+    def whole_queue(
+        action: Action, confirm: bool = False, run: str | None = None
+    ) -> StageAction:
         """Runs one queue verb over everything this stage owns.
 
         Returns at once: none of these does the work. `start` makes rows
         claimable, `stop` makes them `new` again, `retry` clears a failure
         and `rerun` queues finished rows too, skipping whatever a worker
         holds right now. The worker picks them up on its next poll.
+
+        `run` names the run the queued rows belong to, for a caller that
+        already has an id worth joining on - a Dagster run, or a corpus-wide
+        verb stamping every stage with one. Left out, one is minted and
+        answered back.
 
         Raises:
             ApiError: 400 `confirm_required` for an unnarrowed `reclaim`.
@@ -305,7 +330,7 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
                 "that is still on it. Narrow it to one item, or pass "
                 "?confirm=true once the stage is stopped.",
             )
-        return acted(name, repository, action)
+        return acted(name, repository, action, run=run)
 
     @router.get("/{scope}/{value}/status", responses=refusals)
     def scoped_status(scope: str, value: str) -> StageStatus:
@@ -317,7 +342,9 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
         return status_of(name, repository, scope=scope, value=value)
 
     @router.post("/{scope}/{value}/{action}", status_code=202, responses=refusals)
-    def scoped_action(scope: str, value: str, action: Action) -> StageAction:
+    def scoped_action(
+        scope: str, value: str, action: Action, run: str | None = None
+    ) -> StageAction:
         """Runs one queue verb against a single item.
 
         The same operation as the route without a scope, against the rows
@@ -333,6 +360,7 @@ def stage_router(*, name: str, repository: StageRepository) -> APIRouter:
             within=_narrowed(repository, scope, value),
             scope=scope,
             value=value,
+            run=run,
         )
 
     return router

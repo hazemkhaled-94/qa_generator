@@ -24,7 +24,7 @@ from typing import Any
 from opentelemetry import trace
 
 from telemetry import logs, traces
-from telemetry.logs import bind
+from telemetry.logs import bind, running, running_as
 from telemetry.traces import (
     asking,
     instrument_llm,
@@ -37,6 +37,8 @@ __all__ = [
     "bind",
     "configure",
     "instrument_llm",
+    "running",
+    "running_as",
     "trace_engine",
     "tracer",
     "working",

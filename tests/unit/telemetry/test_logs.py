@@ -17,7 +17,7 @@ from datetime import datetime
 
 import pytest
 
-from telemetry.logs import JsonFormatter, _Bound, _file, bind
+from telemetry.logs import JsonFormatter, _Bound, _file, bind, running_as
 
 
 @pytest.fixture
@@ -79,6 +79,34 @@ def test_the_run_is_on_every_line_a_run_writes(line: dict) -> None:
     # Present and empty for a process that is not a run, rather than absent:
     # one shape of line, and a panel filtering on it finds nothing to show.
     assert line["run.id"] == ""
+
+
+def test_the_run_that_asked_outranks_the_process_that_worked(line: dict) -> None:
+    """A claimed row names the run it belongs to, and the lines follow it.
+
+    The worker is long-lived, so its own id names the container rather than
+    the work. The row's `run_id` is this value, and a lineage page's link
+    into Grafana joins on it - so a line stamped with the process instead
+    would leave that link finding nothing.
+    """
+    record = logging.LogRecord(
+        name="extraction.service",
+        level=logging.INFO,
+        pathname="extraction/service.py",
+        lineno=1,
+        msg="working",
+        args=(),
+        exc_info=None,
+    )
+    record.otelTraceID = "0" * 32
+    record.otelSpanID = "0" * 16
+    running_as("dagster-run-7")
+    try:
+        written = json.loads(JsonFormatter("extraction", "worker-uuid").format(record))
+    finally:
+        running_as(None)
+
+    assert written["run.id"] == "dagster-run-7"
 
 
 def test_a_callers_own_fields_survive(line: dict) -> None:

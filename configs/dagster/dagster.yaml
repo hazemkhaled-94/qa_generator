@@ -26,3 +26,24 @@ storage:
 run_launcher:
   module: dagster.core.launcher
   class: DefaultRunLauncher
+
+# One corpus run at a time, enforced where every launcher has to pass.
+#
+# The `corpus` job drives the stage queues in order, so two of them racing
+# through the same queues interleave: one can ask for a topic fit while the
+# other is still draining extraction, and the fit then describes half a
+# corpus. The API refuses a second run with a 409, but that check reads the
+# run list and then launches - two requests can pass it together - and it is
+# not on the path at all for `make pipeline`, for `dagster job launch`, or
+# for the Materialize button in Dagster's own UI.
+#
+# Queued rather than refused, which is the difference between this and the
+# 409: a second run waits for the first instead of being turned away. The
+# default coordinator submits immediately and imposes no limit.
+#
+# Needs the daemon, which is already what ticks the schedule and the sensors.
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 1

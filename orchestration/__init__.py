@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from dagster import (
+    AssetCheckEvaluation,
     AssetKey,
     AssetMaterialization,
     AssetSelection,
@@ -121,13 +124,50 @@ def arrivals(context):
     return RunRequest(run_key=f"new-{run}-{waiting}")
 
 
+def _statuses(backend_url: str, queues: tuple[str, ...]) -> dict[str, Any]:
+    """Every stage's queue, asked for at once rather than one after another.
+
+    Sequentially this is six GETs at the client's 15s timeout, and Dagster
+    gives a sensor tick 60 before it kills it: a backend answering slowly
+    would switch the watcher off exactly when the graph needs it.
+
+    One Backend per thread, because a requests Session is a connection pool
+    that is not documented thread-safe. A stage that cannot be reached is
+    left out, so one unreachable route costs itself and not the tick.
+    """
+    with ThreadPoolExecutor(max_workers=len(queues)) as pool:
+        asked = {
+            stage: pool.submit(Backend(backend_url).status, stage) for stage in queues
+        }
+    found = {}
+    for stage, answer in asked.items():
+        try:
+            found[stage] = answer.result()
+        except Exception as unreachable:  # noqa: BLE001 - one stage, not the tick
+            log.warning("%s: no status, so nothing recorded: %s", stage, unreachable)
+    return found
+
+
+def _last(recorded: Any) -> tuple[int, int]:
+    """What the cursor says a stage had worked and failed last tick.
+
+    A bare int is the shape the cursor held before failures were watched,
+    so a deployment upgrading into this reads its old cursor rather than
+    re-reporting every stage from zero.
+    """
+    if isinstance(recorded, list):
+        return recorded[0], recorded[1]
+    return recorded or 0, 0
+
+
 @sensor(
     minimum_interval_seconds=30,
     default_status=DefaultSensorStatus.RUNNING,
-    description="Records what each stage produced, whoever set it going.",
+    description="Records what each stage produced and what it failed, "
+    "whoever set it going.",
 )
 def progress(context):
-    """Reports a materialisation for work this orchestrator did not start.
+    """Reports what this orchestrator did not start, worked and failed alike.
 
     Without it Dagster sees only its own runs. Every other way of setting
     a stage going - `make extract`, POST /extraction/start, the Start
@@ -136,14 +176,23 @@ def progress(context):
     reading of that graph nobody should have to qualify.
 
     So the asset is no longer only a trigger. This watches the queues the
-    same way the assets do, through /status, and files an
-    AssetMaterialization whenever a stage's worked count has risen. What
-    Dagster then shows is the pipeline, not the subset of it Dagster ran.
+    same way the assets do, through /status, and files:
 
-    The cursor holds the last count seen per stage, so a tick that finds
-    nothing new reports nothing. First tick after an empty cursor records
-    every stage that has produced anything, which is how a graph that has
-    been running for weeks without this catches up in one poll.
+        an AssetMaterialization    when a stage's worked count has risen
+        an AssetCheckEvaluation    when its failed count has moved at all
+
+    The check is what makes the graph go red for work Dagster did not run.
+    A materialisation alone cannot: a stage that failed every row produced
+    nothing, so counting only what was produced reported silence for the
+    one state worth interrupting somebody over. It is filed on a move in
+    either direction, so a `retry` that clears the failures turns the
+    asset green again rather than leaving it red until a run happens.
+
+    The cursor holds the last worked and failed counts per stage, so a
+    tick that finds neither moved reports nothing. First tick after an
+    empty cursor records every stage that has produced or failed anything,
+    which is how a graph that has been running for weeks without this
+    catches up in one poll.
 
     RUNNING rather than STOPPED, unlike the schedule and `arrivals`:
     those two decide that work should happen, and a deployment should opt
@@ -151,40 +200,56 @@ def progress(context):
     a graph that is quietly wrong.
     """
     settings = Settings.load()
-    backend = Backend(settings.backend_url)
     seen = json.loads(context.cursor) if context.cursor else {}
+    queues = _statuses(
+        settings.backend_url, tuple(stage for _, stage, _ in stages.ALL_STAGES)
+    )
 
     events, counted = [], {}
     for name, stage, unit in stages.ALL_STAGES:
-        try:
-            queue = backend.status(stage)
-        except Exception as unreachable:  # noqa: BLE001 - one stage, not the tick
-            log.warning("%s: no status, so nothing recorded: %s", stage, unreachable)
-            counted[stage] = seen.get(stage, 0)
+        was_done, was_failed = _last(seen.get(stage))
+        queue = queues.get(stage)
+        if queue is None:
+            counted[stage] = [was_done, was_failed]
             continue
-        done = stages.produced(queue.rows)
-        counted[stage] = done
-        # Nothing produced is nothing to report: a stage with an empty
+        done, failed = stages.produced(queue.rows), queue.failed
+        counted[stage] = [done, failed]
+
+        # Nothing produced is nothing to materialise: a stage with an empty
         # queue has not materialised, it has not run.
-        if not done or done <= seen.get(stage, 0):
-            continue
-        events.append(
-            AssetMaterialization(
-                asset_key=AssetKey(name),
-                description=f"{done} {unit}(s) worked",
-                metadata={
-                    f"{unit}s done": done,
-                    "since the last tick": done - seen.get(stage, 0),
-                    "failed": queue.failed,
-                    "queue": MetadataValue.json(queue.rows),
-                },
+        if done > was_done:
+            events.append(
+                AssetMaterialization(
+                    asset_key=AssetKey(name),
+                    description=f"{done} {unit}(s) worked",
+                    metadata={
+                        f"{unit}s done": done,
+                        "since the last tick": done - was_done,
+                        "failed": failed,
+                        "queue": MetadataValue.json(queue.rows),
+                    },
+                )
             )
-        )
+        if failed != was_failed:
+            events.append(
+                AssetCheckEvaluation(
+                    asset_key=AssetKey(name),
+                    check_name=stages.NOTHING_FAILED,
+                    passed=failed == 0,
+                    description=f"{failed} {unit}(s) left failed",
+                    metadata={
+                        "failed": failed,
+                        "since the last tick": failed - was_failed,
+                        "retry with": f"POST /{stage}/retry",
+                        "queue": MetadataValue.json(queue.rows),
+                    },
+                )
+            )
 
     context.update_cursor(json.dumps(counted))
     if not events:
-        return SkipReason("no stage has produced anything new")
-    log.info("recorded %d materialisation(s) nobody asked this to watch", len(events))
+        return SkipReason("no stage has produced or failed anything new")
+    log.info("recorded %d event(s) nobody asked this to watch", len(events))
     return SensorResult(asset_events=events)
 
 
