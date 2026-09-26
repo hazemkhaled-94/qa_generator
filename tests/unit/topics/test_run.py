@@ -89,6 +89,73 @@ def test_visualise_writes_one_file_per_modelled_language(cli) -> None:
     assert cli.files()["en.html"] == b"<html>en</html>"
 
 
+def test_render_redraws_each_language_from_its_stored_model(cli) -> None:
+    """The figure comes back without a re-fit of the corpus.
+
+    `export` holds a view and `models` holds what it is a view of, so a
+    lost page costs a render. Before the models were kept this was the one
+    thing that could not be done.
+    """
+    cli.fits = ["de", "en"]
+    cli.fitted("de")
+    cli.fitted("en")
+
+    assert cli.run("--render") == 0
+    assert set(cli.figures) == {"topics/de.html", "topics/en.html"}, cli.figures
+    assert cli.figures["topics/de.html"].startswith(b"<"), "a page, not a sentinel"
+
+
+def test_render_replaces_the_figure_already_there(cli) -> None:
+    """One key per language, so the redraw overwrites rather than adds.
+
+    Idempotent rather than lossy: the same stored model through the same
+    `prepare` draws the same page.
+    """
+    cli.fits = ["de"]
+    cli.fitted("de")
+    cli.drew("de", b"<html>the old figure</html>")
+
+    assert cli.run("--render") == 0
+    assert cli.figures["topics/de.html"] != b"<html>the old figure</html>"
+    # Away before the new one goes in, so a render that raises leaves no
+    # figure rather than the previous language's.
+    assert "remove topics/de.html" in cli.calls
+    assert cli.calls.index("remove topics/de.html") < cli.calls.index(
+        "put topics/de.html"
+    )
+
+
+def test_render_can_be_narrowed_to_one_language(cli) -> None:
+    """`--language` picks which LANGUAGE, not which fit.
+
+    There is one model per language because the database holds one fit's
+    topics, so there is no older model to choose.
+    """
+    cli.fits = ["de", "en"]
+    cli.fitted("de")
+    cli.fitted("en")
+
+    assert cli.run("--render", "--language", "en") == 0
+    assert set(cli.figures) == {"topics/en.html"}, cli.figures
+
+
+def test_render_for_a_language_with_no_topics_is_an_error(cli) -> None:
+    """Naming a language the corpus does not hold is a typo, not a no-op."""
+    cli.fits = ["de"]
+    cli.fitted("de")
+
+    assert cli.run("--render", "--language", "fr") == 1
+    assert cli.figures == {}
+
+
+def test_render_with_no_model_stored_is_an_error(cli) -> None:
+    """Topics fitted before this bucket existed have no model to draw from."""
+    cli.fits = ["de"]
+
+    assert cli.run("--render") == 1
+    assert cli.figures == {}
+
+
 def test_visualise_with_no_topics_stored_is_an_error(cli) -> None:
     """There is nothing to draw, and the exit status has to say so."""
     cli.fits = []

@@ -22,8 +22,17 @@ this package owns the tables, the enums, the connection and the migrations.
 | `questions` | The question, its answer, its derived difficulty, its thread, its embedding and its release | question generation |
 | `question_facts` | Which facts each question cites | question generation |
 | `service_settings` | The settings a deployment changed | the API, the CLI, the UI |
+| `assessments` | What an independent judge made of one artefact, and the queue the phase claims over | [the assessment phase](../assessment/README.md) |
+| `assessment_metrics` | One judgement one judge made about one artefact — the name, the labels and the scores are Phoenix's, so a metric means the same here as anywhere else that posts one | the assessment phase |
 | `prompts` | One prompt per version per service, stored **as composed** — the system message, the user message as its template, and the JSON schema the answer came back in | each stage, once before its first claim |
-| `archived_rows` | Every row deleted from any of the ten above, as JSON | an AFTER DELETE trigger |
+| `archived_rows` | Every row deleted from any of the twelve above, as JSON | an AFTER DELETE trigger |
+
+### `assessments` reaches its artefact through one of three keys
+
+A fact, a topic or a question — exactly one foreign key is set and each
+cascades. An assessment of a fact that has been deleted is an opinion about
+nothing, and a polymorphic `(kind, id)` pair would have left it behind for
+a trigger to sweep.
 
 ### `topics` carries two queues
 

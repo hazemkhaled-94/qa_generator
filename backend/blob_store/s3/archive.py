@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import ClassVar
 
-from blob_store.seaweedfs.bucket import Bucket
-from blob_store.seaweedfs.client import s3_client
+from blob_store.s3.bucket import Bucket
+from blob_store.s3.client import s3_client
 
 #: How many keys one delete request carries. The S3 limit.
 _BATCH = 1000

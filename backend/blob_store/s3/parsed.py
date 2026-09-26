@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from blob_store.seaweedfs.bucket import Bucket
+from blob_store.s3.bucket import Bucket
 
 
 class ParsedBucket(Bucket):

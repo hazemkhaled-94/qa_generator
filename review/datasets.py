@@ -76,9 +76,7 @@ def _judge_metadata() -> list[rg.TermsMetadataProperty]:
     at import time makes importing this module require a running Argilla.
     """
     return [
-        rg.TermsMetadataProperty(
-            name="judge_verdict", title="What the LLM judge said"
-        ),
+        rg.TermsMetadataProperty(name="judge_verdict", title="What the LLM judge said"),
         rg.TermsMetadataProperty(
             name="judge_disagrees", title="Judge disagrees with the pipeline"
         ),

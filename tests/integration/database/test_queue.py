@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from database.qa_generator import Status
 from extraction.repository import PassageQueue
+from preprocessing.chunking.repository import ChunkQueue
 from preprocessing.parsing.repository import ParseQueue
 from stages.queue import ABANDONED
 
@@ -293,6 +294,77 @@ def test_a_stale_claim_does_not_count_as_a_worker(engine, database) -> None:
         )
 
     assert ParseQueue().queue_state().working is False
+
+
+def _chunk_statuses(engine) -> dict[str, int]:
+    """Counts documents by chunk status."""
+    with engine.connect() as connection:
+        return dict(
+            connection.execute(
+                text("SELECT chunk_status, count(*) FROM documents GROUP BY 1")
+            ).all()
+        )
+
+
+def test_chunking_queues_only_the_documents_parsing_has_finished(
+    engine, database
+) -> None:
+    """The one stage that queues over rows it did not create.
+
+    A document exists from the moment it is uploaded, so `start` over a
+    corpus half way through parsing used to queue the unparsed half and fail
+    every row of it on the missing parsed object.
+    """
+    with Session(engine) as session:
+        session.add_all(
+            [
+                document(digest("a"), parse_status=Status.PARSED),
+                document(digest("b"), parse_status=Status.NEW),
+                document(digest("c"), parse_status=Status.FAILED),
+            ]
+        )
+        session.commit()
+
+    assert ChunkQueue().start() == 1
+    assert _chunk_statuses(engine) == {Status.PENDING: 1, Status.NEW: 2}
+
+
+def test_chunking_redoes_only_the_documents_parsing_has_finished(
+    engine, database
+) -> None:
+    """`rerun` carries the same guard: an unparsed row has nothing to redo."""
+    with Session(engine) as session:
+        session.add_all(
+            [
+                document(
+                    digest("a"),
+                    parse_status=Status.PARSED,
+                    chunk_status=Status.CHUNKED,
+                ),
+                document(digest("b"), parse_status=Status.NEW, chunk_status=Status.NEW),
+            ]
+        )
+        session.commit()
+
+    assert ChunkQueue().reset() == 1
+    assert _chunk_statuses(engine) == {Status.PENDING: 1, Status.NEW: 1}
+
+
+def test_a_queued_chunking_row_is_still_claimed_whatever_parsing_says(
+    engine, database
+) -> None:
+    """`ready` gates entering the queue, never leaving it.
+
+    A row already `pending` is a row somebody queued, and a claim reads this
+    stage's own status column and nothing else.
+    """
+    with Session(engine) as session:
+        session.add(
+            document(digest("a"), parse_status=Status.NEW, chunk_status=Status.PENDING)
+        )
+        session.commit()
+
+    assert ChunkQueue().claim() is not None
 
 
 def test_a_narrowed_stop_leaves_the_rest_of_the_queue_alone(documents, engine) -> None:

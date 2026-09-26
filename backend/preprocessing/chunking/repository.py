@@ -21,8 +21,9 @@ from settings.runs import run_id
 from stages import Columns, RowQueue
 from telemetry.evaluations import current_ids
 
-#: The next document to chunk. This stage's own column and nothing else: a
-#: document queued here without a parsed form fails on the missing object.
+#: The next document to chunk. This stage's own column and nothing else: what
+#: keeps an unparsed document out of the queue is `ready` below, applied when
+#: a row is queued rather than when one is claimed.
 _NEXT_PENDING = (
     select(Document.sha256)
     .where(Document.chunk_status == Status.PENDING)
@@ -75,6 +76,13 @@ class ChunkQueue(RowQueue):
     done = Status.CHUNKED
     lease = timedelta(minutes=30)
     next_pending = _NEXT_PENDING
+    #: A document with no parsed form has nothing to chunk. The only stage
+    #: that declares this, because it is the only one queueing over rows it
+    #: did not create: a passage exists because chunking made it, but a
+    #: document exists because somebody uploaded one, and `start` over a
+    #: corpus half way through parsing used to queue the other half and fail
+    #: every row of it on the missing object.
+    ready = Document.parse_status == Status.PARSED
 
     def claim(self) -> ClaimedDocument | None:
         """Takes the next unchunked document off the queue.

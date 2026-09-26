@@ -83,6 +83,4 @@ def downgrade() -> None:
         "WHERE metric IN ('toxicity', 'conciseness', 'refusal')"
     )
     op.drop_constraint(_CONSTRAINT, "assessment_metrics", type_="check")
-    op.create_check_constraint(
-        _CONSTRAINT, "assessment_metrics", f"metric IN ({_WAS})"
-    )
+    op.create_check_constraint(_CONSTRAINT, "assessment_metrics", f"metric IN ({_WAS})")

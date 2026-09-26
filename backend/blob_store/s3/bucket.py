@@ -1,4 +1,4 @@
-"""Shared behaviour for every SeaweedFS bucket."""
+"""Shared behaviour for every bucket."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from time import monotonic
 from typing import Any, ClassVar
 from urllib.parse import quote
 
-from blob_store.seaweedfs.client import s3_client
+from blob_store.s3.client import s3_client
 
 log = logging.getLogger(__name__)
 
@@ -28,14 +28,15 @@ _COUNTS: dict[str, tuple[float, int]] = {}
 
 
 class Bucket:
-    """One bucket in the SeaweedFS S3 gateway.
+    """One bucket in the S3 object store.
 
     Holds put, get, remove and count. Key layout is not part of this
     interface: a bucket that is written to defines its own.
 
     One class per bucket rather than a name passed as a string, because a
-    bucket is a SeaweedFS collection and a collection is the unit of storage
-    policy - replication, TTL, disk type and erasure coding.
+    bucket is the unit of storage policy - replication, TTL, disk type and
+    erasure coding on SeaweedFS, an access tier and a lifecycle rule on a
+    hosted one.
 
     A concrete base, not an ABC: every method here works, and there is
     nothing for a subclass to implement. What a subclass must do is name its
@@ -67,8 +68,8 @@ class Bucket:
     def fanout_key(sha256: str, extension: str) -> str:
         """Builds a content-addressed key with a 2x2-hex fanout.
 
-        The fanout is not cosmetic: the filer keys filemeta on (dirhash,
-        name), so one flat directory becomes a write hotspot.
+        The fanout is not cosmetic: the SeaweedFS filer keys filemeta on
+        (dirhash, name), so one flat directory becomes a write hotspot.
         """
         return f"{sha256[:2]}/{sha256[2:4]}/{sha256}.{extension}"
 

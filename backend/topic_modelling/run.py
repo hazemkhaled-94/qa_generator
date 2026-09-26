@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import telemetry
-from blob_store.seaweedfs import ArchiveBucket, ExportBucket
+from blob_store.s3 import ArchiveBucket, ExportBucket, ModelsBucket
 from database.qa_generator import engine
 from llm.check import before_work
 from settings import decimal
@@ -25,6 +25,7 @@ from topic_modelling import prompts
 from topic_modelling.config import Settings
 from topic_modelling.factory import build_service
 from topic_modelling.repository import TopicCatalog, TopicQueue
+from topic_modelling.space import load
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ _ACTIONS = {
     "status": "report the fit queue and the topics held",
     "discover": "queue a fit over the whole corpus",
     "visualise": "write each language's pyLDAvis page to a file",
+    "render": "redraw each language's page from its stored model",
     "stop": "withdraw a queued fit",
     "retry": "return a failed fit to the queue",
     "delete": "delete every topic and membership",
@@ -52,9 +54,15 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         The exit status.
     """
-    args = parser("topic_modelling.run", _ACTIONS).parse_args(
-        sys.argv[1:] if argv is None else argv
+    built = parser("topic_modelling.run", _ACTIONS)
+    built.add_argument(
+        "--language",
+        metavar="CODE",
+        help="with --render, redraw only this language. One model is kept "
+        "per language and the next fit replaces it, so this chooses which "
+        "LANGUAGE to redraw and not which fit to redraw from.",
     )
+    args = built.parse_args(sys.argv[1:] if argv is None else argv)
 
     def build():
         """Builds the service from the settings as they stand.
@@ -78,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.visualise:
         return _visualise()
 
+    if args.render:
+        return _render(args.language)
+
     if args.delete:
         removed = TopicCatalog().delete_all()
         # The figures go with the topics, as they do on the route. `delete_all`
@@ -85,15 +96,25 @@ def main(argv: list[str] | None = None) -> int:
         # list and dropped it, so the command left two pyLDAvis pages in the
         # export bucket describing topics that no longer existed.
         bucket, archive = ExportBucket(), ArchiveBucket()
+        models = ModelsBucket()
         figures = sum(
             archive.take(bucket.name, bucket.topic_visualisation_key(language))
             for language in removed.languages
         )
+        # The model goes with the figure. A factorisation of topics that no
+        # longer exist describes nothing, and leaving it is the same orphan
+        # the figures were before this read `removed.languages`.
+        kept = sum(
+            archive.take(models.name, models.topic_model_key(language))
+            for language in removed.languages
+        )
         log.info(
-            "archived %d topic(s), %d membership(s) and %d figure(s); %d label(s) lost",
+            "archived %d topic(s), %d membership(s), %d figure(s) and %d "
+            "model(s); %d label(s) lost",
             removed.topics,
             removed.memberships,
             figures,
+            kept,
             removed.labels,
         )
         return 0
@@ -128,6 +149,73 @@ def main(argv: list[str] | None = None) -> int:
 
     watch(reloading("topic_modelling", build), decimal("WORKER_POLL_SECONDS"))
     return 0
+
+
+def _render(only: str | None = None) -> int:
+    """Redraws each language's figure from its stored model.
+
+    The fit draws one as it goes, and this is how a figure comes back
+    without one: `export` holds a view and `models` holds what the view is
+    of, so a lost or corrupted page costs a render rather than a re-fit of
+    the corpus.
+
+    **The figure it writes replaces the one already there.** The key is one
+    per language, and the render is deterministic - the same stored model
+    through the same `prepare` gives the same page - so rewriting it is
+    idempotent rather than lossy.
+
+    **Which model is not a choice, and cannot be.** One model is kept per
+    language because the database holds one fit's topics: `replace` drops
+    every row and writes the new fit's. A figure drawn from an older model
+    would number its topics off rows that are gone, which is the orphan a
+    fit already avoids by taking the old figure away before drawing the
+    new one. `only` therefore picks a LANGUAGE.
+
+    Args:
+        only: Redraw this language alone, or every modelled one.
+
+    Returns:
+        1 if nothing was drawn, else 0.
+    """
+    # pyLDAvis, imported here for the reason the service defers it: it is
+    # needed by this one action and by nothing else the command line does.
+    try:
+        from topic_modelling.visualisation import render
+    except ImportError:
+        log.exception("pyLDAvis is missing, so nothing can be drawn")
+        return 1
+
+    models, export = ModelsBucket(), ExportBucket()
+    languages = [one.language for one in TopicCatalog().fit_state().languages]
+    if only is not None:
+        languages = [one for one in languages if one == only]
+        if not languages:
+            log.error("no topics are stored for %s", only)
+            return 1
+    if not languages:
+        log.error("no topics are stored, so there is nothing to draw")
+        return 1
+
+    drawn = 0
+    for language in languages:
+        held = models.find(models.topic_model_key(language))
+        if held is None:
+            log.warning(
+                "no %s model is stored, so its figure cannot be redrawn. Only "
+                "a fit since this bucket existed leaves one, so run --discover",
+                language,
+            )
+            continue
+        key = export.topic_visualisation_key(language)
+        # Away before the new one goes in, exactly as the fit does it: a
+        # language whose render raises should have no figure rather than
+        # the one belonging to whatever was there before.
+        export.remove(key)
+        page = render(load(held), language)
+        export.put(key, page, content_type=export.TOPIC_VISUALISATION_TYPE)
+        drawn += 1
+        log.info("redrew the %s figure from its model (%d bytes)", language, len(page))
+    return 0 if drawn else 1
 
 
 def _visualise() -> int:

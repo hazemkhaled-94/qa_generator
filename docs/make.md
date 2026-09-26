@@ -47,6 +47,7 @@ Asking azure/gpt-5.4 one question...
 |---|---|
 | `make all` | Bring the stack up, then take the corpus end to end |
 | `make corpus` | Every stage in order, stopping at the first failure. Incremental |
+| `make pipeline-status` | Where the corpus has got to, every stage in one call |
 | `make services` | Every container, whether it is listening, and where to open it |
 | `make open` | The same, and open the application |
 | `make review` | Push a sample of facts, topic labels and questions to Argilla |
@@ -105,6 +106,23 @@ make logs-retention LOGS_RETENTION_DAYS=90
 make logs-prune LOGS_KEEP_DAYS=7
 ```
 
+## The corpus as one thing
+
+The same three verbs as below, over every stage at once, through the API.
+After a model outage the failures are spread over five queues, and visiting
+five of them is five chances to miss one.
+
+| Target | Does |
+|---|---|
+| `make pipeline-status` | Every stage's queue, the run in flight, and what is set to start one |
+| `make pipeline-stop` | Take back everything queued, in every stage, and stop the run behind it |
+| `make pipeline-retry` | Return every stage's failures to the queue |
+
+There is no `pipeline-start`: `make corpus` is the better one for a terminal,
+because it starts each stage **and waits for it to drain** before the next,
+which is the whole difficulty. The Run button and `make pipeline` ask Dagster
+to hold that wait instead.
+
 ## The five verbs every stage answers
 
 Each is the same operation as the route beside it.
@@ -121,6 +139,13 @@ Each is the same operation as the route beside it.
 `assess-start` also **enrols**: nothing upstream creates an assessment, so it
 creates the rows as well as queuing them.
 
+`chunk-start` and `chunk-rerun` queue **only the documents parsing has
+finished**. A document exists from the moment it is uploaded, so without that
+guard a start over a corpus half way through parsing queued the other half
+and failed every row of it on a parsed form that was not there yet. It is the
+only stage that needs it: a passage exists because chunking made it, and a
+topic because a fit did.
+
 Topic modelling has no `start` and no `rerun`: a fit is all-or-nothing over
 one vocabulary.
 
@@ -131,7 +156,8 @@ one vocabulary.
 | `make topics-status` | The topics held, and any queued fit |
 | `make topics-stop` | Withdraw a queued fit |
 | `make topics-retry` | Return a failed fit to the queue |
-| `make topics-visualise` | Write each language's pyLDAvis page to `./topics/` |
+| `make topics-visualise` | Write each language's stored pyLDAvis page to `./topics/` |
+| `make topics-render` | Redraw those pages from the stored models, without re-fitting. `CODE=de` for one |
 | `make topics-delete` | Delete every topic and membership |
 
 ### Narrowing to one item
@@ -226,6 +252,10 @@ make questions-reclaim             # every one the stage holds
 `reclaim` fills the gap between `retry`, which takes the failed, and `rerun`,
 which skips what a worker holds. Narrow it while a worker may be up: nothing
 can tell a dead claim from a live one.
+
+It has a route now as well — `POST /{stage}/{scope}/{value}/reclaim`, with
+`?confirm=true` needed for the unnarrowed form. See
+[`backend/stages/`](../backend/stages/README.md).
 
 ## The evaluation phase
 
@@ -343,6 +373,28 @@ make review-push-questions IDS=12,34,56
 
 `second-opinion` settles nothing; it produces a queue for a person.
 
+## Phoenix's projects
+
+| Target | Does |
+|---|---|
+| `make phoenix-projects` | What Phoenix holds, changing nothing |
+| `make phoenix-prune` | Delete the projects in which no work happened. **Irreversible**, and it says what it is taking before it takes it |
+
+A Phoenix project is created by whatever sends the first span to it and
+removed by nothing. While a project meant a run somebody asked for that was
+fine — but `run_id` mints a uuid **per process**, a `--watch` worker is a
+process per restart, and a credential that has expired restarts it every
+minute. This deployment reached **five hundred projects, 497 of them
+holding one span**: the model call a preflight made before giving up.
+
+Two changes stop it growing — an unnamed run appends to its stage's own
+project, and the exporter is not installed until the preflight passes — and
+`prune` takes back what the old arrangement left.
+
+`prune` takes a project only when **every span in it is a model call and it
+could read every span**. A project too big to read in one page is left
+alone, because the first fifty spans of a real run are model calls too.
+
 ## Tests and checks
 
 | Target | Runs |
@@ -403,3 +455,8 @@ The asset graph already chains the stages. These decide **when**.
 `auto` is the unattended mode and ships stopped. `pipeline` and `make corpus`
 do the same work; the difference is that `pipeline` survives the terminal
 closing.
+
+All four have an equivalent through the api, for a deployment nobody drives
+from a terminal: `POST /pipeline/run` is `make pipeline`, and
+`PUT /pipeline/automation` is `auto` and `manual`. The Run button on the
+Documents page is the first of those.

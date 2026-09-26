@@ -101,6 +101,8 @@ def question(**overrides) -> QuestionRow:
             "status": "draft",
             "rejected_reason": None,
             "facts": ["Standard requests are answered within 48 hours."],
+            "evidence": ["Requests are answered within 48 hours."],
+            "answer_explanation": "A standard request is answered within 48 hours.",
             **overrides,
         }
     )
@@ -123,6 +125,30 @@ def test_a_question_carries_the_facts_it_was_written_from() -> None:
     record = datasets.question_record(question())
 
     assert "48 hours" in record.fields["facts"]
+
+
+def test_a_question_carries_the_evidence_and_the_reason_for_its_answer() -> None:
+    """The facts alone are not what the answer is checked against.
+
+    A fact can be a fair reading of a sentence that does not say what the
+    answer claims, and a reviewer asked whether the answer follows needs
+    the sentence as well as the statement drawn from it.
+    """
+    record = datasets.question_record(question())
+
+    assert "Requests are answered within 48 hours." in record.fields["evidence"]
+    assert "within 48 hours" in record.fields["explanation"]
+
+
+def test_a_question_with_no_explanation_says_so() -> None:
+    """A question with no explanation says so.
+
+    An unanswerable question explains nothing, which is the ordinary case
+    rather than a gap - and Argilla refuses an empty field.
+    """
+    record = datasets.question_record(question(answer_explanation=None))
+
+    assert record.fields["explanation"] == "(none written)"
 
 
 def test_a_questions_gate_falls_back_to_its_status() -> None:

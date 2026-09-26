@@ -184,7 +184,7 @@ def test_deleting_the_topics_from_the_command_line_takes_the_figures(
     real wipe left two pyLDAvis pages in the export bucket, each describing
     topics that no longer existed, and nothing said so.
     """
-    from blob_store.seaweedfs import ExportBucket
+    from blob_store.s3 import ExportBucket
     from topic_modelling.run import main
 
     bucket = ExportBucket()

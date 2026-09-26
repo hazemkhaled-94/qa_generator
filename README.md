@@ -73,10 +73,21 @@ make services    # which containers are up, and where to open them
 
 ## Taking a corpus through
 
-Upload a PDF on the Upload page, then press **Start all** on Documents. Each
-page runs one stage. Nothing runs until it is asked to.
+Upload a PDF on the Upload page, then press **Run the pipeline** on
+Documents. That takes the corpus through every stage in order, waiting for
+each to finish before starting the next, and only over what has not been done
+already. Nothing runs until it is asked to.
 
-The same from a terminal:
+Each page also runs its own stage, for when one is all you want: **Start all**
+on Passages chunks, on Facts extracts, and so on.
+
+The same from a terminal, in one command:
+
+```bash
+make corpus     # every stage in order, in the foreground
+```
+
+Or stage by stage, which is what `corpus` runs:
 
 ```bash
 make parse-start     && make parse
@@ -94,6 +105,20 @@ make questions-export OUT=exam.xlsx FILTER="--status accepted"
 Every stage also has a replay that skips the expensive part — re-applying a
 changed setting without calling the model again. They are listed in
 [docs/make.md](docs/make.md).
+
+And over HTTP, for a deployment nobody drives from a browser or a terminal:
+
+```bash
+curl -s  localhost:8000/pipeline              # where the corpus has got to
+curl -sX POST localhost:8000/pipeline/run     # take it through, in order
+curl -sX POST localhost:8000/pipeline/retry   # every stage's failures, at once
+```
+
+`run` is the one call that needs the orchestrator, because running the stages
+in order means waiting for each to drain and a request cannot hold that wait.
+Without one it answers 503 and says which per-stage route to use instead. To
+hand it over entirely — an upload starts a run by itself — `make auto`, or
+`PUT /pipeline/automation`. See [`backend/api/`](backend/api/README.md).
 
 ### The evaluation phase
 

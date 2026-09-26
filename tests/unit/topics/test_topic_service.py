@@ -11,6 +11,7 @@ import pytest
 from topic_drivers import LabellerDriver, corpus
 
 from topic_modelling.models import FittedTopic, PassageVocabulary
+from topic_modelling.space import load
 
 
 def test_an_empty_queue_is_not_a_run(service) -> None:
@@ -145,6 +146,42 @@ def test_each_language_gets_its_own_figure(service, passages, english) -> None:
 
     assert set(flow.figures) == {"de", "en"}, set(flow.figures)
     assert flow.export.types["topics/de.html"].startswith("text/html")
+
+
+def test_the_fit_keeps_the_model_it_drew_the_figure_from(
+    service, passages, english
+) -> None:
+    """One .npz per language, and it loads back as the model that was fitted.
+
+    The figure is a view of this. Keeping only the view is what the fit did
+    before, which left an hour's work represented by an HTML file with d3
+    inlined into it and nothing able to recompute what it was a picture of.
+    """
+    flow = service({"de": passages, "en": english})
+
+    flow.request_and_run()
+
+    assert set(flow.models.models) == {"topics/de.npz", "topics/en.npz"}
+    read = load(flow.models.models["topics/de.npz"])
+    assert read.vocabulary, "the vocabulary the matrix is indexed by"
+    assert len(read.topic_term) == len(read.doc_topic[0]), "a row per topic"
+    assert len(read.doc_topic) == len(read.doc_lengths), "a row per passage"
+
+
+def test_a_model_that_cannot_be_stored_does_not_fail_the_fit(service) -> None:
+    """The topics are already written by the time it is stored.
+
+    A fit whose rows landed is not a failed fit, and rolling a good corpus
+    back over a briefly unreachable object store would lose more than the
+    model does.
+    """
+    flow = service()
+    flow.models.refuses_put = RuntimeError("the store is down")
+
+    flow.request_and_run()
+
+    assert flow.queue.stored, "the topics were still written"
+    assert not flow.models.models
 
 
 def test_the_old_figure_is_taken_away_before_the_new_one_is_drawn(service) -> None:

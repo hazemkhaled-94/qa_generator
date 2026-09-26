@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from blob_store.seaweedfs import ExportBucket
+from blob_store.s3 import ExportBucket, ModelsBucket
 from llm.client import Client
 from topic_modelling.config import Settings
 from topic_modelling.labels import TopicLabeller
@@ -39,6 +39,7 @@ def build_service(
     return TopicModellingService(
         repository=TopicQueue(version=version),
         export=ExportBucket(),
+        models=ModelsBucket(),
         fitter=TopicFitter(
             num_topics=settings.num_topics,
             passes=settings.passes,

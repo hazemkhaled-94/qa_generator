@@ -39,7 +39,7 @@ The objects are the other half: the removal paths **move** them to the
 | `make delete SHA=` | The document's rows and everything cascading from them; its file and its parsed form |
 | `make delete-derived SHA=` | Its passages, and by cascade its facts and questions |
 | `make wipe` | All of that for every document, plus the upload history and the topics |
-| `make topics-delete` | Every topic and membership, and the pyLDAvis figures |
+| `make topics-delete` | Every topic and membership, the stored factorisations and the pyLDAvis figures |
 | A re-chunk, a re-extraction, a rerun | Whatever the new run replaced |
 | Anything typed into psql or Adminer | The same |
 
@@ -97,7 +97,7 @@ retention**.
 The trigger and the table are in
 [`database/qa_generator/archived_rows.py`](../database/qa_generator/archived_rows.py),
 and the bucket is
-[`blob_store/seaweedfs/archive.py`](../blob_store/seaweedfs/archive.py).
+[`blob_store/s3/archive.py`](../blob_store/s3/archive.py).
 Neither imports this package.
 
 ## Tests

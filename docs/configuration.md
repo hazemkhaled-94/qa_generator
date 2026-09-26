@@ -87,7 +87,7 @@ could ask a database for anything, so they are served read-only.
 | `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | unset | The verifier as the containers reach it |
 | `OLLAMA_CONTAINER_URL` | `.env` | `http://host.docker.internal:11434` | Ollama's address as a container sees it. **Required by compose** |
 | `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a self-hosted model is served |
-| `LLM_TIMEOUT_SECONDS` | `backend.env` | 120 | How long one call may take. The extraction lease derives from it |
+| `LLM_TIMEOUT_SECONDS` | `backend.env` | 300 | How long one call may take. The extraction lease derives from it, so **raise it for a larger model and everything below follows**. Sized off 9,334 priced calls whose slowest was 15.5 s, then raised from 120 alongside the assessment phase, whose judge reads a whole artefact back |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease derives from this too |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
@@ -180,6 +180,7 @@ facts judged whole is forty thousand calls.
 | `EVAL_RUN_NAME` | `evaluation.env` | unset | What a golden-set run is called. Unset names it after the model |
 | `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | `orchestration.env` | 28800 | How long an asset waits for a stage to drain |
 | `ORCHESTRATION_POLL_SECONDS` | `orchestration.env` | 15 | How often it asks |
+| `DAGSTER_URL` | `.env` | `http://dagster-webserver:3000` in compose | Where the **API** reaches the orchestrator, for `POST /pipeline/run` and the Run button. The one address on that surface pointing outside the backend. Unset degrades rather than fails: the reads answer `available: false` and `run` is refused 503 `no_orchestrator`, while `start`, `stop` and `retry` go on working — those are queue verbs and the queue is the backend's own |
 | `LOGS_RETENTION_DAYS` | `make` | 30 | How long the log index is kept, applied by `make logs-retention` |
 | `LOGS_KEEP_DAYS` | `make` | 30 | How long a log file is kept, applied by `make logs-prune` |
 

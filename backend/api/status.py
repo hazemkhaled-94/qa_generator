@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import inspect
 
-from blob_store.seaweedfs import (
+from blob_store.s3 import (
     ArchiveBucket,
     Bucket,
     DocumentsBucket,
     ExportBucket,
+    ModelsBucket,
     ParsedBucket,
     bucket_names,
 )
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 _REQUIRED_BUCKETS: tuple[type[Bucket], ...] = (
     DocumentsBucket,
     ParsedBucket,
+    ModelsBucket,
     ExportBucket,
     ArchiveBucket,
 )

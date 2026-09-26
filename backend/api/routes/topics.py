@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from api.dependencies import (
     archive_bucket,
     export_bucket,
+    models_bucket,
     topic_catalog,
     topics_queue,
 )
@@ -149,12 +150,16 @@ def delete() -> TopicRemoval:
     Passages, facts and questions stay. Labels a person assigned go with the
     topics. Any queued fit goes too.
 
-    The rows land in `archived_rows` and the figures in the archive bucket,
-    so a fit that took an hour is recoverable until it is purged.
+    The rows land in `archived_rows` and both halves of each fit in the
+    archive bucket, so a fit that took an hour is recoverable until it is
+    purged. The model goes with the figure rather than outliving it: a
+    factorisation of topics that no longer exist describes nothing, and
+    leaving it behind is the orphan the figures used to be.
     """
     removed = topic_catalog.delete_all()
     for language in removed.languages:
         archive_bucket.take(
             export_bucket.name, export_bucket.topic_visualisation_key(language)
         )
+        archive_bucket.take(models_bucket.name, models_bucket.topic_model_key(language))
     return removed

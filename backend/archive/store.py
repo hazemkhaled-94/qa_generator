@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
 
-from blob_store.seaweedfs import ArchiveBucket
+from blob_store.s3 import ArchiveBucket
 from database.qa_generator.archived_rows import ArchivedRow
 from database.qa_generator.engine import sessions
 

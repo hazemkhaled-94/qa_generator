@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+from blob_store.s3 import DocumentsBucket, ParsedBucket
 from preprocessing.parsing.analysis import DocumentAnalyser
 from preprocessing.parsing.config import Settings
 from preprocessing.parsing.pipelines import PdfPipeline, PipelineRegistry

@@ -5,6 +5,10 @@ lists: parsing on Documents, chunking on Passages, extraction on Facts,
 topic modelling on Topics, generation on Questions. No page can reach
 another page's stage.
 
+The Pipeline panel on Documents is not an exception to that, because it
+reaches no stage: it asks the orchestrator to decide that every stage should
+run, and nothing here is what then starts one. See `lib/pipeline.py`.
+
 Every stage offers the same two scopes. Without one the verb acts on
 everything the stage owns; with one it acts on a single document, passage or
 topic, and is drawn inside that item's own section.

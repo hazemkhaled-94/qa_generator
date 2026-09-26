@@ -279,9 +279,7 @@ def upgrade() -> None:
         ["assessment_id"],
         unique=False,
     )
-    op.create_index(
-        "ix_assessment_metrics_metric", "assessment_metrics", ["metric"]
-    )
+    op.create_index("ix_assessment_metrics_metric", "assessment_metrics", ["metric"])
 
     # Every table in this schema archives its deletions, and these two are
     # the tables most likely to be deleted from without anybody typing a

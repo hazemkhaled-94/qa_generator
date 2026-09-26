@@ -9,9 +9,10 @@ SQLAlchemy and nothing else: no Docling, no litellm, no gensim, no spaCy.
 from __future__ import annotations
 
 import telemetry
+from api.orchestrator import Dagster
 from api.status import Counter, StatusService
 from assessment.repository import AssessmentCatalog, AssessmentQueue
-from blob_store.seaweedfs import ArchiveBucket, ExportBucket
+from blob_store.s3 import ArchiveBucket, ExportBucket, ModelsBucket
 from database.qa_generator import engine
 from extraction.repository import FactCatalog, PassageQueue
 from ingestion.config import Settings
@@ -58,12 +59,22 @@ assessment_catalog = AssessmentCatalog()
 #: Generated artefacts a route serves back, such as the topic visualisations.
 export_bucket = ExportBucket()
 
+#: What those artefacts are drawn from. Not served by any route - it is
+#: here so a deletion can archive a fit's model beside its figure.
+models_bucket = ModelsBucket()
+
 #: Where a deleted object goes instead of being deleted.
 archive_bucket = ArchiveBucket()
 
 #: One instance per service the API fronts.
 ingest_service = build_service(settings)
 removal_service = build_removal()
+
+#: The orchestrator, for the one control that is not about a single stage:
+#: running every stage in order. Built whether or not DAGSTER_URL is set -
+#: without it every call reports itself unavailable, which is a deployment
+#: that has no orchestrator rather than one that is broken.
+orchestrator = Dagster()
 
 
 def ingesting() -> IngestService:

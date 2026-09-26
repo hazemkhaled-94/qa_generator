@@ -11,6 +11,8 @@ import pytest
 from seed import digest, document, passage
 from sqlalchemy.orm import Session
 
+from database.qa_generator import Status
+
 pytestmark = pytest.mark.integration
 
 #: Every stage built from `stage_router`, and a scope each accepts.
@@ -19,9 +21,21 @@ STAGES = ("parsing", "chunking", "extraction")
 
 @pytest.fixture
 def corpus(client, engine):
-    """Two documents, one with two passages, all waiting to be asked for."""
+    """Two documents, one with two passages, all waiting to be asked for.
+
+    `a` is parsed and `b` is not, so both stages that queue over `documents`
+    have something to move: parsing has the row it has not done, chunking
+    has the one it can. A corpus where neither was parsed had nothing
+    chunking could queue - `ChunkQueue.ready` refuses a document with no
+    parsed form, because the only outcome of queueing one is a failure.
+    """
     with Session(engine) as session:
-        session.add_all([document(digest("a")), document(digest("b"))])
+        session.add_all(
+            [
+                document(digest("a"), parse_status=Status.PARSED),
+                document(digest("b")),
+            ]
+        )
         session.flush()
         session.add_all(
             [
@@ -195,3 +209,79 @@ def test_describing_a_topic_that_does_not_exist_is_a_404(client) -> None:
 def test_a_visualisation_nothing_has_drawn_is_a_404(client) -> None:
     """The figure is an artefact a fit produces."""
     assert client.get("/topics/visualisation/de").status_code == 404
+
+
+# ── reclaim ────────────────────────────────────────────────────────────────
+#
+# The one verb that had no route. It used to be command-line only because
+# "the api cannot know a worker is gone" - but neither can the command line,
+# and a person driving this over HTTP was left with the single stuck row that
+# `retry` (which takes the failed), `rerun` (which skips what is held) and
+# `stop` (which takes back only what has not begun) all step over.
+#
+# What the danger needs is a narrowing, not an absence: nothing can tell a
+# dead claim from a live one, so the whole-stage form asks to be confirmed.
+
+
+@pytest.fixture
+def held(client, engine):
+    """A document a worker claimed and never came back from."""
+    with Session(engine) as session:
+        session.add(document(digest("a"), parse_status=Status.IN_PROGRESS))
+        session.commit()
+    return client
+
+
+def test_reclaiming_one_item_returns_it_to_the_queue(held) -> None:
+    """Narrowed, which is how it is meant to be used while a worker is up."""
+    answered = held.post(f"/parsing/document/{digest('a')}/reclaim")
+
+    assert answered.status_code == 202
+    body = answered.json()
+    assert body["action"] == "reclaim" and body["rows"] == 1
+    assert held.get("/parsing/status").json()["rows"] == {"pending": 1}
+
+
+def test_reclaiming_a_whole_stage_is_refused_without_a_confirmation(held) -> None:
+    """It can take a row from a worker that is still on it."""
+    answered = held.post("/parsing/reclaim")
+
+    assert answered.status_code == 400
+    assert answered.json()["code"] == "confirm_required"
+    assert "Narrow it" in answered.json()["detail"]
+    assert held.get("/parsing/status").json()["rows"] == {"in_progress": 1}
+
+
+def test_a_confirmed_reclaim_over_a_whole_stage_is_allowed(held) -> None:
+    """For when the stage is stopped and the person knows it."""
+    answered = held.post("/parsing/reclaim?confirm=true")
+
+    assert answered.status_code == 202
+    assert answered.json()["rows"] == 1
+
+
+def test_reclaim_leaves_rows_no_worker_holds_alone(corpus) -> None:
+    """Only `in_progress` is its business."""
+    assert corpus.post("/parsing/reclaim?confirm=true").json()["rows"] == 0
+
+
+def test_confirming_is_only_asked_for_reclaim(corpus) -> None:
+    """The other four verbs cannot hand a live worker's row to a second."""
+    assert corpus.post("/parsing/start").status_code == 202
+
+
+# ── enrol ──────────────────────────────────────────────────────────────────
+
+
+def test_enrolling_creates_the_rows_without_queuing_any(client, engine) -> None:
+    """The dry run: what `start` would cost, before paying for it."""
+    answered = client.post("/assessment/enrol")
+
+    assert answered.status_code == 202
+    assert answered.json()["action"] == "enrol"
+    assert client.get("/assessment/status").json()["rows"].get("pending", 0) == 0
+
+
+def test_enrol_is_not_read_as_a_queue_verb(client) -> None:
+    """`POST /assessment/{action}` would otherwise match it first."""
+    assert client.post("/assessment/enrol").status_code != 422

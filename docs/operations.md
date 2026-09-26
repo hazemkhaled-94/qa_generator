@@ -181,7 +181,7 @@ read back through `/{stage}/status`.
 make delete SHA=<sha256>          # a document and everything from it
 make delete-derived SHA=<sha256>  # only its passages and facts
 make wipe                         # every document, then the topics
-make topics-delete                # every topic, membership and figure
+make topics-delete                # every topic, membership, model and figure
 ```
 
 Each is the first of two deletions. An AFTER DELETE trigger copies the row

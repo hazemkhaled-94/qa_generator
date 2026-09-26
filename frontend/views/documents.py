@@ -1,10 +1,18 @@
-"""Documents view. Runs parsing, and no other stage."""
+"""Documents view. Runs parsing, and no other stage.
+
+Also where the whole pipeline is set going, which is not the same thing and
+is not a stage this page owns: the Pipeline panel asks the orchestrator to
+decide that every stage should run, and the orchestrator is what then starts
+each in turn. It is here because this is the page somebody lands on after an
+upload, and "I have added a document, now take it through" is the question
+they arrive with. See `lib/pipeline.py`.
+"""
 
 from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, lineage, page, stage
+from lib import backend, catalog, configure, lineage, page, pipeline, stage
 
 #: The one stage this page runs. Chunking is the Passages page's and
 #: extraction is the Facts page's; neither can be reached from here.
@@ -64,6 +72,12 @@ def view() -> None:
 
     with st.expander("Analysis"):
         page.findings(page.queue_rows("Documents", counts, _STATES))
+
+    # Before Parsing, because it is the broader of the two: this takes the
+    # corpus through every stage, and the panel below runs the one stage
+    # this page owns.
+    with page.panel("Pipeline"):
+        pipeline.panel(backend.pipeline_api())
 
     with page.panel("Parsing"):
         stage.service(client, _PARSING)

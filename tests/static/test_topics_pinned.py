@@ -106,6 +106,10 @@ MODULES = frozenset(
         "repository.py",
         "run.py",
         "service.py",
+        # What a fit produced, and what it is drawn as. `space.py` keeps the
+        # factorisation and `visualisation.py` renders a view of it; the fit
+        # used to store only the view.
+        "space.py",
         "topics.py",
         "visualisation.py",
     }

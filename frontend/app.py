@@ -37,9 +37,7 @@ st.navigation(
         st.Page("views/facts.py", title="Facts", icon=":material/fact_check:"),
         st.Page("views/topics.py", title="Topics", icon=":material/scatter_plot:"),
         st.Page("views/questions.py", title="Questions", icon=":material/quiz:"),
-        st.Page(
-            "views/assessment.py", title="Assessment", icon=":material/gavel:"
-        ),
+        st.Page("views/assessment.py", title="Assessment", icon=":material/gavel:"),
         st.Page(
             "views/health.py", title="System health", icon=":material/monitor_heart:"
         ),

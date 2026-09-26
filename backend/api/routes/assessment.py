@@ -16,9 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from fastapi import APIRouter
+
 from api.dependencies import assessment_catalog, assessment_queue
 from api.params import Limit, Offset, SearchText
-from api.routes.stage import stage_router
+from api.routes.stage import StageAction, answered, stage_router
 from assessment.config import Settings as AssessmentSettings
 from assessment.models import AssessmentQuality, StoredAssessment
 from assessment.templates import PROMPT_VERSION, TEMPLATES, metrics_of
@@ -34,6 +36,31 @@ Metric = Literal["hallucination", "relevance", "qa_correctness", "summarization"
 #: the explanation is "what did the judge say", and that is the half no
 #: other listing in this API can search.
 SearchField = Literal["artifact", "explanation", "both"]
+
+#: This phase's own operation, and the only one of the seven a stage has
+#: beyond the shared verbs that the API can answer at all: it moves rows and
+#: loads nothing. The other six re-derive what a stage computed - vocabulary,
+#: embeddings, the gates - and each of them needs the model or the language
+#: pipeline that produced it, which `tests/static/test_api_stays_light.py`
+#: keeps out of this process. Those stay on the command line.
+#:
+#: A router of its own, registered ahead of the queue routes in
+#: `routes/__init__.py`: `POST /assessment/{action}` would otherwise match
+#: `/assessment/enrol` first and refuse `enrol` as an unknown verb.
+enrol_router = APIRouter(prefix="/assessment", tags=["assessment"])
+
+
+@enrol_router.post("/enrol", status_code=202)
+def enrol() -> StageAction:
+    """Creates an assessment for every artefact that has none, queuing none.
+
+    The dry run: nothing upstream enrols these rows, so this is what turns
+    "judge the corpus" into a number before any of it is paid for. The rows
+    land `new`, which no worker looks at, and `GET /assessment/status` then
+    says how many model calls `start` would cost.
+    """
+    return answered("assessment", "enrol", assessment_queue.enrol())
+
 
 router = stage_router(name="assessment", repository=assessment_queue)
 

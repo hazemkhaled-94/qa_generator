@@ -15,7 +15,6 @@ for the same reason - asking is what creates the work.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -35,9 +34,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database.qa_generator.base import Base
 from database.qa_generator.outcomes import ArtifactKind, JudgeMetric, one_of
 from database.qa_generator.status import Status, check, queued
-
-if TYPE_CHECKING:
-    pass
 
 
 class Assessment(Base):
@@ -132,8 +128,7 @@ class Assessment(Base):
     question_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("questions.id", ondelete="CASCADE"),
-        comment="The question this is about, NULL unless artifact_kind is "
-        "`question`.",
+        comment="The question this is about, NULL unless artifact_kind is `question`.",
     )
     assess_status: Mapped[str] = mapped_column(
         Text,
@@ -195,8 +190,7 @@ class Assessment(Base):
     )
     assessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        comment="When the verdict was reached. NULL exactly when `approved` "
-        "is.",
+        comment="When the verdict was reached. NULL exactly when `approved` is.",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

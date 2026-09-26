@@ -160,7 +160,7 @@ abandoned.
 | `LLM_BASE_URL` | `.env` | `http://localhost:11434` | Where that model is served |
 | `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
 | `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable to the last one |
-| `LLM_TIMEOUT_SECONDS` | `backend.env` | 120 | How long one call may take. Extraction's lease derives from this |
+| `LLM_TIMEOUT_SECONDS` | `backend.env` | 300 | How long one call may take. Extraction's lease derives from this. Sized off 9,334 priced calls whose slowest was 15.5 s, then raised from 120 alongside the assessment phase, whose judge reads a whole artefact back |
 | `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease derives from this too |
 | `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for |
 | `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob. Unset sends nothing, so the model keeps its own default — a reasoning model thinks. Set `off` for a small model that cannot afford to |

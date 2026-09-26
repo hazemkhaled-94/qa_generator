@@ -15,14 +15,14 @@ PDF = b"%PDF-1.7\nnot really a document\n"
 @pytest.fixture
 def documents(buckets):
     """The documents bucket, pointed at the gateway."""
-    from blob_store.seaweedfs import DocumentsBucket
+    from blob_store.s3 import DocumentsBucket
 
     return DocumentsBucket()
 
 
 def stored_metadata(bucket, key: str) -> dict[str, str]:
     """Reads back what `put` attached, as S3 holds it."""
-    from blob_store.seaweedfs import s3_client
+    from blob_store.s3 import s3_client
 
     head = s3_client().head_object(Bucket=bucket.name, Key=key)
     return {name: unquote(value) for name, value in head["Metadata"].items()}
@@ -158,7 +158,7 @@ def test_the_count_is_answered_from_a_cache(documents) -> None:
 
 def test_the_fanout_key_is_where_the_object_lands(documents) -> None:
     """The directories are derived from the digest, never stored."""
-    from blob_store.seaweedfs import s3_client
+    from blob_store.s3 import s3_client
 
     sha = digest("c")
     key = documents.key_for(sha, "application/pdf")
@@ -170,7 +170,7 @@ def test_the_fanout_key_is_where_the_object_lands(documents) -> None:
 
 def test_each_bucket_holds_its_own_objects(buckets) -> None:
     """A collection is the unit of storage policy; they are separate."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     source, parsed = DocumentsBucket(), ParsedBucket()
     key = source.key_for(digest(), "application/pdf")
@@ -182,6 +182,6 @@ def test_each_bucket_holds_its_own_objects(buckets) -> None:
 
 def test_the_gateway_lists_every_bucket_the_pipeline_uses(buckets) -> None:
     """What the health check reads."""
-    from blob_store.seaweedfs import bucket_names
+    from blob_store.s3 import bucket_names
 
     assert {"documents", "parsed", "export"} <= set(bucket_names())

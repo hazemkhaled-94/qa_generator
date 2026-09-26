@@ -473,8 +473,11 @@ schema-reset:
 # None of them runs anything: they move rows between statuses, and whichever
 # worker is watching picks up what is claimable.
 #
-# The API has no /run. It cannot: the work happens in the workers, and the
-# api container is sized to serve JSON.
+# No stage route runs anything either. The work happens in the workers, and
+# the api container is sized to serve JSON. `POST /pipeline/run` is not an
+# exception: it asks the ORCHESTRATOR for a run and answers at once with the
+# run's id, which is why it is the one control that needs a component other
+# than the backend. See the pipeline targets further down.
 
 # Drain the parsing queue here. The first run downloads Docling's weights.
 parse:
@@ -1484,6 +1487,44 @@ review-all:
 
 # Every decision made there, pulled back into the database.
 pull: review-pull-facts review-pull-topics review-pull-questions
+
+# ── The corpus as one thing ────────────────────────────────────────────────
+#
+# The three verbs above, over every stage at once, through the api rather
+# than through six command lines. `/pipeline` is one route for the same
+# reason this section is one heading: after a model outage the failures are
+# spread over five queues, and visiting five of them is five chances to miss
+# one.
+#
+# There is no `pipeline-start` here. `make corpus` above is the better one
+# for a terminal: it starts each stage AND waits for it to drain before the
+# next, which is the whole difficulty, and the shell is what holds that wait.
+# The Run button and `make pipeline` ask Dagster to hold it instead.
+#
+# localhost and BACKEND_PORT like `services` above: BACKEND_URL is the
+# container's view and these run on the host.
+
+# Every stage's queue, the run in flight and what is set to start one, in one
+# call. The whole-corpus answer to "where has this got to".
+pipeline-status:
+	@$(LOADENV) && curl -sf http://localhost:$$BACKEND_PORT/pipeline \
+	  | python3 -c 'import sys, json; d = json.load(sys.stdin); o = d["orchestration"]; r = o.get("running"); [print("{:>12}  {}".format(s["stage"], ", ".join(f"{n} {k}" for k, n in s["rows"].items()) or "nothing")) for s in d["stages"]]; print("\norchestrator:", "running " + r["id"][:8] if r else ("idle" if o["available"] else "not configured")); print("  automatic:", ", ".join(k for k in ("on_arrival", "nightly") if o["automation"].get(k)) or "no")' \
+	  || echo "The api is not answering. Try: make up"
+
+# Take back everything queued, in every stage, and stop the run behind it.
+# Both halves: emptying the queues while a run is going means the run fills
+# them again at its next stage.
+pipeline-stop:
+	@$(LOADENV) && curl -sf -X POST http://localhost:$$BACKEND_PORT/pipeline/stop \
+	  | python3 -c 'import sys, json; print(json.load(sys.stdin)["detail"])' \
+	  || echo "The api is not answering. Try: make up"
+
+# Return every stage's failures to the queue. What a model outage leaves
+# behind, cleared in one command instead of five.
+pipeline-retry:
+	@$(LOADENV) && curl -sf -X POST http://localhost:$$BACKEND_PORT/pipeline/retry \
+	  | python3 -c 'import sys, json; print(json.load(sys.stdin)["detail"])' \
+	  || echo "The api is not answering. Try: make up"
 
 # ── Dagster, from here rather than from its own UI ─────────────────────────
 #

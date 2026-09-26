@@ -30,7 +30,7 @@ PDF = (
 @pytest.fixture
 def service(database, buckets):
     """The service as the composition root wires it."""
-    from blob_store.seaweedfs import DocumentsBucket
+    from blob_store.s3 import DocumentsBucket
 
     return IngestService(
         repository=DocumentRepository(),
@@ -112,7 +112,7 @@ def test_the_metadata_is_enough_to_rebuild_the_row(service) -> None:
     """The bucket alone can say what a document was and when it arrived."""
     from urllib.parse import unquote
 
-    from blob_store.seaweedfs import DocumentsBucket, s3_client
+    from blob_store.s3 import DocumentsBucket, s3_client
 
     result = service.ingest(UploadedFile("Jahresbericht.pdf", PDF))
     assert result.sha256 is not None
@@ -131,7 +131,7 @@ def test_a_row_that_cannot_be_written_takes_its_object_back_out(
     database, buckets, engine, monkeypatch
 ) -> None:
     """Nothing would reference the object and nothing would collect it."""
-    from blob_store.seaweedfs import DocumentsBucket
+    from blob_store.s3 import DocumentsBucket
 
     bucket = DocumentsBucket()
     built = IngestService(

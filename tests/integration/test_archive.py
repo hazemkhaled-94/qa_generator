@@ -31,7 +31,7 @@ def archive(database, buckets) -> Archive:
 @pytest.fixture
 def held(engine, buckets) -> str:
     """A document with a file, a converted form and everything under it."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     sha = digest()
     source, parsed = DocumentsBucket(), ParsedBucket()
@@ -102,7 +102,7 @@ def test_the_archived_row_is_the_whole_row(archive, held, engine) -> None:
 
 def test_the_objects_move_to_the_archive_bucket(archive, held) -> None:
     """The uploaded file is readable again from where the deletion put it."""
-    from blob_store.seaweedfs import ArchiveBucket, DocumentsBucket
+    from blob_store.s3 import ArchiveBucket, DocumentsBucket
 
     build_removal().delete(held)
 

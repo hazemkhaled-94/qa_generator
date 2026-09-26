@@ -28,7 +28,7 @@ def service(database, buckets):
 @pytest.fixture
 def held(engine, buckets):
     """A document with a file, a converted form and derived rows."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     sha = digest()
     source, parsed = DocumentsBucket(), ParsedBucket()
@@ -68,7 +68,7 @@ def counts(engine) -> dict[str, int]:
 
 def test_deleting_a_document_removes_every_trace_of_it(service, held, engine) -> None:
     """The rows, the file and the converted form."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     removed = service.delete(held)
 
@@ -98,7 +98,7 @@ def test_a_document_with_no_converted_form_still_deletes(
     service, database, buckets, engine
 ) -> None:
     """Parsing may never have run; the file alone is enough to remove."""
-    from blob_store.seaweedfs import DocumentsBucket
+    from blob_store.s3 import DocumentsBucket
 
     sha = digest("b")
     source = DocumentsBucket()
@@ -138,7 +138,7 @@ def test_deleting_derived_data_keeps_the_document_and_its_files(
     service, held, engine
 ) -> None:
     """The next run rebuilds the passages without re-parsing."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     removed = service.delete_derived(held)
 

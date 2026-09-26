@@ -10,9 +10,11 @@ judges what those stages produced and carries both in one router for the
 same reason; `settings` is what each of them is configured to do, one
 service per request; `prompts` is what a version of one asked for; `lineage`
 is how one artefact any of them produced was produced; `system` is the
-platform itself.
+platform itself; `pipeline` is every stage at once, for the two controls no
+single stage can answer - running them in order, and acting on all of them.
 """
 
+from api.routes.assessment import enrol_router as assessment_enrol_router
 from api.routes.assessment import router as assessment_router
 from api.routes.chunking import router as chunking_router
 from api.routes.documents import router as documents_router
@@ -21,6 +23,7 @@ from api.routes.facts import router as facts_router
 from api.routes.lineage import router as lineage_router
 from api.routes.parsing import router as parsing_router
 from api.routes.passages import router as passages_router
+from api.routes.pipeline import router as pipeline_router
 from api.routes.prompts import router as prompts_router
 from api.routes.questions import router as questions_router
 from api.routes.settings import router as settings_router
@@ -31,6 +34,7 @@ from api.routes.topics import router as topics_router
 #: mounts under a prefix of its own name.
 ROUTERS = (
     system_router,
+    pipeline_router,
     documents_router,
     parsing_router,
     chunking_router,
@@ -39,6 +43,9 @@ ROUTERS = (
     passages_router,
     facts_router,
     questions_router,
+    # Ahead of the queue routes, whose `POST /assessment/{action}` would
+    # otherwise match `/assessment/enrol` first.
+    assessment_enrol_router,
     assessment_router,
     settings_router,
     prompts_router,
@@ -47,6 +54,7 @@ ROUTERS = (
 
 __all__ = [
     "ROUTERS",
+    "assessment_enrol_router",
     "assessment_router",
     "chunking_router",
     "documents_router",
@@ -55,6 +63,7 @@ __all__ = [
     "lineage_router",
     "parsing_router",
     "passages_router",
+    "pipeline_router",
     "prompts_router",
     "questions_router",
     "settings_router",

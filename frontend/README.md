@@ -26,6 +26,14 @@ over it.
 
 **Nothing on a page can reach another page's stage.**
 
+Documents carries one control that is not a stage's: the **Pipeline** panel,
+which takes the corpus through every stage in order. It is not an exception
+to the rule above, because it reaches no stage — it asks the orchestrator to
+decide that the pipeline should run, and the orchestrator is what then starts
+each in turn. It is on Documents because that is where somebody lands after
+an upload, with "now take it through" to ask. See
+[`lib/pipeline.py`](lib/pipeline.py).
+
 Assessment is the one page that lists an opinion rather than an artefact,
 and the one whose stage can be switched off entirely — see
 [`backend/assessment/`](../backend/assessment/README.md).
@@ -248,7 +256,10 @@ These need no container and no spaCy. `make test-fast` runs them.
 - **`MAX_FILE_SIZE_MB` and `server.maxUploadSize` are two numbers for one
   limit.** Streamlit enforces its own first.
 - **A page that shows a spinner is not doing the work.** Closing the tab does
-  not stop the worker.
+  not stop the worker, and closing it does not stop a pipeline run either:
+  the waiting between stages is held by Dagster, not by the browser.
+- **Run is disabled without an orchestrator**, and says so in its help. The
+  other three pipeline controls are queue verbs and go on working.
 - **Every listing filters server-side** apart from `/topics`, which returns
   every topic at once.
 - **A rejected question stays visible on purpose.** The share that was thrown

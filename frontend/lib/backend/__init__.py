@@ -16,6 +16,7 @@ from lib.backend.base import Endpoint
 from lib.backend.catalog import CatalogApi
 from lib.backend.health import HealthApi
 from lib.backend.lineage import LineageApi
+from lib.backend.pipeline import PipelineApi
 from lib.backend.settings import SettingsApi
 from lib.backend.upload import UploadApi
 
@@ -24,11 +25,13 @@ __all__ = [
     "Endpoint",
     "HealthApi",
     "LineageApi",
+    "PipelineApi",
     "SettingsApi",
     "UploadApi",
     "catalog_api",
     "health_api",
     "lineage_api",
+    "pipeline_api",
     "settings_api",
     "upload_api",
 ]
@@ -67,3 +70,8 @@ def lineage_api() -> LineageApi:
 def settings_api() -> SettingsApi:
     """Returns the client every page's configuration panel uses."""
     return SettingsApi(config.BACKEND_URL, _session())
+
+
+def pipeline_api() -> PipelineApi:
+    """Returns the client the Documents page's pipeline panel uses."""
+    return PipelineApi(config.BACKEND_URL, _session())

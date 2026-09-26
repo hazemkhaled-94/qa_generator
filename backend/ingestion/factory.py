@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blob_store.seaweedfs import ArchiveBucket, DocumentsBucket, ParsedBucket
+from blob_store.s3 import ArchiveBucket, DocumentsBucket, ParsedBucket
 from ingestion.config import Settings
 from ingestion.removal import RemovalService
 from ingestion.repository import DocumentRepository

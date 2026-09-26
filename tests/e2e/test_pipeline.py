@@ -310,7 +310,7 @@ def pipeline(database, buckets, chunker):
 
 def _pipeline_with(chunker, model) -> dict:
     """Builds the stages around one served model."""
-    from blob_store.seaweedfs import DocumentsBucket, ParsedBucket
+    from blob_store.s3 import DocumentsBucket, ParsedBucket
 
     return {
         "ingest": IngestService(
@@ -462,7 +462,7 @@ def test_a_second_run_of_a_finished_stage_does_nothing(pipeline) -> None:
 
 def test_dropping_the_derived_data_lets_the_run_repeat(pipeline, engine) -> None:
     """Chunking returns to the queue without re-parsing."""
-    from blob_store.seaweedfs import ArchiveBucket, DocumentsBucket, ParsedBucket
+    from blob_store.s3 import ArchiveBucket, DocumentsBucket, ParsedBucket
     from ingestion.removal import RemovalService
 
     sha = _run(pipeline)

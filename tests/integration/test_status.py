@@ -41,7 +41,13 @@ def test_the_object_store_names_and_measures_its_buckets(service) -> None:
     store = service.snapshot()["object_store"]
 
     assert store.ok
-    assert set(store.metrics) == {"documents", "parsed", "export", "archive"}
+    assert set(store.metrics) == {
+        "documents",
+        "parsed",
+        "models",
+        "export",
+        "archive",
+    }
     assert all(count == 0 for count in store.metrics.values()), store.metrics
 
 
@@ -49,7 +55,7 @@ def test_a_stored_object_shows_up_in_the_count(service, buckets) -> None:
     """What a person watches after an upload."""
     from seed import digest
 
-    from blob_store.seaweedfs import DocumentsBucket
+    from blob_store.s3 import DocumentsBucket
 
     bucket = DocumentsBucket()
     bucket.put(
@@ -93,7 +99,7 @@ def test_an_unreachable_object_store_is_reported_rather_than_thrown(
 ) -> None:
     """The database half of the panel still answers."""
     monkeypatch.setenv("S3_ENDPOINT", "http://127.0.0.1:1")
-    from blob_store.seaweedfs import client
+    from blob_store.s3 import client
 
     client.s3_client.cache_clear()
 
@@ -107,7 +113,7 @@ def test_an_unreachable_object_store_is_reported_rather_than_thrown(
 
 def test_a_missing_bucket_is_named(service, buckets) -> None:
     """A bucket nobody created is a stage that will fail on its first write."""
-    from blob_store.seaweedfs import s3_client
+    from blob_store.s3 import s3_client
 
     s3_client().delete_bucket(Bucket="export")
 

@@ -4,10 +4,16 @@ The HTTP surface the frontend and the orchestrator call, and the only address
 either of them holds.
 
 It **reads back** what the stages produced and **moves rows on and off a
-stage's queue**. It never runs a stage: there is no `run` route, because a
-conversion running inside the process that serves JSON held one request for
-sixteen minutes. The work happens in the stage's worker container, off the
-queue this API writes to — see [`backend/stages/`](../stages/README.md).
+stage's queue**. It never runs a stage: no route here does a stage's work,
+because a conversion running inside the process that serves JSON held one
+request for sixteen minutes. The work happens in the stage's worker
+container, off the queue this API writes to — see
+[`backend/stages/`](../stages/README.md).
+
+`POST /pipeline/run` is not an exception to that. It runs nothing either: it
+asks the **orchestrator** for a run and answers at once with its id. That is
+the one thing on this surface the backend cannot do alone, and
+[`/pipeline`](#the-corpus-as-one-thing) says why.
 
 ## What it does
 
@@ -41,7 +47,7 @@ with the id `status`.
 
 ```
 GET  /{stage}/status                      how much work is waiting
-POST /{stage}/{action}                    start | stop | retry | rerun
+POST /{stage}/{action}                    start | stop | retry | rerun | reclaim
 GET  /{stage}/{scope}/{value}/status      the same, for one item
 POST /{stage}/{scope}/{value}/{action}    the same verb, against fewer rows
 ```
@@ -56,12 +62,26 @@ a narrowed verb and a whole-queue one cannot disagree.
 | `retry` | a failed row back to `pending`, clearing the reason |
 | `rerun` | every row to `pending`, skipping what a worker holds right now |
 
-All four answer **202** and return at once. None does the work.
+| `reclaim` | an `in_progress` row back to `pending`, without waiting out its lease |
 
-There is a fifth verb on the command line and deliberately not here:
-`reclaim` moves an `in_progress` row back to `pending` without waiting out
-its lease, which is safe only when a person knows the worker holding it is
-gone. See [`backend/stages/`](../stages/README.md).
+All five answer **202** and return at once. None does the work.
+
+`reclaim` used to be on the command line and deliberately not here, on the
+grounds that the API cannot know a worker is gone. Neither can the command
+line — a person runs both — and what the absence actually cost was the one
+stuck row none of the other verbs reaches: `retry` takes the failed, `rerun`
+skips what is held, and `stop` takes back only what has not begun. So it is
+here, and the danger is answered by the thing that actually addresses it:
+
+```
+POST /parsing/document/{sha256}/reclaim   one item, while a worker may be up
+POST /parsing/reclaim?confirm=true        the whole stage, once it is stopped
+POST /parsing/reclaim                     400 confirm_required
+```
+
+Nothing here can tell a dead claim from a live one, so the unnarrowed form
+asks to be confirmed rather than being refused outright. See
+[`backend/stages/`](../stages/README.md).
 
 | Stage | Narrows to | Example |
 |---|---|---|
@@ -76,6 +96,48 @@ Topic modelling's routes are written out in
 [`routes/topics.py`](routes/topics.py) rather than built by the factory:
 `POST /topics/discover` writes a request row, and `/topics/stop` and
 `/topics/retry` are the only other verbs that mean anything.
+
+The assessment phase has one more of its own, `POST /assessment/enrol`:
+nothing upstream creates an assessment, so enrolling without queuing is how
+"judge the corpus" becomes a number before any of it is paid for.
+
+### The corpus as one thing
+
+[`routes/pipeline.py`](routes/pipeline.py). Two controls no stage route can
+have, because neither is about one stage.
+
+```
+GET  /pipeline              every stage's queue, the run in flight, what is automated
+POST /pipeline/run          take the whole corpus through, in order
+POST /pipeline/start        queue everything ready to be worked, in every stage
+POST /pipeline/stop         take back everything queued, and stop the run behind it
+POST /pipeline/retry        return every stage's failures to the queue
+GET  /pipeline/runs         the recent runs
+GET  /pipeline/automation   whether anything starts a run by itself
+PUT  /pipeline/automation   switch that on or off
+```
+
+**Why `run` needs somebody else.** Stages have to be sequenced — chunking
+needs a parsed document — and sequencing means waiting for one to drain
+before starting the next. A request cannot hold that wait: extraction over
+a real corpus is hours. So `run` asks the orchestrator, which is the one
+component whose whole job is deciding when a stage should run, and returns
+the run's id at once. It is the only route on this surface that talks to
+anything outside the backend.
+
+**`start` is the same idea without the waiting.** It queues one wave — as
+far as the corpus can go right now — and is what a deployment with no
+orchestrator uses. Calling it again after the workers drain moves it the
+next stretch. It leaves topic modelling and the assessment phase alone: a
+fit replaces every topic and the judge costs model calls `.env` opts into,
+so both are asked for rather than swept into a fan-out.
+
+**Everything degrades except `run`.** `DAGSTER_URL` unset, or a webserver
+that is down, answers `available: false` on the reads and **503
+`no_orchestrator`** on `run`, while `start`, `stop` and `retry` go on
+working — those are queue verbs, and the queue is the backend's own. A
+second run is refused with **409 `already_running`** rather than racing the
+first through the same queues.
 
 ## The full surface
 

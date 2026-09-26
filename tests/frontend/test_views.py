@@ -30,6 +30,25 @@ EVERY = (*LISTING, "upload", "health")
 #: A question the gates have not judged, so Accept is live on it.
 QUESTION_DRAFT = changed(QUESTION, status="draft", rejected_reason=None)
 
+#: The one panel on any page that is not a stage's, by the page carrying it.
+#:
+#: Documents holds the whole-pipeline controls, drawn between the figures and
+#: the stage this page runs because it is the broader of the two: it asks the
+#: orchestrator to run every stage in order, and the panel under it runs
+#: parsing. It is not a page reaching into another page's stage - the rule
+#: these tests exist for - because it reaches no stage at all. See
+#: `frontend/lib/pipeline.py`.
+BEYOND_THE_STAGE = {"documents": "Pipeline"}
+
+#: The fold that panel adds, beside the two every page has.
+AUTOMATION_FOLD = "Run it without being asked"
+
+
+def _stage_panels(name: str, drawn: list[str]) -> list[str]:
+    """The panels every page has, with that one exception taken out."""
+    return [one for one in drawn if one != BEYOND_THE_STAGE.get(name)]
+
+
 # ── Every page ────────────────────────────────────────────────────────────
 
 
@@ -52,8 +71,15 @@ def test_a_page_opens_an_analysis_fold_rather_than_spilling_it(open_view, name) 
     Two folds now: the analysis, and the configuration of the one service
     this page runs. Neither is what anybody arrives to do, and a page that
     opened with forty numbers on it is a page nobody reads.
+
+    Documents has a third, for the same reason and from the panel above:
+    switching the pipeline to unattended is a decision made once.
     """
-    assert open_view(name).folds() == ["Analysis", "Configuration"]
+    folded = [
+        one for one in open_view(name).folds() if not one.startswith(AUTOMATION_FOLD)
+    ]
+
+    assert folded == ["Analysis", "Configuration"]
 
 
 @pytest.mark.parametrize("name", LISTING)
@@ -62,8 +88,9 @@ def test_every_page_is_laid_out_the_same_way(open_view, name) -> None:
 
     Topics carries a sixth: its deletion is over the whole model rather
     than over a row, so the box is on the page and not in a selection.
+    Documents carries one more again, which `BEYOND_THE_STAGE` names.
     """
-    drawn = open_view(name).panels()
+    drawn = _stage_panels(name, open_view(name).panels())
 
     assert [drawn[0], *drawn[2:4]] == ["Overview", "Search", "Filters"], drawn
     assert drawn[4].lower().startswith(name), drawn
@@ -75,9 +102,28 @@ def test_a_page_names_its_service_between_the_figures_and_the_search(
     open_view, name
 ) -> None:
     """So a reader finds the controls in the same place on every page."""
-    drawn = open_view(name).panels()
+    drawn = _stage_panels(name, open_view(name).panels())
 
     assert drawn[1].lower().startswith(OWNED[name][:5]), drawn
+
+
+def test_only_documents_carries_a_control_that_is_not_a_stage_s(open_view) -> None:
+    """The exception above is one page and one panel, and stays that way.
+
+    Every other page holds exactly the stage that produced what it lists.
+    A second page growing a whole-pipeline control would be two places to
+    press Run, disagreeing the first time one of them changed.
+    """
+    carrying = {name for name in LISTING if "Pipeline" in open_view(name).panels()}
+
+    assert carrying == {"documents"}
+
+
+def test_the_pipeline_panel_sits_above_the_stage_the_page_runs(open_view) -> None:
+    """Broadest first: every stage, then the one this page owns."""
+    drawn = open_view("documents").panels()
+
+    assert drawn[:3] == ["Overview", "Pipeline", "Parsing"], drawn
 
 
 @pytest.mark.parametrize("name", LISTING)

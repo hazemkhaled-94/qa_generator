@@ -68,6 +68,13 @@ UNCONFIGURABLE = {
     # The frontend's own, read in its process and not the backend's.
     "BACKEND_URL",
     "PAGE_SIZE",
+    # An address, like the three above, and read the same way: before there
+    # is a settings store to ask. It is also the one setting whose ABSENCE
+    # is a supported deployment rather than a missing value - without it
+    # `/pipeline` reports no orchestrator and every other route is
+    # unaffected - so a Configuration panel offering to change it would be
+    # offering to move a deployment's topology from a web page.
+    "DAGSTER_URL",
 }
 
 

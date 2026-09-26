@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from blob_store.seaweedfs.bucket import Bucket
-from blob_store.seaweedfs.documents import DocumentsBucket
+from blob_store.s3.bucket import Bucket
+from blob_store.s3.documents import DocumentsBucket
 
 SHA = "abcd" + "e" * 60
 

@@ -54,8 +54,9 @@ A stage selects on its own status column and on nothing else. Chunking never
 reads `parse_status`, which is how parsing and chunking own different columns
 of the same `documents` row.
 
-The four buckets are `documents`, `parsed`, `export` and `archive` —
-`S3_BUCKETS` in `.env`. See
+The five buckets are `documents`, `parsed`, `models`, `export` and `archive` —
+`S3_BUCKETS` in `.env`. `models` holds what the topic fit produced and
+`export` a figure drawn from it, which is why they are two. See
 [`backend/blob_store/`](../backend/blob_store/README.md).
 
 ## 2. What a worker does with one row
@@ -128,9 +129,20 @@ flowchart TD
 | `layers` | A stage sits above what it shares and below nothing but the api |
 | `stages-are-independent` | No backend service imports another |
 
-There is one upward edge: `settings.changes` imports each service's `config`
-submodule, because refusing a setting that would stop a service means calling
-that service's own `Settings.load`.
+There are two deliberate edges the contracts name. `settings.changes`
+imports each service's `config` submodule, because refusing a setting that
+would stop a service means calling that service's own `Settings.load`. And
+`question_generation.export` imports `assessment.repository` — one import,
+in a function body, in the module that is a command line rather than a
+library: `workbook()` takes the judgements as an argument and imports
+nothing, which is what lets the api call it holding its own catalogue.
+
+**One module sits outside the graph.** `backend/confidence.py` is a leaf
+imported by both extraction and question generation — how close a row came
+to the verdict that would have refused it, which is a reading both stages
+take and neither owns. It imports nothing but the standard library, so it
+cannot create an edge between them; it is not in `.importlinter`'s
+`root_packages`, so nothing enforces that.
 
 A service package re-exports nothing, so a caller naming
 `extraction.repository` pays for that submodule and no more. The contracts
@@ -150,12 +162,13 @@ flowchart LR
     api --> pg[(postgres)]
     api --> s3[(seaweedfs)]
 
-    subgraph workers [five workers, one image with the api]
+    subgraph workers [six workers, one image with the api]
         parse-worker
         chunk-worker
         extract-worker
         topic-worker
         question-worker
+        assess-worker
     end
     workers --> pg
     workers --> s3

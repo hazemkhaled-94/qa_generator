@@ -8,13 +8,14 @@ from typing import ClassVar
 
 from opentelemetry.trace import Span
 
-from blob_store.seaweedfs import ExportBucket
+from blob_store.s3 import ExportBucket, ModelsBucket
 from stages import StageService
 from telemetry import tracer, working
 from telemetry.evaluations import current_ids
 from topic_modelling.labels import TopicLabeller
 from topic_modelling.models import FittedTopic, Fitting
 from topic_modelling.repository import TopicQueue
+from topic_modelling.space import dump
 from topic_modelling.topics import NoVocabulary, TopicFitter, carry_labels
 
 log = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class TopicModellingService(StageService):
         repository: TopicQueue,
         fitter: TopicFitter,
         export: ExportBucket,
+        models: ModelsBucket,
         labeller: TopicLabeller | None = None,
         min_fact_share: float = 0.0,
     ) -> None:
@@ -51,6 +53,10 @@ class TopicModellingService(StageService):
             repository: The fit queue and the corpus reader.
             fitter: Fits one language at a time.
             export: Where each language's figure is stored.
+            models: Where the factorisation the figure is drawn from is
+                stored. The figure is a view of this and can be redrawn
+                from it; this is what a re-fit would otherwise be needed
+                to get back.
             labeller: Names the unnamed topics. Without one a topic keeps its
                 terms and no name.
             min_fact_share: The smallest share of a topic's passages that must
@@ -60,6 +66,7 @@ class TopicModellingService(StageService):
         self._repository: TopicQueue = repository
         self._fitter = fitter
         self._export = export
+        self._models = models
         self._labeller = labeller
         self._min_fact_share = min_fact_share
 
@@ -146,6 +153,7 @@ class TopicModellingService(StageService):
             )
 
         memberships = self._repository.replace(fit_id, fittings)
+        self._keep(fittings)
         self._draw(fittings)
         self._annotate(current, fittings, memberships)
 
@@ -167,6 +175,29 @@ class TopicModellingService(StageService):
                     fitting.passages,
                     fitting.language,
                 )
+
+    def _keep(self, fittings: list[Fitting]) -> None:
+        """Stores each language's factorisation.
+
+        Before `_draw`, because the figure is a view of this: if only one
+        of the two survives a bad run it should be the one the other can
+        be rebuilt from.
+
+        Every failure is logged and left rather than raised, as the
+        drawing's are. The topics are already written by the time this
+        runs, and a fit whose rows landed is not a failed fit - refusing it
+        here would roll a good corpus back over an object store that was
+        briefly unreachable.
+        """
+        for fitting in fittings:
+            try:
+                self._models.put(
+                    self._models.topic_model_key(fitting.language),
+                    dump(fitting.space),
+                    content_type=self._models.TOPIC_MODEL_TYPE,
+                )
+            except Exception:
+                log.exception("could not keep the %s model", fitting.language)
 
     def _draw(self, fittings: list[Fitting]) -> None:
         """Stores each language's model as a page.

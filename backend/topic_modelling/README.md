@@ -129,8 +129,26 @@ Properties of the input, not defects here. Figures in
 `facts.validated` for reporting.
 
 **Writes:** `topics`, one row per topic per language; `passage_topics`, one
-row per passage-topic pair above the weight floor; and
-`topics/<language>.html` in the `export` bucket.
+row per passage-topic pair above the weight floor; `topics/<language>.npz`
+in the `models` bucket; and `topics/<language>.html` in the `export` bucket.
+
+### The model and the picture of it are two artefacts
+
+`models` holds the **factorisation**; `export` holds a pyLDAvis page drawn
+from it. Until `models` existed, a fit's one durable trace was a view of
+itself with d3 inlined, and the matrix it was drawn from went out of scope
+when scoring returned — so the disposable half was the kept half.
+
+They have opposite durability contracts: the picture is derivable from the
+model, and the model is derivable from nothing short of another fit. See
+[`blob_store/`](../blob_store/README.md#the-five-buckets).
+
+`.npz` rather than gensim's own `Nmf.save()`, which is pickle underneath. A
+pickle is a promise about the class that wrote it, so a gensim upgrade can
+make last year's fit unloadable — which is the one thing keeping it was
+for. Five arrays and a version tag load in anything that has numpy. It is
+compressed because a term-topic matrix is mostly zeros: a factorisation
+puts a term in few of its topics, and deflate is very good at that.
 
 | Route | Answers |
 |---|---|
@@ -142,7 +160,7 @@ row per passage-topic pair above the weight floor; and
 | `POST /topics/discover` | Queues a fit. 202 |
 | `POST /topics/stop` | Withdraws a queued fit |
 | `POST /topics/retry` | Returns a failed fit to the queue |
-| `DELETE /topics` | Deletes every topic, membership and figure |
+| `DELETE /topics` | Deletes every topic, membership, stored model and figure |
 
 There is no `POST /topics/start` and no `/topics/rerun`: asking is what
 creates the work, and a fit has no scope to narrow to.

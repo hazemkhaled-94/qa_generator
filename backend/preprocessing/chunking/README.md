@@ -143,7 +143,7 @@ the JSON object it names in the `parsed` bucket.
 | Route | Answers |
 |---|---|
 | `GET /chunking/status` | The queue depth, and whether a worker is on it |
-| `POST /chunking/{action}` | `start`, `stop`, `retry`, `rerun` |
+| `POST /chunking/{action}` | `start`, `stop`, `retry`, `rerun`, `reclaim` |
 | `GET\|POST /chunking/{scope}/{value}/…` | The same, narrowed to one document |
 | `GET /passages` | One page of passages, narrowed by document, block type and a text search |
 | `GET /passages/types` | The block types the corpus holds |
@@ -217,3 +217,9 @@ corpus, which is a property of the model rather than of this code.
   outside every topic model and outside question generation.
 - **`revocabulary` does not renumber sentences.** A change to how sentences
   are split reaches the corpus only through a re-chunk.
+- **`start` and `rerun` skip a document parsing has not finished.** This is
+  the only stage that queues over rows it did not create — a document exists
+  from the moment it is uploaded — so it is the only one that has to check.
+  A start over a half-parsed corpus used to queue the rest and fail every
+  row of it on the missing parsed object. The guard is `ChunkQueue.ready`;
+  see [`backend/stages/`](../../stages/README.md).

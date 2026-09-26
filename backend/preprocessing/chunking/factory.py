@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blob_store.seaweedfs import ParsedBucket
+from blob_store.s3 import ParsedBucket
 from preprocessing.chunking.config import Settings
 from preprocessing.chunking.passages import PassageBuilder
 from preprocessing.chunking.repository import ChunkQueue

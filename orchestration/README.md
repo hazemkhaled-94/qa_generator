@@ -10,6 +10,35 @@ is the same surface the Start button and the `make` targets use.
 `orchestration/` is **additive**. Delete it and the pipeline runs exactly as
 before, with nobody deciding for it.
 
+## The one call that comes the other way
+
+`POST /pipeline/run` — the Run button on the Documents page, and the same
+thing over HTTP — asks the api to launch the `corpus` job here. So the api
+now holds this package's address, `DAGSTER_URL`, and the graph is no longer
+one-way.
+
+It is worth being exact about what that does and does not change:
+
+- **Nothing here calls the api differently.** The assets still post to the
+  stage routes and poll `/status`. The new edge reaches the *webserver's*
+  GraphQL, not this package's code, and asks for a job that already exists
+  by name.
+- **Deleting this directory still changes nothing about the pipeline.**
+  `DAGSTER_URL` then points at nothing, `GET /pipeline` answers
+  `available: false`, and the Run button is disabled with a line saying why.
+  Every queue verb on every surface goes on working, including the
+  corpus-wide `start`, `stop` and `retry`, because those are the backend's
+  own queue and never came through here.
+- **What is lost without it is the waiting.** Running the stages in order
+  means waiting for each to drain, and a request cannot hold that wait. The
+  shell holds it for `make corpus`; a run holds it for everything else.
+
+The queries are pinned to Dagster 1.13 in
+[`backend/api/orchestrator.py`](../backend/api/orchestrator.py) and proved
+against a live webserver by `tests/smoke/test_orchestrator_queries.py`,
+which sends every one of them against a name that does not exist — so it
+validates the documents without launching, stopping or switching anything.
+
 ## The asset graph
 
 ```
@@ -43,13 +72,15 @@ distance, and the one most likely to reach
 
 | | |
 |---|---|
-| The `corpus` job | Every stage, end to end. Run it by hand from the UI |
+| The `corpus` job | Every stage, end to end. Run it by hand from the UI, from `make pipeline`, from the Run button, or from `POST /pipeline/run` |
 | The `nightly_corpus` schedule | 02:00 UTC. A refit is corpus-wide and goes stale on every new document |
 | The `arrivals` sensor | Polls parsing every minute and requests a run when documents are sitting `new` |
 
-The schedule and the sensor both ship **stopped** and are switched on in the
-UI. A stack that starts running the pipeline the moment it comes up is one
-nobody chose.
+The schedule and the sensor both ship **stopped**. A stack that starts
+running the pipeline the moment it comes up is one nobody chose. Either can
+be switched on from Dagster's own UI, from `make auto`, or from
+`PUT /pipeline/automation` — which is the same switch through the api, for a
+deployment whose operators never open this UI at all.
 
 ### A fourth that only watches, and ships running
 
@@ -89,6 +120,10 @@ because it makes HTTP calls and needs neither torch nor spaCy nor a model.
 It is given **no `DATABASE_URL` and no object store credentials**, and
 `tests/smoke/test_compose.py` pins that. A process that cannot reach the
 application tables cannot grow a second way of moving a row.
+
+That still holds with the api calling in. `DAGSTER_URL` points the api at
+this webserver; it gives this package no credential and no reach of its own,
+and the only thing asked for through it is a run of a job defined here.
 
 ## Running it
 
@@ -134,5 +169,10 @@ None of these reaches a network.
   `progress` sensor is the exception and ships running: it starts nothing.
 - **A materialisation no longer means Dagster ran it.** `progress` files one
   for work any surface set going.
-- **Deleting this directory changes nothing about the pipeline.**
+- **Deleting this directory changes nothing about the pipeline.** It takes
+  away the Run button and `POST /pipeline/run`, both of which then report
+  themselves unavailable; every queue verb on every surface is untouched.
 - **The orchestrator cannot fix a row.** It has no database access by design.
+- **The api holds this webserver's address, not this package's code.** The
+  queries it sends are pinned to Dagster 1.13 and proved against a live
+  server by `tests/smoke/test_orchestrator_queries.py`.

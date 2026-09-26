@@ -169,9 +169,7 @@ def test_a_question_records_every_gate_that_read_it(engine, database) -> None:
     # The readings land as JSON with their thresholds, and `confidence` is
     # the weakest margin of them - the duplicate probe's 0.2366, not the
     # recall reading's 0.5.
-    (scores, margin), = _rows(
-        engine, "SELECT gate_scores, confidence FROM questions"
-    )
+    ((scores, margin),) = _rows(engine, "SELECT gate_scores, confidence FROM questions")
     assert [one["gate"] for one in scores] == ["near_duplicate", "recall"]
     assert scores[0]["threshold"] == 0.93
     assert margin == pytest.approx(0.2366, abs=1e-4)

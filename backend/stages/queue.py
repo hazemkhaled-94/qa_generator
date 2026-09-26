@@ -5,7 +5,9 @@ Claiming, failing, sweeping an abandoned claim and requeueing are written here
 once against those declarations.
 
 A row arrives `new` and no worker looks at it until something asks for it, so
-a stage selects on its own status column and on nothing else.
+a stage claims on its own status column and on nothing else. The one thing
+read beside it is `RowQueue.ready`, which says which rows may be QUEUED - see
+there for why chunking is the only stage that needs it.
 
 Every queue operation takes an optional `within`, which narrows it to part of
 the queue - one document, one passage - instead of all of it. A stage says
@@ -154,9 +156,7 @@ class StageQueue(Repository):
         # Every caller returns its key column first, which is what `touch`
         # refreshes. Read by name rather than by position, so a stage that
         # returns its columns in another order still beats.
-        self._held = (
-            None if claimed is None else getattr(claimed, self.columns.key.key)
-        )
+        self._held = None if claimed is None else getattr(claimed, self.columns.key.key)
         return claimed
 
     def _finish(self, key: Any, *, session: Any = None, **values: Any) -> None:
@@ -368,13 +368,32 @@ class RowQueue(StageQueue, abstract=True):
     the base without them rather than answering them with something else.
     """
 
+    #: Which of this stage's rows have an input to work on. None means every
+    #: one does, which is true wherever the row is created by the stage
+    #: before - a passage exists because chunking made it, a topic because a
+    #: fit did. Only chunking needs this: it queues over `documents`, and a
+    #: document exists from the moment it is uploaded, so `start` without it
+    #: queues documents that have not been parsed and whose only possible
+    #: outcome is a failure on the missing parsed object.
+    #:
+    #: Carried by `start` and `reset` and by nothing else. Claiming, failing,
+    #: sweeping and `retry` still select on this stage's own status column
+    #: alone: this says which rows may ENTER the queue, not which a worker
+    #: may take, and a row already queued is worked whatever this says.
+    ready: ClassVar[Any] = None
+
     def start(self, within: Any = None) -> int:
-        """Queues the rows this stage has never been asked to do."""
-        return self._requeue(self.columns.status == Status.NEW, within)
+        """Queues the rows this stage has never been asked to do.
+
+        Skips rows the stage before this one has not produced an input for.
+        """
+        return self._requeue(self.columns.status == Status.NEW, within, self.ready)
 
     def reset(self, within: Any = None) -> int:
         """Returns every row to the queue, finished ones included.
 
-        Skips rows a worker holds right now.
+        Skips rows a worker holds right now, and rows with no input to redo.
         """
-        return self._requeue(self.columns.status != Status.IN_PROGRESS, within)
+        return self._requeue(
+            self.columns.status != Status.IN_PROGRESS, within, self.ready
+        )
