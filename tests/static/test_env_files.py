@@ -57,6 +57,7 @@ def _compose() -> str:
     lines = (ROOT / "compose.yaml").read_text().splitlines()
     return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
 
+
 #: Names compose interpolates that no env file declares, each because
 #: something else supplies it.
 SUPPLIED_ELSEWHERE = {
@@ -93,7 +94,8 @@ def test_no_name_is_assigned_in_two_files() -> None:
     twice = {name: files for name, files in where.items() if len(files) > 1}
 
     assert not twice, "\n".join(
-        f"{name} is set in {' and '.join(files)}" for name, files in sorted(twice.items())
+        f"{name} is set in {' and '.join(files)}"
+        for name, files in sorted(twice.items())
     )
 
 
@@ -184,7 +186,7 @@ def test_the_example_is_the_only_file_holding_a_secret() -> None:
 
 @pytest.mark.parametrize("path", ENV_FILES)
 def test_a_value_carries_no_shell_expansion(path: str) -> None:
-    """bash sources these and compose parses them, and only one expands.
+    """Bash sources these and compose parses them, and only one expands.
 
     A `${...}` therefore means one thing to a host command and another to a
     container. The exception is the OTLP header, which is only ever sourced.

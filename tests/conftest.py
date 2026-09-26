@@ -341,6 +341,12 @@ def s3(runtime) -> Iterator[dict[str, str]]:
             ),
             "S3_ACCESS_KEY": S3_KEY,
             "S3_SECRET_KEY": S3_SECRET,
+            # All five the client reads, not the three it used to: it takes
+            # them off the environment with `os.environ[...]`, so a name the
+            # fixture leaves out is a KeyError at the first object rather
+            # than a default.
+            "S3_REGION": "local",
+            "S3_ADDRESSING_STYLE": "path",
         }
     finally:
         container.stop()

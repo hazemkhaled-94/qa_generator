@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -68,6 +69,15 @@ def _engine() -> tuple[str, ...]:
     pytest.skip("no working compose on this machine")
 
 
+#: The env files compose reads, in the order the Makefile gives them. A
+#: bare `compose config` sees `.env` alone, and the names that moved out of
+#: it - `BACKEND_CONTAINER_URL` among them - then interpolate to empty,
+#: which reads here as a service that was never told where the backend is.
+#: `COMPOSE_ENV_FILES` rather than `--env-file`, because that is the
+#: spelling `make doctor` points at for a compose command run outside make.
+ENV_FILES = "configs/env/deployment.env,.env"
+
+
 def compose(*args: str) -> subprocess.CompletedProcess:
     """Runs one compose command, or skips when there is no engine."""
     return subprocess.run(
@@ -77,6 +87,7 @@ def compose(*args: str) -> subprocess.CompletedProcess:
         text=True,
         timeout=300,
         check=False,
+        env={**os.environ, "COMPOSE_ENV_FILES": ENV_FILES},
     )
 
 
