@@ -23,22 +23,9 @@ drift.
 from __future__ import annotations
 
 import dataclasses
+import importlib
 
 import pytest
-
-from api.routes.assessment import JudgePlan
-from api.routes.questions import GenerationPlan
-from api.routes.settings import ServiceSettings, SettingState
-from assessment.models import AssessmentQuality, StoredAssessment
-from extraction.models import FactQuality, StoredFact
-from ingestion.models import StoredDocument
-from preprocessing.chunking.models import PassageDetail, StoredPassage
-from question_generation.models import (
-    QuestionQuality,
-    QuestionSource,
-    StoredQuestion,
-)
-from topic_modelling.models import LanguageFit, StoredTopic, TopicFit
 
 #: Each fake response beside the dataclass it stands in for.
 #:
@@ -47,30 +34,52 @@ from topic_modelling.models import LanguageFit, StoredTopic, TopicFit
 #: on the two pages nothing else covers - a document, a passage, a topic and
 #: a fit - so the drift this exists to catch could still happen anywhere but
 #: in the six places somebody had already been bitten.
-PINNED: dict[str, tuple[str, type]] = {
+#:
+#: The shapes are NAMED rather than imported, and that is not a style
+#: choice. Three of them live in `api.routes.*`, which imports
+#: `api.dependencies` - the composition root, which builds every repository
+#: and caches an engine off DATABASE_URL as it is imported. pytest imports
+#: every test module while collecting, deselected ones included, so an
+#: import here bound the whole session's API to the placeholder DSN in
+#: conftest before any fixture could point it at a container. 222 of the
+#: integration tests failed on it and `test_the_api_is_wired_to_the_
+#: container_and_not_to_a_developers_database` said exactly why.
+PINNED: dict[str, tuple[str, str]] = {
     # The rows a listing page draws.
-    "document": ("DOCUMENT", StoredDocument),
-    "passage": ("PASSAGE", StoredPassage),
-    "passage_detail": ("PASSAGE_DETAIL", PassageDetail),
-    "fact": ("FACT", StoredFact),
-    "topic": ("TOPIC", StoredTopic),
-    "question": ("QUESTION", StoredQuestion),
-    "assessment": ("ASSESSMENT", StoredAssessment),
+    "document": ("DOCUMENT", "ingestion.models:StoredDocument"),
+    "passage": ("PASSAGE", "preprocessing.chunking.models:StoredPassage"),
+    "passage_detail": ("PASSAGE_DETAIL", "preprocessing.chunking.models:PassageDetail"),
+    "fact": ("FACT", "extraction.models:StoredFact"),
+    "topic": ("TOPIC", "topic_modelling.models:StoredTopic"),
+    "question": ("QUESTION", "question_generation.models:StoredQuestion"),
+    "assessment": ("ASSESSMENT", "assessment.models:StoredAssessment"),
     # What a row was drawn from, which the detail panes read.
-    "question_source": ("QUESTION_SOURCE", QuestionSource),
+    "question_source": ("QUESTION_SOURCE", "question_generation.models:QuestionSource"),
     # The reports behind each page's Analysis fold.
-    "fact_quality": ("FACT_QUALITY", FactQuality),
-    "question_quality": ("QUESTION_QUALITY", QuestionQuality),
-    "assessment_quality": ("ASSESSMENT_QUALITY", AssessmentQuality),
+    "fact_quality": ("FACT_QUALITY", "extraction.models:FactQuality"),
+    "question_quality": (
+        "QUESTION_QUALITY",
+        "question_generation.models:QuestionQuality",
+    ),
+    "assessment_quality": ("ASSESSMENT_QUALITY", "assessment.models:AssessmentQuality"),
     # The state of the topic model, per language and overall.
-    "language_fit": ("LANGUAGE_FIT", LanguageFit),
-    "topic_fit": ("FIT", TopicFit),
+    "language_fit": ("LANGUAGE_FIT", "topic_modelling.models:LanguageFit"),
+    "topic_fit": ("FIT", "topic_modelling.models:TopicFit"),
     # What each phase is configured to do.
-    "question_plan": ("PLAN", GenerationPlan),
-    "assessment_plan": ("ASSESSMENT_PLAN", JudgePlan),
+    "question_plan": ("PLAN", "api.routes.questions:GenerationPlan"),
+    "assessment_plan": ("ASSESSMENT_PLAN", "api.routes.assessment:JudgePlan"),
     # The configuration panel, which every page draws.
-    "settings": ("SETTINGS", ServiceSettings),
+    "settings": ("SETTINGS", "api.routes.settings:ServiceSettings"),
 }
+
+
+def shape_of(dotted: str) -> type:
+    """The dataclass one name points at, imported when a test asks.
+
+    Inside the test, never at module scope. See the note on PINNED.
+    """
+    module, _, attribute = dotted.partition(":")
+    return getattr(importlib.import_module(module), attribute)
 
 
 def fields_of(shape: type) -> set[str]:
@@ -83,7 +92,8 @@ def test_a_fake_response_carries_what_the_api_returns(name: str) -> None:
     """Neither short of the real thing nor carrying what it does not."""
     from tests.frontend import pages
 
-    attribute, shape = PINNED[name]
+    attribute, dotted = PINNED[name]
+    shape = shape_of(dotted)
     faked = set(getattr(pages, attribute))
     real = fields_of(shape)
 
@@ -104,7 +114,7 @@ def test_a_faked_setting_carries_what_the_panel_is_drawn_from() -> None:
     from tests.frontend import pages
 
     faked = set(pages.setting("ANY"))
-    real = fields_of(SettingState)
+    real = fields_of(shape_of("api.routes.settings:SettingState"))
 
     assert faked == real, (
         f"pages.setting and SettingState disagree.\n"
