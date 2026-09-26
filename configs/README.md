@@ -47,7 +47,7 @@ compose hands each file to the services that need it with `env_file`, and the
 Makefile sources `backend.env`, `deployment.env` and `.env` for host
 commands. `deployment.env` is also one of the two files compose interpolates
 `${...}` out of, which is why every compose command goes through
-`$(COMPOSE)`:
+`$(COMPOSE_CMD)`:
 
 ```bash
 podman compose --env-file configs/env/deployment.env --env-file .env

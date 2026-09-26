@@ -47,9 +47,11 @@ podman compose --env-file configs/env/deployment.env --env-file .env
 ```
 
 The last one wins, which is what lets a secret sit over a name. Every
-compose command in the Makefile goes through `$(COMPOSE)`, which carries
-both flags. A bare `podman compose` outside make sees only `.env` and fails
-on the first missing port; export `COMPOSE_ENV_FILES` to it instead:
+compose command in the Makefile goes through `$(COMPOSE_CMD)`, which carries
+both flags; `COMPOSE` stays the engine alone, so
+`make COMPOSE="docker compose" up` still carries the files rather than
+replacing them. A bare `podman compose` outside make sees only `.env` and
+fails on the first missing port; export `COMPOSE_ENV_FILES` to it instead:
 
 ```bash
 export COMPOSE_ENV_FILES=configs/env/deployment.env,.env
