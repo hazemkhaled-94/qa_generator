@@ -41,6 +41,24 @@ PROVIDER = { [ ! -f ./configs/env/provider.env ] || . ./configs/env/provider.env
 LOADENV = set -a && . ./configs/env/backend.env && $(PROVIDER) && . ./.env \
           && set +a $(OVERRIDE)
 
+# What `wipe` leaves standing. Comma-separated, and empty by default: the
+# command is called wipe, and a default that quietly kept things would be
+# the wrong way round.
+#
+#   make wipe-all KEEP=golden        the Phoenix datasets and their experiments
+#   make wipe-all KEEP=runs          the Dagster run history
+#   make wipe-all KEEP=golden,runs   both
+#
+# Each is something a deployment may want back and nothing upstream
+# rebuilds: the golden cases come from evaluation/ and the run history is
+# the record of what ran. Everything else a wipe takes is derived from the
+# corpus and comes back with it.
+KEEP ?=
+
+# True, and says so, when KEEP names $(1). $(2) is what to call it.
+SPARED = case ",$(KEEP)," in *,$(1),*) echo "KEEP=$(1): leaving $(2)";; \
+         *) false;; esac
+
 # The same, for a tool with a tuning file of its own:
 #
 #     $(call WITH,review.env) && python -m review.run --status
@@ -1057,6 +1075,7 @@ wipe:
 	$(MAKE) phoenix-purge
 	$(MAKE) review-delete
 	$(MAKE) logs-wipe
+	$(MAKE) dagster-wipe
 
 # Both deletions, in the only order they work in: `wipe` fills the archive
 # and `archive-purge` empties it, so the purge has to come second or it
@@ -1070,6 +1089,17 @@ wipe:
 # that script has nothing to read.
 wipe-all: wipe
 	$(MAKE) archive-purge ALL=1
+
+# Every run Dagster remembers, and the event log under each. What `make
+# wipe` runs: a run record for a corpus that is gone names assets nothing
+# can open. `KEEP=runs` spares it.
+#
+# Through the webserver container, which is where DAGSTER_HOME and the
+# instance's database configuration are; `--force` because the prompt has
+# no terminal to answer it.
+dagster-wipe:
+	@$(call SPARED,runs,the Dagster run history) || \
+	  $(COMPOSE) exec -T dagster-webserver dagster run wipe --force
 
 # Delete only what the pipeline built: passages and facts. The document and
 # its file stay, and chunking goes back to `new`, so the next run rebuilds
@@ -1399,11 +1429,15 @@ phoenix-projects:
 phoenix-prune:
 	$(LOADENV) && poetry run python -m telemetry.projects --prune
 
-# Every project, whatever it holds. What `make wipe` runs: a trace of a run
-# over documents that no longer exist is not worth keeping, and `prune`
-# would leave all of them - they each recorded real work.
+# Every project AND every dataset, whatever they hold. What `make wipe`
+# runs: a trace of a run over documents that no longer exist is not worth
+# keeping, and `prune` would leave all of them - they each recorded real
+# work. The datasets are `make eval-upload`'s golden cases and the
+# experiments under them; `KEEP=golden` spares those, see `wipe`.
 phoenix-purge:
 	$(LOADENV) && poetry run python -m telemetry.projects --purge
+	@$(call SPARED,golden,the Phoenix datasets) || \
+	  { $(LOADENV) && poetry run python -m telemetry.projects --purge-datasets; }
 
 # ── Review ─────────────────────────────────────────────────────────────────
 #

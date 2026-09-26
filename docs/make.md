@@ -305,6 +305,7 @@ Documents are ingestion's, not a stage's. **All of these are irreversible.**
 | `make delete-derived SHA=<sha256>` | Delete only its passages and facts |
 | `make wipe` | Every document, the topics, and the four services that describe them. Waits 5 seconds first |
 | `make wipe-all` | The same, then the archive. The one command for "leave nothing" |
+| `make wipe KEEP=golden,runs` | Spare the Phoenix datasets and the Dagster run history |
 
 `wipe` runs both deletions because deleting every document leaves the topics
 standing. It also drops the upload history, which a single deletion keeps.
@@ -322,6 +323,26 @@ nothing to recover from. [`make archive-purge`](#the-archive) is the second
 decision and stays one - or `make wipe-all`, which is both in the only
 order they work in: `wipe` fills the archive, so the purge has to come
 second or it takes nothing.
+
+### What a wipe leaves
+
+Nothing, by default. The command is called wipe, and a default that quietly
+kept things would be the wrong way round: Phoenix keeps no project and no
+dataset, Argilla no dataset, Dagster no run, and Grafana reads an empty log
+stream. Grafana holds nothing of its own - its dashboards come from
+[`configs/grafana/provisioning/`](../configs/grafana/provisioning/) on every
+start, so there is nothing there a wipe could take.
+
+`KEEP` spares the two things nothing upstream rebuilds:
+
+| `KEEP=` | Leaves |
+|---|---|
+| `golden` | The Phoenix datasets and the experiments under them. `make eval-upload` puts them back |
+| `runs` | The Dagster run history |
+| `golden,runs` | Both |
+
+Everything else a wipe takes is derived from the corpus and comes back with
+it, which is why none of it has a switch.
 
 ## The archive
 
@@ -397,6 +418,8 @@ make review-push-questions IDS=12,34,56
 | `make phoenix-projects` | What Phoenix holds, changing nothing |
 | `make phoenix-prune` | Delete the projects in which no work happened. **Irreversible**, and it says what it is taking before it takes it |
 | `make phoenix-purge` | Delete **every** project, whatever it holds. What `make wipe` runs, and what `prune` will not do |
+| `make phoenix-purge KEEP=golden` | The same, but leave the datasets and their experiments |
+| `make dagster-wipe` | Every run Dagster remembers, and the event log under each |
 
 A Phoenix project is created by whatever sends the first span to it and
 removed by nothing. While a project meant a run somebody asked for that was

@@ -248,8 +248,12 @@ configs/env/provider.env
 # keystroke, and these carry a real name and a module code.
 Project_Report_*.docx
 Project_Report_*.pdf
-# Every deck, and the lock file PowerPoint leaves beside an open one. Two
-# of these were tracked and came to nine megabytes of binary that no diff
-# can read; they are rebuilt from the READMEs rather than reviewed.
+# Every deck. Two of these were tracked and came to nine megabytes of
+# binary that no diff can read; they are rebuilt from the READMEs rather
+# than reviewed.
 *.pptx
 *.potx
+# The lock file Word and PowerPoint leave beside an open document. Named by
+# its prefix rather than by extension: Office truncates the stem to fit, so
+# `~$oject_Report_....docx` matches none of the rules above it.
+~$*

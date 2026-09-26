@@ -164,6 +164,54 @@ def test_purging_takes_the_projects_that_hold_work_too() -> None:
     assert purging.deleted == ["/v1/projects/spent", "/v1/projects/worked"]
 
 
+def test_purging_takes_the_golden_datasets_too() -> None:
+    """A project and a dataset are different resources in Phoenix.
+
+    Deleting every project leaves `make eval-upload`'s golden cases and
+    the experiments scored against them standing, which is a Phoenix that
+    is not empty after a wipe said it emptied one.
+    """
+
+    class _Answer:
+        """A successful response, as `requests` reports one."""
+
+        ok = True
+
+        @staticmethod
+        def json() -> dict:
+            """One page of two datasets, and no cursor after it."""
+            return {
+                "data": [{"id": "d1", "name": "golden"}, {"id": "d2"}],
+                "next_cursor": None,
+            }
+
+        @staticmethod
+        def raise_for_status() -> None:
+            """Answered 200."""
+
+    class _Client:
+        """A client that lists two datasets and succeeds at every delete."""
+
+        def __init__(self) -> None:
+            """Holds nothing yet."""
+            self.deleted: list[str] = []
+
+        def get(self, path: str, params=None):
+            """Answers the dataset listing."""
+            assert path == "/v1/datasets", path
+            return _Answer()
+
+        def delete(self, path: str):
+            """Records the delete."""
+            self.deleted.append(path)
+            return _Answer()
+
+    client = _Client()
+
+    assert projects.purge_datasets(client) == 2
+    assert client.deleted == ["/v1/datasets/d1", "/v1/datasets/d2"]
+
+
 def test_purging_an_empty_phoenix_deletes_nothing() -> None:
     """A wipe run twice is not an error."""
     assert projects.prune(None, [], everything=True) == 0

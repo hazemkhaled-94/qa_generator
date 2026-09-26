@@ -134,8 +134,8 @@ def _client() -> _Phoenix:
     return client
 
 
-def listed(client) -> Iterator[dict]:
-    """Every project Phoenix holds, following the cursor to the end.
+def listed(client, path: str = "/v1/projects") -> Iterator[dict]:
+    """Everything Phoenix holds at one path, following the cursor to the end.
 
     **Paginated, and the first version of this was not.** Phoenix answers
     with a page and a `next_cursor`, and a tool that reads one page reports
@@ -149,7 +149,7 @@ def listed(client) -> Iterator[dict]:
         params = {"limit": PAGE}
         if cursor:
             params["cursor"] = cursor
-        answered = client.get("/v1/projects", params=params)
+        answered = client.get(path, params=params)
         answered.raise_for_status()
         page = answered.json()
         yield from page.get("data", [])
@@ -241,6 +241,40 @@ def prune(client, projects: list[Project], everything: bool = False) -> int:
     return deleted
 
 
+def purge_datasets(client) -> int:
+    """Deletes every dataset, and says how many went.
+
+    A different resource from a project and not reached by deleting one:
+    `/v1/projects` holds the traces a run wrote, `/v1/datasets` holds the
+    golden cases `make eval-upload` puts there and the experiments scored
+    against them, which Phoenix keeps under the dataset.
+
+    Its own flag rather than part of `--purge`, because `make wipe
+    KEEP=golden` spares these and takes the projects anyway. The cases are
+    re-uploadable from `evaluation/`, which is what makes either choice
+    reasonable.
+
+    Returns:
+        How many datasets were deleted.
+    """
+    taking = list(listed(client, "/v1/datasets"))
+    if not taking:
+        return 0
+    log.warning("deleting %d dataset(s) and their experiments", len(taking))
+    deleted = 0
+    for one in taking:
+        answered = client.delete(f"/v1/datasets/{one['id']}")
+        if answered.ok:
+            deleted += 1
+        else:
+            log.warning(
+                "could not delete dataset %s: %s",
+                one.get("name", one["id"]),
+                answered.status_code,
+            )
+    return deleted
+
+
 def parser() -> argparse.ArgumentParser:
     """Builds the argument parser."""
     built = argparse.ArgumentParser(
@@ -266,6 +300,15 @@ def parser() -> argparse.ArgumentParser:
         help="delete EVERY project, whatever it holds. What `make wipe` "
         "runs: traces of a corpus that no longer exists. Irreversible.",
     )
+    group.add_argument(
+        "--purge-datasets",
+        action="store_true",
+        dest="purge_datasets",
+        help="delete every DATASET and the experiments under it - the "
+        "golden cases `make eval-upload` puts there. A different resource "
+        "from a project, so `--purge` does not reach them. Irreversible, "
+        "and re-uploadable from evaluation/.",
+    )
     return built
 
 
@@ -281,11 +324,15 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.configure("telemetry-projects")
 
     with _client() as client:
-        projects = held(client)
-        for line in report(projects):
+        # Only when a project is being read or taken: `held` costs one
+        # request per project, and the dataset flag touches none of them.
+        projects = [] if args.purge_datasets else held(client)
+        for line in report(projects) if not args.purge_datasets else ():
             log.info("%s", line)
         if args.prune or args.purge:
             log.info("deleted %d project(s)", prune(client, projects, args.purge))
+        if args.purge_datasets:
+            log.info("deleted %d dataset(s)", purge_datasets(client))
     return 0
 
 
