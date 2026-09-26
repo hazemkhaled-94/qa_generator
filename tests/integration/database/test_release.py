@@ -217,6 +217,7 @@ def _settings(**overrides):
             "elsewhere_passages": 0,
             "long_answer_chars": 60,
             "duplicate_cosine": 0.93,
+            "duplicate_floor": 0.75,
             "release_size": 0,
             "release_unanswerable": 0.1,
             "release_difficulty": BANDS,

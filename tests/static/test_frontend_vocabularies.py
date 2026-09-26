@@ -34,6 +34,21 @@ DICT = "_GATES"
 #: The phase each gate names, which the checker runs it in.
 PHASES = ROOT / "backend/question_generation/types.py"
 
+#: Where the views live, and the every-page explainer content in each.
+VIEWS = ROOT / "frontend/views"
+
+#: Every page carrying an explainer, by the module it draws a service for.
+#: A page absent from here draws none, which `test_views.py` allows and
+#: this file therefore cannot check.
+EXPLAINED = (
+    "documents",
+    "passages",
+    "facts",
+    "topics",
+    "questions",
+    "assessment",
+)
+
 
 def _bound(path: Path, name: str) -> ast.expr:
     """The value of one module-level assignment."""
@@ -56,14 +71,22 @@ def _argument(call: ast.expr, position: int) -> str | None:
 
 
 def _keys(path: Path, name: str) -> list[str]:
-    """The code each gate is rejected under, in the order the page lists them.
+    """The code each check is rejected under, in the order the page lists them.
 
-    Read off a tuple of `explain.Gate(...)` calls rather than a dict, which
-    is what the page held until each gate gained the phase it runs in and
-    what it costs. The code is still the first thing declared.
+    Two shapes, because the two pages hold two. Questions binds a tuple of
+    `explain.Gate(...)` calls, where the code is the first argument;
+    Facts binds a dict keyed by the code. Both are read here rather than
+    normalised in the pages, because what each holds beside the code
+    differs and neither shape is wrong.
     """
     listed = _bound(path, name)
-    assert isinstance(listed, ast.Tuple), f"{name} is not a tuple literal"
+    if isinstance(listed, ast.Dict):
+        return [
+            key.value
+            for key in listed.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        ]
+    assert isinstance(listed, ast.Tuple), f"{name} is neither a dict nor a tuple"
     found = [_argument(one, 0) for one in listed.elts]
     assert all(one is not None for one in found), (
         f"{name} holds an entry whose code is not a string literal"
@@ -129,4 +152,90 @@ def test_every_phase_a_gate_names_is_one_the_checker_runs() -> None:
     assert named <= known, (
         f"the page puts a gate in {sorted(named - known)}, which is not a "
         f"phase the checker runs"
+    )
+
+
+# ── What every page's explainer claims ────────────────────────────────────
+
+
+def _steps(name: str) -> list[ast.Call]:
+    """The `explain.Step(...)` calls one view binds to `_STEPS`."""
+    listed = _bound(VIEWS / f"{name}.py", "_STEPS")
+    assert isinstance(listed, ast.Tuple), f"{name}: _STEPS is not a tuple literal"
+    return [one for one in listed.elts if isinstance(one, ast.Call)]
+
+
+def _strings(call: ast.Call, position: int) -> list[str]:
+    """The string literals of one positional tuple argument."""
+    if len(call.args) <= position:
+        return []
+    given = call.args[position]
+    if not isinstance(given, ast.Tuple):
+        return []
+    return [
+        one.value
+        for one in given.elts
+        if isinstance(one, ast.Constant) and isinstance(one.value, str)
+    ]
+
+
+@pytest.mark.parametrize("name", EXPLAINED)
+def test_every_setting_a_step_names_is_one_the_catalogue_describes(name: str) -> None:
+    """A step naming a setting nothing reads is a page inventing a dial.
+
+    The explainer tells a reader which settings change what a step does, so
+    a name that has gone stale sends them to a control that is not there.
+    The Topics page carried this check alone; every page names settings now.
+    """
+    from settings.catalog import BY_NAME
+
+    named = {one for call in _steps(name) for one in _strings(call, 3)}
+    unknown = named - set(BY_NAME)
+
+    assert not unknown, (
+        f"{name} names settings the catalogue does not describe: {sorted(unknown)}"
+    )
+
+
+@pytest.mark.parametrize("name", EXPLAINED)
+def test_every_module_a_step_names_is_one_that_exists(name: str) -> None:
+    """A step pointing at a module nobody can open is worse than none.
+
+    Matched by filename anywhere under `backend/`, because a page says
+    `service.py` rather than the package path a reader would have to know
+    already.
+    """
+    named = {one for call in _steps(name) for one in _strings(call, 2)}
+    paths = [
+        str(one.relative_to(ROOT / "backend"))
+        for one in (ROOT / "backend").rglob("*.py")
+    ]
+    # By suffix, so `service.py` matches and `pipelines/pdf.py` does too:
+    # a page names the module a reader would open, not the package path
+    # they would have to know already to find it.
+    missing = {
+        one
+        for one in named
+        if not any(path == one or path.endswith(f"/{one}") for path in paths)
+    }
+
+    assert not missing, f"{name} names modules that do not exist: {sorted(missing)}"
+
+
+def test_the_facts_page_lists_exactly_the_codes_a_fact_can_be_rejected_under() -> None:
+    """The Questions guarantee, for the page that had none.
+
+    It had drifted: `over_cap` and `duplicate` were in the enum and on
+    nothing in the UI, and `duplicate` is the commonest rejection there is
+    — 2,292 of 3,098 on one corpus, so three quarters of the refusals were
+    unexplained by a panel claiming to list every check.
+    """
+    from database.qa_generator import Rejection
+
+    listed = set(_keys(VIEWS / "facts.py", "_CHECKS"))
+    held = {str(one) for one in Rejection}
+
+    assert listed == held, (
+        f"the Facts page lists {sorted(listed - held)} that no fact can be "
+        f"rejected under, and is missing {sorted(held - listed)} that one can"
     )

@@ -63,3 +63,27 @@ def test_an_unknown_legacy_gate_is_read_as_the_common_direction() -> None:
     )
 
     assert rebuilt.high_is_safe is True
+
+
+def test_the_command_reads_both_floors_from_the_settings(monkeypatch) -> None:
+    """The entry point's whole job: two settings, one call, a reported total.
+
+    Stubbed at `main`, because what the command contributes is reading the
+    right two settings and reporting what came back - the write itself is
+    `tests/integration/database/test_recalibration_store.py`'s.
+    """
+    from stages import recalibrate_run
+
+    monkeypatch.setenv("QUESTIONS_DUPLICATE_FLOOR", "0.75")
+    monkeypatch.setenv("EXTRACTION_DUPLICATE_FLOOR", "0.70")
+    asked: dict[str, float] = {}
+
+    def recorded(questions_floor: float, facts_floor: float) -> int:
+        """Stands in for the recalibration, keeping what it was asked."""
+        asked.update(questions=questions_floor, facts=facts_floor)
+        return 7
+
+    monkeypatch.setattr(recalibrate_run, "main", recorded)
+
+    assert recalibrate_run.run() == 0
+    assert asked == {"questions": 0.75, "facts": 0.70}

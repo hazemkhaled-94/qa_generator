@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import streamlit as st
 
@@ -130,9 +131,8 @@ def panel(service: Service, label: str = "How this works") -> None:
     """
     with st.expander(label):
         st.caption(service.what)
-        steps, gates, numbers = st.tabs(
-            ["What it does", f"Gates · {len(service.gates)}", "The numbers"]
-        )
+        counted = f"Gates · {len(service.gates)}" if service.gates else "Gates"
+        steps, gates, numbers = st.tabs(["What it does", counted, "The numbers"])
         with steps:
             _steps(service.steps)
         with gates:
@@ -170,7 +170,17 @@ def _gates(gates: Sequence[Gate]) -> None:
     The phase is carried beside the code because they are two names for
     one thing seen from two sides, and a page showing only one of them
     leaves a reader unable to match a trace to a rejection.
+
+    A service with no gates says so. An empty table would read as a table
+    that failed to load, where "nothing here refuses a row" is a fact worth
+    stating - it is the whole of what the evaluation phase is.
     """
+    if not gates:
+        st.caption(
+            "This service has no gates: nothing it does refuses a row or "
+            "changes a verdict another stage reached."
+        )
+        return
     st.caption(
         "Applied cheapest first, and the first one to refuse stops the rest. "
         "A gate after the one that refused a question never read it, which is "
@@ -201,8 +211,127 @@ def _gates(gates: Sequence[Gate]) -> None:
     )
 
 
+def confidence(row: Mapping[str, Any], readings: Mapping[str, Reading]) -> None:
+    """What the measuring gates read on one row, and how close the weakest came.
+
+    A verdict says a gate let this through; these say by how much. A row
+    0.92 from an accepted twin and one 0.01 from it are both `accepted`
+    against the same ceiling, and this panel is the difference.
+
+    Absent where nothing measured anything - an opinion has no number
+    behind it and a structural rule has no scale - and saying so is better
+    than a row of dashes nobody can read a meaning into.
+
+    Shared by every page whose rows carry `gate_scores`, so a fact and a
+    question are read the same way.
+    """
+    scores: list[dict] = list(row.get("gate_scores") or [])
+    if not scores:
+        st.caption(
+            "No gate that read this measured anything, so it carries no "
+            "confidence. That is not a low one — most gates are rules, "
+            "which either fire or do not, and opinions, which have no scale "
+            "behind them."
+        )
+        return
+
+    st.caption(_weakest(row, scores, readings))
+    st.dataframe(
+        [
+            {
+                "Gate": one["gate"],
+                "Reads": readings[one["gate"]].reads
+                if one["gate"] in readings
+                else "—",
+                "Measured": one["value"],
+                "Refuses at": one["threshold"],
+                "Safe when": direction(one),
+                "Margin": one["margin"],
+            }
+            for one in scores
+        ],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Reads": st.column_config.TextColumn(
+                width="large", help="What the measured number is, on this gate's scale."
+            ),
+            "Measured": st.column_config.NumberColumn(
+                format="%.3f", help="What this gate read for this row."
+            ),
+            "Refuses at": st.column_config.NumberColumn(
+                format="%.2f",
+                help="The value at which the verdict changes. Whether crossing "
+                "it means going above or below is the next column.",
+            ),
+            "Margin": st.column_config.ProgressColumn(
+                "Margin",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="How much room the reading had, as a share of the room "
+                "its scale offers. 1.00 is as far from refusal as that gate "
+                "goes; 0.00 is on the line. Comparable between gates, which "
+                "the raw numbers are not.",
+            ),
+        },
+    )
+    if any("safe_end" not in one for one in scores):
+        st.caption(
+            ":orange[This row was scored before the margins were calibrated,] "
+            "so its confidence is measured against room its scale never had "
+            "and reads lower than it should. `make confidence-recalibrate` "
+            "takes every stored margin again."
+        )
+
+
+def _weakest(
+    row: Mapping[str, Any],
+    scores: list[dict],
+    readings: Mapping[str, Reading],
+) -> str:
+    """The confidence as a sentence, naming what is weakest about the row.
+
+    The number alone is the thing nobody could read: it is the SMALLEST of
+    several readings on different scales, so which gate it came from is
+    most of what it says.
+    """
+    held = row.get("confidence")
+    if held is None:
+        return "Nothing this row was measured against carries a margin."
+
+    worst = min(scores, key=lambda one: one["margin"])
+    reading = readings.get(worst["gate"])
+    comfort = "comfortable" if held >= 0.5 else "close" if held < 0.2 else "adequate"
+    said = (
+        f"**Confidence {held:.2f} — {comfort}.** The weakest of the "
+        f"{len(scores)} reading(s) below is `{worst['gate']}`, which measured "
+        f"{worst['value']:.3f} against a threshold of {worst['threshold']:.2f} "
+        f"({direction(worst)})."
+    )
+    if reading:
+        said += f" {reading.reads}"
+    return (
+        f"{said} A margin, not a probability — it is the smallest reading of "
+        f"the several below, which sit on different scales and cannot be "
+        f"averaged."
+    )
+
+
 def _readings(readings: Mapping[str, Reading]) -> None:
-    """What each measuring gate's number is, and which way it runs."""
+    """What each measuring gate's number is, and which way it runs.
+
+    Absent where nothing measures anything, which is most stages: a
+    citation resolves or it does not, and a conversion raises or it does
+    not. Neither carries a number to be close to a threshold on.
+    """
+    if not readings:
+        st.caption(
+            "Nothing in this service is a measurement, so no row it writes "
+            "carries a confidence. Its checks are rules, which either fire "
+            "or do not."
+        )
+        return
     st.dataframe(
         [
             {

@@ -4,11 +4,81 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, lineage, page, stage
+from lib import backend, catalog, configure, explain, lineage, page, stage
 
 #: The one stage this page runs. It queues over a document and replaces all
 #: of its passages at once, so a passage picked below is run by its document.
 _CHUNKING = stage.Queue("chunking", "Chunking", "documents", "chunked")
+
+#: What refuses a document here. One, because nothing in this stage judges
+#: quality: a passage is cut or it is not.
+_GATES = (
+    explain.Gate(
+        "no passages",
+        "cut",
+        "The document yielded at least one passage holding more than whitespace.",
+        "nothing",
+        "rule",
+    ),
+)
+
+#: The order this service works in, and what runs each step.
+_STEPS = (
+    explain.Step(
+        "Cut",
+        "Docling's chunker, sized by the tokenizer of the embedding model "
+        "rather than its own English default. It splits on the document's "
+        "structure first and only then merges or divides by token count, so "
+        "a passage keeps its heading trail.",
+        ("service.py",),
+        ("CHUNKING_MERGE_PEERS", "EMBEDDING_MODEL"),
+    ),
+    explain.Step(
+        "Number and count",
+        "Chunks holding only whitespace are dropped and the rest numbered "
+        "from 1 contiguously. Nothing is discarded on size: `oversized` is a "
+        "tripwire, because the chunker splits on the same budget it is "
+        "counted against, so anything above it means the split did not "
+        "happen.",
+        ("passages.py",),
+        ("EMBEDDING_MAX_TOKENS",),
+    ),
+    explain.Step(
+        "Read each chunk into a row",
+        "The stripped text every offset indexes, the heading trail, the "
+        "block type, one bounding box per page spanned, and the cell grid of "
+        "every table. The grid is kept separately because rendering a table "
+        "to Markdown loses the header flags, positions and spans.",
+        ("service.py",),
+        (),
+    ),
+    explain.Step(
+        "Read the linguistic surface",
+        "Each passage's language is detected on its own text, falling back "
+        "to the document's when the passage is too short to judge — per "
+        "passage, because a document carrying an English summary of a German "
+        "report holds both. Sentences are numbered and their offsets "
+        "recorded, and the content lemmas a topic model is fitted over are "
+        "read out.",
+        ("service.py",),
+        (),
+    ),
+)
+
+#: Everything this page can say about the service it runs.
+_SERVICE = explain.Service(
+    what=(
+        "Cuts the converted document into passages, and reads each one for "
+        "its language, the numbered units a fact may cite, and the "
+        "vocabulary a topic model is fitted over. **A citation is an index, "
+        "not a quote** — every sentence is numbered and its offsets "
+        "recorded, so there is no similarity threshold anywhere in this "
+        "stage. It reads the converted document, never the original file, so "
+        "re-chunking never re-parses."
+    ),
+    steps=_STEPS,
+    gates=_GATES,
+)
 
 #: The columns the search box can look in, by the heading each carries in
 #: the table below, mapped to the name /passages takes.
@@ -76,6 +146,7 @@ def view() -> None:
 
     with service, page.panel("Chunking"):
         stage.service(client, _CHUNKING)
+        explain.panel(_SERVICE, "How chunking works")
         configure.panel("chunking")
 
     with page.panel(f"Passages · {total:,}"):

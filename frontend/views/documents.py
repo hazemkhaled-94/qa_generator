@@ -12,11 +12,112 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, lineage, page, pipeline, stage
+from lib import backend, catalog, configure, explain, lineage, page, pipeline, stage
 
 #: The one stage this page runs. Chunking is the Passages page's and
 #: extraction is the Facts page's; neither can be reached from here.
 _PARSING = stage.Queue("parsing", "Parsing", "documents", "parsed")
+
+#: What refuses a document, by the failure the row carries. Not gates in
+#: the sense the later stages have them - nothing here judges quality - but
+#: they are what a `failed` row means, and the page lists them for the same
+#: reason: a refusal with no name cannot be looked up.
+_GATES = (
+    explain.Gate(
+        "unsupported type",
+        "dispatch",
+        "The format is one a pipeline here handles.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "scanned document",
+        "ocr check",
+        "The document carries text rather than being images of it.",
+        "nothing",
+        "measurement",
+    ),
+    explain.Gate(
+        "conversion failed",
+        "convert",
+        "The converter read it without raising, inside its timeout.",
+        "the conversion",
+        "rule",
+    ),
+    explain.Gate(
+        "empty document",
+        "read values",
+        "The conversion produced body text to read a title and language off.",
+        "nothing",
+        "rule",
+    ),
+)
+
+#: The order this service works in, and what runs each step.
+_STEPS = (
+    explain.Step(
+        "Dispatch on the media type",
+        "The pipeline that owns the format ingestion detected from the "
+        "leading bytes. A type nothing handles fails here, naming the types "
+        "that are handled.",
+        ("pipelines/__init__.py",),
+        (),
+    ),
+    explain.Step(
+        "Decide whether it is scanned",
+        "Characters per page against a floor, read from counts that already "
+        "exist. OCR is not implemented, so a scanned document is refused "
+        "here, where the reason is still known.",
+        ("service.py",),
+        ("PARSING_OCR_CHAR_THRESHOLD",),
+    ),
+    explain.Step(
+        "Convert",
+        "Docling, with heading hierarchy and table structure on and OCR off. "
+        "This is the expensive step — layout and table-structure models over "
+        "every page — which is why the stage runs in a worker off a queue.",
+        ("pipelines/pdf.py",),
+        ("PARSING_TIMEOUT_SECONDS",),
+    ),
+    explain.Step(
+        "Repair the text",
+        "Every string is rewritten before anything reads it: composed to "
+        "NFC, words the page broke across two lines rejoined, control and "
+        "zero-width characters dropped, every other kind of space folded. A "
+        "character a model cannot reproduce is one no quote of it can match.",
+        ("pipelines/pdf.py",),
+        (),
+    ),
+    explain.Step(
+        "Store the converted document",
+        "One JSON object in the `parsed` bucket, keyed by the source digest, "
+        "written BEFORE anything reads values out of it — so a bug in the "
+        "reading does not mean paying for the conversion twice. This is what "
+        "chunking reads, so re-chunking never re-parses.",
+        ("service.py",),
+        (),
+    ),
+    explain.Step(
+        "Read the values the row holds",
+        "The body rendered as text — table values included, running headers "
+        "and footers excluded — then the title, the language, and a hash of "
+        "the body with whitespace collapsed and case folded.",
+        ("analysis.py",),
+        (),
+    ),
+)
+
+#: Everything this page can say about the service it runs.
+_SERVICE = explain.Service(
+    what=(
+        "Turns the uploaded file into a structured document: headings in a "
+        "hierarchy, tables as cell grids, text in reading order. Nothing it "
+        "does starts the next stage — a re-parse leaves the old passages "
+        "standing until chunking is asked to run."
+    ),
+    steps=_STEPS,
+    gates=_GATES,
+)
 
 #: The column the search box looks in. One entry, because the backend
 #: searches filename, title and digest together.
@@ -81,6 +182,7 @@ def view() -> None:
 
     with page.panel("Parsing"):
         stage.service(client, _PARSING)
+        explain.panel(_SERVICE, "How parsing works")
         configure.panel("parsing")
 
     words, _ = catalog.search("documents", _FIELDS)

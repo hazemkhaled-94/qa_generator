@@ -752,7 +752,7 @@ def _detail(client, question: dict) -> None:
         if any(not source["validated"] for source in detail["sources"]):
             st.warning("A fact this question rests on no longer passes its checks.")
 
-        _confidence(question)
+        explain.confidence(question, _READINGS)
 
         if len(detail.get("thread") or []) > 1:
             st.caption("The thread this sits in")
@@ -777,122 +777,6 @@ def _detail(client, question: dict) -> None:
         _trace(question)
         _prompt(client, question)
         _verdict(client, question)
-
-
-def _confidence(question: dict) -> None:
-    """What the measuring gates read, and how close the weakest came.
-
-    A verdict says a gate let this through; these say by how much. A
-    question 0.92 from an accepted twin and one 0.01 from it are both
-    `accepted` against a 0.93 ceiling, and this panel is the difference.
-
-    Absent where nothing measured anything - an opinion has no number
-    behind it and a structural rule has no scale - and saying so is better
-    than a row of dashes nobody can read a meaning into.
-    """
-    scores = question.get("gate_scores") or []
-    if not scores:
-        st.caption(
-            "No gate that read this question measured anything, so it carries "
-            "no confidence. That is not a low one. Only five of the gates take "
-            "a number at all — the rest are rules, which either fire or do "
-            "not, and opinions, which have no scale behind them."
-        )
-        return
-
-    st.caption(_weakest(question, scores))
-    st.dataframe(
-        [
-            {
-                "Gate": one["gate"],
-                "Reads": _READINGS[one["gate"]].reads
-                if one["gate"] in _READINGS
-                else "—",
-                "Measured": one["value"],
-                "Refuses at": one["threshold"],
-                "Safe when": explain.direction(one),
-                "Margin": one["margin"],
-            }
-            for one in scores
-        ],
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Reads": st.column_config.TextColumn(
-                width="large", help="What the measured number is, on this gate's scale."
-            ),
-            "Measured": st.column_config.NumberColumn(
-                format="%.3f", help="What this gate read for this question."
-            ),
-            "Refuses at": st.column_config.NumberColumn(
-                format="%.2f",
-                help="The value at which the verdict changes. Whether crossing "
-                "it means going above or below is the next column.",
-            ),
-            "Margin": st.column_config.ProgressColumn(
-                "Margin",
-                min_value=0.0,
-                max_value=1.0,
-                format="%.2f",
-                help="How much room the reading had, as a share of the room "
-                "its scale offers. 1.00 is as far from refusal as that gate "
-                "goes; 0.00 is on the line. Comparable between gates, which "
-                "the raw numbers are not.",
-            ),
-        },
-    )
-    if _uncalibrated(scores):
-        st.caption(
-            ":orange[This question was scored before the margins were "
-            "calibrated,] so its confidence is measured against room its "
-            "scale never had and reads lower than it should. "
-            "`make confidence-recalibrate` takes every stored margin again."
-        )
-
-
-def _weakest(question: dict, scores: list[dict]) -> str:
-    """The confidence as a sentence, naming what is weakest about the row.
-
-    The number alone is the thing nobody could read: it is the SMALLEST of
-    several readings on different scales, so which gate it came from is
-    most of what it says.
-    """
-    confidence = question.get("confidence")
-    if confidence is None:
-        return "Nothing this question was measured against carries a margin."
-
-    worst = min(scores, key=lambda one: one["margin"])
-    reading = _READINGS.get(worst["gate"])
-    comfort = (
-        "comfortable"
-        if confidence >= 0.5
-        else "close"
-        if confidence < 0.2
-        else "adequate"
-    )
-    said = (
-        f"**Confidence {confidence:.2f} — {comfort}.** The weakest of the "
-        f"{len(scores)} reading(s) below is `{worst['gate']}`, which measured "
-        f"{worst['value']:.3f} against a threshold of {worst['threshold']:.2f} "
-        f"({explain.direction(worst)})."
-    )
-    if reading:
-        said += f" {reading.reads}"
-    return (
-        f"{said} A margin, not a probability — it is the smallest reading of "
-        f"the several below, which sit on different scales and cannot be "
-        f"averaged."
-    )
-
-
-def _uncalibrated(scores: list[dict]) -> bool:
-    """Whether these readings predate the margins being calibrated.
-
-    A row written before it carries no `safe_end`, and its similarity
-    margins were taken as a share of the whole unit interval rather than of
-    the stretch its scale reaches.
-    """
-    return any("safe_end" not in one for one in scores)
 
 
 def _trace(question: dict) -> None:

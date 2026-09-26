@@ -7,11 +7,112 @@ from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
-from lib import backend, catalog, configure, lineage, page, stage
+from lib import backend, catalog, configure, explain, lineage, page, stage
 
 #: The one stage this page runs. A fit is all-or-nothing over one
 #: vocabulary, so it has no per-topic form.
 _TOPICS = stage.Queue("topics", "Topic modelling", "fits", "modelled")
+
+#: What fails a fit. Nothing here judges one topic - a fit succeeds whole or
+#: not at all - so these are raised rather than fitted through.
+_GATES = (
+    explain.Gate(
+        "no language",
+        "list languages",
+        "Some passage carries a language to fit a model for.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "empty vocabulary",
+        "filter",
+        "Some term survives the rare-and-common filter.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "every term is uninformative",
+        "filter",
+        "Some surviving term has a non-zero idf, without which every topic "
+        "would come out NaN.",
+        "nothing",
+        "rule",
+    ),
+)
+
+#: The order this service works in, and what runs each step.
+_STEPS = (
+    explain.Step(
+        "Claim the request",
+        "The oldest outstanding fit. A fit is always the whole corpus, so "
+        "there is no per-topic form of any of this.",
+        ("repository.py",),
+        (),
+    ),
+    explain.Step(
+        "List the languages",
+        "One model per language, because a mixed corpus fitted as one model "
+        "spends its topics telling the languages apart — `delivery` and "
+        "`Lieferung` are the same subject and share no characters. The cost "
+        "is that topic numbers only mean something within a language.",
+        ("service.py",),
+        (),
+    ),
+    explain.Step(
+        "Build and filter the vocabulary",
+        "Read from the lemmas chunking already stored, not recomputed. Terms "
+        "in too few passages or too many of them distinguish nothing and are "
+        "dropped.",
+        ("service.py",),
+        ("TOPIC_NO_BELOW", "TOPIC_NO_ABOVE"),
+    ),
+    explain.Step(
+        "Fit",
+        "Non-negative matrix factorisation over the passage-by-term matrix, "
+        "weighted by tf-idf. Every component is a topic. Nothing is "
+        "pretrained and nothing is embedded, so no word list, ontology or "
+        "domain model has to be supplied.",
+        ("service.py",),
+        ("TOPIC_NUM_TOPICS", "TOPIC_PASSES", "TOPIC_RANDOM_STATE"),
+    ),
+    explain.Step(
+        "Read the topics out",
+        "The highest-weighted terms of each component. This is also the only "
+        "signature a label is matched on across a refit.",
+        ("service.py",),
+        ("TOPIC_TOP_TERMS",),
+    ),
+    explain.Step(
+        "Score every passage",
+        "Each passage is scored against the fitted model, keeping every "
+        "membership above the floor. A passage above none of them is "
+        "unplaced, which is reported rather than hidden.",
+        ("service.py",),
+        ("TOPIC_MIN_WEIGHT",),
+    ),
+    explain.Step(
+        "Name and carry the labels over",
+        "A served model names each topic from its terms. Labels from the "
+        "previous fit are carried across where the top terms still overlap, "
+        "each used at most once, so a refit does not rename the corpus.",
+        ("service.py",),
+        ("TOPIC_MODEL", "TOPIC_LABEL_MIN_FACT_SHARE"),
+    ),
+)
+
+#: Everything this page can say about the service it runs.
+_SERVICE = explain.Service(
+    what=(
+        "Finds what the corpus is about: the groups of words that tend to "
+        "appear together, one model per language, over the corpus's own "
+        "vocabulary. **A fit is always the whole corpus** — the components "
+        "are estimated jointly, so adding a document makes all of them "
+        "stale, and one ask replaces the whole model. That is why this stage "
+        "has no per-item controls and no Start."
+    ),
+    steps=_STEPS,
+    gates=_GATES,
+)
 
 #: Room for the pyLDAvis figure, which is drawn at a fixed size.
 _MAP_HEIGHT = 850
@@ -37,6 +138,7 @@ def view() -> None:
 
     with page.panel("Topic modelling"):
         stage.fit(client, _TOPICS)
+        explain.panel(_SERVICE, "How topic modelling works")
         configure.panel("topics")
 
     words, field = catalog.search("topics", _FIELDS)

@@ -12,10 +12,67 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib import backend, catalog, configure, page, stage
+from lib import backend, catalog, configure, explain, page, stage
 
 #: The one stage this page runs.
 _ASSESSMENT = stage.Queue("assessment", "Assessment", "artifacts", "assessed")
+
+#: The order this phase works in, and what runs each step.
+_STEPS = (
+    explain.Step(
+        "Claim what has not been judged",
+        "Facts, topics and questions alike. An unanswerable question is "
+        "skipped: it has no answer for a judge to check, so asking would "
+        "score the absence of one.",
+        ("queue.py",),
+        (),
+    ),
+    explain.Step(
+        "Ask one judgement at a time",
+        "Three calls for a fact, two for a topic, six for a question — one "
+        "per metric rather than one call answering several, because a call "
+        "asked for five things answers the small ones in whatever language "
+        "the hard one was thinking in.",
+        ("service.py", "prompts.py"),
+        ("ASSESSMENT_JUDGE_MODEL", "ASSESSMENT_KINDS"),
+    ),
+    explain.Step(
+        "Record the verdict and the reasoning",
+        "Both halves. The label is what the figures group on; the "
+        "explanation is the half nothing else in this application stores, "
+        "and the search box above looks in it.",
+        ("repository.py",),
+        (),
+    ),
+    explain.Step(
+        "Report the disagreements",
+        "The artefacts the pipeline KEPT and the judge refused. That number "
+        "is what this phase exists to produce — everything else here is "
+        "context for it.",
+        ("service.py",),
+        (),
+    ),
+)
+
+#: Everything this page can say about the phase it runs. It has no gates,
+#: and saying so is the point: `Service.gates` is empty and the fold's gate
+#: tab says why rather than showing an empty table.
+_SERVICE = explain.Service(
+    what=(
+        "A second opinion on work the pipeline already decided about, held "
+        "by a model that wrote none of it.\n\n"
+        "**This phase is not a gate and cannot become one.** It writes "
+        "`assessments.approved`, which no stage reads; whether a fact is "
+        "valid stays the checker's and whether a question is accepted stays "
+        "the gates'. That is measured, not cautious: over nineteen labelled "
+        "cases a served model answered a phrasing judgement 7/7 in English "
+        "and 6/12 in German, which is chance, and half this corpus is "
+        "German. A phase that could reject rows would have thrown away good "
+        "German questions on the strength of a coin.\n\n"
+        "What a judge is good for is the **disagreement**, at corpus scale."
+    ),
+    steps=_STEPS,
+)
 
 #: The columns the search box can look in, by the heading each carries,
 #: mapped to the name /assessment takes. The explanations are the half
@@ -271,6 +328,7 @@ def view() -> None:
             f"{plan['judge_model'] or 'LLM_MODEL, which is marking its own work'}"
             f" · template version {plan['prompt_version']}"
         )
+        explain.panel(_SERVICE, "How the evaluation phase works")
         configure.panel("assessment")
 
     with page.panel(f"Assessments · {total:,}"):
