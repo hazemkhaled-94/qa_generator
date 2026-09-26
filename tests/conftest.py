@@ -96,7 +96,7 @@ def pytest_sessionstart() -> None:
     """
     seen: dict[str, Path] = {}
     clashing: list[str] = []
-    for found in sorted(ROOT.rglob("test_*.py")):
+    for found in sorted((ROOT / "tests").rglob("test_*.py")):
         if "__pycache__" in found.parts:
             continue
         first = seen.setdefault(found.name, found)
