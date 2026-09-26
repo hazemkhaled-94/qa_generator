@@ -46,7 +46,7 @@ Asking azure/gpt-5.4 one question...
 | Target | Does |
 |---|---|
 | `make all` | Bring the stack up, then take the corpus end to end |
-| `make corpus` | Every stage in order, stopping at the first failure. Incremental |
+| `make corpus` | Every stage in order, the judge last, stopping at the first failure. Incremental |
 | `make pipeline-status` | Where the corpus has got to, every stage in one call |
 | `make services` | Every container, whether it is listening, and where to open it |
 | `make open` | The same, and open the application |
@@ -100,6 +100,7 @@ run compose has no equivalent of.
 | `make logs-shipper` | The log shipper, when Grafana shows nothing |
 | `make logs-retention` | Not a follow: how long Elasticsearch keeps them. **Run once** |
 | `make logs-prune` | Not a follow: delete the files on the `logs` volume |
+| `make logs-wipe` | Not a follow: delete every log line, the `qa-logs` data stream included. What `make wipe` runs |
 
 ```bash
 make logs-retention LOGS_RETENTION_DAYS=90
@@ -302,10 +303,22 @@ Documents are ingestion's, not a stage's. **All of these are irreversible.**
 | `make documents` | List every document with its parse state |
 | `make delete SHA=<sha256>` | Delete a document and everything derived from it |
 | `make delete-derived SHA=<sha256>` | Delete only its passages and facts |
-| `make wipe` | Every document, then the topics. Waits 5 seconds first |
+| `make wipe` | Every document, the topics, and the four services that describe them. Waits 5 seconds first |
 
 `wipe` runs both deletions because deleting every document leaves the topics
 standing. It also drops the upload history, which a single deletion keeps.
+
+It then takes the Phoenix projects, the Argilla datasets and the logs, for
+the reason the corpus went: a trace of a run over documents that are gone, a
+reviewer asked about facts that no longer exist and a log line about a
+passage nothing holds all describe a corpus nobody can open. Leaving them is
+how a fresh run starts against four services still full of the last one.
+
+**The archive is kept.** Every deletion here is the first of two - the
+triggers copy each row into `archived_rows` and the removal paths move each
+object into the `archive` bucket - so a wipe that purged it would leave
+nothing to recover from. [`make archive-purge`](#the-archive) is the second
+decision and stays one.
 
 ## The archive
 
@@ -358,6 +371,7 @@ a trigger, a data backfill, or anything ordered.
 | `make review-push-topics` / `review-pull-topics` | The same, for topic labels |
 | `make review-push-questions` / `review-pull-questions` | The same, for questions |
 | `make review-status` | How much has been looked at |
+| `make review-delete` | Delete every dataset in the workspace. **Irreversible** - pull first. What `make wipe` runs |
 | `make review-all` | Every artefact of every kind, not a sample |
 | `make eval-upload` | Put the golden cases in Phoenix |
 | `make eval-score` | Score the served model against them, and record it |
@@ -379,6 +393,7 @@ make review-push-questions IDS=12,34,56
 |---|---|
 | `make phoenix-projects` | What Phoenix holds, changing nothing |
 | `make phoenix-prune` | Delete the projects in which no work happened. **Irreversible**, and it says what it is taking before it takes it |
+| `make phoenix-purge` | Delete **every** project, whatever it holds. What `make wipe` runs, and what `prune` will not do |
 
 A Phoenix project is created by whatever sends the first span to it and
 removed by nothing. While a project meant a run somebody asked for that was

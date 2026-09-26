@@ -23,7 +23,7 @@ from question_generation.catalog import QuestionCatalog
 from review import datasets, judged
 from review.config import Settings
 from review.records import ReviewRepository
-from review.service import Catalogs, pull, push
+from review.service import Catalogs, drop, pull, push
 from topic_modelling.repository import TopicCatalog
 
 log = logging.getLogger(__name__)
@@ -52,6 +52,13 @@ def parser() -> argparse.ArgumentParser:
     )
     group.add_argument(
         "--status", action="store_true", help="report how much has been reviewed"
+    )
+    group.add_argument(
+        "--delete",
+        action="store_true",
+        help="delete every dataset in the workspace. What `make wipe` runs "
+        "once the corpus is gone. Irreversible: pull first if a verdict "
+        "nobody has brought back still matters.",
     )
     built.add_argument(
         "--all",
@@ -110,6 +117,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     settings = Settings.load()
+
+    # Before the catalogs, which read a database this does not need: a
+    # wipe deletes the corpus first, and asking Argilla to forget it must
+    # not depend on the rows still being there.
+    if args.delete:
+        log.info("deleted %d dataset(s)", drop(settings))
+        return 0
+
     catalogs = Catalogs(
         facts=repository,
         questions=QuestionCatalog(),

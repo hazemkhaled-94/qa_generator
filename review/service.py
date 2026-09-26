@@ -197,6 +197,34 @@ def push(
     return len(records)
 
 
+def drop(settings: Settings) -> int:
+    """Deletes every dataset in the workspace, and says how many went.
+
+    The opposite decision from :func:`_dataset`, which reuses what it finds
+    precisely so a push never throws away an answer nobody has pulled. This
+    throws them away on purpose: `make wipe` deletes the corpus, and a
+    dataset of facts that no longer exist is a reviewer being asked about
+    rows nothing can apply their verdict to.
+
+    Pull before wiping if the verdicts matter. Nothing here warns about
+    that, because `wipe` already says what it is about to do and waits.
+
+    Returns:
+        How many datasets were deleted.
+    """
+    client = connect(settings)
+    deleted = 0
+    for name in datasets.NAMES:
+        held = datasets.dataset_name(name)
+        found = client.datasets(name=held, workspace=settings.workspace)
+        if found is None:
+            continue
+        log.info("deleting dataset %s", held)
+        found.delete()
+        deleted += 1
+    return deleted
+
+
 def pull(name: str, settings: Settings, catalogs: Catalogs) -> int:
     """Brings submitted verdicts back into the database.
 

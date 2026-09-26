@@ -393,6 +393,24 @@ logs-prune:
 	   find logs -type f -mtime +$(LOGS_KEEP_DAYS) -print -delete 2>/dev/null; \
 	 } | wc -l | xargs printf '%s file(s) deleted.\n'
 
+# Every log line, in both places one lives: the `qa-logs` data stream that
+# Grafana reads, and the JSON files Filebeat ships from. What `make wipe`
+# runs - a log trail of a corpus that is gone describes nothing.
+#
+# Through the container: elasticsearch publishes no port, and Argilla
+# reaches it over TLS with a certificate the host does not have. Filebeat
+# recreates the stream on its next line, so nothing needs restarting.
+#
+# `|| true` on the delete: a stream that is not there yet is a deployment
+# that has logged nothing, not a failure.
+logs-wipe:
+	@$(LOADENV) && $(COMPOSE) exec -T elasticsearch \
+	   curl -sS -k -u "elastic:$$ELASTICSEARCH_PASSWORD" \
+	   -XDELETE "https://localhost:9200/_data_stream/qa-logs" >/dev/null || true
+	@$(COMPOSE) exec -T api sh -c 'find /var/log/qa -type f -delete' || true
+	@find logs -type f -delete 2>/dev/null || true
+	@echo "log stream and files deleted."
+
 # ── Database ───────────────────────────────────────────────────────────────
 #
 # Alembic owns the schema. The models say what the tables should be; a
@@ -1016,11 +1034,29 @@ delete:
 # The upload history goes with the documents here, though a single deletion
 # keeps it: an empty corpus reporting nine upload attempts is a status panel
 # describing documents nothing has.
+# Everything the corpus left behind goes with it, and that is the point:
+# once the documents are gone, a trace of the run that read them, a review
+# dataset of facts that no longer exist and a log line about a passage
+# nothing holds are all describing a corpus nobody can look at. Leaving
+# them is how a fresh run starts against four services still full of the
+# last one.
+#
+# **The archive is the exception, and deliberately.** Every deletion here
+# is the first of two: the triggers copy each row into `archived_rows` and
+# the removal paths move each object into the `archive` bucket. That is
+# what makes this recoverable at all, so a wipe that purged it would leave
+# nothing. `make archive-purge ALL=1` is the second decision, and stays
+# one.
 wipe:
-	@echo "WARNING: this deletes every document, topic, fact and question. Ctrl-C within 5s to abort."
+	@echo "WARNING: this deletes every document, topic, fact and question,"
+	@echo "and with them the Phoenix traces, the Argilla datasets and the logs."
+	@echo "The archive is kept; see make archive-purge. Ctrl-C within 5s to abort."
 	@sleep 5
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m ingestion.run --delete-all
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m topic_modelling.run --delete
+	$(MAKE) phoenix-purge
+	$(MAKE) review-delete
+	$(MAKE) logs-wipe
 
 # Delete only what the pipeline built: passages and facts. The document and
 # its file stay, and chunking goes back to `new`, so the next run rebuilds
@@ -1350,6 +1386,12 @@ phoenix-projects:
 phoenix-prune:
 	$(LOADENV) && poetry run python -m telemetry.projects --prune
 
+# Every project, whatever it holds. What `make wipe` runs: a trace of a run
+# over documents that no longer exist is not worth keeping, and `prune`
+# would leave all of them - they each recorded real work.
+phoenix-purge:
+	$(LOADENV) && poetry run python -m telemetry.projects --purge
+
 # ── Review ─────────────────────────────────────────────────────────────────
 #
 # Human review of what the models decided, through Argilla. Three things
@@ -1372,6 +1414,12 @@ REVIEW = $(call WITH,review.env) && \
 # What is in Argilla now, and how much of it has been submitted.
 review-status:
 	$(REVIEW) --status
+
+# Delete every dataset in the workspace. What `make wipe` runs, and the one
+# review target that throws an answer away: a push reuses the dataset it
+# finds precisely so it never does. Pull first if a verdict still matters.
+review-delete:
+	$(REVIEW) --delete
 
 # Push a sample of facts, spread over the checker's verdicts.
 review-push-facts:
@@ -1447,6 +1495,11 @@ all: up corpus
 #
 # One `$(MAKE)` per line rather than a prerequisite list: prerequisites are
 # ordered only while nothing runs in parallel, and this order is the point.
+#
+# The judge last, and unconditionally: `assessment.run` reads
+# ASSESSMENT_ENABLED itself, says so and exits 0 when it is off. A `case`
+# on the flag here would be a second reader of it, and the two would
+# eventually disagree about which spellings mean yes.
 corpus:
 	$(MAKE) parse-start     && $(MAKE) parse
 	$(MAKE) chunk-start     && $(MAKE) chunk
@@ -1454,6 +1507,7 @@ corpus:
 	$(MAKE) topics-discover && $(MAKE) topics
 	$(MAKE) questions-start && $(MAKE) questions
 	$(MAKE) questions-balance
+	$(MAKE) assess-start    && $(MAKE) assess
 
 # Every container, whether it is listening, and where to open it.
 #

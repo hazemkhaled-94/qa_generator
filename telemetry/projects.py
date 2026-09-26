@@ -208,20 +208,28 @@ def report(projects: list[Project]) -> list[str]:
     ]
 
 
-def prune(client, projects: list[Project]) -> int:
-    """Deletes the projects holding no work, and says how many went.
+def prune(client, projects: list[Project], everything: bool = False) -> int:
+    """Deletes projects, and says how many went.
+
+    Args:
+        client: The Phoenix client.
+        projects: Everything Phoenix holds.
+        everything: Take all of them rather than only the spent ones. What
+            `make wipe` passes: a corpus that is gone has no traces worth
+            keeping, and the spent-only rule would leave every project that
+            recorded a real run - which after a wipe is all of them.
 
     Returns:
         How many were deleted.
     """
-    taking = spent(projects)
+    taking = projects if everything else spent(projects)
     if not taking:
         return 0
     log.warning(
-        "deleting %d project(s) holding %d span(s) between them, all of them "
-        "model calls no run followed",
+        "deleting %d project(s) holding %d span(s) between them%s",
         len(taking),
         sum(one.spans for one in taking),
+        "" if everything else ", all of them model calls no run followed",
     )
     deleted = 0
     for one in taking:
@@ -252,6 +260,12 @@ def parser() -> argparse.ArgumentParser:
         help="delete the projects in which nothing but a model call ever "
         "happened. Irreversible, and it says what it is taking first.",
     )
+    group.add_argument(
+        "--purge",
+        action="store_true",
+        help="delete EVERY project, whatever it holds. What `make wipe` "
+        "runs: traces of a corpus that no longer exists. Irreversible.",
+    )
     return built
 
 
@@ -270,8 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         projects = held(client)
         for line in report(projects):
             log.info("%s", line)
-        if args.prune:
-            log.info("deleted %d project(s)", prune(client, projects))
+        if args.prune or args.purge:
+            log.info("deleted %d project(s)", prune(client, projects, args.purge))
     return 0
 
 

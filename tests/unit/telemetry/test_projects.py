@@ -127,8 +127,50 @@ def test_pruning_takes_each_spent_project_once() -> None:
     assert client.deleted == ["/v1/projects/7-parsing-a", "/v1/projects/7-parsing-b"]
 
 
-@pytest.mark.parametrize("action", ["--list", "--prune"])
-def test_the_two_actions_are_exclusive_and_one_is_required(action: str) -> None:
+def test_purging_takes_the_projects_that_hold_work_too() -> None:
+    """Which is the whole difference from pruning.
+
+    `make wipe` deletes the corpus, and a trace of a run over documents
+    that no longer exist is not worth keeping. The spent-only rule would
+    leave every project that recorded a real run, which after a wipe is
+    all of them.
+    """
+
+    class _Answer:
+        """A successful response, as `requests` reports one."""
+
+        ok = True
+
+    class _Client:
+        """A client that succeeds at every delete."""
+
+        def __init__(self) -> None:
+            """Holds nothing yet."""
+            self.deleted: list[str] = []
+
+        def delete(self, path: str):
+            """Records the delete."""
+            self.deleted.append(path)
+            return _Answer()
+
+    held = [project("spent", [projects.CALL]), project("worked", ["extract"])]
+
+    pruning = _Client()
+    assert projects.prune(pruning, held) == 1
+    assert pruning.deleted == ["/v1/projects/spent"], "pruning leaves the run"
+
+    purging = _Client()
+    assert projects.prune(purging, held, everything=True) == 2
+    assert purging.deleted == ["/v1/projects/spent", "/v1/projects/worked"]
+
+
+def test_purging_an_empty_phoenix_deletes_nothing() -> None:
+    """A wipe run twice is not an error."""
+    assert projects.prune(None, [], everything=True) == 0
+
+
+@pytest.mark.parametrize("action", ["--list", "--prune", "--purge"])
+def test_the_three_actions_are_exclusive_and_one_is_required(action: str) -> None:
     """The shape every command line in this repository takes."""
     assert projects.parser().parse_args([action])
 
@@ -136,6 +178,8 @@ def test_the_two_actions_are_exclusive_and_one_is_required(action: str) -> None:
         projects.parser().parse_args([])
     with pytest.raises(SystemExit):
         projects.parser().parse_args(["--list", "--prune"])
+    with pytest.raises(SystemExit):
+        projects.parser().parse_args(["--prune", "--purge"])
 
 
 # ── Reading past the first page ────────────────────────────────────────────
