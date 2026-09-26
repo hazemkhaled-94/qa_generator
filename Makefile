@@ -1058,6 +1058,19 @@ wipe:
 	$(MAKE) review-delete
 	$(MAKE) logs-wipe
 
+# Both deletions, in the only order they work in: `wipe` fills the archive
+# and `archive-purge` empties it, so the purge has to come second or it
+# takes nothing.
+#
+# This is the one command for "leave nothing", and it is separate from
+# `wipe` rather than a flag on it because the two answer different
+# questions. `wipe` is "start again from the documents", and the archive is
+# what makes that survivable - there is a restore script in this tree
+# written for the morning after. This one is "leave nothing", and after it
+# that script has nothing to read.
+wipe-all: wipe
+	$(MAKE) archive-purge ALL=1
+
 # Delete only what the pipeline built: passages and facts. The document and
 # its file stay, and chunking goes back to `new`, so the next run rebuilds
 # them once somebody starts it.

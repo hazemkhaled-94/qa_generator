@@ -304,6 +304,7 @@ Documents are ingestion's, not a stage's. **All of these are irreversible.**
 | `make delete SHA=<sha256>` | Delete a document and everything derived from it |
 | `make delete-derived SHA=<sha256>` | Delete only its passages and facts |
 | `make wipe` | Every document, the topics, and the four services that describe them. Waits 5 seconds first |
+| `make wipe-all` | The same, then the archive. The one command for "leave nothing" |
 
 `wipe` runs both deletions because deleting every document leaves the topics
 standing. It also drops the upload history, which a single deletion keeps.
@@ -318,7 +319,9 @@ how a fresh run starts against four services still full of the last one.
 triggers copy each row into `archived_rows` and the removal paths move each
 object into the `archive` bucket - so a wipe that purged it would leave
 nothing to recover from. [`make archive-purge`](#the-archive) is the second
-decision and stays one.
+decision and stays one - or `make wipe-all`, which is both in the only
+order they work in: `wipe` fills the archive, so the purge has to come
+second or it takes nothing.
 
 ## The archive
 
