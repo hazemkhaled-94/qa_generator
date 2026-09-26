@@ -9,9 +9,19 @@ from __future__ import annotations
 
 import pytest
 
-from stages.prompts import Composed, record, stored
+from stages.prompts import Composed, stored
+from stages.prompts import record as _record
 
 pytestmark = pytest.mark.integration
+
+#: Stands in for the stage's model settings. Only the publisher reads it,
+#: and `PHOENIX_BASE_URL` is unset for a test run, so nothing here does.
+MODEL = object()
+
+
+def record(service, composed):
+    """`stages.prompts.record`, under a model nothing in here looks at."""
+    return _record(service, composed, MODEL)
 
 
 @pytest.fixture

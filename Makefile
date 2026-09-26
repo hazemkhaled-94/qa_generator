@@ -1368,6 +1368,13 @@ eval-score:
 # source has moved past goes too - which is the reason that table exists.
 # The stages write it when they start, so run one of them first.
 #
+# NOT a refresh, and running it costs something. A stage publishes each of
+# its prompts against the model that model actually goes to - the judge's
+# against ASSESSMENT_JUDGE_MODEL, the verifier's against
+# QUESTIONS_VERIFIER_MODEL - and which model that was is not recorded in the
+# table. So this republishes all of them against LLM_MODEL and overwrites
+# that attribution, because Phoenix shows the version created last.
+#
 # The source is still the code. An edit in Phoenix's UI reaches nothing and
 # the next publish writes over it.
 prompts-publish:

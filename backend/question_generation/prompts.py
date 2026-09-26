@@ -18,6 +18,7 @@ Questions page. Nothing here calls a model or touches a row.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 from question_generation import phrasing, verifier
 from question_generation.generation import (
@@ -31,6 +32,9 @@ from question_generation.generation import (
 from question_generation.types import PROMPT_VERSION, SPECS
 from stages.prompts import Composed
 
+if TYPE_CHECKING:
+    from question_generation.config import Settings
+
 #: What the stage records its prompts under.
 SERVICE = "questions"
 
@@ -40,16 +44,22 @@ _ANSWERED = _Answered.model_json_schema()
 _UNANSWERED = _Unanswered.model_json_schema()
 
 
-def catalogue() -> list[Composed]:
+def catalogue(settings: Settings | None = None) -> list[Composed]:
     """Every prompt this stage can send, composed as it would be sent.
 
     Both halves and the shape: the system prompt, the user message as its
     template, and the JSON schema the answer has to come back in.
+
+    `settings` names which model each goes to, because this stage sends to
+    three: QUESTIONS_MODEL writes, QUESTIONS_PHRASING_MODEL judges wording
+    and QUESTIONS_VERIFIER_MODEL checks. Only the publisher reads it - a
+    row records what was asked and not who was asked - so it is optional,
+    and left out every prompt resolves to the stage's shared model.
     """
-    return list(_writer()) + list(_judges())
+    return list(_writer(settings)) + list(_judges(settings))
 
 
-def _writer() -> Iterator[Composed]:
+def _writer(settings: Settings | None = None) -> Iterator[Composed]:
     """The prompts that write a question, at `types.PROMPT_VERSION`.
 
     Each type twice. `spans` adds the instruction to draw on more than one
@@ -58,18 +68,19 @@ def _writer() -> Iterator[Composed]:
     are different prompts and a row for only one of them would be a record
     of half of what was sent.
     """
+    writes = settings.model if settings else None
     for name, spec in sorted(SPECS.items()):
-        yield Composed(name, PROMPT_VERSION, spec.system(), _USER, _ANSWERED)
+        yield Composed(name, PROMPT_VERSION, spec.system(), _USER, _ANSWERED, writes)
         spanning = spec.system(spans=True)
         if spanning != spec.system():
             yield Composed(
-                f"{name} (spans)", PROMPT_VERSION, spanning, _USER, _ANSWERED
+                f"{name} (spans)", PROMPT_VERSION, spanning, _USER, _ANSWERED, writes
             )
-    yield Composed("perturb", PROMPT_VERSION, _PERTURB, _USER, _UNANSWERED)
-    yield Composed("follow", PROMPT_VERSION, _FOLLOW, _USER_FOLLOW, _ANSWERED)
+    yield Composed("perturb", PROMPT_VERSION, _PERTURB, _USER, _UNANSWERED, writes)
+    yield Composed("follow", PROMPT_VERSION, _FOLLOW, _USER_FOLLOW, _ANSWERED, writes)
 
 
-def _judges() -> Iterator[Composed]:
+def _judges(settings: Settings | None = None) -> Iterator[Composed]:
     """The prompts that judge one, each at its own module's version.
 
     The three phrasing judgements are a model's opinion about wording; the
@@ -105,7 +116,12 @@ def _judges() -> Iterator[Composed]:
         ),
     ):
         yield Composed(
-            name, phrasing.PROMPT_VERSION, text, user, shape.model_json_schema()
+            name,
+            phrasing.PROMPT_VERSION,
+            text,
+            user,
+            shape.model_json_schema(),
+            settings.phrasing_model if settings else None,
         )
     for name, text, user, shape in (
         (
@@ -134,5 +150,10 @@ def _judges() -> Iterator[Composed]:
         ),
     ):
         yield Composed(
-            name, verifier.PROMPT_VERSION, text, user, shape.model_json_schema()
+            name,
+            verifier.PROMPT_VERSION,
+            text,
+            user,
+            shape.model_json_schema(),
+            settings.verifier_model if settings else None,
         )

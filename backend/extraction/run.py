@@ -95,6 +95,15 @@ def main(argv: list[str] | None = None) -> int:
             within,
         )
 
+    def record_prompts() -> int:
+        """Records what this stage sends, under the model that sends it.
+
+        The cap is what the atomic extractor appends to its own prompt, so
+        without it the recorded text is one no model was given.
+        """
+        model, settings, _ = configured()
+        return record(prompts.SERVICE, prompts.catalogue(settings.atomic_cap), model)
+
     #: This stage's own operations. `revalidate` calls no model: it re-reads
     #: what the checks read off facts already stored, which is how a change to
     #: the checks reaches facts extracted before it.
@@ -129,12 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
         preflight=preflight,
-        # [1] is this stage's settings; [0] is the model's. The cap is
-        # what the atomic extractor appends to its own prompt, so without
-        # it the recorded text is one no model was given.
-        prompts=lambda: record(
-            prompts.SERVICE, prompts.catalogue(configured()[1].atomic_cap)
-        ),
+        prompts=record_prompts,
     )
 
 

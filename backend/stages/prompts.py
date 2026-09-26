@@ -17,12 +17,18 @@ import hashlib
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from database.qa_generator import Prompt, sessions
+
+if TYPE_CHECKING:
+    # Behind TYPE_CHECKING so the api, which imports `stored` from here to
+    # serve GET /prompts, keeps the import graph
+    # `tests/static/test_api_stays_light.py` reads.
+    from llm.config import Settings as ModelSettings
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +60,19 @@ class Composed:
             sends both halves; this is the one the row used not to carry.
         response_schema: The JSON schema the answer has to come back in,
             taken from the Pydantic shape the call asks for.
+        model: Which model this one is sent to, where the stage names
+            another instead of its own. A NAME rather than settings,
+            because a name is what a deployment overrides and the rest
+            follows from it - `Settings.overridden` moves the address with
+            the provider, and the publisher asks it. Question generation is
+            why this exists: its writer, its three phrasing judgements and
+            its verifier's four are three model choices inside one service,
+            so a model per service would publish four of them against a
+            model that never sees them.
+
+            NOT recorded. The table says what was asked; which model was
+            asked is the deployment's answer and it can change under a
+            fixed version without the prompt changing at all.
     """
 
     name: str
@@ -61,6 +80,7 @@ class Composed:
     text: str
     user_text: str = ""
     response_schema: dict[str, Any] | None = None
+    model: str | None = None
 
     @property
     def digest(self) -> str:
@@ -108,8 +128,16 @@ def stored(
     return rows
 
 
-def record(service: str, composed: Iterable[Composed]) -> int:
+def record(service: str, composed: Iterable[Composed], model: ModelSettings) -> int:
     """Writes one stage's prompts, and reports how many rows moved.
+
+    `model` is the one this stage calls, and it is what a published prompt
+    is offered against in Phoenix's playground: opened there it is replayed
+    at the temperature, the window and the provider that sent it. Asked for
+    rather than read off `LLM_MODEL` here, because a stage that overrides
+    it - the judge, the topic labeller - would otherwise publish its
+    prompts against a model that never sees them. A prompt naming one of
+    its own is resolved against this; see `Composed.model`.
 
     Idempotent: a start-up that changes nothing writes nothing. Called
     where a stage starts rather than per row - the prompts cannot change
@@ -154,11 +182,11 @@ def record(service: str, composed: Iterable[Composed]) -> int:
             exc,
         )
         return 0
-    _publish(service, moved)
+    _publish(service, moved, model)
     return len(moved)
 
 
-def _publish(service: str, moved: Sequence[Composed]) -> None:
+def _publish(service: str, moved: Sequence[Composed], model: ModelSettings) -> None:
     """Sends the prompts just written to Phoenix, if there are any.
 
     Imported here rather than at the top, and that is the whole reason this
@@ -172,10 +200,9 @@ def _publish(service: str, moved: Sequence[Composed]) -> None:
     if not moved:
         return
     try:
-        from llm.config import Settings as ModelSettings
         from stages.publish import publish
 
-        publish(service, moved, ModelSettings.load())
+        publish(service, moved, model)
     except Exception as exc:  # noqa: BLE001 - any failure is the same answer
         log.warning(
             "could not publish %s's prompts to Phoenix, so they are in the "

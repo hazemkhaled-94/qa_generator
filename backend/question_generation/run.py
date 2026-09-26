@@ -81,6 +81,15 @@ def main(argv: list[str] | None = None) -> int:
         """The queue this stage claims from."""
         return QuestionQueue()
 
+    def record_prompts() -> int:
+        """Records what this stage sends, each under the model it goes to.
+
+        The settings as well as the shared model, because this stage sends
+        to three: the writer's, the phrasing judge's and the verifier's.
+        """
+        settings, model, _ = configured()
+        return record(prompts.SERVICE, prompts.catalogue(settings), model)
+
     return queue_main(
         name="questions",
         module="question_generation.run",
@@ -89,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
         preflight=preflight,
-        prompts=lambda: record(prompts.SERVICE, prompts.catalogue()),
+        prompts=record_prompts,
     )
 
 

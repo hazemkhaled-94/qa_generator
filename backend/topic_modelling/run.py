@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         # Here rather than at the top, for the same reason `before_work` is:
         # a deployment with no model never sends this prompt, and a row
         # saying it did would be a record of a call nothing made.
-        record(prompts.SERVICE, prompts.catalogue())
+        record(prompts.SERVICE, prompts.catalogue(), naming)
 
     if not args.watch:
         service.drain()

@@ -23,6 +23,7 @@ import pytest
 from phoenix.client.types import PromptVersion
 
 from llm.config import Settings as ModelSettings
+from stages.prompts import Composed
 from stages.publish import (
     _response_format,
     aside,
@@ -30,6 +31,7 @@ from stages.publish import (
     order,
     parameters,
     provider,
+    publish,
 )
 
 
@@ -190,3 +192,93 @@ def test_versions_are_published_oldest_first() -> None:
 def test_the_tenth_version_is_newer_than_the_ninth() -> None:
     """These are compared as text, where `10` sorts before `9`."""
     assert sorted(["9", "10", "8"], key=order) == ["8", "9", "10"]
+
+
+class Recorder:
+    """A Phoenix client that keeps what it was asked to create."""
+
+    def __init__(self) -> None:
+        """Starts with nothing published."""
+        self.prompts = self
+        self.created: list[tuple[str, dict]] = []
+
+    def create(self, *, name: str, version, prompt_description: str = "") -> None:
+        """Keeps one prompt version, as Phoenix stores it."""
+        del prompt_description
+        self.created.append((name, version._dumps()))
+
+
+@pytest.fixture
+def recorder(monkeypatch) -> Recorder:
+    """A Phoenix to publish into, and an address to find it at."""
+    held = Recorder()
+    monkeypatch.setenv("PHOENIX_BASE_URL", "http://phoenix.invalid:6006")
+    monkeypatch.setattr("stages.publish.client", lambda base_url=None: held)
+    return held
+
+
+def test_nothing_is_published_without_an_address(monkeypatch, recorder) -> None:
+    """The client's own default is localhost, and that is the danger.
+
+    A process never told where Phoenix is would otherwise publish into
+    whatever answers on 6006 - a test suite on a laptop running the stack
+    being exactly that process.
+    """
+    monkeypatch.delenv("PHOENIX_BASE_URL", raising=False)
+
+    sent = publish(
+        "extraction",
+        [Composed("atomic", "9", "ROLE\nAn analyst.", "{{excerpt}}")],
+        settings(),
+    )
+
+    assert sent == 0
+    assert recorder.created == []
+
+
+def test_a_prompt_that_names_its_own_model_is_published_against_it(
+    recorder,
+) -> None:
+    """One service can send to more than one model.
+
+    Question generation writes with QUESTIONS_MODEL and checks with
+    QUESTIONS_VERIFIER_MODEL, and the two are usually different providers -
+    a local writer and a hosted checker. Published against the writer's
+    model, the verifier's four prompts open in the playground against a
+    model that never sees them, under the wrong provider's parameter block.
+    """
+    publish(
+        "questions",
+        [
+            Composed("factoid", "10", "ROLE\nA writer.", "{{facts}}"),
+            Composed(
+                "verifier: supported",
+                "2",
+                "ROLE\nA checker.",
+                "{{answer}}",
+                None,
+                "azure/gpt-4.1",
+            ),
+        ],
+        settings("ollama/gemma3:12b"),
+    )
+    by_name = dict(recorder.created)
+
+    assert by_name["questions-factoid"]["model_name"] == "ollama/gemma3:12b"
+    assert by_name["questions-verifier-supported"]["model_name"] == "azure/gpt-4.1"
+    assert "ollama" in by_name["questions-factoid"]["invocation_parameters"]
+    assert (
+        "azure_openai"
+        in by_name["questions-verifier-supported"]["invocation_parameters"]
+    )
+
+
+def test_a_prompt_that_names_no_model_takes_the_stages_own(recorder) -> None:
+    """`overridden(None)` is the settings themselves, so this is a lookup."""
+    publish(
+        "extraction",
+        [Composed("atomic", "9", "ROLE\nAn analyst.", "{{excerpt}}")],
+        settings("azure/gpt-4.1"),
+    )
+
+    assert recorder.created[0][1]["model_name"] == "azure/gpt-4.1"

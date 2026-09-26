@@ -74,6 +74,19 @@ def main(argv: list[str] | None = None) -> int:
         settings, model, _ = configured()
         before_work(judge_model(settings, model))
 
+    def record_prompts() -> int:
+        """Records what the judge asks, under the model that judges.
+
+        `judge_model` and not the shared one: ASSESSMENT_JUDGE_MODEL is the
+        whole point of this phase - an opinion the pipeline did not already
+        hold - and a template published against the writer's model is one
+        the playground replays against the wrong model.
+        """
+        settings, model, _ = configured()
+        return record(
+            prompts.SERVICE, prompts.catalogue(), judge_model(settings, model)
+        )
+
     def queue() -> AssessmentQueue:
         """The queue this stage claims from."""
         settings, _, _ = configured()
@@ -105,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
         preflight=preflight,
-        prompts=lambda: record(prompts.SERVICE, prompts.catalogue()),
+        prompts=record_prompts,
     )
 
 

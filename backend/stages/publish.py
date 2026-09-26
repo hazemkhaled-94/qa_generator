@@ -47,12 +47,13 @@ for the questions to change.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from llm.config import Settings as ModelSettings
 from stages.prompts import Composed, stored
-from telemetry.evaluations import client
+from telemetry.evaluations import ENDPOINT, client
 
 if TYPE_CHECKING:
     from database.qa_generator import Prompt
@@ -208,6 +209,14 @@ def publish(service: str, composed: Iterable[Composed], model: ModelSettings) ->
     provider's parameter block the version carries, and its settings are
     what goes in that block and in the description beside it.
 
+    PER PROMPT, not per service, through `Composed.model`. One service can
+    send to more than one: question generation writes with QUESTIONS_MODEL,
+    judges wording with QUESTIONS_PHRASING_MODEL and checks with
+    QUESTIONS_VERIFIER_MODEL, and the four verifier prompts opened against
+    the writer's model are four prompts replayed in the playground against
+    a model that never sees them. `overridden` returns `model` itself where
+    a prompt names none, so most rows resolve to exactly what was passed.
+
     Never raises. A stage that cannot publish still sent the prompt and
     still recorded it; what is lost is the copy Phoenix shows beside the
     trace, and that must not fail a run.
@@ -218,7 +227,20 @@ def publish(service: str, composed: Iterable[Composed], model: ModelSettings) ->
     rows = sorted(composed, key=lambda row: (row.name, order(row.version)))
     if not rows:
         return 0
-    connected = client()
+    # No address, no publish - the same bargain `Evaluations` makes, and
+    # here it is a guard rather than a courtesy: the Phoenix client's own
+    # default is localhost:6006, so a process that was never told where
+    # Phoenix is would otherwise write to whatever happens to answer there.
+    # A test suite on a developer's laptop is exactly that process.
+    base_url = os.getenv(ENDPOINT)
+    if not base_url:
+        log.info(
+            "%s is unset, so %s's prompts stay in the table and are not published",
+            ENDPOINT,
+            service,
+        )
+        return 0
+    connected = client(base_url)
     if connected is None:
         log.info(
             "arize-phoenix-client is not installed, so %s's prompts are in the "
@@ -229,16 +251,20 @@ def publish(service: str, composed: Iterable[Composed], model: ModelSettings) ->
 
     from phoenix.client.types import PromptVersion
 
-    asked = parameters(model)
-    also = aside(model)
-    named_provider = provider(model.model)
     sent, refused = 0, 0
     for row in rows:
+        # Resolved per row, because a prompt may name a model of its own.
+        # `overridden(None)` is `model`, so this is a lookup and not a
+        # branch, and the three calls below are string work either way.
+        asked_of = model.overridden(row.model)
+        asked = parameters(asked_of)
+        also = aside(asked_of)
+        named_provider = provider(asked_of.model)
         messages: list[dict[str, str]] = [{"role": "system", "content": row.text}]
         if row.user_text:
             messages.append({"role": "user", "content": row.user_text})
         call: dict[str, Any] = {
-            "model": model.model,
+            "model": asked_of.model,
             "messages": messages,
             **asked,
         }
@@ -310,6 +336,21 @@ def publish_stored(model: ModelSettings, service: str | None = None) -> int:
 
     Also the way in for a version the SOURCE has moved past, which is the
     reason the table is read here rather than the code.
+
+    **Every row goes under `model`, and a stage's own choices do not
+    survive this.** `Composed.model` is not recorded - the table says what
+    was asked, not who was asked - so a republish cannot know that the
+    judge's templates go to ASSESSMENT_JUDGE_MODEL or that question
+    generation's verifier prompts go to QUESTIONS_VERIFIER_MODEL. It
+    publishes them all against the model it is given, which is what this
+    did for every prompt before `record` began publishing, and it OVERWRITES
+    the correctly-attributed versions a stage published: Phoenix keeps the
+    version created last.
+
+    So this is a repair and not a refresh. Running it costs the model
+    attribution on the seven prompts that have one; starting the stages is
+    what puts it back, and only for prompts the table has not already seen.
+    A `model` column on `prompts` is what would close it.
     """
     held: dict[str, list[Composed]] = {}
     for row in stored(service=service):
