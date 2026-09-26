@@ -2,9 +2,9 @@
 
 Run after an accidental `make wipe`, before `make archive-purge`:
 
-    make LOADENV source && PYTHONPATH=backend poetry run python restore_documents.py
+    make restore-documents
 
-Or let the Makefile load the environment for you:
+Or load the environment the way the Makefile does and run it directly:
 
     set -a && . ./configs/env/backend.env && \
       { [ ! -f ./configs/env/provider.env ] || . ./configs/env/provider.env; } && \
@@ -18,20 +18,16 @@ import mimetypes
 import os
 import sys
 
-import boto3
 import botocore.exceptions
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from blob_store.s3 import s3_client
+
 DATABASE_URL = os.environ["DATABASE_URL"].replace(
     "postgresql+psycopg://", "postgresql://", 1
 )
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT") or None
-S3_ACCESS_KEY = os.environ["S3_ACCESS_KEY"]
-S3_SECRET_KEY = os.environ["S3_SECRET_KEY"]
-S3_REGION = os.environ.get("S3_REGION", "local")
-S3_STYLE = os.environ.get("S3_ADDRESSING_STYLE", "path")
 
 
 def fanout_key(sha256: str, ext: str) -> str:
@@ -84,14 +80,7 @@ def copy_back(
 
 def main() -> None:
     """Puts every archived document back where the pipeline reads it."""
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=S3_ENDPOINT,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
-        region_name=S3_REGION,
-        config=boto3.session.Config(s3={"addressing_style": S3_STYLE}),
-    )
+    s3 = s3_client()
 
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
         doc_rows = conn.execute(

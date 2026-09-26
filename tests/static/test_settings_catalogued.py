@@ -57,11 +57,16 @@ SOURCES = ("backend", "frontend", "telemetry")
 #: service could ask a database for it, or belongs to the frontend process
 #: rather than to the pipeline.
 UNCONFIGURABLE = {
-    # Read to reach the store that would hold the settings.
+    # Read to reach the store that would hold the settings. The region and
+    # the addressing style are part of that address: which S3 they name is
+    # the deployment's, and a page offering to change one would be offering
+    # to move the object store from a web page.
     "DATABASE_URL",
     "S3_ENDPOINT",
     "S3_ACCESS_KEY",
     "S3_SECRET_KEY",
+    "S3_REGION",
+    "S3_ADDRESSING_STYLE",
     # Read before a service has read its settings.
     "LOG_LEVEL",
     "LOG_DIR",

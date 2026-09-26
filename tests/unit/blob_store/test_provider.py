@@ -12,10 +12,13 @@ import pytest
 from blob_store.s3 import client as client_module
 
 #: The names that must be set, whatever they are set to.
-REQUIRED = ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY")
-
-#: The names that need not be.
-OPTIONAL = ("S3_REGION", "S3_ADDRESSING_STYLE")
+REQUIRED = (
+    "S3_ENDPOINT",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_REGION",
+    "S3_ADDRESSING_STYLE",
+)
 
 
 @pytest.fixture
@@ -30,7 +33,7 @@ def built(monkeypatch):
     monkeypatch.setattr(client_module.boto3, "client", capture)
 
     def build(**environment: str) -> dict:
-        for name in REQUIRED + OPTIONAL:
+        for name in REQUIRED:
             monkeypatch.delenv(name, raising=False)
         for name, value in environment.items():
             monkeypatch.setenv(name, value)
@@ -46,13 +49,20 @@ SEAWEEDFS = {
     "S3_ENDPOINT": "http://seaweedfs-s3:8333",
     "S3_ACCESS_KEY": "key",
     "S3_SECRET_KEY": "secret",
+    "S3_REGION": "local",
+    "S3_ADDRESSING_STYLE": "path",
 }
 
-AWS = {"S3_ENDPOINT": "", "S3_ACCESS_KEY": "", "S3_SECRET_KEY": ""}
+AWS = {
+    "S3_ENDPOINT": "",
+    "S3_ACCESS_KEY": "",
+    "S3_SECRET_KEY": "",
+    "S3_ADDRESSING_STYLE": "auto",
+}
 
 
 def test_a_self_hosted_gateway_is_addressed_by_path_in_a_local_region(built) -> None:
-    """The defaults are SeaweedFS's, so an existing .env keeps working."""
+    """Every one of the five comes from the environment and none from here."""
     made = built(**SEAWEEDFS)
     assert made["endpoint_url"] == "http://seaweedfs-s3:8333"
     assert made["aws_access_key_id"] == "key"
@@ -76,9 +86,20 @@ def test_the_region_and_the_addressing_style_come_from_the_environment(
     built,
 ) -> None:
     """The two that differ between providers holding the same API."""
-    made = built(**AWS, S3_REGION="eu-central-1", S3_ADDRESSING_STYLE="auto")
+    made = built(**AWS, S3_REGION="eu-central-1")
     assert made["region_name"] == "eu-central-1"
     assert made["config"].s3["addressing_style"] == "auto"
+
+
+def test_an_empty_region_or_style_lets_the_sdk_decide(built) -> None:
+    """Empty is a value, like the endpoint and the credentials above.
+
+    None is what botocore reads as unset; an empty string it refuses
+    outright, which is why neither is passed through as it stands.
+    """
+    made = built(**{**SEAWEEDFS, "S3_REGION": "", "S3_ADDRESSING_STYLE": ""})
+    assert made["region_name"] is None
+    assert made["config"].s3["addressing_style"] is None
 
 
 @pytest.mark.parametrize("missing", REQUIRED)

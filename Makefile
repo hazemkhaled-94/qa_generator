@@ -149,7 +149,7 @@ help:
         questions-balance questions-export \
         questions-runs questions-diff \
         documents delete delete-derived \
-        archive archive-purge \
+        archive archive-purge restore-documents \
         test test-fast test-unit test-integration test-e2e test-smoke \
         test-eval test-coverage test-perf mutation \
         check typecheck audit lint lint-imports deps \
@@ -1135,6 +1135,13 @@ archive-purge:
 	@[ -z "$(ALL)" ] || { echo "WARNING: this deletes the whole archive, rows and objects. Ctrl-C within 5s to abort."; sleep 5; }
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m archive.run --purge \
 	   $(if $(TABLE),--table $(TABLE)) $(if $(DAYS),--older-than $(DAYS)) $(if $(ALL),--all)
+
+# Put the archived documents back, after an accidental wipe.
+#
+# Run it before `archive-purge`, which is what makes the archive unreadable.
+# The pipeline is re-run from parsing afterwards, and the script says so.
+restore-documents:
+	$(LOADENV) && PYTHONPATH=backend poetry run python restore_documents.py
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 
