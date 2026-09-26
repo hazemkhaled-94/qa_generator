@@ -1,8 +1,20 @@
 # `certs` uses process substitution, which /bin/sh does not have.
 SHELL := /bin/bash
 
-# Override for Docker: make COMPOSE="docker compose" up
-COMPOSE ?= podman compose
+# Override for Docker: make COMPOSE_ENGINE="docker compose" up
+COMPOSE_ENGINE ?= podman compose
+
+# The two files compose interpolates `${...}` out of, in precedence order:
+# the deployment's ports and addresses, then the secrets over them. Compose
+# reads only one such file on its own - `.env` - so both are named here, and
+# the last one wins.
+#
+# Every compose command in this file goes through $(COMPOSE) for that
+# reason. A bare `podman compose` outside make sees deployment.env not at
+# all and fails on the first missing port; export COMPOSE_ENV_FILES to it,
+# which `make doctor` says how to do. It cannot be set inside .env - compose
+# has to resolve the file list before it reads one.
+COMPOSE = $(COMPOSE_ENGINE) --env-file configs/env/deployment.env --env-file .env
 
 # The engine itself, for the build and run that `lock` needs; compose has no
 # equivalent of --target.
@@ -17,15 +29,33 @@ AUDIT_TMP := backend/api/requirements.lock.audit
 # pyproject.toml rather than on this command line.
 SOURCES := backend frontend telemetry orchestration review evaluation tests
 
-# What every host command reads, and in the same order the containers do: the
-# tuning values from configs/env/backend.env, then .env for the credentials,
-# the ports and the addresses a host reaches services at.
+# What every host command reads, and in the same order the containers do: how
+# the pipeline behaves, then where this deployment put things, then .env for
+# the credentials and the model.
 #
 # OVERRIDE re-applies whatever was given on the command line, because sourcing
 # the files above would otherwise overwrite it - which is why
 # `make topics TOPIC_PASSES=20` used to run with the file's value and say
 # nothing.
 OVERRIDE = $(if $(MAKEOVERRIDES),&& export $(MAKEOVERRIDES),)
+
+# The values that are never written down, because they are built out of ones
+# that are. A copy of a port inside an address is a copy free to disagree
+# with it, and a copy of a password inside a connection string is a secret
+# in two places.
+#
+# compose builds the container's half of each of these out of the same
+# names; this is the host's. One assignment-only command, so `set -a` above
+# exports every one of them.
+#
+# The addresses are localhost and a PUBLISHED port: a host command reaches a
+# service the way a browser would, not by the compose service name.
+DERIVED = DATABASE_URL=postgresql+psycopg://$$APP_DB_USER:$$APP_DB_PASSWORD@localhost:$$POSTGRES_PORT/$$APP_DB_NAME \
+          BACKEND_URL=http://localhost:$$BACKEND_PORT \
+          S3_ENDPOINT=http://localhost:$$S3_PORT \
+          PHOENIX_BASE_URL=http://localhost:$$PHOENIX_PORT \
+          OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:$$PHOENIX_GRPC_PORT \
+          ARGILLA_API_URL=http://localhost:$$ARGILLA_PORT
 
 # The provider's credentials, for whichever host command calls a model.
 # Optional and absent for a plain Ollama, which needs none - hence the test
@@ -38,8 +68,8 @@ OVERRIDE = $(if $(MAKEOVERRIDES),&& export $(MAKEOVERRIDES),)
 # .env, found no key in either, and failed to authenticate.
 PROVIDER = { [ ! -f ./configs/env/provider.env ] || . ./configs/env/provider.env; }
 
-LOADENV = set -a && . ./configs/env/backend.env && $(PROVIDER) && . ./.env \
-          && set +a $(OVERRIDE)
+LOADENV = set -a && . ./configs/env/backend.env && . ./configs/env/deployment.env \
+          && $(PROVIDER) && . ./.env && $(DERIVED) && set +a $(OVERRIDE)
 
 # What `wipe` leaves standing. Comma-separated, and empty by default: the
 # command is called wipe, and a default that quietly kept things would be
@@ -67,8 +97,9 @@ SPARED = case ",$(KEEP)," in *,$(1),*) echo "KEEP=$(1): leaving $(2)";; \
 # this rather than appending `&& . ./configs/env/x.env` to LOADENV: after
 # `set +a` a sourced file's values are set in the shell and not exported,
 # so the process below saw none of them and stopped naming the first.
-WITH = set -a && . ./configs/env/backend.env && . ./configs/env/$(1) && \
-       $(PROVIDER) && . ./.env && set +a $(OVERRIDE)
+WITH = set -a && . ./configs/env/backend.env && . ./configs/env/deployment.env && \
+       . ./configs/env/$(1) && $(PROVIDER) && . ./.env && $(DERIVED) && \
+       set +a $(OVERRIDE)
 
 # Narrows a stage target to one item instead of the whole queue, mirroring
 # the route's /{scope}/{value} segment:
@@ -172,9 +203,10 @@ ASSIGNED = grep -E '^[A-Z][A-Z0-9_]*=' .env
 # every password. Safe to run twice: it replaces the placeholders and
 # nothing else, so a file already edited by hand keeps what it says.
 #
-# One secret per distinct placeholder, replaced everywhere it appears -
-# which is what keeps APP_DB_PASSWORD and the password inside DATABASE_URL
-# the same string without this needing to know that they are related.
+# One secret per distinct placeholder, replaced everywhere it appears. It
+# used to be what kept APP_DB_PASSWORD and the password inside DATABASE_URL
+# the same string; the connection string is derived now, so there is no
+# second copy left for this to have to keep in step.
 #
 # Longest placeholder first, because `change_me_phoenix` is a prefix of
 # `change_me_phoenix_ui_password` and replacing the short one first would
@@ -213,7 +245,7 @@ doctor:
 	@fail=0; \
 	say() { printf '  %-8s %s\n' "$$1" "$$2"; }; \
 	command -v $(CONTAINER) >/dev/null && say ok "$(CONTAINER)" \
-	  || { say MISSING "$(CONTAINER) - install it, or set CONTAINER= and COMPOSE="; fail=1; }; \
+	  || { say MISSING "$(CONTAINER) - install it, or set CONTAINER= and COMPOSE_ENGINE="; fail=1; }; \
 	command -v poetry >/dev/null && say ok "poetry" \
 	  || { say MISSING "poetry - https://python-poetry.org/docs/#installation"; fail=1; }; \
 	if test -f configs/env/provider.env; then say ok "configs/env/provider.env"; \
@@ -221,6 +253,11 @@ doctor:
 	if ! test -f .env; then say MISSING ".env - run: make setup"; \
 	  echo; echo "Fix the above, then run make doctor again."; exit 1; fi; \
 	say ok ".env"; \
+	if test -f configs/env/deployment.env; then \
+	  say ok "configs/env/deployment.env"; \
+	  else say MISSING "configs/env/deployment.env - it is in git; git checkout it"; fail=1; fi; \
+	say "-" "compose reads both: make passes them, a bare podman compose needs"; \
+	say "" "  export COMPOSE_ENV_FILES=configs/env/deployment.env,.env"; \
 	if $(ASSIGNED) | grep -q change_me; then \
 	  say FAIL "$$($(ASSIGNED) | grep -c change_me) placeholder password(s) left - run: make setup"; fail=1; \
 	  else say ok "no placeholder passwords"; fi; \
@@ -258,12 +295,18 @@ dev: install certs logs-dir
 	$(MAKE) schema
 
 # The spaCy pipelines are downloaded, not resolved: they are not on PyPI
-# under a version range. The same names go into the image; see
-# SPACY_MODELS in backend/api/Dockerfile.
+# under a version range.
+#
+# READ OFF NLP_MODELS rather than written out again, and exported so that
+# `compose build` bakes exactly what the workers will try to LOAD. The two
+# used to be separate lists in four files, and a language added to
+# NLP_MODELS gave a worker that starts and then cannot read it.
 #
 # Retried, because they come from GitHub's release downloads rather than
 # from an index: a 504 there fails the whole install, and did.
-SPACY_MODELS := de_core_news_md en_core_web_md
+SPACY_MODELS := $(strip $(shell sed -n 's/^NLP_MODELS=//p' configs/env/backend.env \
+                                | tr ',' '\n' | cut -d: -f2))
+export SPACY_MODELS
 
 # Install the Python dependencies and the spaCy pipelines.
 install:
@@ -1174,8 +1217,8 @@ test-e2e:
 	poetry run pytest -m e2e
 
 # Builds both images and reads the compose file. Minutes, not seconds, and
-# it starts no stack: compose.yaml binds its ports from .env, so a second
-# copy would collide with a running one rather than run beside it.
+# it starts no stack: compose.yaml binds its ports from deployment.env, so a
+# second copy would collide with a running one rather than run beside it.
 test-smoke:
 	poetry run pytest -m smoke
 
@@ -1522,14 +1565,15 @@ review-pull-questions:
 # Runs the UI and the daemon on the host instead, against the
 # containerised PostgreSQL and the containerised api.
 #
-# Two things differ from the containers and are given here rather than in
-# .env, because .env holds what both use. The database is reached on its
-# published port rather than over the compose network, and the api is too.
+# Only the database is named here now: it is reached on its published port
+# rather than over the compose network, and nothing else needs to say so.
+# BACKEND_URL used to be given here too, because the name held the
+# container's address for everybody; it is the host's own by the time WITH
+# is done, and the container's is BACKEND_CONTAINER_URL.
 dagster-dev:
 	$(call WITH,orchestration.env) && \
 	  DAGSTER_HOME=$$PWD/configs/dagster \
 	  DAGSTER_DB_HOST=localhost DAGSTER_DB_PORT=$$POSTGRES_PORT \
-	  BACKEND_URL=http://localhost:$$BACKEND_PORT \
 	  poetry run dagster dev
 
 
@@ -1570,15 +1614,15 @@ corpus:
 
 # Every container, whether it is listening, and where to open it.
 #
-# Asked of the api rather than read out of .env, so this and the System
+# Asked of the api rather than read out of a file, so this and the System
 # health page cannot come to disagree about what is running. A worker
 # serves no port and is shown as `-`: it reads a queue, and its own stage
 # page is what says whether it is doing that.
 #
-# localhost and BACKEND_PORT, not BACKEND_URL: that one is the container's
-# view - `http://api:8000` - and this runs on the host.
+# BACKEND_URL, which is the host's own: derived from BACKEND_PORT above.
+# The container's is BACKEND_CONTAINER_URL and is not read here.
 services:
-	@$(LOADENV) && answer=$$(curl -sf http://localhost:$$BACKEND_PORT/services) \
+	@$(LOADENV) && answer=$$(curl -sf $$BACKEND_URL/services) \
 	  && printf '%s' "$$answer" | python3 -c 'import sys, json; [print("{:>4}  {:<20}  {}".format({True: "up", False: "DOWN", None: "-"}[r["ok"]], r["name"], r["url"] or "")) for r in json.load(sys.stdin)]' \
 	  || echo "The api is not answering. Try: make up"
 
@@ -1614,13 +1658,12 @@ pull: review-pull-facts review-pull-topics review-pull-questions
 # next, which is the whole difficulty, and the shell is what holds that wait.
 # The Run button and `make pipeline` ask Dagster to hold it instead.
 #
-# localhost and BACKEND_PORT like `services` above: BACKEND_URL is the
-# container's view and these run on the host.
+# BACKEND_URL like `services` above, which is the host's own address.
 
 # Every stage's queue, the run in flight and what is set to start one, in one
 # call. The whole-corpus answer to "where has this got to".
 pipeline-status:
-	@$(LOADENV) && curl -sf http://localhost:$$BACKEND_PORT/pipeline \
+	@$(LOADENV) && curl -sf $$BACKEND_URL/pipeline \
 	  | python3 -c 'import sys, json; d = json.load(sys.stdin); o = d["orchestration"]; r = o.get("running"); [print("{:>12}  {}".format(s["stage"], ", ".join(f"{n} {k}" for k, n in s["rows"].items()) or "nothing")) for s in d["stages"]]; print("\norchestrator:", "running " + r["id"][:8] if r else ("idle" if o["available"] else "not configured")); print("  automatic:", ", ".join(k for k in ("on_arrival", "nightly") if o["automation"].get(k)) or "no")' \
 	  || echo "The api is not answering. Try: make up"
 
@@ -1628,14 +1671,14 @@ pipeline-status:
 # Both halves: emptying the queues while a run is going means the run fills
 # them again at its next stage.
 pipeline-stop:
-	@$(LOADENV) && curl -sf -X POST http://localhost:$$BACKEND_PORT/pipeline/stop \
+	@$(LOADENV) && curl -sf -X POST $$BACKEND_URL/pipeline/stop \
 	  | python3 -c 'import sys, json; print(json.load(sys.stdin)["detail"])' \
 	  || echo "The api is not answering. Try: make up"
 
 # Return every stage's failures to the queue. What a model outage leaves
 # behind, cleared in one command instead of five.
 pipeline-retry:
-	@$(LOADENV) && curl -sf -X POST http://localhost:$$BACKEND_PORT/pipeline/retry \
+	@$(LOADENV) && curl -sf -X POST $$BACKEND_URL/pipeline/retry \
 	  | python3 -c 'import sys, json; print(json.load(sys.stdin)["detail"])' \
 	  || echo "The api is not answering. Try: make up"
 

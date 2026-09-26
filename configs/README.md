@@ -3,8 +3,10 @@
 Service configuration and init scripts — everything that is a **decision**
 rather than a credential, and so lives in git.
 
-Credentials, ports and the addresses a host reaches a service at are in
-`.env`, which is not. See
+The credentials, and which model this deployment calls, are in `.env`, which
+is not. The ports and addresses used to be there too and are now in
+[`env/deployment.env`](env/deployment.env), because neither is a secret and
+both are worth reviewing in a diff. See
 [docs/configuration.md](../docs/configuration.md) for the full picture.
 
 | Path | Holds |
@@ -20,7 +22,8 @@ Credentials, ports and the addresses a host reaches a service at are in
 
 | File | In git | Holds |
 |---|---|---|
-| `backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction, topic and question settings |
+| `backend.env` | yes | How the pipeline behaves: the parsing, chunking, extraction, topic, question and assessment settings |
+| `deployment.env` | yes | Where this deployment put things: the ports, the container-side addresses, the topology, the role names |
 | `elasticsearch.env` | yes | The node's certificate paths, security flags and heap. One node serves both Argilla and the logs |
 | `seaweedfs-filer.env` | yes | Which metadata store the filer uses |
 | `orchestration.env` | yes | How long Dagster waits on a stage it started |
@@ -28,13 +31,27 @@ Credentials, ports and the addresses a host reaches a service at are in
 | `evaluation.env` | yes | What a golden-set run is called in Phoenix |
 | `provider.env` | **no** | Whatever env vars the model provider needs. Optional, absent for a plain Ollama, read by the three services that call a model |
 
+**A name appears in exactly one of these, and in `.env` or here but never
+both.** No file overrides another, so there is no order to know;
+`tests/static/test_env_files.py` refuses a second copy. A value that could
+be written twice — a port inside an address, a password inside a connection
+string — is derived instead and written nowhere. See
+[docs/configuration.md](../docs/configuration.md) for the list.
+
 `backend.env` is the long form: each setting carries the paragraphs
 explaining what it does. [`settings/catalog.py`](../backend/settings/catalog.py)
 carries the one-line version, and `tests/static/` refuses a setting that
 appears in one and not the other.
 
 compose hands each file to the services that need it with `env_file`, and the
-Makefile sources `backend.env` and `.env` for host commands.
+Makefile sources `backend.env`, `deployment.env` and `.env` for host
+commands. `deployment.env` is also one of the two files compose interpolates
+`${...}` out of, which is why every compose command goes through
+`$(COMPOSE)`:
+
+```bash
+podman compose --env-file configs/env/deployment.env --env-file .env
+```
 
 ## `postgres/`
 
@@ -116,5 +133,10 @@ names the one code location, [`orchestration/`](../orchestration/README.md).
   error.
 - **An edit to `filebeat.yml` does nothing without
   `setup.template.overwrite`.**
-- **`backend.env` is in git and `.env` is not**, and both are sourced by the
-  Makefile. A value in the wrong one either leaks or goes missing.
+- **Everything here is in git and `.env` is not**, and all of them are
+  sourced by the Makefile. A value in the wrong one either leaks or goes
+  missing; the rule is that only a secret is in `.env`, and a test checks
+  that `.env.example` holds nothing but placeholders.
+- **A bare `podman compose` does not read `deployment.env`.** Use `make`, or
+  export `COMPOSE_ENV_FILES=configs/env/deployment.env,.env`. It cannot be
+  set inside `.env` — compose resolves the file list before reading one.

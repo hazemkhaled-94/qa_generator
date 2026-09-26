@@ -1,12 +1,13 @@
 """Reading configuration out of the environment, and out of an override.
 
 There are no defaults in code: a missing variable stops the service at
-start-up, naming itself. Two files list what must be set:
-`configs/env/backend.env` for how the pipeline behaves, and `.env` - see
-`.env.example` - for credentials, ports and addresses. Two exceptions: a
-setting whose absence is itself meaningful uses `optional`, and `telemetry`
-falls back to INFO because it is configured before a service has read its
-settings.
+start-up, naming itself. Three files list what must be set:
+`configs/env/backend.env` for how the pipeline behaves,
+`configs/env/deployment.env` for the ports and addresses, and `.env` - see
+`.env.example` - for the credentials and the model. Each name is in exactly
+one of them. Two exceptions: a setting whose absence is itself meaningful
+uses `optional`, and `telemetry` falls back to INFO because it is configured
+before a service has read its settings.
 
 Every reader takes an optional `source`. Absent, it is the process
 environment. Given, it is whatever the caller resolved - the environment
@@ -46,8 +47,9 @@ def required(name: str, source: Mapping[str, str] | None = None) -> str:
     if not value:
         raise KeyError(
             f"{name} must be set in the environment. How the pipeline behaves "
-            f"comes from configs/env/backend.env; credentials, ports and "
-            f"addresses come from .env, which .env.example lists."
+            f"comes from configs/env/backend.env; the ports and addresses "
+            f"from configs/env/deployment.env; the credentials and the model "
+            f"from .env, which .env.example lists."
         )
     return value
 

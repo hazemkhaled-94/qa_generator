@@ -22,10 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 #: The readers in backend/settings/env.py, by name.
 READERS = frozenset({"required", "optional", "integer", "decimal", "boolean", "csv"})
 
-#: Where a setting may be declared. Tuning in the first two, credentials,
-#: ports and addresses in the last.
+#: Where a setting may be declared: how the pipeline behaves, then where
+#: this deployment put things, then the credentials and the model.
 DECLARING = (
     "configs/env/backend.env",
+    "configs/env/deployment.env",
     "configs/env/orchestration.env",
     "configs/env/review.env",
     "configs/env/evaluation.env",

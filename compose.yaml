@@ -32,16 +32,26 @@ x-logging: &logging
 # the six backend services take with env_file and the Makefile sources for
 # the host commands, so one value reaches both.
 #
+# THIS FILE IS INTERPOLATED OUT OF TWO: configs/env/deployment.env for the
+# ports, the addresses and the role names, then .env for the secrets and the
+# model over them. Compose reads one such file on its own, so the Makefile
+# names both:
+#
+#   podman compose --env-file configs/env/deployment.env --env-file .env
+#
+# A bare `podman compose` here sees only .env and fails on the first missing
+# port. Use make, or export COMPOSE_ENV_FILES.
+#
 # What stays here is what an env file cannot express: a value composed out of
-# others, a setting the container knows by a different name than .env does,
-# and a credential.
+# others - a connection string, a published address, the service links - and
+# a setting the container knows by a different name than the host does.
 
 # All services.
 #
-# LOG_DIR is set over .env's, which is the host's `./logs`: it names the
-# shared `logs` volume that filebeat reads, and that path exists only in
-# here. One name for both, as with the OTLP endpoint and Phoenix's API
-# below. Set it to nothing and the process logs to stdout only.
+# LOG_DIR is set over deployment.env's, which is the host's `./logs`: it
+# names the shared `logs` volume that filebeat reads, and that path exists
+# only in here. One name for both, as with the OTLP endpoint and Phoenix's
+# API below. Set it to nothing and the process logs to stdout only.
 #
 # HF_HOME is where the Hugging Face cache goes, and it is a path inside the
 # container for the same reason. EMBEDDING_MODEL is fetched on first use -
@@ -54,32 +64,33 @@ x-service-env: &service-env
   LOG_LEVEL: ${LOG_LEVEL}
   LOG_DIR: /var/log/qa
   HF_HOME: /home/app/.cache/huggingface
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT}
   OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
   # Phoenix's HTTP API, as a CONTAINER reaches it. The two lines above are
   # the gRPC collector that receives spans; this is the same service read
   # the other way, and it is what a gate verdict is posted through.
   #
   # The same name the host reads, overwritten here with the container's
-  # address - exactly what the OTLP endpoint two lines above does. .env's
-  # value is the host's and resolves to nothing from inside the network;
-  # a second name read as a fallback meant the reverse, because the
-  # Makefile sources .env for a host command too.
-  PHOENIX_BASE_URL: ${PHOENIX_CONTAINER_BASE_URL:-http://phoenix:6006}
+  # address - exactly what the OTLP endpoint two lines above does. The
+  # host's is derived from PHOENIX_PORT and resolves to nothing from
+  # inside the network; a second name read as a fallback meant the
+  # reverse, because the Makefile loads the same files for a host command.
+  PHOENIX_BASE_URL: ${PHOENIX_CONTAINER_BASE_URL}
   PHOENIX_API_KEY: ${PHOENIX_ADMIN_SECRET}
 
 # Object store readers and writers.
 x-store-env: &store-env
   # The gateway as a CONTAINER reaches it, the way the OTLP endpoint and
-  # Phoenix's API are. .env's value is the host's and resolves to nothing
-  # from in here. Overridable because the store need not be this one: a
-  # deployment pointing at AWS or R2 sets S3_CONTAINER_ENDPOINT to the same
-  # address its host uses, or to nothing at all for AWS.
-  S3_ENDPOINT: ${S3_CONTAINER_ENDPOINT-http://seaweedfs-s3:8333}
+  # Phoenix's API are. The host's is derived from S3_PORT and resolves to
+  # nothing from in here. It is a name of its own because the store need
+  # not be this one: a deployment pointing at AWS or R2 sets
+  # S3_CONTAINER_ENDPOINT to the same address its host uses, or to nothing
+  # at all for AWS.
+  S3_ENDPOINT: ${S3_CONTAINER_ENDPOINT}
   S3_ACCESS_KEY: ${S3_ACCESS_KEY}
   S3_SECRET_KEY: ${S3_SECRET_KEY}
-  S3_REGION: ${S3_REGION-local}
-  S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE-path}
+  S3_REGION: ${S3_REGION}
+  S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE}
 
 # Which model, and where it is served. Its mode, temperature, timeout and
 # attempt count are in backend.env; these stay here, because that is one
@@ -213,10 +224,10 @@ x-dagster: &dagster
     DAGSTER_DB_HOST: postgres
     DAGSTER_DB_PORT: 5432
     # The only thing it talks to. The compose service name, not localhost.
-    BACKEND_URL: ${BACKEND_URL}
+    BACKEND_URL: ${BACKEND_CONTAINER_URL}
     LOG_LEVEL: ${LOG_LEVEL}
     LOG_DIR: /var/log/qa
-    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT}
     OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
   volumes:
     - dagster_home:/opt/dagster/dagster_home
@@ -671,22 +682,21 @@ services:
     restart: unless-stopped
     environment:
       TZ: UTC
-      BACKEND_URL: ${BACKEND_URL}
+      BACKEND_URL: ${BACKEND_CONTAINER_URL}
       PAGE_SIZE: ${PAGE_SIZE}
       LOG_LEVEL: ${LOG_LEVEL}
       LOG_DIR: /var/log/qa
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT:-http://phoenix:4317}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_CONTAINER_ENDPOINT}
       OTEL_EXPORTER_OTLP_HEADERS: authorization=Bearer ${PHOENIX_ADMIN_SECRET}
       # The HOST's address, deliberately, and the one place in this file
       # where that is right: this is not called from the container, it is
-      # written into a link a BROWSER follows. .env's value is what a
-      # browser needs, so it is taken as it stands rather than set over
-      # the way the backend services have it.
+      # written into a link a BROWSER follows.
       #
-      # Optional. Unset, a question shows its trace id as text instead of
-      # a link, which is what a deployment that publishes no Phoenix
-      # should show.
-      PHOENIX_BASE_URL: ${PHOENIX_BASE_URL-}
+      # Built here out of the published port, the way SERVICE_URLS below
+      # is and the way the Makefile builds it for a host command. It used
+      # to be a name of its own in .env, which was a second copy of this
+      # port free to disagree with it.
+      PHOENIX_BASE_URL: http://localhost:${PHOENIX_PORT}
       STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
     volumes:
       - ./frontend:/app:ro

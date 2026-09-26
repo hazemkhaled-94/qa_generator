@@ -221,14 +221,19 @@ def test_every_setting_described_is_also_declared_for_a_deployment() -> None:
     supplies one, so a setting missing from both files would stop a service
     at start-up however well the catalogue described it.
     """
+    files = (
+        "configs/env/backend.env",
+        "configs/env/deployment.env",
+        ".env.example",
+    )
     declared = {
         name
-        for file in ("configs/env/backend.env", ".env.example")
+        for file in files
         for name in _DECLARATION.findall((ROOT / file).read_text())
     }
     undeclared = {one.name for one in SETTINGS} - declared
 
     assert not undeclared, (
         f"{', '.join(sorted(undeclared))} is described in the catalogue but "
-        f"declared in neither configs/env/backend.env nor .env.example"
+        f"declared in none of {', '.join(files)}"
     )

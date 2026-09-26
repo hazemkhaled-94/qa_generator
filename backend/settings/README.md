@@ -8,10 +8,15 @@ configs/env/*.env, .env   ──▶  the default, and required
         service_settings  ──▶  the override, if a row exists
 ```
 
-The files stay required. A variable missing from both **stops the service at
-start-up naming itself** — there are no defaults in code. An override is a
-row in `service_settings`, and deleting that row returns a setting to
-whatever the file says.
+A name is declared in **exactly one** of those files, so there is no
+precedence between them to know — see
+[docs/configuration.md](../../docs/configuration.md) for which file holds
+what, and for the values that are derived rather than declared.
+
+The files stay required. A variable missing from its file **stops the
+service at start-up naming itself** — there are no defaults in code. An
+override is a row in `service_settings`, and deleting that row returns a
+setting to whatever the file says.
 
 `tests/static/test_settings_documented.py` moves that start-up failure to the
 pull request.
@@ -101,8 +106,12 @@ Highest first:
 
 1. A variable on a `make` command line — `make topics-discover TOPIC_PASSES=20`
 2. A row in `service_settings`
-3. `.env`
-4. `configs/env/backend.env`, and the tool file for a tool that has one
+3. The one file that declares it
+
+There is no fourth rung, and that is the point: a name is in
+`configs/env/backend.env` or `deployment.env` or `.env` or a tool's own
+file, never in two, so "which file wins" is not a question a deployment has
+to answer. `tests/static/test_env_files.py` keeps it that way.
 
 The Makefile re-applies command-line overrides after sourcing the files,
 because sourcing would otherwise overwrite them.
