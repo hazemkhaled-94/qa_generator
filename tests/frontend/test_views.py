@@ -43,6 +43,9 @@ BEYOND_THE_STAGE = {"documents": "Pipeline"}
 #: The fold that panel adds, beside the two every page has.
 AUTOMATION_FOLD = "Run it without being asked"
 
+#: What a page's own explainer fold is called, whichever service it covers.
+EXPLAINER_FOLD = "How "
+
 
 def _stage_panels(name: str, drawn: list[str]) -> list[str]:
     """The panels every page has, with that one exception taken out."""
@@ -68,18 +71,43 @@ def test_a_page_draws_no_progress_bar(open_view, name) -> None:
 def test_a_page_opens_an_analysis_fold_rather_than_spilling_it(open_view, name) -> None:
     """Everything beyond the headline figures is folded away on arrival.
 
-    Two folds now: the analysis, and the configuration of the one service
-    this page runs. Neither is what anybody arrives to do, and a page that
-    opened with forty numbers on it is a page nobody reads.
+    Two folds on most pages: the analysis, and the configuration of the one
+    service this page runs. Neither is what anybody arrives to do, and a
+    page that opened with forty numbers on it is a page nobody reads.
 
     Documents has a third, for the same reason and from the panel above:
     switching the pipeline to unattended is a decision made once.
+
+    Questions has a third of its own, `EXPLAINER_FOLD`: what the service
+    does, what its gates are, and how to read the numbers it stores. ONE
+    fold holding three tabs rather than three folds, because the ceiling
+    this test defends is the count a page opens with, and a page is no more
+    readable for having its reference split across five headings than for
+    having it spilled.
     """
     folded = [
-        one for one in open_view(name).folds() if not one.startswith(AUTOMATION_FOLD)
+        one
+        for one in open_view(name).folds()
+        if not one.startswith((AUTOMATION_FOLD, EXPLAINER_FOLD))
     ]
 
     assert folded == ["Analysis", "Configuration"]
+
+
+@pytest.mark.parametrize("name", LISTING)
+def test_a_page_adds_at_most_one_fold_of_its_own(open_view, name) -> None:
+    """The ceiling the rule above is really about.
+
+    A page may explain itself, and no page may do it in more than one
+    place: three collapsed sections is what the minimal-page rule was
+    written against, and a reference is as capable of flooding a page as a
+    figure is.
+    """
+    explainers = [
+        one for one in open_view(name).folds() if one.startswith(EXPLAINER_FOLD)
+    ]
+
+    assert len(explainers) <= 1
 
 
 @pytest.mark.parametrize("name", LISTING)

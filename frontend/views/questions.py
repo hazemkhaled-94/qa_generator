@@ -6,7 +6,7 @@ import json
 
 import streamlit as st
 
-from lib import backend, catalog, config, configure, lineage, page, stage
+from lib import backend, catalog, config, configure, explain, lineage, page, stage
 
 #: What an .xlsx is on the wire, which the download button labels the file
 #: with so a browser hands it to a spreadsheet rather than saving it blind.
@@ -24,31 +24,253 @@ _FIELDS = {
     "Answer": "answer",
 }
 
-#: Every gate a question is put through, by the code it is rejected under,
-#: and what the gate tests. Listed whether or not anything failed it, in the
-#: order the checker applies them: cheapest first.
-_GATES = {
-    "malformed": "The question is a question, in the language of its facts.",
-    "answer_too_short": "The answer clears the floor its form is held to.",
-    "answer_too_long": "The answer is within the ceiling its form is held to.",
-    "wrong_form": "A value names a thing, an explanation explains one.",
-    "wrong_type": "An entity question asks after a party, an enumeration a set.",
-    "restates_question": "The answer adds a content word the question did not have.",
-    "explanation_unusable": "The long answer reads, rests on the passages, and "
-    "says more than the key.",
-    "asks_nothing_new": "A follow-up reaches a fact the question before it did not.",
-    "off_thread": "A follow-up stays on the material the turn before it used.",
-    "leaks_source": "The question does not say which document holds the answer.",
-    "off_topic": "An unanswerable question is about what the material covers.",
-    "duplicate": "The question is far enough from every question accepted.",
-    "answerable_after_all": "A question written to have no answer has none.",
-    "compound": "The question uses one interrogative, so it asks one thing.",
-    "unanchored": "Somebody who never read the passage could tell what is asked.",
-    "not_recoverable": "A second model got the answer out of the cited passages.",
-    "answer_incomplete": "The answer names most of what that model found there.",
-    "answerable_elsewhere": "No passage it leaves uncited answers it either.",
-    "source_changed": "Every fact the question rests on still passes its checks.",
+#: Every gate a question is put through, in the order the checker applies
+#: them: cheapest first. Listed whether or not anything failed it.
+#:
+#: Three names for one thing, and all three are carried because all three
+#: are shown somewhere. The CODE is what a rejected row stores and what the
+#: table filters on; the PHASE is the group the checker runs it in and what
+#: a Phoenix trace records; a MEASUREMENT is the reading a gate took, and
+#: only some gates take one. A page showing one name and a trace showing
+#: another is what this reconciles.
+_GATES = (
+    explain.Gate(
+        "malformed",
+        "structural",
+        "The question is a question, in the language of its facts.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "compound",
+        "structural",
+        "The question uses one interrogative, so it asks one thing.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "answer_too_short",
+        "structural",
+        "The answer clears the floor its form is held to.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "answer_too_long",
+        "structural",
+        "The answer is within the ceiling its form is held to.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "wrong_form",
+        "structural",
+        "A value names a thing, an explanation explains one.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "off_topic",
+        "off_topic",
+        "An unanswerable question is about what the material covers.",
+        "nothing",
+        "measurement",
+    ),
+    explain.Gate(
+        "wrong_type",
+        "kind_and_thread",
+        "An entity question asks after a party, an enumeration a set.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "restates_question",
+        "kind_and_thread",
+        "The answer adds a content word the question did not have.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "explanation_unusable",
+        "kind_and_thread",
+        "The long answer reads, rests on the passages, and says more than the key.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "asks_nothing_new",
+        "kind_and_thread",
+        "A follow-up reaches a fact the question before it did not.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "off_thread",
+        "kind_and_thread",
+        "A follow-up stays on the material the turn before it used.",
+        "nothing",
+        "rule",
+    ),
+    explain.Gate(
+        "duplicate",
+        "near_duplicate",
+        "The question is far enough from every question accepted.",
+        "one index probe",
+        "measurement",
+    ),
+    explain.Gate(
+        "leaks_source",
+        "phrasing",
+        "The question does not say which document holds the answer.",
+        "nothing, or one question-only call",
+        "rule, then opinion",
+    ),
+    explain.Gate(
+        "unanchored",
+        "phrasing",
+        "Somebody who never read the passage could tell what is asked.",
+        "nothing, or one question-only call",
+        "opinion, vetoed by a rule",
+    ),
+    explain.Gate(
+        "answerable_after_all",
+        "near_duplicate or round_trip",
+        "A question written to have no answer has none.",
+        "the same probe, or the round trip",
+        "opinion",
+    ),
+    explain.Gate(
+        "not_recoverable",
+        "round_trip",
+        "A second model got the answer out of the cited passages.",
+        "the round trip",
+        "measurement, then opinion",
+    ),
+    explain.Gate(
+        "answer_incomplete",
+        "round_trip",
+        "The answer names most of what that model found there.",
+        "the same round trip",
+        "measurement",
+    ),
+    explain.Gate(
+        "answerable_elsewhere",
+        "round_trip",
+        "No passage it leaves uncited answers it either.",
+        "a lemma probe and a second call",
+        "opinion",
+    ),
+    explain.Gate(
+        "source_changed",
+        "re-check only",
+        "Every fact the question rests on still passes its checks.",
+        "nothing",
+        "rule",
+    ),
+)
+
+#: What each gate tests, by its code. The analysis fold's column, derived
+#: rather than written twice.
+_TESTS = {one.code: one.tests for one in _GATES}
+
+#: What each measuring gate's number actually is. Only these five gates
+#: carry a margin; everything else is a rule or an opinion and contributes
+#: no confidence at all.
+_READINGS = {
+    "near_duplicate": explain.Reading(
+        "Cosine between this question's embedding and the nearest question "
+        "already accepted.",
+        "it is too close to one already asked",
+        "a cosine; unrelated questions score about 0.75, paraphrases above 0.95",
+    ),
+    "recall": explain.Reading(
+        "Share of the target answer's content words that came back when a "
+        "second model was shown only the cited passages and asked the question.",
+        "too little of the answer came back",
+        "a share of the answer's own content words, 0 to 1",
+    ),
+    "off_topic": explain.Reading(
+        "Share of the question's content words that occur in the passages it "
+        "was drawn from. Unanswerable questions only.",
+        "it is about nothing the material mentions",
+        "a share of the question's content words, 0 to 1",
+    ),
+    "about": explain.Reading(
+        "Share of the question's content words occurring in the passages, "
+        "read before the entailment pass is allowed to rescue an answer.",
+        "the passages are not about what it asks",
+        "a share of the question's content words, 0 to 1",
+    ),
+    "entailment": explain.Reading(
+        "How strongly an NLI encoder finds the answer entailed by some one "
+        "cited passage.",
+        "no passage supports the answer strongly enough",
+        "a probability from the encoder's entailment head, 0 to 1",
+    ),
 }
+
+#: The order this service works in, and what runs each step.
+_STEPS = (
+    explain.Step(
+        "Plan",
+        "One slot per question, each carrying the kind to write, the band to "
+        "aim for, and whether it is meant to have an answer at all. Weights "
+        "are spread by highest averages, so the counts are exact over a run.",
+        ("planning.py",),
+        ("QUESTIONS_TYPE_MIX", "QUESTIONS_DIFFICULTY_MIX", "QUESTIONS_PER_TOPIC"),
+    ),
+    explain.Step(
+        "Deal the facts",
+        "The band decides the shape of the sample: one passage for easy, a "
+        "second document for medium, a bridging passage for hard. The corpus's "
+        "own furniture — a copyright notice, a contents page — is never "
+        "offered, read by repetition rather than by vocabulary.",
+        ("selection.py",),
+        (
+            "QUESTIONS_FACT_SAMPLE",
+            "QUESTIONS_BOILERPLATE_COSINE",
+            "QUESTIONS_PARTY_DENSITY",
+        ),
+    ),
+    explain.Step(
+        "Write one question",
+        "One call returns the question and two answers: the short key a "
+        "chatbot is scored against, and an explanation for a reader who never "
+        "saw the material. Which facts it cites is the writer's answer, not "
+        "the sample's.",
+        ("generation.py", "types.py", "prompts.py"),
+        ("QUESTIONS_MODEL", "QUESTIONS_RETRIES"),
+    ),
+    explain.Step(
+        "Gate it",
+        "Every gate in the fold above, cheapest first. A question that fails "
+        "one is stored with the gate's name rather than dropped — the rate at "
+        "which that happens is how the writer is judged.",
+        ("checker.py", "gates.py", "verifier.py", "phrasing.py"),
+        ("QUESTIONS_VERIFIER_MODEL", "QUESTIONS_DUPLICATE_COSINE"),
+    ),
+    explain.Step(
+        "Draw a balanced release",
+        "What the accepted SET looks like, which is a different problem from "
+        "whether any one question is sound: every gate can do its job and "
+        "still leave a set that is mostly easy.",
+        ("balance.py",),
+        ("QUESTIONS_RELEASE_SIZE", "QUESTIONS_RELEASE_DIFFICULTY"),
+    ),
+)
+
+#: Everything this page can say about the service it runs.
+_SERVICE = explain.Service(
+    what=(
+        "Each topic's facts become questions with known answers, and each "
+        "question cites the facts it was written from. The unit of work is a "
+        "topic; the facts it may be asked about are those of the passages it "
+        "is strongest in."
+    ),
+    steps=_STEPS,
+    gates=_GATES,
+    readings=_READINGS,
+)
 
 #: The three criteria a question is classified by, as the wider value of
 #: each: what a chatbot has to reach across to answer it.
@@ -217,10 +439,18 @@ def view() -> None:
         )
 
     with analysis, st.expander("Analysis"):
+        st.caption(
+            "Every check this stage makes of itself. **Should be** is what a "
+            "healthy run looks like — `0` for a gate, because a gate counts "
+            "what it refused; a dash where the row is a spread rather than a "
+            "verdict, and there is no right answer to compare it to. The "
+            "gates are explained in full under Question generation below."
+        )
         page.findings(_analysis(quality, counts, client.question_plan()))
 
     with service, page.panel("Question generation"):
         stage.service(client, _QUESTIONS)
+        explain.panel(_SERVICE, "How question generation works")
         configure.panel("questions")
 
     with page.panel(f"Questions · {total:,}"):
@@ -246,8 +476,40 @@ def view() -> None:
             ],
             key="questions-table",
             column_config={
+                "State": st.column_config.TextColumn(
+                    help="accepted cleared every gate, or a person said so. "
+                    "rejected failed one. draft has not been judged."
+                ),
+                "Failed gate": st.column_config.TextColumn(
+                    help="The first gate to refuse it. The gates after that "
+                    "one never read it, which is not the same as passing."
+                ),
+                "Answerable": st.column_config.TextColumn(
+                    help="no means it was written on purpose to have no "
+                    "answer in the corpus, to test whether a chatbot admits it."
+                ),
+                "Difficulty": st.column_config.TextColumn(
+                    help="How far the answer is spread, not how clever it is. "
+                    "Five things each count one point: the three scopes, a "
+                    "long answer, and following another question."
+                ),
+                "Passages": st.column_config.TextColumn(
+                    help="How many passages the answer needs. 2+ is a question "
+                    "a retriever cannot answer from one hit."
+                ),
+                "Documents": st.column_config.TextColumn(
+                    help="How many documents the answer needs. 2+ is the "
+                    "criterion a retriever cannot fake."
+                ),
+                "Turn": st.column_config.TextColumn(
+                    help="Where it sits in its thread. 1 is an opening "
+                    "question; higher is a follow-up."
+                ),
                 "Question": st.column_config.TextColumn(width="large"),
-                "Answer": st.column_config.TextColumn(width="medium"),
+                "Answer": st.column_config.TextColumn(
+                    width="medium",
+                    help="The short key a chatbot's reply is marked against.",
+                ),
             },
         )
         _export(client, where, total)
@@ -313,7 +575,7 @@ def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:
             "State": "OK" if not rejected.get(code) else "Attention",
             "What it means": tests,
         }
-        for code, tests in _GATES.items()
+        for code, tests in _TESTS.items()
     ]
 
     # Coverage, which is about the SET and not about any question in it.
@@ -368,7 +630,7 @@ def _analysis(quality: dict, counts: dict[str, int], plan: dict) -> list[dict]:
             "State": "Attention",
             "What it means": "A rejection code this page has no name for.",
         }
-        for code in sorted(set(rejected) - set(_GATES))
+        for code in sorted(set(rejected) - set(_TESTS))
     ]
 
     weights = plan.get("types", {})
@@ -532,21 +794,23 @@ def _confidence(question: dict) -> None:
     if not scores:
         st.caption(
             "No gate that read this question measured anything, so it carries "
-            "no confidence. That is not a low one."
+            "no confidence. That is not a low one. Only five of the gates take "
+            "a number at all — the rest are rules, which either fire or do "
+            "not, and opinions, which have no scale behind them."
         )
         return
 
-    st.caption(
-        f"Confidence {question['confidence']:.2f} — how close the weakest "
-        f"measuring gate came to refusing it. A margin, not a probability: "
-        f"the readings below are on different scales."
-    )
+    st.caption(_weakest(question, scores))
     st.dataframe(
         [
             {
                 "Gate": one["gate"],
+                "Reads": _READINGS[one["gate"]].reads
+                if one["gate"] in _READINGS
+                else "—",
                 "Measured": one["value"],
-                "Threshold": one["threshold"],
+                "Refuses at": one["threshold"],
+                "Safe when": explain.direction(one),
                 "Margin": one["margin"],
             }
             for one in scores
@@ -554,11 +818,81 @@ def _confidence(question: dict) -> None:
         width="stretch",
         hide_index=True,
         column_config={
+            "Reads": st.column_config.TextColumn(
+                width="large", help="What the measured number is, on this gate's scale."
+            ),
+            "Measured": st.column_config.NumberColumn(
+                format="%.3f", help="What this gate read for this question."
+            ),
+            "Refuses at": st.column_config.NumberColumn(
+                format="%.2f",
+                help="The value at which the verdict changes. Whether crossing "
+                "it means going above or below is the next column.",
+            ),
             "Margin": st.column_config.ProgressColumn(
-                "Margin", min_value=0.0, max_value=1.0, format="%.2f"
-            )
+                "Margin",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.2f",
+                help="How much room the reading had, as a share of the room "
+                "its scale offers. 1.00 is as far from refusal as that gate "
+                "goes; 0.00 is on the line. Comparable between gates, which "
+                "the raw numbers are not.",
+            ),
         },
     )
+    if _uncalibrated(scores):
+        st.caption(
+            ":orange[This question was scored before the margins were "
+            "calibrated,] so its confidence is measured against room its "
+            "scale never had and reads lower than it should. "
+            "`make confidence-recalibrate` takes every stored margin again."
+        )
+
+
+def _weakest(question: dict, scores: list[dict]) -> str:
+    """The confidence as a sentence, naming what is weakest about the row.
+
+    The number alone is the thing nobody could read: it is the SMALLEST of
+    several readings on different scales, so which gate it came from is
+    most of what it says.
+    """
+    confidence = question.get("confidence")
+    if confidence is None:
+        return "Nothing this question was measured against carries a margin."
+
+    worst = min(scores, key=lambda one: one["margin"])
+    reading = _READINGS.get(worst["gate"])
+    comfort = (
+        "comfortable"
+        if confidence >= 0.5
+        else "close"
+        if confidence < 0.2
+        else "adequate"
+    )
+    said = (
+        f"**Confidence {confidence:.2f} — {comfort}.** The weakest of the "
+        f"{len(scores)} reading(s) below is `{worst['gate']}`, which measured "
+        f"{worst['value']:.3f} against a threshold of {worst['threshold']:.2f} "
+        f"({explain.direction(worst)})."
+    )
+    if reading:
+        said += f" {reading.reads}"
+    return (
+        f"{said} A margin, not a probability — it is the smallest reading of "
+        f"the several below, which sit on different scales and cannot be "
+        f"averaged."
+    )
+
+
+def _uncalibrated(scores: list[dict]) -> bool:
+    """Whether these readings predate the margins being calibrated.
+
+    A row written before it carries no `safe_end`, and its similarity
+    margins were taken as a share of the whole unit interval rather than of
+    the stretch its scale reaches.
+    """
+    return any("safe_end" not in one for one in scores)
 
 
 def _trace(question: dict) -> None:

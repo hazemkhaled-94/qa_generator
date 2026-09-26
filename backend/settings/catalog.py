@@ -221,6 +221,17 @@ SETTINGS: tuple[Setting, ...] = (
         "passage already kept. 0 turns the gate off and writes no vectors.",
     ),
     Setting(
+        name="EXTRACTION_DUPLICATE_FLOOR",
+        service="extraction",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("extraction",),
+        help="The cosine two unrelated statements score, which is where a "
+        "fact's confidence is measured from. Calibration for the stored "
+        "confidence only; it moves no verdict.",
+    ),
+    Setting(
         name="EXTRACTION_BRIDGES_PER_TOPIC",
         service="extraction",
         kind="integer",
@@ -502,6 +513,17 @@ SETTINGS: tuple[Setting, ...] = (
         invalidates=("questions",),
         help="How close two question embeddings may be before the later one "
         "is refused as already asked.",
+    ),
+    Setting(
+        name="QUESTIONS_DUPLICATE_FLOOR",
+        service="questions",
+        kind="decimal",
+        low=0,
+        high=1,
+        invalidates=("questions",),
+        help="The cosine two unrelated questions score, which is where a "
+        "question's confidence is measured from. Calibration for the stored "
+        "confidence only; it moves no verdict.",
     ),
     Setting(
         name="QUESTIONS_ANSWER_COVERAGE",

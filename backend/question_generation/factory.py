@@ -75,6 +75,7 @@ def build_service(
             verifier=Verifier(Client(verifier_model)),
             nearest=catalog.nearest,
             threshold=settings.duplicate_cosine,
+            floor=settings.duplicate_floor,
             # Only an independent model's opinion of a question may reject
             # it. A writer marking its own work rejected `According to the
             # ECB and NCAs, who conducts the due diligence check?` for

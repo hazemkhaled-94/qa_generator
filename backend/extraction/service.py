@@ -680,6 +680,7 @@ class ExtractionService(StageService):
         digest_min_chars: int = 0,
         embedder: Embedder | None = None,
         duplicate_cosine: float = 0.0,
+        duplicate_floor: float = 0.0,
     ) -> None:
         """Initialises the service with its collaborators.
 
@@ -698,6 +699,9 @@ class ExtractionService(StageService):
             duplicate_cosine: How alike two statements may be before the
                 second is refused. 0 turns the gate off and leaves the
                 vectors being written.
+            duplicate_floor: The cosine two unrelated statements score,
+                which the stored confidence is measured from. Calibration
+                only; it refuses nothing.
         """
         super().__init__(repository)
         self._repository: PassageQueue = repository
@@ -708,6 +712,7 @@ class ExtractionService(StageService):
         self._digest_min_chars = digest_min_chars
         self._embedder = embedder
         self._duplicate_cosine = duplicate_cosine
+        self._duplicate_floor = duplicate_floor
         # Held for the life of the service, as question generation holds
         # its own: the client is one connection and the batch spans
         # passages, so a passage yielding four facts costs no call.
@@ -888,7 +893,11 @@ class ExtractionService(StageService):
                 # or it does not. High is what refuses, so a statement far
                 # from anything already stored has the whole margin.
                 reading = Measurement(
-                    "duplicate", twin.similarity, threshold, high_is_safe=False
+                    "duplicate",
+                    twin.similarity,
+                    threshold,
+                    high_is_safe=False,
+                    safe_end=self._duplicate_floor,
                 )
                 fact = replace(
                     fact,

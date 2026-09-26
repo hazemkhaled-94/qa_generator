@@ -15,6 +15,14 @@ comparable quantity because it is dimensionless, and the aggregate is the
 SMALLEST of them, which answers the only question a single number honestly
 can - what is the weakest thing about this row.
 
+The room is measured to where the scale actually ends, which is what
+`safe_end` carries. A cosine is the case that forces it: nothing an
+embedder compares sits at 0, so a margin measured to 0 is a share of room
+that was never there. Over one corpus of 3,781 scored questions that put
+96% of them in the bottom tenth and left tenths three through ten empty -
+a column that cannot order a review queue, which is the one thing it is
+for.
+
 A gate that is a judgement rather than a measurement contributes nothing
 here, and that is the point. `leaks_source` answered by a model is a yes or
 a no with no number behind it; recording 1.0 for it would put a confidence
@@ -38,12 +46,28 @@ class Measurement:
         threshold: The value at which the verdict changes.
         high_is_safe: Whether a HIGH reading is what keeps the artefact.
             The entailment rescue needs one; `near_duplicate` refuses one.
+        safe_end: The reading a scale takes when it is as safe as it ever
+            gets, or None for the end of the unit interval. A cosine from a
+            trained embedder does not reach 0: multilingual-e5 puts
+            unrelated questions near 0.75, so the room a `near_duplicate`
+            reading has is the distance from its threshold to there and not
+            to zero. Measured over one corpus, normalising to zero put 96%
+            of the questions in the bottom tenth of the scale and left
+            eight tenths of it empty.
     """
 
     gate: str
     value: float
     threshold: float
     high_is_safe: bool = True
+    safe_end: float | None = None
+
+    @property
+    def _safest(self) -> float:
+        """The reading this scale takes at its safe end."""
+        if self.safe_end is not None:
+            return self.safe_end
+        return 1.0 if self.high_is_safe else 0.0
 
     @property
     def margin(self) -> float:
@@ -51,11 +75,11 @@ class Measurement:
 
         1.0 is as far from refusal as the scale allows, 0.0 is on the line
         or past it. Clamped at both ends: a rejected artefact has no
-        negative confidence, it has none at all, and a threshold of 0 or 1
-        leaves no room to be a share of and yields 0.0 rather than a
-        division by zero.
+        negative confidence, it has none at all, and a threshold sitting on
+        the safe end leaves no room to be a share of and yields 0.0 rather
+        than a division by zero.
         """
-        room = 1.0 - self.threshold if self.high_is_safe else self.threshold
+        room = abs(self._safest - self.threshold)
         if room <= 0:
             return 0.0
         distance = (
@@ -71,12 +95,19 @@ class Measurement:
         `margin` is written out rather than left to be re-derived. Every
         reader of the column would otherwise need this module's arithmetic,
         including the ones that are SQL and the ones that are a dashboard.
+
+        `high_is_safe` and `safe_end` are written for the same reason. A
+        value of 0.88 is comfortable under one gate and refusing under
+        another, and a reader that had to know which way each gate runs
+        would be a second list of gates to keep in step with this one.
         """
         return {
             "gate": self.gate,
             "value": round(self.value, 4),
             "threshold": round(self.threshold, 4),
             "margin": round(self.margin, 4),
+            "high_is_safe": self.high_is_safe,
+            "safe_end": round(self._safest, 4),
         }
 
 

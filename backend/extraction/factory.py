@@ -64,6 +64,7 @@ def build_service(
         # pay two gigabytes for a name it never uses.
         embedder=_embedder(settings) if settings.embeds else None,
         duplicate_cosine=settings.duplicate_cosine,
+        duplicate_floor=settings.duplicate_floor,
     )
 
 

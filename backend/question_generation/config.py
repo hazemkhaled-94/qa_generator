@@ -175,6 +175,9 @@ class Settings:
     elsewhere_passages: int
     long_answer_chars: int
     duplicate_cosine: float
+    #: The cosine two unrelated questions score. Calibration for the stored
+    #: confidence only; it decides no verdict.
+    duplicate_floor: float
     #: How alike a passage must be to one in ANOTHER document before it is
     #: read as boilerplate and never asked about. 0 turns the reading off.
     #:
@@ -275,6 +278,7 @@ class Settings:
             elsewhere_passages=integer("QUESTIONS_ELSEWHERE_PASSAGES", source),
             long_answer_chars=integer("QUESTIONS_LONG_ANSWER_CHARS", source),
             duplicate_cosine=decimal("QUESTIONS_DUPLICATE_COSINE", source),
+            duplicate_floor=decimal("QUESTIONS_DUPLICATE_FLOOR", source),
             boilerplate_cosine=decimal("QUESTIONS_BOILERPLATE_COSINE", source),
             release_size=integer("QUESTIONS_RELEASE_SIZE", source),
             release_unanswerable=decimal("QUESTIONS_RELEASE_UNANSWERABLE", source),

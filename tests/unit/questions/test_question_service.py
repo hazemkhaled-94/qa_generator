@@ -54,6 +54,7 @@ SETTINGS = Settings(
     long_answer_chars=60,
     boilerplate_cosine=0.0,
     duplicate_cosine=0.93,
+    duplicate_floor=0.75,
     release_size=0,
     release_unanswerable=0.1,
     release_difficulty={Difficulty.EASY: 1, Difficulty.MEDIUM: 1, Difficulty.HARD: 1},

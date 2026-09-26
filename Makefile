@@ -1,20 +1,24 @@
 # `certs` uses process substitution, which /bin/sh does not have.
 SHELL := /bin/bash
 
-# Override for Docker: make COMPOSE_ENGINE="docker compose" up
-COMPOSE_ENGINE ?= podman compose
+# Override for Docker: make COMPOSE="docker compose" up
+COMPOSE ?= podman compose
 
 # The two files compose interpolates `${...}` out of, in precedence order:
 # the deployment's ports and addresses, then the secrets over them. Compose
 # reads only one such file on its own - `.env` - so both are named here, and
 # the last one wins.
 #
-# Every compose command in this file goes through $(COMPOSE) for that
-# reason. A bare `podman compose` outside make sees deployment.env not at
-# all and fails on the first missing port; export COMPOSE_ENV_FILES to it,
-# which `make doctor` says how to do. It cannot be set inside .env - compose
-# has to resolve the file list before it reads one.
-COMPOSE = $(COMPOSE_ENGINE) --env-file configs/env/deployment.env --env-file .env
+# Every compose command in this file goes through $(COMPOSE_CMD) for that
+# reason, and $(COMPOSE_CMD) stays the engine alone so that the documented
+# `make COMPOSE="docker compose" up` still carries the files rather than
+# replacing them.
+#
+# A bare `podman compose` outside make sees deployment.env not at all and
+# fails on the first missing port; export COMPOSE_ENV_FILES to it, which
+# `make doctor` says how to do. It cannot be set inside .env - compose has
+# to resolve the file list before it reads one.
+COMPOSE_CMD = $(COMPOSE) --env-file configs/env/deployment.env --env-file .env
 
 # The engine itself, for the build and run that `lock` needs; compose has no
 # equivalent of --target.
@@ -177,6 +181,7 @@ help:
         settings settings-set settings-unset \
         questions questions-status questions-start questions-stop wipe \
         questions-retry questions-reclaim questions-rerun questions-reverify \
+        confidence-recalibrate \
         questions-balance questions-export \
         questions-runs questions-diff \
         documents delete delete-derived \
@@ -245,7 +250,7 @@ doctor:
 	@fail=0; \
 	say() { printf '  %-8s %s\n' "$$1" "$$2"; }; \
 	command -v $(CONTAINER) >/dev/null && say ok "$(CONTAINER)" \
-	  || { say MISSING "$(CONTAINER) - install it, or set CONTAINER= and COMPOSE_ENGINE="; fail=1; }; \
+	  || { say MISSING "$(CONTAINER) - install it, or set CONTAINER= and COMPOSE="; fail=1; }; \
 	command -v poetry >/dev/null && say ok "poetry" \
 	  || { say MISSING "poetry - https://python-poetry.org/docs/#installation"; fail=1; }; \
 	if test -f configs/env/provider.env; then say ok "configs/env/provider.env"; \
@@ -287,10 +292,10 @@ doctor:
 
 # Install dependencies, start every service, and create the schema.
 dev: install certs logs-dir
-	$(COMPOSE) up -d
+	$(COMPOSE_CMD) up -d
 	@echo "Waiting for PostgreSQL..."
 	@$(LOADENV) && \
-	  until $(COMPOSE) exec -T postgres pg_isready -U "$$POSTGRES_SUPERUSER" -q; \
+	  until $(COMPOSE_CMD) exec -T postgres pg_isready -U "$$POSTGRES_SUPERUSER" -q; \
 	  do sleep 2; done
 	$(MAKE) schema
 
@@ -334,11 +339,11 @@ logs-dir:
 
 # Start every service, generating the certificates first if they are missing.
 up: certs logs-dir
-	$(COMPOSE) up -d
+	$(COMPOSE_CMD) up -d
 
 # Stop every service. The volumes are kept.
 down:
-	$(COMPOSE) down
+	$(COMPOSE_CMD) down
 	@$(MAKE) --no-print-directory prune
 
 # Reclaim the images a rebuild orphaned. Neither podman nor docker collects
@@ -357,34 +362,34 @@ prune:
 down-volumes:
 	@echo "WARNING: this deletes all persistent data. Ctrl-C within 5s to abort."
 	@sleep 5
-	$(COMPOSE) down -v
+	$(COMPOSE_CMD) down -v
 
 # The container logs, as the engine holds them. Every service, this project's
 # and the infrastructure alike. What the api, the four workers and the
 # frontend log also goes to Elasticsearch as JSON; Grafana is where you read
 # it back across services, filtered and over time.
 logs:
-	$(COMPOSE) logs -f
+	$(COMPOSE_CMD) logs -f
 
 # The Streamlit application's log.
 logs-frontend:
-	$(COMPOSE) logs -f streamlit
+	$(COMPOSE_CMD) logs -f streamlit
 
 # Upload failures surface here; the frontend only sees the status code.
 logs-api:
-	$(COMPOSE) logs -f api
+	$(COMPOSE_CMD) logs -f api
 
 # The shipper's own log. Where to look when Grafana shows nothing: a
 # connection refused, a certificate it will not trust, or a rejected mapping
 # is reported here and nowhere else.
 logs-shipper:
-	$(COMPOSE) logs -f filebeat
+	$(COMPOSE_CMD) logs -f filebeat
 
 # The webserver and the daemon together. A code location that will not load
 # is reported by the webserver, and a schedule or sensor that fired and
 # failed by the daemon.
 logs-orchestration:
-	$(COMPOSE) logs -f dagster-webserver dagster-daemon
+	$(COMPOSE_CMD) logs -f dagster-webserver dagster-daemon
 
 # How long the logs are kept. Run once against a running stack, after the
 # shipper has written something: the retention belongs to the data stream,
@@ -417,7 +422,7 @@ LOGS_RETENTION_DAYS ?= 30
 # error instead. So the answer is read directly, which is also the only way
 # to see which streams it matched.
 logs-retention:
-	@$(COMPOSE) exec -T elasticsearch sh -c 'answer=$$(curl -sS \
+	@$(COMPOSE_CMD) exec -T elasticsearch sh -c 'answer=$$(curl -sS \
 	  --cacert /usr/share/elasticsearch/config/certs/ca.crt \
 	  -u "elastic:$$ELASTIC_PASSWORD" \
 	  -X PUT "https://localhost:9200/_data_stream/qa-logs*/_lifecycle" \
@@ -449,7 +454,7 @@ logs-retention:
 LOGS_KEEP_DAYS ?= 30
 # Delete the log files no process has written to for LOGS_KEEP_DAYS.
 logs-prune:
-	@{ $(COMPOSE) exec -T api sh -c \
+	@{ $(COMPOSE_CMD) exec -T api sh -c \
 	     'find /var/log/qa -type f -mtime +$(LOGS_KEEP_DAYS) -print -delete'; \
 	   find logs -type f -mtime +$(LOGS_KEEP_DAYS) -print -delete 2>/dev/null; \
 	 } | wc -l | xargs printf '%s file(s) deleted.\n'
@@ -465,10 +470,10 @@ logs-prune:
 # `|| true` on the delete: a stream that is not there yet is a deployment
 # that has logged nothing, not a failure.
 logs-wipe:
-	@$(LOADENV) && $(COMPOSE) exec -T elasticsearch \
+	@$(LOADENV) && $(COMPOSE_CMD) exec -T elasticsearch \
 	   curl -sS -k -u "elastic:$$ELASTICSEARCH_PASSWORD" \
 	   -XDELETE "https://localhost:9200/_data_stream/qa-logs" >/dev/null || true
-	@$(COMPOSE) exec -T api sh -c 'find /var/log/qa -type f -delete' || true
+	@$(COMPOSE_CMD) exec -T api sh -c 'find /var/log/qa -type f -delete' || true
 	@find logs -type f -delete 2>/dev/null || true
 	@echo "log stream and files deleted."
 
@@ -826,6 +831,19 @@ questions-rerun:
 questions-reverify:
 	$(LOADENV) && PYTHONPATH=backend poetry run python -m question_generation.run --reverify $(ONLY)
 
+# Take every stored margin again, after a change to where a similarity scale
+# is measured from. Reads QUESTIONS_DUPLICATE_FLOOR and
+# EXTRACTION_DUPLICATE_FLOOR and rewrites gate_scores and confidence on the
+# questions and the facts.
+#
+# No model, no embedder, no service: every number it needs is already in the
+# row, so this is arithmetic over one column. It moves NO verdict - a
+# question's status and rejected_reason are untouched, which is what
+# separates it from questions-reverify. Running it twice writes nothing the
+# second time.
+confidence-recalibrate:
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m stages.recalibrate_run
+
 # Draw the balanced release out of every accepted question, and report what
 # it came out as. Accepting a question says it is sound; this says what the
 # SET looks like, and the two are different problems - every gate can do its
@@ -1142,7 +1160,7 @@ wipe-all: wipe
 # no terminal to answer it.
 dagster-wipe:
 	@$(call SPARED,runs,the Dagster run history) || \
-	  $(COMPOSE) exec -T dagster-webserver dagster run wipe --force
+	  $(COMPOSE_CMD) exec -T dagster-webserver dagster run wipe --force
 
 # Delete only what the pipeline built: passages and facts. The document and
 # its file stay, and chunking goes back to `new`, so the next run rebuilds
@@ -1332,7 +1350,7 @@ lock:
 	@awk '/^#/ {print; next} {exit}' backend/api/requirements.lock > $(LOCK_TMP)
 	set -o pipefail; $(CONTAINER) run --rm qa_generator-resolve | sort >> $(LOCK_TMP)
 	@mv $(LOCK_TMP) backend/api/requirements.lock
-	@echo "backend/api/requirements.lock rewritten; rebuild with: $(COMPOSE) build api"
+	@echo "backend/api/requirements.lock rewritten; rebuild with: $(COMPOSE_CMD) build api"
 
 # ── TLS certificates ───────────────────────────────────────────────────────
 
@@ -1701,7 +1719,7 @@ pipeline-retry:
 # shim hands back the container's two streams merged, so the interesting
 # line arrives among the code server's startup logging and there is no
 # redirection that separates them.
-DAGSTER = $(COMPOSE) exec -T dagster-webserver dagster $(1) \
+DAGSTER = $(COMPOSE_CMD) exec -T dagster-webserver dagster $(1) \
           -w /opt/dagster/dagster_home/workspace.yaml 2>&1
 
 # What it is doing: the sensor, the schedule, and the last few runs.
@@ -1715,7 +1733,7 @@ DAGSTER = $(COMPOSE) exec -T dagster-webserver dagster $(1) \
 runs:
 	-@$(call DAGSTER,sensor list)   | grep -E "Sensor: "
 	-@$(call DAGSTER,schedule list) | grep -E "Schedule: "
-	-@$(COMPOSE) exec -T dagster-webserver dagster run list --limit 5 2>&1 \
+	-@$(COMPOSE_CMD) exec -T dagster-webserver dagster run list --limit 5 2>&1 \
 	  | grep -E "Run: |Job: |Status: "
 
 # Every stage once, through Dagster instead of in the foreground. The same

@@ -82,6 +82,9 @@ class Settings:
     model: str | None
     digest_model: str | None
     duplicate_cosine: float
+    #: The cosine two unrelated statements score. Calibration for the stored
+    #: confidence only; it decides no verdict.
+    duplicate_floor: float
     embedding_model: str
     embedding_max_tokens: int
 
@@ -129,6 +132,7 @@ class Settings:
             # pointing somewhere cheaper on its own.
             digest_model=optional("EXTRACTION_DIGEST_MODEL", source),
             duplicate_cosine=decimal("EXTRACTION_DUPLICATE_COSINE", source),
+            duplicate_floor=decimal("EXTRACTION_DUPLICATE_FLOOR", source),
             embedding_model=required("EMBEDDING_MODEL", source),
             embedding_max_tokens=integer("EMBEDDING_MAX_TOKENS", source),
         )

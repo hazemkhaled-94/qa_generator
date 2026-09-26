@@ -107,6 +107,7 @@ class QuestionChecker:
         verifier: Verifier,
         nearest,
         threshold: float,
+        floor: float = 0.0,
         judge_phrasing: bool = True,
         bounds: Mapping[str, tuple[int, int]] | None = None,
         explanation_chars: tuple[int, int] = EXPLANATION_CHARS,
@@ -149,6 +150,7 @@ class QuestionChecker:
         self._embedder = embedder
         self._verifier = verifier
         self._nearest = nearest
+        self._floor = floor
         self._judge_phrasing = judge_phrasing
         self._bounds = dict(bounds or BOUNDS)
         self._explanation_chars = explanation_chars
@@ -280,12 +282,16 @@ class QuestionChecker:
             # High is what refuses here: a question near an accepted one is
             # the duplicate. The first question of a run has no neighbour
             # and so no reading, which is an abstention and not a 1.0.
+            #
+            # Measured from the floor two unrelated questions score, not
+            # from 0, which no pair of embeddings reaches.
             readings.append(
                 Measurement(
                     "near_duplicate",
                     near.similarity,
                     self._threshold,
                     high_is_safe=False,
+                    safe_end=self._floor,
                 )
             )
         failed = near_verdict(

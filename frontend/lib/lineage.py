@@ -107,8 +107,10 @@ def _gates(chain: dict) -> None:
         ]
     )
     st.caption(
-        f"{len(gates)} of 6 gates read it. The ones after the last are not "
-        "listed because they never ran, which is different from passing."
+        f"{len(gates)} of 6 gate PHASES read it. A phase is a group of gates, "
+        "not one of the rejection codes the table above filters on — "
+        "`structural` alone holds five of them. The phases after the last are "
+        "not listed because they never ran, which is different from passing."
     )
 
 

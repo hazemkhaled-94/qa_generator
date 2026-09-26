@@ -75,4 +75,64 @@ def test_a_recorded_reading_carries_its_threshold() -> None:
         "value": 0.71,
         "threshold": 0.93,
         "margin": pytest.approx(0.2366, abs=1e-4),
+        "high_is_safe": False,
+        "safe_end": 0.0,
     }
+
+
+def test_a_recorded_reading_carries_which_way_its_gate_runs() -> None:
+    """0.88 is comfortable under one gate and refusing under another.
+
+    A reader holding the number alone cannot tell, so the direction and the
+    end of the scale are stored beside it rather than left to a second list
+    of gates somewhere else.
+    """
+    (written,) = scored([Measurement("near_duplicate", 0.88, 0.93, False, 0.75)])
+
+    assert written["high_is_safe"] is False
+    assert written["safe_end"] == 0.75
+
+
+def test_room_is_measured_to_where_the_scale_ends_not_to_zero() -> None:
+    """A cosine's safe side stops where unrelated things score, not at 0."""
+    measured = Measurement("near_duplicate", 0.88, 0.93, False, safe_end=0.75)
+
+    # 0.05 of the 0.18 the scale actually offers, not of the 0.93 it does not.
+    assert measured.margin == pytest.approx(0.05 / 0.18, abs=1e-4)
+
+
+def test_a_reading_at_the_floor_has_every_bit_of_room() -> None:
+    """As far from refusal as this scale goes is 1.0, wherever that sits."""
+    assert Measurement("near_duplicate", 0.75, 0.93, False, safe_end=0.75).margin == 1.0
+
+
+def test_a_reading_past_the_floor_is_clamped_rather_than_over_one() -> None:
+    """A corpus quieter than the floor was calibrated for does not score 1.4."""
+    assert Measurement("near_duplicate", 0.60, 0.93, False, safe_end=0.75).margin == 1.0
+
+
+def test_a_floor_on_its_threshold_scores_zero_rather_than_raising() -> None:
+    """Calibration that leaves no room divides by none of it."""
+    assert Measurement("near_duplicate", 0.8, 0.93, False, safe_end=0.93).margin == 0.0
+
+
+def test_the_floor_is_what_spreads_a_corpus_over_the_scale() -> None:
+    """The defect this calibration exists for, at the two ends it showed up.
+
+    Measured over 3,781 scored questions: the lowest near_duplicate reading
+    was 0.745 and the median 0.882. Against a floor of 0 both land in the
+    bottom fifth and are indistinguishable; against 0.75 they are a
+    question worth reviewing last and one worth reviewing first.
+    """
+    lowest, median = 0.745, 0.882
+    uncalibrated = [
+        Measurement("near_duplicate", one, 0.93, False) for one in (lowest, median)
+    ]
+    calibrated = [
+        Measurement("near_duplicate", one, 0.93, False, safe_end=0.75)
+        for one in (lowest, median)
+    ]
+
+    assert all(one.margin < 0.2 for one in uncalibrated)
+    assert calibrated[0].margin == 1.0
+    assert calibrated[1].margin == pytest.approx(0.2667, abs=1e-4)
