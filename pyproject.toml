@@ -210,6 +210,10 @@ known_first_party = [
     "archive",
     "assessment",
     "blob_store",
+    # A module rather than a package, and first-party all the same: five
+    # backend modules import it and deptry read every one as a missing
+    # dependency.
+    "confidence",
     "database",
     "drivers",
     "evaluation",
@@ -363,6 +367,12 @@ filterwarnings = [
     # wants a __module__ on a builtin type and SWIG does not set one.
     "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
     "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+    # The anyio stream pair schemathesis's ASGI transport opens per generated
+    # call and does not close; it surfaces at collection as an unraisable.
+    # Named by the stream rather than by the category, because the category
+    # is also what a leaked psycopg connection raises - which was a real
+    # defect in tests/conftest.py and has to keep failing.
+    "ignore:Unclosed <MemoryObject(Receive|Send)Stream:ResourceWarning",
 ]
 
 # Measured over every package a deployment runs, not just the backend: the

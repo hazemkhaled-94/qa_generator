@@ -115,14 +115,27 @@ def test_the_frontend_calls_something(published) -> None:
     assert "/documents/names" in called
 
 
+#: The paths a client composes from a verb it is handed rather than holds
+#: as a literal. The API serves each concrete verb as a route of its own, so
+#: the composed shape is served by nothing and comparing it as a literal is
+#: a failure about spelling. Each is covered by a test below that names the
+#: verbs instead.
+COMPOSED = ("/pipeline/{}",)
+
+
 def test_every_path_the_frontend_calls_exists(published) -> None:
     """The frontend holds these as literals and finds out at run time.
 
-    The stage client composes its path from a stage name it is given, so
-    those are checked by the test below rather than compared as literals.
+    The stage and pipeline clients compose their path from a name they are
+    given, so those are checked by the tests below rather than compared as
+    literals.
     """
     served = {templated(path) for path in published["paths"]}
-    fixed = {path for path in _called_paths() if not path.startswith("/{}")}
+    fixed = {
+        path
+        for path in _called_paths()
+        if not path.startswith("/{}") and templated(path) not in COMPOSED
+    }
 
     missing = {path for path in fixed if templated(path) not in served}
 
@@ -133,6 +146,23 @@ def test_every_path_the_frontend_calls_exists(published) -> None:
 #: scopes it narrows them with.
 STAGES = ("parsing", "chunking", "extraction", "topics", "questions")
 SCOPES = ("", "/document/{}", "/passage/{}")
+
+#: What the pipeline client composes `/pipeline/{action}` from. One route
+#: each rather than one route taking an action, so each is checked by name.
+PIPELINE_VERBS = ("start", "stop", "retry")
+
+
+@pytest.mark.parametrize("verb", PIPELINE_VERBS)
+def test_every_pipeline_verb_the_frontend_composes_is_served(published, verb) -> None:
+    """`act()` builds `/pipeline/{action}` and the API serves three routes.
+
+    The composed shape matches none of them, which is why the literal
+    comparison above skips it: what matters is that each verb it can be
+    handed is a route, and that is this.
+    """
+    served = {templated(path) for path in published["paths"]}
+
+    assert f"/pipeline/{verb}" in served, sorted(served)
 
 
 @pytest.mark.parametrize("stage", STAGES)

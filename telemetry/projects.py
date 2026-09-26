@@ -37,6 +37,8 @@ import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+import requests
+
 log = logging.getLogger(__name__)
 
 #: How many projects one page of the listing asks for.
@@ -86,10 +88,39 @@ class Project:
         return not self.work and self.whole
 
 
-def _client():
-    """An HTTP client pointed at Phoenix, with the bearer it wants."""
-    import httpx
+#: How long one Phoenix call may take. A prune walks every project and
+#: deletes some of them, and the server is doing real work for each.
+_TIMEOUT = 60.0
 
+
+class _Phoenix(requests.Session):
+    """A session that answers relative paths and times every call out.
+
+    `requests` has neither a base URL nor a default timeout, and both are
+    what the call sites here rely on. The same shape `orchestration/client`
+    and `frontend/lib/backend/base` build by hand; a Session subclass
+    because this one is used as a context manager and passed around as a
+    client rather than wrapped in a class of its own.
+    """
+
+    def __init__(self, base: str) -> None:
+        """Points the session at one Phoenix."""
+        super().__init__()
+        self._base = base.rstrip("/")
+
+    def request(self, method, url, *args, **kwargs):
+        """Sends one call, resolving the path and defaulting the timeout."""
+        kwargs.setdefault("timeout", _TIMEOUT)
+        return super().request(method, f"{self._base}{url}", *args, **kwargs)
+
+
+def _client() -> _Phoenix:
+    """An HTTP client pointed at Phoenix, with the bearer it wants.
+
+    requests rather than httpx, which is what every other first-party
+    caller in this repository speaks. httpx arrives transitively through
+    the model stack and was never declared here.
+    """
     base = os.environ.get("PHOENIX_BASE_URL")
     if not base:
         raise SystemExit(
@@ -97,11 +128,10 @@ def _client():
             ".env; see .env.example."
         )
     key = os.environ.get("PHOENIX_API_KEY") or os.environ.get("PHOENIX_ADMIN_SECRET")
-    return httpx.Client(
-        base_url=base.rstrip("/"),
-        headers={"Authorization": f"Bearer {key}"} if key else {},
-        timeout=60.0,
-    )
+    client = _Phoenix(base)
+    if key:
+        client.headers["Authorization"] = f"Bearer {key}"
+    return client
 
 
 def listed(client) -> Iterator[dict]:
@@ -196,7 +226,7 @@ def prune(client, projects: list[Project]) -> int:
     deleted = 0
     for one in taking:
         answered = client.delete(f"/v1/projects/{one.id}")
-        if answered.is_success:
+        if answered.ok:
             deleted += 1
         else:
             log.warning("could not delete %s: %s", one.name, answered.status_code)

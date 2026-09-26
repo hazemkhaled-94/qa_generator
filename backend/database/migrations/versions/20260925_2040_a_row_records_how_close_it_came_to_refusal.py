@@ -30,20 +30,44 @@ down_revision: str | None = "c1a7e93b04d6"
 branch_labels: str | None = None
 depends_on: str | None = None
 
-_SCORES = (
-    "One entry per measuring gate that read this row: the gate, the value it "
-    "measured, the threshold it was read against and the margin between "
-    "them. A gate that is a judgement rather than a measurement records "
-    "nothing here, because an opinion has no number behind it. NULL for a "
-    "row written before this column."
-)
+# One pair per table rather than one shared pair, because the models spell
+# them per table: a question is read by GATES and a fact by CHECKS, and
+# nearly every check on a fact is structural and records no number. These
+# have to match the model word for word - `test_the_models_and_the_
+# migrations_agree` compares the comment as well as the type, and a shared
+# "this row" here against "this fact" there is a diff on every run.
+_SCORES = {
+    "questions": (
+        "One entry per measuring gate that read this question: the gate, the "
+        "value it measured, the threshold it was read against and the margin "
+        "between them. A gate that is a judgement rather than a measurement "
+        "records nothing here, because an opinion has no number behind it. "
+        "NULL for a question written before this column."
+    ),
+    "facts": (
+        "One entry per measuring check that read this fact: the check, the "
+        "value it measured, the threshold it was read against and the margin "
+        "between them. A check that is structural rather than a measurement "
+        "records nothing here - a citation resolves or it does not. NULL for "
+        "a fact written before this column."
+    ),
+}
 
-_CONFIDENCE = (
-    "The smallest margin in gate_scores, in [0, 1]. How close this row came "
-    "to the verdict that would have refused it, NOT a probability: the "
-    "readings are on different scales and only the margins are comparable. "
-    "NULL when no measuring gate read the row, which is different from 0."
-)
+_CONFIDENCE = {
+    "questions": (
+        "The smallest margin in gate_scores, in [0, 1]. How close this "
+        "question came to the verdict that would have refused it, NOT a "
+        "probability: the readings are on different scales and only the "
+        "margins are comparable. NULL when no measuring gate read it, which "
+        "is different from 0."
+    ),
+    "facts": (
+        "The smallest margin in gate_scores, in [0, 1]. How close this fact "
+        "came to the verdict that would have refused it, NOT a probability. "
+        "NULL when no measuring check read it, which is most facts: nearly "
+        "every check here is structural."
+    ),
+}
 
 
 def upgrade() -> None:
@@ -51,11 +75,13 @@ def upgrade() -> None:
     for table in ("questions", "facts"):
         op.add_column(
             table,
-            sa.Column("gate_scores", JSONB(), nullable=True, comment=_SCORES),
+            sa.Column("gate_scores", JSONB(), nullable=True, comment=_SCORES[table]),
         )
         op.add_column(
             table,
-            sa.Column("confidence", sa.Float(), nullable=True, comment=_CONFIDENCE),
+            sa.Column(
+                "confidence", sa.Float(), nullable=True, comment=_CONFIDENCE[table]
+            ),
         )
         op.create_check_constraint(
             f"{table}_confidence_is_a_share",

@@ -88,8 +88,25 @@ def api_schema(application):
 #: silently ignored - `parametrize` collects its operations from the lazy
 #: wrapper. That looked like it worked, and the give-away was PATCH
 #: operations in the failure list of a run restricted to GET.
-schema = schemathesis.pytest.from_fixture("api_schema").include(
-    method=sorted(READ_ONLY)
+#: Read routes whose generated calls are not worth what they report.
+#:
+#: `/pipeline/runs` answers 503 `no_orchestrator` when DAGSTER_URL is unset,
+#: which is every test run: nothing here starts a Dagster. That status is
+#: DECLARED on the route and the frontend branches on it, so the document
+#: and the server agree and `status_code_conformance` is content. Only
+#: `not_a_server_error` objects, and it objects to the shape of the number
+#: rather than to anything being wrong - which is the same reason
+#: `unsupported_method` is off above.
+#:
+#: What the route does with a reachable orchestrator is covered by
+#: `tests/unit/api/test_orchestrator.py` and `tests/integration/api/
+#: test_pipeline_routes.py`, both of which can stand one in.
+UNGENERATED = ("/pipeline/runs",)
+
+schema = (
+    schemathesis.pytest.from_fixture("api_schema")
+    .include(method=sorted(READ_ONLY))
+    .exclude(path_regex="^(" + "|".join(UNGENERATED) + ")$")
 )
 
 

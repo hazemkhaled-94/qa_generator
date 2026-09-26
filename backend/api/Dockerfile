@@ -97,6 +97,12 @@ COPY backend/question_generation/ ./question_generation/
 COPY backend/assessment/ ./assessment/
 COPY backend/nlp/ ./nlp/
 COPY backend/llm/ ./llm/
+# The one first-party module that is a file rather than a package, and so
+# the one that a line per directory above does not carry. Four packages
+# import it - extraction, question_generation and the two that read a
+# score back - and without it the api and every worker died on
+# `ModuleNotFoundError: No module named 'confidence'` at import.
+COPY backend/confidence.py ./confidence.py
 # The version stamped on a stored object is read from it at run time.
 COPY pyproject.toml ./
 COPY telemetry/ /shared/telemetry/

@@ -169,6 +169,8 @@ x-worker: &worker
     - ./backend/question_generation:/app/question_generation:ro
     - ./backend/assessment:/app/assessment:ro
     - ./backend/archive:/app/archive:ro
+    # A file rather than a package, so the lines above do not carry it.
+    - ./backend/confidence.py:/app/confidence.py:ro
     - ./telemetry:/shared/telemetry:ro
     - logs:/var/log/qa
     - models:/home/app/.cache/huggingface
@@ -474,6 +476,19 @@ services:
       # model-env, and no provider.env: the api serves the model settings
       # and calls no model.
       <<: [*service-env, *store-env, *model-env]
+      # The orchestrator, for `POST /pipeline/run` and nothing else. The
+      # compose service name, because this is the container's view.
+      #
+      # This is the one edge from the backend into `orchestration/`, and it
+      # is optional on purpose: unset, /pipeline answers `available: false`
+      # and every other route is unaffected. A deployment that deletes the
+      # two dagster services leaves nothing here to point at and loses the
+      # Run button, not the pipeline.
+      #
+      # No `depends_on` to match. The api must come up whether or not the
+      # webserver did - and the webserver already depends on the api, so
+      # requiring it both ways would be a cycle compose refuses to start.
+      DAGSTER_URL: ${DAGSTER_URL:-http://dagster-webserver:3000}
       # Where a person opens each service, for the System health page. Built
       # here rather than in .env because it is the PUBLISHED port that a
       # browser needs and the ports below are the only place both halves are
@@ -504,6 +519,7 @@ services:
       - ./backend/nlp:/app/nlp:ro
       - ./backend/llm:/app/llm:ro
       - ./backend/archive:/app/archive:ro
+      - ./backend/confidence.py:/app/confidence.py:ro
       - ./telemetry:/shared/telemetry:ro
       - logs:/var/log/qa
     ports:

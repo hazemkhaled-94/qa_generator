@@ -104,9 +104,9 @@ def test_pruning_takes_each_spent_project_once() -> None:
     """One DELETE per project, and the count is what went."""
 
     class _Answer:
-        """A successful response."""
+        """A successful response, as `requests` reports one."""
 
-        is_success = True
+        ok = True
 
     class _Client:
         """A client that succeeds at every delete."""

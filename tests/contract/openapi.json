@@ -17,6 +17,14 @@
       ]
     }
   },
+  "/assessment/enrol": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202"
+      ]
+    }
+  },
   "/assessment/plan": {
     "get": {
       "parameters": [],
@@ -47,10 +55,13 @@
   "/assessment/{action}": {
     "post": {
       "parameters": [
-        "action"
+        "action",
+        "confirm"
       ],
       "responses": [
         "202",
+        "400",
+        "404",
         "422"
       ]
     }
@@ -95,10 +106,13 @@
   "/chunking/{action}": {
     "post": {
       "parameters": [
-        "action"
+        "action",
+        "confirm"
       ],
       "responses": [
         "202",
+        "400",
+        "404",
         "422"
       ]
     }
@@ -213,10 +227,13 @@
   "/extraction/{action}": {
     "post": {
       "parameters": [
-        "action"
+        "action",
+        "confirm"
       ],
       "responses": [
         "202",
+        "400",
+        "404",
         "422"
       ]
     }
@@ -325,10 +342,13 @@
   "/parsing/{action}": {
     "post": {
       "parameters": [
-        "action"
+        "action",
+        "confirm"
       ],
       "responses": [
         "202",
+        "400",
+        "404",
         "422"
       ]
     }
@@ -395,6 +415,76 @@
         "200",
         "404",
         "422"
+      ]
+    }
+  },
+  "/pipeline": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    }
+  },
+  "/pipeline/automation": {
+    "get": {
+      "parameters": [],
+      "responses": [
+        "200"
+      ]
+    },
+    "put": {
+      "parameters": [],
+      "responses": [
+        "200",
+        "422",
+        "503"
+      ]
+    }
+  },
+  "/pipeline/retry": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202"
+      ]
+    }
+  },
+  "/pipeline/run": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202",
+        "409",
+        "503"
+      ]
+    }
+  },
+  "/pipeline/runs": {
+    "get": {
+      "parameters": [
+        "limit"
+      ],
+      "responses": [
+        "200",
+        "422",
+        "503"
+      ]
+    }
+  },
+  "/pipeline/start": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202"
+      ]
+    }
+  },
+  "/pipeline/stop": {
+    "post": {
+      "parameters": [],
+      "responses": [
+        "202"
       ]
     }
   },
@@ -508,10 +598,13 @@
   "/questions/{action}": {
     "post": {
       "parameters": [
-        "action"
+        "action",
+        "confirm"
       ],
       "responses": [
         "202",
+        "400",
+        "404",
         "422"
       ]
     }

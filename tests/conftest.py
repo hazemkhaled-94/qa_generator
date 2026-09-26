@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -417,22 +418,27 @@ def _empty(client) -> None:
                     client.delete_object(Bucket=name, Key=held["Key"])
 
 
+def _rebuilt(module: str) -> bool:
+    """Whether one module has to be imported again against the containers.
+
+    The composition root, the routers that read it, and the app that mounts
+    them. Nothing else: see `application`.
+    """
+    return module in ("api.dependencies", "api.main") or module.startswith("api.routes")
+
+
 @pytest.fixture(scope="session")
 def application(postgres: str, s3: dict[str, str]):
     """The FastAPI application, built against the containers.
 
     api.dependencies is the composition root and builds every service as it
     is imported, binding each to the addresses in the environment at that
-    moment. So it is imported here, once, after the containers are up - and
-    nothing is dropped from sys.modules afterwards, because a second copy of
-    blob_store would carry a second object count cache and the fixtures
-    would be clearing the wrong one.
+    moment. So it is imported here, once, after the containers are up.
 
     The routes hold those services as module-level names rather than through
     `Depends`, so there is nothing to override: what these tests exercise is
     the real wiring.
 
-    The caches are cleared BEFORE that import, and that is the whole fixture.
     Each repository captures `sessions()` as it is constructed, so a cache
     populated by anything that ran earlier binds every route for the rest of
     the process - and the `database` fixture clearing it afterwards cannot
@@ -440,6 +446,34 @@ def application(postgres: str, s3: dict[str, str]):
     command line populates it against the ambient DATABASE_URL, which is the
     developer's own database: the API tests then read and write there while
     the fixtures set up a container nothing touches.
+
+    Clearing the caches before the import is therefore necessary and not
+    sufficient. If anything has already imported the composition root, the
+    import below is a no-op against sys.modules and every service keeps the
+    factory it captured then - the clear cannot reach them.
+
+    Something does. `tests/unit/api/test_params.py` reads the signature of
+    each route out of `api.routes.*`, which cannot be imported without
+    `api.dependencies`. Its own docstring says so and defers the import into
+    the test body, which is enough for `-m integration` - that run never
+    executes the file - and not enough for `make test`, which runs both
+    layers in one process and shuffles the order. 217 API tests read the
+    developer's own database whenever the unit layer got there first.
+
+    So the three modules that hold a binding - the composition root, the
+    routers that read it and the app that mounts them - are dropped from
+    sys.modules and rebuilt here.
+
+    Only those three. Dropping `api` wholesale rebuilds `api.orchestrator`
+    too, and `tests/integration/api/test_pipeline_routes.py` imports five
+    of its classes at module scope to stand a Dagster in: rebuilt, the
+    route would be raising a `Refused` that is not the `Refused` the test
+    is watching for, and eight tests failed on an isinstance against a
+    class of the same name. Everything a route needs by identity rather
+    than by binding - orchestrator, errors, status, params - is left as the
+    one copy. The same reasoning keeps blob_store, whose second copy would
+    carry a second object count cache for the fixtures to clear the wrong
+    one of.
     """
     os.environ["DATABASE_URL"] = postgres
     os.environ.update(s3)
@@ -447,6 +481,9 @@ def application(postgres: str, s3: dict[str, str]):
     # does not carry: the settings routes serve these and refuse a bad value
     # for one, and both need the value the workers are reading.
     os.environ.setdefault("LLM_MODEL", "ollama_chat/test-model")
+
+    for name in [one for one in sys.modules if _rebuilt(one)]:
+        del sys.modules[name]
     _release()
 
     from api.main import app

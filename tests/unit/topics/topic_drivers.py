@@ -299,6 +299,36 @@ class RecordingExport:
         self.figures.pop(key, None)
 
 
+class RecordingModels:
+    """The models bucket, held in memory.
+
+    Beside `RecordingExport` rather than sharing it: the two buckets hold
+    the two halves of a fit, and a test asserting the factorisation was
+    kept should not pass because a figure was.
+    """
+
+    TOPIC_MODEL_TYPE = "application/octet-stream"
+
+    def __init__(self) -> None:
+        """Starts with no model stored."""
+        self.models: dict[str, bytes] = {}
+        self.types: dict[str, str] = {}
+        self.refuses_put: Exception | None = None
+
+    @staticmethod
+    def topic_model_key(language: str) -> str:
+        """The key one language's fitted model is stored under."""
+        return f"topics/{language}.npz"
+
+    def put(self, key: str, body: bytes, content_type: str | None = None) -> None:
+        """Stores one model."""
+        if self.refuses_put is not None:
+            raise self.refuses_put
+        self.models[key] = body
+        if content_type:
+            self.types[key] = content_type
+
+
 class CommandDriver:
     """The command line, with every collaborator it reaches for replaced.
 
@@ -314,9 +344,13 @@ class CommandDriver:
         self.calls: list[str] = []
         self.watched: list[float] = []
         self.figures: dict[str, bytes] = {}
+        self.stored_models: dict[str, bytes] = {}
+        self.rendered: list[str] = []
         self.fits: list[str] = ["de"]
         self.queued: list[int] = []
         self.drains = 0
+        #: Every model the preflight was asked to reach before working.
+        self.checked: list[object] = []
 
         driver = self
 
@@ -375,10 +409,35 @@ class CommandDriver:
                 """The key one language's figure is stored under."""
                 return f"topics/{language}.html"
 
+            TOPIC_VISUALISATION_TYPE = "text/html; charset=utf-8"
+
             def find(self, key: str) -> bytes | None:
                 """Reads one figure, or nothing."""
                 driver.calls.append(f"find {key}")
                 return driver.figures.get(key)
+
+            def remove(self, key: str) -> None:
+                """Takes one figure away."""
+                driver.calls.append(f"remove {key}")
+                driver.figures.pop(key, None)
+
+            def put(self, key: str, body: bytes, content_type: str = "") -> None:
+                """Stores one figure."""
+                driver.calls.append(f"put {key}")
+                driver.figures[key] = body
+
+        class Models:
+            """The models bucket."""
+
+            @staticmethod
+            def topic_model_key(language: str) -> str:
+                """The key one language's fitted model is stored under."""
+                return f"topics/{language}.npz"
+
+            def find(self, key: str) -> bytes | None:
+                """Reads one stored model, or nothing."""
+                driver.calls.append(f"find {key}")
+                return driver.stored_models.get(key)
 
         class Service:
             """The worker."""
@@ -396,6 +455,7 @@ class CommandDriver:
         monkeypatch.setattr(module, "TopicQueue", Queue)
         monkeypatch.setattr(module, "TopicCatalog", Catalog)
         monkeypatch.setattr(module, "ExportBucket", Export)
+        monkeypatch.setattr(module, "ModelsBucket", Models)
         monkeypatch.setattr(module, "build_service", lambda *_: Service())
         # The settings the command reads, without the database they are
         # stored in. The environment is what a deployment with nothing
@@ -404,6 +464,22 @@ class CommandDriver:
             module, "snapshot", lambda: (dict(os.environ), "test-settings")
         )
         monkeypatch.setattr(module, "_DRAWN", written)
+        # The preflight, which is a collaborator like the rest and was the
+        # one this did not replace. It asks the naming model a question over
+        # HTTP, and the command reaches it whenever a model is configured -
+        # which here is decided by the ambient LLM_MODEL, because
+        # `snapshot` above hands the command os.environ.
+        #
+        # Nothing in this file sets that, so on its own the command found no
+        # model and skipped the preflight. `tests/conftest.py` sets it in the
+        # `application` fixture through os.environ rather than monkeypatch,
+        # so once the integration layer had built the API it stayed set for
+        # the process - and the four tests here that drain went looking for
+        # ollama_chat/test-model over the network. Passed alone, failed in a
+        # full run, which is the worst way for a test to be wrong.
+        monkeypatch.setattr(
+            module, "before_work", lambda *models: driver.checked.extend(models)
+        )
         monkeypatch.setattr(module.telemetry, "configure", lambda *_, **__: None)
         monkeypatch.setattr(module.telemetry, "trace_engine", lambda *_: None)
         monkeypatch.setattr(module, "engine", lambda: None)
@@ -415,6 +491,26 @@ class CommandDriver:
     def drew(self, language: str, page: bytes = b"<html>a figure</html>") -> None:
         """Puts one language's figure in the bucket."""
         self.figures[f"topics/{language}.html"] = page
+
+    def fitted(self, language: str) -> None:
+        """Puts one language's stored model in the bucket.
+
+        A real one through `space.dump`, so `--render` loads what it would
+        load in a deployment rather than a sentinel that only this knows
+        how to read.
+        """
+        from topic_modelling.models import TopicSpace
+        from topic_modelling.space import dump
+
+        self.stored_models[f"topics/{language}.npz"] = dump(
+            TopicSpace(
+                topic_term=[[0.6, 0.3, 0.1], [0.2, 0.2, 0.6]],
+                doc_topic=[[0.8, 0.2], [0.3, 0.7]],
+                doc_lengths=[9, 14],
+                vocabulary=["frist", "prüfung", "anfrage"],
+                term_frequency=[11, 7, 4],
+            )
+        )
 
     def run(self, *argv: str) -> int:
         """Runs the command line with these arguments."""
@@ -445,11 +541,13 @@ class ServiceDriver:
         """Wires the service over the doubles."""
         self.queue = RecordingQueue(corpora or {}, texts)
         self.export = RecordingExport()
+        self.models = RecordingModels()
         self.labeller = labeller
         self.service = TopicModellingService(
             repository=self.queue,  # pyright: ignore[reportArgumentType]
             fitter=TopicFitter(**settings),
             export=self.export,  # pyright: ignore[reportArgumentType]
+            models=self.models,  # pyright: ignore[reportArgumentType]
             labeller=labeller.labeller if labeller else None,
         )
 
