@@ -483,6 +483,12 @@ class CheckedQuestion:
     #: writes one: an opinion has nothing to record, and a structural rule
     #: has no scale. `confidence` is the weakest margin of them.
     readings: tuple[Measurement, ...] = ()
+    #: Every judgement this question was meant to get and could not, because
+    #: the model would not answer. NOT the same as a gate that passed, which
+    #: is what it used to be indistinguishable from: the checker rejects on
+    #: False and an abstention is None, so a question whose judge was
+    #: unreachable was ACCEPTED having cleared a gate nobody ran.
+    gates_abstained: tuple[str, ...] = ()
     #: The trace this question was written and judged in, and the span the
     #: gates ran in - which is the span its verdict annotations hang off.
     #: Columns, unlike the two above: what they are for is getting from a

@@ -618,6 +618,22 @@ class QuestionGenerationService(StageService):
             # question refused at the round trip and one refused at the
             # first rule were indistinguishable in how far they got.
             current.set_attribute("question.gates_ran", list(checked.gates_ran))
+            # And the judgements that could not be had, which is the one
+            # thing `gates_ran` cannot say: a gate that ran and abstained is
+            # in both lists, and a question accepted with this non-empty
+            # cleared a gate nobody actually ran.
+            if checked.gates_abstained:
+                current.set_attribute(
+                    "question.gates_abstained", list(checked.gates_abstained)
+                )
+                log.warning(
+                    "%r was judged without %s: the model would not answer, so it "
+                    "is accepted on gates that did not run. `make "
+                    "questions-reverify` re-reads the free gates; these are not "
+                    "among them, so re-run the stage to have them asked again.",
+                    checked.question_text,
+                    ", ".join(checked.gates_abstained),
+                )
             current.set_attribute("question.accepted", checked.accepted)
             # What the measuring gates read, so a trace can be filtered to
             # the questions that only just survived one. Per gate as well as

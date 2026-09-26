@@ -32,7 +32,7 @@ from typing import ClassVar
 from assessment.judge import Judge, JudgeUnavailable
 from assessment.models import ArtifactToJudge, Assessed
 from assessment.repository import AssessmentQueue
-from assessment.templates import PROMPT_VERSION, direction_of
+from assessment.templates import PROMPT_VERSION, direction_of, metrics_of
 from stages import StageService
 from telemetry import tracer, working
 from telemetry.evaluations import Evaluations, Verdict, current_ids
@@ -106,6 +106,11 @@ class AssessmentService(StageService):
                 judgements=judgements,
                 judge_model=self._judge.model,
                 prompt_version=PROMPT_VERSION,
+                # What the kind was DUE, which is not what came back: the
+                # judge abstains per metric when the model will not answer,
+                # and the row would otherwise read `assessed` whether it got
+                # six judgements or two.
+                metrics_due=len(metrics_of(artifact.kind)),
                 trace_id=trace_id,
                 span_id=span_id,
             )
@@ -128,6 +133,22 @@ class AssessmentService(StageService):
                 # joining to Postgres.
                 current.set_attribute(f"assessment.{one.metric}", str(one.label))
 
+            if assessed.abstained:
+                # The judge already logged each one. This says what it cost
+                # the ROW, which is the thing that outlives the run: a
+                # verdict standing on fewer metrics than its version asked
+                # for, and `assess-retry` will not find it because the row
+                # did not fail.
+                log.warning(
+                    "%s %d is judged on %d of %d metric(s): the rest abstained, "
+                    "so this verdict is thinner than version %s asks for. "
+                    "`make assess-rerun` is what asks them again.",
+                    artifact.kind,
+                    artifact.artifact_id,
+                    len(judgements),
+                    assessed.metrics_due,
+                    PROMPT_VERSION,
+                )
             self._record(artifact, assessed, span_id)
             log.info(
                 "%s %d: the judge %s%s",

@@ -306,6 +306,15 @@ class Question(Base):
         "derived from rejected_reason and a fixed order. NULL for a question "
         "written before this column; empty means no gate ran.",
     )
+    gates_abstained: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text),
+        comment="Every judgement this question was meant to get and could not, "
+        "because the model could not be reached. A gate that abstained is NOT a "
+        "gate that passed: the checker rejects on False and an abstention is "
+        "None, so without this the question reads as having cleared a gate "
+        "nobody ran. NULL for a question written before this column; empty means "
+        "every gate that was asked answered.",
+    )
     attempt: Mapped[int] = mapped_column(
         Integer,
         server_default=text("1"),

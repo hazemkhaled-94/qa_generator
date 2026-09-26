@@ -18,6 +18,7 @@ import pytest
 from assessment.judge import JudgeUnavailable
 from assessment.models import ArtifactToJudge, Judgement
 from assessment.service import SUMMARY, AssessmentService
+from assessment.templates import metrics_of
 from database.qa_generator import ArtifactKind, JudgeMetric
 
 
@@ -276,9 +277,43 @@ def test_the_phase_writes_no_column_a_stage_reads(judgements) -> None:
         "judgements",
         "judge_model",
         "prompt_version",
+        # How many metrics the kind was DUE, which is the assessment's own
+        # column and no stage's: it says whether this verdict stands on the
+        # whole set or on what was left after a metric abstained.
+        "metrics_due",
         "trace_id",
         "span_id",
     }
+
+
+def test_a_verdict_records_what_its_kind_was_due() -> None:
+    """A fact is due three metrics; APPROVING answers two of them.
+
+    Without the count, a verdict that lost a metric to an unreachable model
+    and a whole one are the same row: both read `assessed`, and `retry`
+    finds neither because nothing failed.
+    """
+    queue = _Queue(_fact())
+
+    _service(queue, _Judge(*APPROVING)).process_next()
+
+    written = queue.recorded[0]
+    assert written.metrics_due == len(metrics_of(ArtifactKind.FACT))
+    assert len(written.judgements) == 2
+    assert written.abstained == 1
+
+
+def test_a_whole_verdict_reports_no_abstention() -> None:
+    """The ordinary case, and the one the count has to stay quiet about."""
+    queue = _Queue(_fact())
+    whole = tuple(
+        _judgement(metric, "factual", 0.0, True)
+        for metric in metrics_of(ArtifactKind.FACT)
+    )
+
+    _service(queue, _Judge(*whole)).process_next()
+
+    assert queue.recorded[0].abstained == 0
 
 
 def test_the_refused_metrics_reach_the_span_as_plain_strings() -> None:

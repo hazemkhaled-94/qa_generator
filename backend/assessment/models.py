@@ -66,6 +66,12 @@ class Assessed:
         judgements: One per metric the kind declares, in template order.
         judge_model: Which model answered.
         prompt_version: Which template version it was asked under.
+        metrics_due: How many metrics the kind declares under that version.
+            Recorded because `judgements` is short of it wherever a metric
+            ABSTAINED - the model would not answer - and without the count
+            a thin verdict and a whole one are the same row. The count is
+            in the source under a version the row outlives, which is the
+            argument the `prompts` table is built on.
         trace_id: The trace it was judged in, for the row to link to.
         span_id: The span its annotations hang off.
     """
@@ -74,8 +80,14 @@ class Assessed:
     judgements: tuple[Judgement, ...]
     judge_model: str
     prompt_version: str
+    metrics_due: int = 0
     trace_id: str = ""
     span_id: str = ""
+
+    @property
+    def abstained(self) -> int:
+        """How many metrics were due and did not answer."""
+        return max(self.metrics_due - len(self.judgements), 0)
 
     @property
     def approved(self) -> bool:

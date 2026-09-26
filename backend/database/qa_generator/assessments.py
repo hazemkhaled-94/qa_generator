@@ -24,6 +24,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     Text,
     UniqueConstraint,
     func,
@@ -155,6 +156,16 @@ class Assessment(Base):
         "Never read by a gate: `facts.validated` and `questions.status` are "
         "what decide whether an artefact is kept, and this is the second "
         "opinion recorded beside them.",
+    )
+    metrics_due: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="How many metrics this artefact's kind was due under its "
+        "prompt_version. The judge abstains per metric when the model cannot be "
+        "reached, so a row with fewer assessment_metrics than this was judged on "
+        "less than it should have been. Stored rather than derived because the "
+        "count lives in the source under a version the row outlives. NULL for a "
+        "row assessed before this column.",
     )
     judge_model: Mapped[str | None] = mapped_column(
         Text,

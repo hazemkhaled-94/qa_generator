@@ -343,6 +343,13 @@ def bridge(
     """
     log.info("replacing %d bridge fact(s)", catalog.clear_bridges(within))
     written = 0
+    # Groups the model could not be asked about. Counted because skipping
+    # one and carrying on is right - a batch over hundreds of groups must
+    # not end because one call failed - but a pass that quietly wrote fewer
+    # facts than it could have is a pass whose result cannot be read. The
+    # same ExtractionFailed fails a PASSAGE outright, and the difference
+    # between the two was invisible.
+    dropped = 0
     for topic_id, passages in catalog.by_topic(within):
         # The same gate the per-passage stage applies, so the two cannot
         # drift. Without it a group is spent on a table of contents or a
@@ -355,6 +362,7 @@ def bridge(
                 proposed = extractor.extract(offered)
             except ExtractionFailed as exc:
                 log.warning("topic %d: a group failed: %s", topic_id, exc)
+                dropped += 1
                 continue
             written += catalog.add_bridges(
                 [
@@ -362,7 +370,16 @@ def bridge(
                     for candidate in proposed
                 ]
             )
-    log.info("wrote %d bridge fact(s)", written)
+    if dropped:
+        log.warning(
+            "wrote %d bridge fact(s), and %d group(s) were never read because the "
+            "model would not answer. This pass is short by whatever they held; "
+            "`make extract-bridge` again is what asks for them.",
+            written,
+            dropped,
+        )
+    else:
+        log.info("wrote %d bridge fact(s)", written)
     return written
 
 

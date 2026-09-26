@@ -207,6 +207,11 @@ class QuestionChecker:
         # measured something is not derivable from the verdict either. Only
         # the gates that ARE measurements write here.
         readings: list[Measurement] = []
+        # And the judgements that were asked for and could not be had. An
+        # abstention leaves no other trace: the checker rejects on False and
+        # an abstention is None, so a gate that could not run reads exactly
+        # like one that passed and the question is ACCEPTED.
+        abstained: list[str] = []
         failed, form = structural(
             question_text=candidate.question_text,
             target_answer=candidate.target_answer,
@@ -299,13 +304,14 @@ class QuestionChecker:
                 form,
                 ran,
                 readings,
+                abstained,
             )
 
         # Before the round trip, because none of it reads a passage: a
         # question naming its own source is refused without ever paying for
         # the call that would have answered it.
         ran.append("phrasing")
-        failed = self._phrasing(candidate)
+        failed = self._phrasing(candidate, abstained)
         if failed:
             return self._verdict(
                 candidate,
@@ -315,6 +321,7 @@ class QuestionChecker:
                 form,
                 ran,
                 readings,
+                abstained,
             )
 
         ran.append("round_trip")
@@ -326,6 +333,7 @@ class QuestionChecker:
             form,
             ran,
             readings,
+            abstained,
         )
 
     def _kind(self, candidate: Candidate) -> tuple[str, str] | None:
@@ -452,8 +460,17 @@ class QuestionChecker:
             )
         return None
 
-    def _phrasing(self, candidate: Candidate) -> tuple[str, str] | None:
+    def _phrasing(
+        self, candidate: Candidate, abstained: list[str] | None = None
+    ) -> tuple[str, str] | None:
         """What the question's own wording says, before any passage is read.
+
+        `abstained` collects the judgements that were asked for and could
+        not be had. Passed down rather than returned, the way `ran` and
+        `readings` are, because this returns a verdict and an abstention is
+        not one - it is the absence of one, and the caller records it on the
+        row so the question does not read as having cleared a gate nobody
+        ran.
 
         Ahead of the round trip because none of it needs the passages, so a
         question that carries its own source no longer pays for a call that
@@ -476,10 +493,14 @@ class QuestionChecker:
         # A question carrying its own source has already done the work it
         # was meant to test. Judged for a follow-up too - leaning on the
         # conversation is allowed, naming the file is not.
+        said = [] if abstained is None else abstained
+
         cited = cites_source(question, language)
         ruled = cited is not None
         if cited is None and (judge := self._opinion) is not None:
             cited = judge.names_its_source(question)
+            if cited is None:
+                said.append("names_its_source")
         if cited:
             reason = (
                 "it names the material the answer is in, so it asks a question "
@@ -507,11 +528,14 @@ class QuestionChecker:
         # call about the passages. Over the labelled cases the parse is
         # right 19 times out of 19 and that field managed 16.
         judge = self._opinion
-        if (
-            judge is not None
-            and not anchored(question, language)
-            and judge.names_something(question) is False
-        ):
+        names = (
+            judge.names_something(question)
+            if judge is not None and not anchored(question, language)
+            else True
+        )
+        if names is None:
+            said.append("names_something")
+        if names is False:
             reason = (
                 f"it names nothing a person searching would know - the "
                 f"parse finds {subject(question, language)!r} - and it "
@@ -529,7 +553,10 @@ class QuestionChecker:
         pointers = pointing(question, language)
         if not pointers or judge is None:
             return None
-        if judge.self_contained(question, pointers) is False:
+        contained = judge.self_contained(question, pointers)
+        if contained is None:
+            said.append("self_contained")
+        if contained is False:
             reason = (
                 f"it points outward with {', '.join(repr(one) for one in pointers)} "
                 f"and there is nothing in the question to point at, so only "
@@ -917,6 +944,7 @@ class QuestionChecker:
         form: str | None = None,
         ran: Sequence[str] = (),
         readings: Sequence[Measurement] = (),
+        abstained: Sequence[str] = (),
     ) -> CheckedQuestion:
         """Assembles one judged question, kept whichever way it went.
 
@@ -957,4 +985,5 @@ class QuestionChecker:
             planned_difficulty=candidate.planned_difficulty,
             gates_ran=tuple(ran),
             readings=tuple(readings),
+            gates_abstained=tuple(abstained),
         )

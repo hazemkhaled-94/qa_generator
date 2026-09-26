@@ -372,6 +372,7 @@ class AssessmentQueue(RowQueue):
                 approved=assessed.approved,
                 judge_model=assessed.judge_model,
                 prompt_version=assessed.prompt_version,
+                metrics_due=assessed.metrics_due or None,
                 settings_version=self._version,
                 run_id=run_id(),
                 trace_id=assessed.trace_id or None,
@@ -386,6 +387,23 @@ class AssessmentQueue(RowQueue):
         other five answer in.
         """
         counts = dict(self.counts_by_status())
+        # A verdict standing on fewer metrics than its version asked for.
+        # Counted here rather than left to whoever writes the query,
+        # because the row is `assessed` either way and `retry` cannot find
+        # it: nothing failed, the judge was simply unreachable for part of
+        # it. `metrics_due` is what makes this SQL rather than code.
+        thin = (
+            select(func.count())
+            .select_from(Assessment)
+            .where(
+                Assessment.metrics_due.is_not(None),
+                select(func.count())
+                .select_from(AssessmentMetric)
+                .where(AssessmentMetric.assessment_id == Assessment.id)
+                .scalar_subquery()
+                < Assessment.metrics_due,
+            )
+        )
         with self._session() as session:
             for name, condition in (
                 ("approved", Assessment.approved.is_(True)),
@@ -397,6 +415,7 @@ class AssessmentQueue(RowQueue):
                     ).scalar()
                     or 0
                 )
+            counts["thin"] = session.execute(thin).scalar() or 0
         return counts
 
 
