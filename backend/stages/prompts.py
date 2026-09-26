@@ -70,9 +70,10 @@ class Composed:
             so a model per service would publish four of them against a
             model that never sees them.
 
-            NOT recorded. The table says what was asked; which model was
-            asked is the deployment's answer and it can change under a
-            fixed version without the prompt changing at all.
+            Recorded, so `make prompts-publish` can put the same prompt
+            back against the same model. Changing it rewrites the row and
+            republishes, and is NOT reported as drift: repointing a stage
+            at another model changes nothing about what the prompt asks.
     """
 
     name: str
@@ -213,6 +214,14 @@ def _publish(service: str, moved: Sequence[Composed], model: ModelSettings) -> N
         )
 
 
+#: The halves of a prompt whose change under a fixed version is DRIFT, in
+#: the order `_write` reports them. The model beside them is not one of
+#: these: repointing a stage at another model is a deployment's decision
+#: and changes nothing about what the prompt asks, so it is compared - the
+#: row is rewritten and republished - and not warned about.
+_HALVES = ("system prompt", "user template", "response schema")
+
+
 def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
     """Upserts the prompts, warning about any that changed under a version.
 
@@ -221,16 +230,24 @@ def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
     """
     with sessions().begin() as session:
         stored = {
-            (row.name, row.version): (row.digest, row.user_text, row.response_schema)
+            (row.name, row.version): (
+                row.digest,
+                row.user_text,
+                row.response_schema,
+                row.model,
+            )
             for row in session.scalars(select(Prompt).where(Prompt.service == service))
         }
         moved: list[Composed] = []
         for one in held:
             was = stored.get((one.name, one.version))
-            sending = (one.digest, one.user_text, one.response_schema)
+            sending = (one.digest, one.user_text, one.response_schema, one.model)
             if was == sending:
                 continue
-            if was is not None:
+            # The model alone moving is not drift; see `_HALVES`. Sliced
+            # rather than compared field by field so the two stay in step:
+            # a fourth half added to the warning is added to that tuple.
+            if was is not None and was[: len(_HALVES)] != sending[: len(_HALVES)]:
                 # All three halves, not the digest alone: the digest is over
                 # the system prompt, and a user template edited under a fixed
                 # version is the same two datasets.
@@ -244,10 +261,7 @@ def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
                     ", ".join(
                         half
                         for half, before, now in zip(
-                            ("system prompt", "user template", "response schema"),
-                            was,
-                            sending,
-                            strict=True,
+                            _HALVES, was, sending, strict=False
                         )
                         if before != now
                     ),
@@ -262,6 +276,7 @@ def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
                     text=one.text,
                     user_text=one.user_text,
                     response_schema=one.response_schema,
+                    model=one.model,
                     digest=one.digest,
                 )
                 # first_seen_at is deliberately not touched: what it would
@@ -272,6 +287,7 @@ def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
                         "text": one.text,
                         "user_text": one.user_text,
                         "response_schema": one.response_schema,
+                        "model": one.model,
                         "digest": one.digest,
                     },
                 )

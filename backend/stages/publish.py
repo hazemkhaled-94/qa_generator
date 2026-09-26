@@ -72,7 +72,14 @@ def composed_from(row: Prompt) -> Composed:
     The digest is recomputed rather than read across, and is the same value
     - `_write` writes the text and its digest together.
     """
-    return Composed(row.name, row.version, row.text, row.user_text, row.response_schema)
+    return Composed(
+        row.name,
+        row.version,
+        row.text,
+        row.user_text,
+        row.response_schema,
+        row.model,
+    )
 
 
 def named(service: str, name: str) -> str:
@@ -337,20 +344,12 @@ def publish_stored(model: ModelSettings, service: str | None = None) -> int:
     Also the way in for a version the SOURCE has moved past, which is the
     reason the table is read here rather than the code.
 
-    **Every row goes under `model`, and a stage's own choices do not
-    survive this.** `Composed.model` is not recorded - the table says what
-    was asked, not who was asked - so a republish cannot know that the
-    judge's templates go to ASSESSMENT_JUDGE_MODEL or that question
-    generation's verifier prompts go to QUESTIONS_VERIFIER_MODEL. It
-    publishes them all against the model it is given, which is what this
-    did for every prompt before `record` began publishing, and it OVERWRITES
-    the correctly-attributed versions a stage published: Phoenix keeps the
-    version created last.
-
-    So this is a repair and not a refresh. Running it costs the model
-    attribution on the seven prompts that have one; starting the stages is
-    what puts it back, and only for prompts the table has not already seen.
-    A `model` column on `prompts` is what would close it.
+    **A stage's own model choices survive it**, because the row records
+    them: the judge's templates go back against ASSESSMENT_JUDGE_MODEL and
+    question generation's verifier prompts against
+    QUESTIONS_VERIFIER_MODEL, exactly as the stage published them.
+    `model` is the fallback for a row that names none, which is every row
+    of a stage that calls the shared one.
     """
     held: dict[str, list[Composed]] = {}
     for row in stored(service=service):

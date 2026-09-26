@@ -83,6 +83,51 @@ def test_a_changed_prompt_under_one_version_is_stored_and_reported(
     assert "PROMPT_VERSION is still 8" in caplog.text
 
 
+def test_the_model_a_prompt_goes_to_is_read_back(engine, database) -> None:
+    """So `make prompts-publish` puts it back against the same model.
+
+    One service sends to several - question generation writes with
+    QUESTIONS_MODEL and checks with QUESTIONS_VERIFIER_MODEL - and a
+    republish reads this table and nothing else.
+    """
+    record(
+        "questions",
+        [
+            Composed("factoid", "8", "Write one question."),
+            Composed(
+                "verifier: recover",
+                "1",
+                "Answer from the passages.",
+                model="azure/gpt-4.1",
+            ),
+        ],
+    )
+    by_name = {one.name: one.model for one in stored(service="questions")}
+
+    assert by_name == {"factoid": None, "verifier: recover": "azure/gpt-4.1"}
+
+
+def test_repointing_a_stage_rewrites_the_row_without_calling_it_drift(
+    written, caplog
+) -> None:
+    """A deployment changing models is not a prompt changing under a version.
+
+    It has to be WRITTEN, because the republish reads the row and would
+    otherwise keep sending an old model. It must not WARN, because the
+    warning tells somebody to bump PROMPT_VERSION and there is nothing
+    here to bump: the prompt asks exactly what it asked.
+    """
+    with caplog.at_level("WARNING"):
+        moved = record(
+            "questions",
+            [Composed("factoid", "8", "Write one question.", model="azure/gpt-4.1")],
+        )
+
+    assert moved == 1
+    assert stored(version="8", name="factoid")[0].model == "azure/gpt-4.1"
+    assert "PROMPT_VERSION" not in caplog.text
+
+
 def test_two_services_may_share_a_name_at_one_version(written) -> None:
     """Versions are per MODULE, so `1` means different things in two."""
     record("extraction", [Composed("factoid", "8", "Something else entirely.")])

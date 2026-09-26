@@ -106,6 +106,15 @@ class Prompt(Base):
         "column existed, which is not the same as a call that asked for no "
         "shape - there is no such call.",
     )
+    model: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Which model this prompt is sent to, where the stage names one "
+        "instead of the shared LLM_MODEL. A name and not a setting: the publisher "
+        "resolves the rest through llm.config.Settings.overridden. NULL means the "
+        "stage's own model, which is what a row recorded before this column "
+        "existed means too.",
+    )
     digest: Mapped[str] = mapped_column(
         Text,
         comment="The first sixteen hex characters of the text's SHA-256, spelled "
