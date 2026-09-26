@@ -23,14 +23,16 @@ log = logging.getLogger(__name__)
 
 def models(
     settings: Settings, shared: ModelSettings
-) -> tuple[ModelSettings, ModelSettings]:
-    """The model that writes a question, and the model that checks it.
+) -> tuple[ModelSettings, ModelSettings, ModelSettings]:
+    """The three models this stage calls: writer, verifier, phrasing judge.
 
-    QUESTIONS_MODEL and QUESTIONS_VERIFIER_MODEL name them; either absent is
-    LLM_MODEL. A pair rather than a flag: what the gates need is whether the
-    two came out different, not whether a setting was set.
+    QUESTIONS_MODEL and QUESTIONS_VERIFIER_MODEL name the first two and are
+    LLM_MODEL when absent. QUESTIONS_PHRASING_MODEL names the third and is
+    the verifier's when absent.
     """
-    return shared.overridden(settings.model), shared.overridden(settings.verifier_model)
+    writer = shared.overridden(settings.model)
+    verifier = shared.overridden(settings.verifier_model)
+    return writer, verifier, verifier.overridden(settings.phrasing_model)
 
 
 def build_service(
@@ -42,7 +44,7 @@ def build_service(
     and QUESTIONS_VERIFIER_MODEL checks. A verifier that turns out to be the
     writer is warned about.
     """
-    writer_model, verifier_model = models(settings, model)
+    writer_model, verifier_model, phrasing_model = models(settings, model)
     independent = verifier_model.model != writer_model.model
     if not independent:
         log.warning(
@@ -52,12 +54,6 @@ def build_service(
             "model.",
             writer_model.model,
         )
-
-    # Its own dial, defaulting to the verifier's model rather than to the
-    # writer's: what it judges is still the writer's work, so the same
-    # independence argument applies. It never sees a passage, which is what
-    # makes a much smaller model reasonable here.
-    phrasing_model = verifier_model.overridden(settings.phrasing_model)
 
     catalog = QuestionCatalog()
     return QuestionGenerationService(

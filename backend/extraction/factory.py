@@ -17,6 +17,17 @@ from llm.client import Client
 from llm.config import Settings as ModelSettings
 
 
+def models(
+    settings: Settings, shared: ModelSettings
+) -> tuple[ModelSettings, ModelSettings]:
+    """The two models this stage calls: passage reader and digest reader.
+
+    EXTRACTION_MODEL and EXTRACTION_DIGEST_MODEL name them and are LLM_MODEL
+    when absent.
+    """
+    return shared.overridden(settings.model), shared.overridden(settings.digest_model)
+
+
 def build_service(
     model: ModelSettings,
     settings: Settings | None = None,
@@ -35,18 +46,15 @@ def build_service(
         The service a worker drains the passage queue with.
     """
     settings = settings or Settings.load()
-    client = Client(model.overridden(settings.model))
+    reading, condensed = models(settings, model)
+    client = Client(reading)
     digests = settings.digests
     cap = settings.atomic_cap
     # Its own client when EXTRACTION_DIGEST_MODEL names one, and the reader's
     # otherwise. Condensing a passage is the cheapest thing asked of a model
     # here and the one a small model is trained for, so it is the first call
     # worth moving; what produced a fact is recorded on the fact either way.
-    condensing = (
-        Client(model.overridden(settings.digest_model))
-        if settings.digest_model
-        else client
-    )
+    condensing = Client(condensed) if settings.digest_model else client
     return ExtractionService(
         repository=PassageQueue(version=version),
         extractors=ExtractorRegistry(

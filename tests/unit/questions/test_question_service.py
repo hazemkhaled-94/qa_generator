@@ -393,7 +393,7 @@ def test_the_phrasing_gate_is_off_when_one_model_does_both() -> None:
 
     def built(verifier: str | None) -> bool:
         """Whether a checker wired for this verifier may judge phrasing."""
-        writer, checker_model = models(
+        writer, checker_model, _ = models(
             replace(SETTINGS, model=None, verifier_model=verifier), model
         )
         checker = QuestionChecker(

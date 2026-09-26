@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     def build():
         """Builds the service, naming the models it will call."""
         settings, model, version = configured()
-        writer, verifier = models(settings, model)
+        writer, verifier, _ = models(settings, model)
         log.info(
             "writing with %s, verifying with %s, at %s",
             writer.model,
@@ -69,10 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         return build_service(settings, model, version)
 
     def preflight() -> None:
-        """Proves both models answer before a topic is claimed.
+        """Proves the writer, the verifier and the phrasing judge answer.
 
-        The verifier as well as the writer: a run whose verifier will not
-        answer is a run of ungated questions, which is worse than no run.
+        All three before a topic is claimed: a run whose verifier will not
+        answer is a run of ungated questions, and an unreachable phrasing
+        judge abstains once per question rather than failing the start.
         """
         settings, model, _ = configured()
         before_work(*models(settings, model))

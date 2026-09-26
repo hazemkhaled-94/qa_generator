@@ -31,19 +31,25 @@ pytestmark = [pytest.mark.eval, pytest.mark.nlp]
 
 @pytest.fixture(scope="module")
 def extractor():
-    """The real extractor against the served model, or a skip."""
+    """The real extractor against the served model.
+
+    A model named but not answering fails here. It used to skip, which
+    reported a model that is down as a run with nothing to measure.
+    """
     if not os.environ.get("LLM_MODEL"):
         pytest.skip("LLM_MODEL is unset; no model to measure")
 
+    from extraction.extractors.base import ExtractionFailed
     from extraction.extractors.llm import LlmExtractor
     from llm.client import Client, ModelUnavailable
     from llm.config import Settings
 
-    built = LlmExtractor(Client(Settings.load()))
+    settings = Settings.load()
+    built = LlmExtractor(Client(settings))
     try:
         built.extract(passage("The device weighs 4 kg.", language="en"))
-    except ModelUnavailable as exc:
-        pytest.skip(f"the model is not answering: {exc}")
+    except (ModelUnavailable, ExtractionFailed) as exc:
+        pytest.fail(f"the model {settings.model} is not answering: {exc}")
     return built
 
 

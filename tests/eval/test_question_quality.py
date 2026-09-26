@@ -39,8 +39,6 @@ def checker():
     if not os.environ.get("LLM_MODEL"):
         pytest.skip("LLM_MODEL is unset; no model to measure")
 
-    from dataclasses import replace
-
     from llm.client import Client, ModelUnavailable
     from llm.config import Settings
     from nlp.embedding import Embedder
@@ -52,17 +50,14 @@ def checker():
     questions = QuestionSettings.load()
     if not questions.verifier_model:
         print("\nQUESTIONS_VERIFIER_MODEL is unset; the writer is marking its own work")
-    verifier = Verifier(
-        Client(
-            replace(settings, model=questions.verifier_model)
-            if questions.verifier_model
-            else settings
-        )
-    )
+    # `overridden` and not `replace`: the address follows the provider, so a
+    # verifier served somewhere other than the writer is reached where it is.
+    checking = settings.overridden(questions.verifier_model)
+    verifier = Verifier(Client(checking))
     try:
         verifier.read("Is this on?", ["This is on."])
     except ModelUnavailable as exc:
-        pytest.skip(f"the verifier is not answering: {exc}")
+        pytest.fail(f"the verifier {checking.model} is not answering: {exc}")
 
     return QuestionChecker(
         embedder=Embedder(questions.embedding_model, questions.max_tokens),

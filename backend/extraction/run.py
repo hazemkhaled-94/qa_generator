@@ -12,7 +12,7 @@ import sys
 
 from extraction import prompts
 from extraction.config import Settings
-from extraction.factory import build_bridge, build_service
+from extraction.factory import build_bridge, build_service, models
 from extraction.repository import FactCatalog, PassageQueue
 from extraction.service import bridge, embed, recap, revalidate
 from extraction.validation import FactChecker
@@ -54,9 +54,14 @@ def main(argv: list[str] | None = None) -> int:
         return build_service(model, settings, version)
 
     def preflight() -> None:
-        """Proves the model answers before a passage is claimed."""
+        """Proves the passage reader and the digest reader answer.
+
+        Both before a passage is claimed: EXTRACTION_DIGEST_MODEL may name a
+        model the reader does not, and an unreachable one refuses a digest
+        per passage rather than failing the start.
+        """
         model, settings, _ = configured()
-        before_work(model.overridden(settings.model))
+        before_work(*models(settings, model))
 
     def run_bridge(within) -> int:
         """Reads every topic's passage groups for the claims they share."""

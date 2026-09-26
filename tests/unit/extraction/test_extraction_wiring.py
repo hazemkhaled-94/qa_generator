@@ -13,7 +13,7 @@ import pytest
 
 from database.qa_generator import FactKind
 from extraction.config import Settings
-from extraction.factory import build_bridge, build_service
+from extraction.factory import build_bridge, build_service, models
 from llm.config import Settings as ModelSettings
 from stages.queue import StageQueue
 
@@ -197,3 +197,22 @@ def test_the_digest_reader_takes_its_own_model_when_one_is_named() -> None:
     assert built._extractors.for_block_type("text").provenance.model == (
         "ollama/test-model"
     ), "the passage reader keeps the shared model"
+
+
+def test_every_model_this_stage_calls_is_offered_to_the_preflight() -> None:
+    """The digest reader as well as the passage reader.
+
+    `run.preflight` proves whatever this returns. Unproved, a digest model
+    that will not answer refuses a digest per passage instead of failing
+    the start.
+    """
+    named = models(settings(FactKind.ATOMIC, digest_model="ollama/small"), MODEL)
+
+    assert [one.model for one in named] == ["ollama/test-model", "ollama/small"]
+
+
+def test_the_preflight_is_offered_the_shared_model_when_no_digest_is_named() -> None:
+    """`before_work` asks a repeated model once, so naming it twice is free."""
+    named = models(settings(FactKind.ATOMIC), MODEL)
+
+    assert [one.model for one in named] == ["ollama/test-model", "ollama/test-model"]

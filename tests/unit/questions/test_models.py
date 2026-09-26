@@ -66,7 +66,7 @@ def test_which_model_writes_and_which_checks(
     writer, verifier, writes, checks, independent
 ) -> None:
     """Every combination of the two settings, and what it comes out as."""
-    written, checked = models(settings(writer, verifier), SHARED)
+    written, checked, _ = models(settings(writer, verifier), SHARED)
 
     assert written.model == writes
     assert checked.model == checks
@@ -75,7 +75,7 @@ def test_which_model_writes_and_which_checks(
 
 def test_both_models_are_served_where_the_deployment_says() -> None:
     """A stage names a model, not an address: one runtime serves both."""
-    written, checked = models(
+    written, checked, _ = models(
         settings("ollama/writer", "ollama/checker"),
         replace(SHARED, base_url="http://served:11434"),
     )
@@ -86,7 +86,7 @@ def test_both_models_are_served_where_the_deployment_says() -> None:
 
 def test_both_models_are_held_to_the_same_patience() -> None:
     """One stage naming its own model may not also change how patient it is."""
-    written, checked = models(settings("ollama/writer", "ollama/checker"), SHARED)
+    written, checked, _ = models(settings("ollama/writer", "ollama/checker"), SHARED)
 
     assert written.timeout_seconds == SHARED.timeout_seconds
     assert checked.max_attempts == SHARED.max_attempts

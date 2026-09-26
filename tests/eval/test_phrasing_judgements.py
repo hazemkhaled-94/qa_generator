@@ -101,16 +101,13 @@ def verifier():
 
     settings = Settings.load()
     questions = QuestionSettings.load()
-    built = PhrasingJudge(
-        Client(
-            settings.overridden(questions.phrasing_model or questions.verifier_model)
-        )
-    )
+    judging = settings.overridden(questions.phrasing_model or questions.verifier_model)
+    built = PhrasingJudge(Client(judging))
     try:
         if built.names_its_source("Is this on?") is None:
             raise ModelUnavailable("it abstained on the warm-up")
     except ModelUnavailable as exc:
-        pytest.skip(f"the phrasing judge is not answering: {exc}")
+        pytest.fail(f"the phrasing judge {judging.model} is not answering: {exc}")
     return built
 
 

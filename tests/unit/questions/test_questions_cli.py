@@ -200,14 +200,18 @@ def test_watch_keeps_draining_instead_of_returning(cli) -> None:
     assert cli.watched, "the watch loop was never entered"
 
 
-def test_both_models_are_proved_before_anything_is_claimed(cli) -> None:
-    """The verifier as well as the writer.
+def test_every_model_this_stage_calls_is_proved_before_anything_is_claimed(
+    cli,
+) -> None:
+    """The verifier and the phrasing judge as well as the writer.
 
     A run whose verifier will not answer is a run of ungated questions,
-    which is worse than no run at all.
+    which is worse than no run at all. QUESTIONS_PHRASING_MODEL may name a
+    model neither of the other two does, and an unreachable one abstains
+    once per question instead of failing the start.
     """
     assert cli.run("--watch") == 0
-    assert len(cli.proved) == 2, "the writer and the verifier"
+    assert len(cli.proved) == 3, "the writer, the verifier and the phrasing judge"
 
 
 def test_a_model_that_will_not_answer_stops_a_drain(cli) -> None:
