@@ -26,11 +26,11 @@ evaluation phase" everywhere a person does.
 checker's and `questions.status` is the gates'. This phase writes neither.
 It writes `assessments.approved`, which no stage reads.
 
-That is not caution for its own sake. [`evaluation/README.md`](../../evaluation/README.md)
-records the measurement: over nineteen labelled cases gpt-4.1 answered a
-phrasing judgement **7/7 in English and 6/12 in German**, which is chance.
-Half of this corpus is German. A phase that could reject rows would have
-thrown away good German questions on the strength of a coin.
+That is not caution for its own sake. A judge asked a phrasing judgement over
+labelled cases was reliable in English and near chance in German, and half of
+this corpus is German: a phase that could reject rows would have thrown away
+good German questions on the strength of a coin. `make eval-phrasing` scores
+a judge against the floor an uninformed one reaches.
 
 What a judge is good for is the **disagreement** — and that is what this
 produces, at corpus scale, where `make second-opinion` produced it for one
@@ -225,17 +225,17 @@ horizontally.
 
 From `.env`, because both are one deployment's decision:
 
-| Setting | Default | What it does |
-|---|---|---|
-| `ASSESSMENT_ENABLED` | `false` | Whether the phase runs at all |
-| `ASSESSMENT_JUDGE_MODEL` | — | Who judges. **Not** `LLM_MODEL`: a model asked whether its own facts follow from its own evidence says yes, and the worker warns on every start when it is unset |
+| Setting | What it does |
+| --- | --- |
+| `ASSESSMENT_ENABLED` | Whether the phase runs at all |
+| `ASSESSMENT_JUDGE_MODEL` | Who judges. **Not** `LLM_MODEL`: a model asked whether its own facts follow from its own evidence says yes, and the worker warns on every start when it is unset |
 
 From [`configs/env/backend.env`](../../configs/env/backend.env), in git:
 
-| Setting | Default | What it does |
-|---|---|---|
-| `ASSESSMENT_KINDS` | `fact,topic,question` | Which artefacts are judged |
-| `ASSESSMENT_SAMPLE` | `200` | How many of each kind one `start` enrols, newest first. 0 is all of them |
+| Setting | What it does |
+| --- | --- |
+| `ASSESSMENT_KINDS` | Which artefacts are judged |
+| `ASSESSMENT_SAMPLE` | How many of each kind one `start` enrols, newest first. 0 is all of them |
 
 ## Layout
 

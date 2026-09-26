@@ -81,7 +81,6 @@ SUBJECTS = (
     # The software-testing syllabi
     "lehrplan",
     "lehrplän",
-    "istqb",
     "iso/iec",
     "ieee",
     "ctfl",

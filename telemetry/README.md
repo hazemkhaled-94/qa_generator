@@ -164,12 +164,12 @@ make questions                      # 6-question_generation
 make questions RUN_ID=a-gpt-4.1     # 6-question_generation-a-gpt-4.1
 ```
 
-A project per run was the original design and it does not survive a
-worker: `run_id` fell back to a uuid per PROCESS, `restart: unless-stopped`
-makes a process per restart, and this deployment reached **five hundred
-projects** — 497 of them holding one span, the model call a preflight made
-before giving up. The comparison that design existed for is still there
-and is now the thing you ask for by name.
+A project per run was the original design and it does not survive a worker:
+`run_id` fell back to a uuid per PROCESS and `restart: unless-stopped` makes
+a process per restart, so a failing credential produced one project per
+attempt, each holding the single span its preflight filed before giving up.
+The comparison that design existed for is still there and is now the thing
+you ask for by name.
 
 Two runs sharing a project are still separable: `run.id` is a resource
 attribute on every span, the same id the logs and the rows carry. Telling
@@ -240,11 +240,10 @@ The span batching is **OpenTelemetry's own**, configured by
 argument would override the environment and take that escape hatch away.
 
 The defaults suit this pipeline by a wide margin: a queue of 2,048 drained
-every 5 s is sized for a service answering requests, and the unit of work
-here is a passage at a median 473 s. Measured against a real judging run —
-5 artefacts judged, 5 `assess` spans and 18 `completion` spans in Phoenix,
-nothing lost. A queue that did fill would log `Queue full, dropping spans`
-per overflow, so that is a loud failure rather than a quiet one.
+every 5 s is sized for a service answering requests, where the unit of work
+here is one passage through a model. A queue that did fill would log
+`Queue full, dropping spans` per overflow, so that is a loud failure rather
+than a quiet one.
 
 **A span is dropped and an annotation is not, when Phoenix is down.** The
 exporter discards what it cannot send; `evaluations.py` warns once per run
@@ -297,12 +296,12 @@ where compose set it and `PHOENIX_ADMIN_SECRET` where `.env` did.
 
 ## Configuration
 
-| Setting | Where | Default | What it does |
-|---|---|---|---|
-| `LOG_LEVEL` | `.env` | `INFO` | Every service, the frontend included |
-| `LOG_DIR` | `.env`, set over in `compose.yaml` | `logs` on the host, `/var/log/qa` in a container | Where the JSON file goes. Unset means stdout only |
-| `OTEL_CONTAINER_ENDPOINT` | `.env` | `http://phoenix:4317` | Trace collector, as the containers reach it |
-| `TRACE_DATABASE` | unset | off | A span per SQL statement and per pool connect |
+| Setting | Where | What it does |
+| --- | --- | --- |
+| `LOG_LEVEL` | `.env` | Every service, the frontend included |
+| `LOG_DIR` | `.env`, set over in `compose.yaml` | Where the JSON file goes. Unset means stdout only |
+| `OTEL_CONTAINER_ENDPOINT` | `.env` | Trace collector, as the containers reach it |
+| `TRACE_DATABASE` | unset | A span per SQL statement and per pool connect |
 
 `service.name` is not a setting: each process passes its own name to
 `telemetry.configure(...)`.

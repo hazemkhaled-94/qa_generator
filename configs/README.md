@@ -73,14 +73,15 @@ declared for the Phoenix role rather than the superuser.
 ## `grafana/`
 
 Four dashboards over three datasources, all provisioned. A dashboard edited
-in the UI is lost on the next restart.
+in the UI is lost on the next restart. What each one shows is in
+[docs/operations.md](../docs/operations.md); here is which file is which.
 
-| Dashboard | Reads | Shows |
+| File | Dashboard | Reads |
 |---|---|---|
-| Pipeline state | `Pipeline` | Queue depth per stage, failures with reasons, fact and question acceptance, topic coverage |
-| Pipeline throughput | `Logs` | Units finished per interval, model latency at p50/p95/p99, facts and questions accepted against refused |
-| Pipeline logs | `Logs` | Lines per level, what failed and where |
-| Run | all three | One run on one page: what it produced, what it cost, its Phoenix projects, the gate verdicts, every line it wrote |
+| `pipeline-state.json` | 1 · Where the corpus is now | `Pipeline` |
+| `pipeline-throughput.json` | 2 · What each stage is doing | `Logs` |
+| `pipeline-runs.json` | 3 · One run, end to end | all three |
+| `pipeline-logs.json` | 4 · Every line every process wrote | `Logs` |
 
 | Datasource | Points at |
 |---|---|
@@ -88,10 +89,10 @@ in the UI is lost on the next restart.
 | `Logs` | Elasticsearch, the `qa-logs` data stream |
 | `Phoenix` | Phoenix's own database — the same PostgreSQL server, a different database, the same read-only role |
 
-Logs say what happened once; the tables say what is true now. **Run** crosses
-that split deliberately, which is why `Phoenix` exists as a datasource: a run
-is `questions.run_id` on one side and a project named `<stage>-<run id>` on
-the other.
+Logs say what happened once; the tables say what is true now. Dashboard 3
+crosses that split deliberately, which is why `Phoenix` exists as a
+datasource: a run is `questions.run_id` on one side and a project named
+`<position>-<stage>-<run id>` on the other.
 
 `tests/static/test_dashboards.py` checks each panel against the datasource
 and the fields that serve it.

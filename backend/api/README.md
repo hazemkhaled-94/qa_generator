@@ -5,8 +5,8 @@ either of them holds.
 
 It **reads back** what the stages produced and **moves rows on and off a
 stage's queue**. It never runs a stage: no route here does a stage's work,
-because a conversion running inside the process that serves JSON held one
-request for sixteen minutes. The work happens in the stage's worker
+because a conversion running inside the process that serves JSON holds that
+request until it finishes. The work happens in the stage's worker
 container, off the queue this API writes to — see
 [`backend/stages/`](../stages/README.md).
 
@@ -61,7 +61,6 @@ a narrowed verb and a whole-queue one cannot disagree.
 | `stop` | `pending` → `new` |
 | `retry` | a failed row back to `pending`, clearing the reason |
 | `rerun` | every row to `pending`, skipping what a worker holds right now |
-
 | `reclaim` | an `in_progress` row back to `pending`, without waiting out its lease |
 
 All five answer **202** and return at once. None does the work.

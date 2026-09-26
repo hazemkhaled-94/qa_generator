@@ -2085,7 +2085,7 @@ def test_an_entity_question_asking_who_names_a_party() -> None:
 def test_an_entity_question_whose_answer_names_an_organisation_passes() -> None:
     """The other way to pass: the party is in the answer, not the question."""
     assert asks_for_an_agent(
-        "Which body accredits a training provider?", "the ISTQB", "en"
+        "Which body accredits a training provider?", "the Standards Council", "en"
     )
 
 
@@ -2100,7 +2100,7 @@ def test_an_entity_question_asking_after_no_party_is_refused() -> None:
 
 def test_an_enumeration_answering_with_one_thing_is_refused() -> None:
     """Its own directive says so, and nothing enforced it."""
-    assert not enumerates("an ISTQB examination", "en")
+    assert not enumerates("a written examination", "en")
 
 
 def test_an_enumeration_answering_with_a_set_passes() -> None:

@@ -187,24 +187,25 @@ topics tied at the same weight yield one row.
 
 ## Configuration
 
-Read once at start-up from the environment, with no default in code. Changing
-any of the first eight changes what the topics are, and there is no partial
-refit.
+Read once at start-up from the environment, with no default in code. The
+values are in [`configs/env/backend.env`](../../configs/env/backend.env).
+Changing any of the first eight changes what the topics are, and there is no
+partial refit.
 
-| Setting | Default | What it does |
-|---|---|---|
-| `TOPIC_PASSAGES_PER_TOPIC` | `40` | How many passages one topic is worth. Above 0 this turns `TOPIC_NUM_TOPICS` into a ceiling and fits `passages / this`, floored at 2. `0` turns it off |
-| `TOPIC_NUM_TOPICS` | `40` | Topics per language, and the ceiling above. At least 2 |
-| `TOPIC_PASSES` | `10` | Times the factorisation walks the corpus |
-| `TOPIC_RANDOM_STATE` | `42` | Seed. Fixed, so the same corpus gives the same topics |
-| `TOPIC_TOP_TERMS` | `12` | Terms stored as a topic's signature, and what a label is matched on |
-| `TOPIC_MIN_WEIGHT` | `0.05` | Smallest membership weight stored, exclusive. In `(0, 1]` |
-| `TOPIC_NO_BELOW` | `3` | Drop a term appearing in fewer than this many passages |
-| `TOPIC_NO_ABOVE` | `0.5` | Drop a term appearing in more than this share. In `(0, 1]` |
-| `TOPIC_LANGUAGE_NAMES` | `de:German,en:English` | ISO code to language name, for the naming prompt |
-| `TOPIC_LABEL_MIN_FACT_SHARE` | `0.15` | Below this share of validated facts, a topic is not sent to the model to be named |
-| `TOPIC_MODEL` | `ollama_chat/gemma4:12b` | The model that names a topic |
-| `LLM_MODEL` | — | What `TOPIC_MODEL` falls back to. With neither, topics are fitted but not named |
+| Setting | What it does |
+| --- | --- |
+| `TOPIC_PASSAGES_PER_TOPIC` | How many passages one topic is worth. Above 0 this turns `TOPIC_NUM_TOPICS` into a ceiling and fits `passages / this`, floored at 2. `0` turns it off |
+| `TOPIC_NUM_TOPICS` | Topics per language, and the ceiling above. At least 2 |
+| `TOPIC_PASSES` | Times the factorisation walks the corpus |
+| `TOPIC_RANDOM_STATE` | Seed. Fixed, so the same corpus gives the same topics |
+| `TOPIC_TOP_TERMS` | Terms stored as a topic's signature, and what a label is matched on |
+| `TOPIC_MIN_WEIGHT` | Smallest membership weight stored, exclusive. In `(0, 1]` |
+| `TOPIC_NO_BELOW` | Drop a term appearing in fewer than this many passages |
+| `TOPIC_NO_ABOVE` | Drop a term appearing in more than this share. In `(0, 1]` |
+| `TOPIC_LANGUAGE_NAMES` | ISO code to language name, for the naming prompt |
+| `TOPIC_LABEL_MIN_FACT_SHARE` | Below this share of validated facts, a topic is not sent to the model to be named |
+| `TOPIC_MODEL` | The model that names a topic |
+| `LLM_MODEL` | What `TOPIC_MODEL` falls back to. With neither, topics are fitted but not named |
 
 Not configurable, on purpose: the Jaccard threshold for carrying a label
 (0.4), how many excerpts the labeller sees (4), how much of each (400

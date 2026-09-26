@@ -1,6 +1,6 @@
 # Stages — the queue, the worker and the command line
 
-Five stages run off a queue, and all five run off *this* queue. A stage owns a
+Six stages run off a queue, and all six run off *this* queue. A stage owns a
 status column, an error column and the timestamp of its claim; claiming,
 failing, sweeping an abandoned claim, requeueing, draining and the command
 line that drives any of it are written here once.
@@ -30,10 +30,10 @@ what lets two stages own different columns of the same `documents` row.
 ### The one thing read beside it
 
 Queueing is not claiming, and one stage needs the difference. A passage
-exists because chunking made it and a topic because a fit did, so for four
-of the five stages "this row exists" already means "the stage before me
-produced it". Chunking queues over `documents`, and a document exists from
-the moment somebody uploaded one.
+exists because chunking made it and a topic because a fit did, so for the
+other stages "this row exists" already means "the stage before me produced
+it". Chunking queues over `documents`, and a document exists from the moment
+somebody uploaded one.
 
 So `start` over a corpus half way through parsing used to queue the unparsed
 half, and every row of it failed on the missing parsed object — a `Start all`
@@ -86,12 +86,11 @@ against it, and `retry` returns it to the queue.
 
 **One lease for every stage, because it no longer measures the work.**
 `claimed_at` used to record only when work started, so a sweep could ask
-nothing better than "could this still be running?" — and the honest answer
-is the worst case the stage might cost. Each stage therefore derived its own
-from its settings, and question generation's came to 9 days. That bound the
-wrong thing: it was also how long a killed worker's topic stayed unreachable,
-since `stop` moves `pending`, `retry` moves `failed` and `rerun` skips what
-is held.
+nothing better than "could this still be running?" — and the honest answer is
+the worst case the stage might cost, which for question generation is days.
+That bound the wrong thing: it was also how long a killed worker's topic
+stayed unreachable, since `stop` moves `pending`, `retry` moves `failed` and
+`rerun` skips what is held.
 
 Beating asks "is anyone still on it?" instead, which one small constant
 answers for a stage whose unit is a passage and a stage whose unit is a whole
@@ -109,6 +108,7 @@ theirs through `StageQueue.narrow`, so neither learns a column name.
 | Chunking | `document` |
 | Extraction | `document`, `passage` |
 | Question generation | `topic` |
+| Assessment | `kind` |
 | Topic modelling | none |
 
 A scope a stage does not accept and a value its column cannot hold are one
@@ -164,10 +164,10 @@ skips what a worker holds, and `stop` takes back only what has not begun — so
 a worker killed mid-row is the one case none of them reaches.
 
 Before the heartbeat this was the *only* way out, and the wait was the whole
-worst case the work might have taken: question generation derived a lease of
-9 days at the settings it ran under, and 67 days at a 900-second timeout. A
-killed worker now loses its rows to `abandon` in five minutes, so this verb
-is for when five minutes is too long to wait.
+worst case the work might have taken — days for question generation, and
+longer at a long model timeout. A killed worker now loses its rows to
+`abandon` in five minutes, so this verb is for when five minutes is too long
+to wait.
 
 **Narrow it.** Nothing here can tell a dead claim from a live one:
 
@@ -200,14 +200,13 @@ stops with nothing taken. A watching worker retries instead of dying, backing
 off from 5 seconds towards 60.
 
 **It says so once.** How often a worker tries and how often it says so used
-to be the same number, and around each attempt the client wrote a
-traceback, instructor wrote its attempts and a credential library listed
-every identity it had tried: **836 lines in four minutes, from one worker,
-about one unreachable address**. The check now silences those for the
-length of its own call, the first refusal is reported in full with the
-reason, and the repeats are counted every ten minutes. Coming back is a
-line of its own, so a log going quiet is not mistaken for a worker that
-started working. Same four minutes, after: **two lines.**
+to be the same number, and around each attempt the client wrote a traceback,
+instructor wrote its attempts and a credential library listed every identity
+it had tried — hundreds of lines a minute from one worker about one
+unreachable address. The check now silences those for the length of its own
+call, the first refusal is reported in full with the reason, and the repeats
+are counted every ten minutes. Coming back is a line of its own, so a log
+going quiet is not mistaken for a worker that started working.
 
 The retry interval is deliberately unchanged. How fast a worker recovers
 is a different question from how loud it is while it waits.
@@ -228,7 +227,7 @@ for a Phoenix wiped while the rows stayed.
 
 ### The worker
 
-`--watch` is what the five worker containers run: drain, sleep
+`--watch` is what the six worker containers run: drain, sleep
 `WORKER_POLL_SECONDS`, drain again. A poll rather than `LISTEN`/`NOTIFY` — at
 this interval an idle worker costs one cheap query every few seconds.
 

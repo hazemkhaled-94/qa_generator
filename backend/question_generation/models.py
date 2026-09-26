@@ -330,19 +330,13 @@ class FactGroup:
         together with the text, for the reason extraction fences one: a model
         shown the two as one block asks about the heading.
 
-        A sample drawn from more than one document says so, because a writer
-        that cannot tell two sources apart states one's claim as the other's:
-        two syllabi giving different chapter counts were asked as one
-        question and answered "once with three, once with eight". A letter
-        rather than the title, for two reasons. Titles do not distinguish -
-        six of eight documents in one corpus were called `Lehrplan` or a
-        spacing variant of `ISTQB ® Certified Tester` - and a title in the
-        prompt is a title the writer quotes, which is the one thing
-        `leaks_source` exists to refuse.
+        A sample drawn from more than one document labels each with a
+        letter, so a writer cannot state one source's claim as another's. A
+        letter rather than the title: titles repeat across a corpus, and a
+        title in the prompt is one the writer quotes, which `leaks_source`
+        refuses.
 
-        Only when there is something to tell apart. One document needs no
-        letter, and a label carrying no information is a label a model
-        reaches for anyway.
+        One document gets no letter.
         """
         documents: dict[str, str] = {}
         for passage in self.resting:

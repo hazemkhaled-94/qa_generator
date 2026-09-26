@@ -61,7 +61,7 @@ The five buckets are `documents`, `parsed`, `models`, `export` and `archive` —
 
 ## 2. What a worker does with one row
 
-The same queue for all five stages, written once in
+The same queue for all six stages, written once in
 [`backend/stages/`](../backend/stages/README.md).
 
 ```mermaid

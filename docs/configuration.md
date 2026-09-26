@@ -96,8 +96,8 @@ over it inside the network.
 The model pair is the one that does **not** fall back. A container holds no
 cloud credential and must never reach a hosted provider, so
 `LLM_CONTAINER_MODEL` is required, is checked by `make doctor`, and does not
-inherit `LLM_MODEL` — inheriting it is how a stale container spent 2,019
-restarts failing to authenticate to Azure.
+inherit `LLM_MODEL`. A container that inherits a hosted model restarts on
+every authentication failure, indefinitely.
 
 ## Precedence
 

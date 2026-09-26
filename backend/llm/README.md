@@ -92,9 +92,8 @@ OLLAMA_CONTAINER_URL=http://host.docker.internal:11434
 
 `LLM_CONTAINER_MODEL` and `OLLAMA_CONTAINER_URL` are **required**:
 `compose.yaml` fails to start without them rather than falling back to
-`LLM_MODEL`. That fallback is how a container created before
-`LLM_CONTAINER_MODEL` existed kept a hosted model it had no credential for
-and spent 2,019 restarts failing to authenticate — a compose variable is
+`LLM_MODEL`. A container that falls back to a hosted model it has no
+credential for restarts on every failure, indefinitely. A compose variable is
 resolved when a container is *created*, so a `.env` edit reaches a running
 stack only through `up --force-recreate`.
 
@@ -115,9 +114,8 @@ answers, and exits only when it is a one-off drain with a person holding the
 exit code.
 
 Exiting was the bug: under `restart: unless-stopped` a process is a restart,
-a fresh `run_id` and a Phoenix project holding the one call that failed,
-which made a pipeline that was down for a day read as one that had run two
-thousand times.
+a fresh `run_id` and a Phoenix project holding the one call that failed, so a
+pipeline that was down for a day read as one that had run thousands of times.
 
 `before_work` in [`check.py`](check.py) is the preflight
 `stages.cli.queue_main` runs. It asks for one trivial structured answer,
@@ -144,32 +142,34 @@ make spend-by-shape LOG=run.log           # split by model and judgement
 ```
 
 `LOG` is **required**: it is the text log a drain wrote to a terminal, not
-the shipped JSON. For a run happening now, Grafana's Pipeline throughput
-dashboard and Phoenix are where the cost is.
+the shipped JSON. For a run happening now, Grafana's **2 · What each stage is
+doing** dashboard and Phoenix are where the cost is.
 
-The model is the bottleneck, not the pipeline — a median passage measured at
-473 s on a 31B model. The panel worth watching is model latency p99: a p99
-climbing towards `LLM_TIMEOUT_SECONDS` is healthy workers about to look
+The model is the bottleneck, not the pipeline;
+[measurements.md](../../docs/measurements.md) carries the last run's
+per-stage latency and spend. The panel worth watching is model latency p99: a
+p99 climbing towards `LLM_TIMEOUT_SECONDS` is healthy workers about to look
 abandoned.
 
 ## Configuration
 
-| Setting | Where | Default | What it does |
-|---|---|---|---|
-| `LLM_MODEL` | `.env` | `ollama_chat/gemma4:31b` | LiteLLM model id; the prefix picks the provider |
-| `LLM_BASE_URL` | `.env` | `http://localhost:11434` | Where that model is served |
-| `LLM_STRUCTURED_MODE` | `backend.env` | `JSON_SCHEMA` | How a typed answer is asked for |
-| `LLM_TEMPERATURE` | `backend.env` | 0 | Zero, so a re-run is comparable to the last one |
-| `LLM_TIMEOUT_SECONDS` | `backend.env` | 300 | How long one call may take. Extraction's lease derives from this. Sized off 9,334 priced calls whose slowest was 15.5 s, then raised from 120 alongside the assessment phase, whose judge reads a whole artefact back |
-| `LLM_MAX_ATTEMPTS` | `backend.env` | 3 | Attempts per call. The lease derives from this too |
-| `LLM_NUM_CTX` | `backend.env` | unset | The context window to ask the runtime for |
-| `LLM_REASONING_EFFORT` | `backend.env` | unset | For a model that has the knob. Unset sends nothing, so the model keeps its own default — a reasoning model thinks. Set `off` for a small model that cannot afford to |
-| `OLLAMA_BASE_URL` | `.env` | `http://localhost:11434` | Where a self-hosted model is served. The address follows the provider |
-| `LLM_CONTAINER_MODEL` | `.env` | unset | `LLM_MODEL` as the containers see it |
-| `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | unset | The verifier as the containers see it |
-| `EXTRACTION_MODEL`, `QUESTIONS_MODEL` | `backend.env` | unset | One stage calling a different model. The model only |
-| `TOPIC_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | The same, for topic naming |
-| `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | `ollama_chat/gemma4:12b` | One judgement on a smaller model |
+The values are in the file named beside each, once.
+
+| Setting | Declared in | What it does |
+|---|---|---|
+| `LLM_MODEL` | `.env` | LiteLLM model id; the prefix picks the provider |
+| `LLM_BASE_URL` | `.env` | Where that model is served |
+| `LLM_STRUCTURED_MODE` | `backend.env` | How a typed answer is asked for |
+| `LLM_TEMPERATURE` | `backend.env` | Zero, so a re-run is comparable to the last one |
+| `LLM_TIMEOUT_SECONDS` | `backend.env` | How long one call may take. Extraction's lease derives from it |
+| `LLM_MAX_ATTEMPTS` | `backend.env` | Attempts per call. The lease derives from this too |
+| `LLM_NUM_CTX` | `backend.env` | The context window to ask the runtime for |
+| `LLM_REASONING_EFFORT` | `backend.env` | For a model that has the knob. Unset sends nothing, so the model keeps its own default |
+| `OLLAMA_BASE_URL` | `.env` | Where a self-hosted model is served |
+| `LLM_CONTAINER_MODEL` | `.env` | `LLM_MODEL` as the containers see it |
+| `QUESTIONS_VERIFIER_CONTAINER_MODEL` | `.env` | The verifier as the containers see it |
+| `EXTRACTION_MODEL`, `QUESTIONS_MODEL`, `TOPIC_MODEL` | `backend.env` | One stage calling a different model. The model only |
+| `EXTRACTION_DIGEST_MODEL`, `QUESTIONS_PHRASING_MODEL` | `backend.env` | One judgement on a smaller model |
 
 ## Tests
 

@@ -19,7 +19,7 @@ DELETE on any table  ──▶  archive_deleted_row()  ──▶  archived_rows
                                                        (table_name, payload, archived_at)
 ```
 
-An `AFTER DELETE ... FOR EACH ROW` trigger on all ten tables, one shared
+An `AFTER DELETE ... FOR EACH ROW` trigger on all thirteen tables, one shared
 function, declared beside the table it fills in
 [`archived_rows.py`](../database/qa_generator/archived_rows.py).
 
@@ -68,7 +68,7 @@ question embedder put it back.
 
 The key is dropped from the jsonb rather than the column named per table, and
 `jsonb - text` on a row without that key is the row unchanged, so one
-function serves the four tables carrying a vector and the six that do not.
+function serves the four tables carrying a vector and the nine that do not.
 
 ## What a purge measures its age by
 

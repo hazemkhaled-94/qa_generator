@@ -94,7 +94,7 @@ arrival.
 
 ## The shape of every page
 
-The same sequence of panels, on all seven:
+The same sequence of panels, on all seven stage pages:
 
 ```
 the few figures worth seeing on arrival

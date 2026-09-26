@@ -12,7 +12,7 @@ it never loads a pipeline.
 is what lets the fact checks run without a served model and why
 `make extract-revalidate` costs seconds rather than hours.
 
-Four files load weights, and nothing outside a worker may import them:
+Three files load weights, and nothing outside a worker may import them:
 
 | File | Loads | Asked |
 |---|---|---|
@@ -116,22 +116,20 @@ that gate **silently never fires** for it — no error, no log.
 | `_ATTRIBUTIONS` | same | Words that attribute what follows to a source | `laut`, `according` |
 | `_AGENTS` | same | The interrogatives that ask after a **party** rather than a thing | `wer`, `who` |
 | `_ANAPHORIC` | [`analysis.py`](analysis.py) | Adjectives pointing back at something already said | `besagt`, `aforementioned` |
-
 | `_NAMED` | [`models.py`](models.py) | What to call the language in a prompt | `de: German` |
 
-Read by **lemma and never as a substring**: `Risikobericht` is a thing a
-corpus is about and `Bericht` is a thing a corpus IS.
+The five lemma lists are read by **lemma and never as a substring**:
+`Risikobericht` is a thing a corpus is about and `Bericht` is a thing a
+corpus IS.
 
-`_NAMED` is the one that is not a lemma list, and it fails loudly rather
-than silently: a language missing from it falls back to its own ISO code,
-which is still an instruction a model can follow. Every prompt that writes
-text names its language from it, because *"write in the language of the
-excerpt"* is an inference — and on a corpus of 1,444 German passages
-against 51 English, a model infers German for all of it. Every validated
-fact drawn from an English passage in one run came back in German, and
-nothing in extraction checks a language, so the drift reached question
-generation as a German question labelled English and was thrown out as
-`malformed` — 31 of the 34 English questions that run wrote.
+`_NAMED` is the one that is not a lemma list, and it fails loudly rather than
+silently: a language missing from it falls back to its own ISO code, which is
+still an instruction a model can follow. Every prompt that writes text names
+its language from it, because *"write in the language of the excerpt"* is an
+inference — on a corpus lopsided towards one language a model infers that one
+for all of it. Nothing in extraction checks a language, so the drift reaches
+question generation as a question in the wrong language and is thrown out as
+`malformed`.
 
 `_AGENTS` could not be a feature — no tagset marks animacy on an
 interrogative.
@@ -169,17 +167,17 @@ misses an era year, a Hijri year, Arabic-Indic digits and `FY24`. Only
 Only the first three are read here. The rest are the caller's, and all are
 catalogued under `platform`.
 
-| Setting | Default | What it does |
-|---|---|---|
-| `NLP_MODELS` | `de:de_core_news_md,en:en_core_web_md` | The spaCy pipeline per language, **and** the languages the detector may answer with |
-| `NLP_DEFAULT_LANGUAGE` | `en` | What a passage too short to judge is read as |
-| `NLP_CAPITALISED_NOUNS` | `de` | Languages where capitalisation is not evidence of a proper noun |
-| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | The one embedding model, and the tokenizer chunking sizes a passage by |
-| `NLI_MODEL` | `MoritzLaurer/bge-m3-zeroshot-v2.0` | The entailment encoder. Absent asks the verifier instead |
-| `NLI_ENTAILMENT_THRESHOLD` | `0.7` | How sure it must be before it rescues an answer |
-| `QA_MODEL` | unset | The extractive reader asked for a span before the verifier is |
-| `QA_ANSWER_CONFIDENCE` | `0.9` | How sure that reader must be before its span is taken |
-| `ENCODER_MAX_TOKENS` | `8192` | The longest pair an encoder reads. A **ceiling** |
+| Setting | What it does |
+| --- | --- |
+| `NLP_MODELS` | The spaCy pipeline per language, **and** the languages the detector may answer with |
+| `NLP_DEFAULT_LANGUAGE` | What a passage too short to judge is read as |
+| `NLP_CAPITALISED_NOUNS` | Languages where capitalisation is not evidence of a proper noun |
+| `EMBEDDING_MODEL` | The one embedding model, and the tokenizer chunking sizes a passage by |
+| `NLI_MODEL` | The entailment encoder. Absent asks the verifier instead |
+| `NLI_ENTAILMENT_THRESHOLD` | How sure it must be before it rescues an answer |
+| `QA_MODEL` | The extractive reader asked for a span before the verifier is |
+| `QA_ANSWER_CONFIDENCE` | How sure that reader must be before its span is taken |
+| `ENCODER_MAX_TOKENS` | The longest pair an encoder reads. A **ceiling** |
 
 Changing `NLP_MODELS` changes what a fact is, in the same way changing the
 prompt does. Both are recorded on every fact — `spacy_model`,

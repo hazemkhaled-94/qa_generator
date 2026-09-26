@@ -371,7 +371,8 @@ make settings-unset SERVICE=topics UNSET="TOPIC_PASSES"
 ```
 
 The services are `ingestion`, `parsing`, `chunking`, `extraction`, `topics`,
-`questions` and `platform`. See [configuration.md](configuration.md).
+`questions`, `assessment` and `platform`. See
+[configuration.md](configuration.md).
 
 ## Schema
 
@@ -423,14 +424,14 @@ make review-push-questions IDS=12,34,56
 
 A Phoenix project is created by whatever sends the first span to it and
 removed by nothing. While a project meant a run somebody asked for that was
-fine — but `run_id` fell back to a uuid **per process**, a `--watch` worker
-is a process per restart, and a credential that has expired restarts it every
-minute. This deployment reached **five hundred projects, 497 of them
-holding one span**: the model call a preflight made before giving up.
+fine — but a `run_id` falling back to a uuid **per process**, a `--watch`
+worker that is a process per restart, and an expired credential together
+produce one project per minute, each holding the single call a preflight made
+before giving up.
 
-Two changes stop it growing — an unnamed run appends to its stage's own
-project, and the exporter is not installed until the preflight passes — and
-`prune` takes back what the old arrangement left.
+Two changes stop that — an unnamed run appends to its stage's own project,
+and the exporter is not installed until the preflight passes — and `prune`
+takes back whatever an older arrangement left.
 
 `prune` takes a project only when **every span in it is a model call and it
 could read every span**. A project too big to read in one page is left
@@ -476,7 +477,7 @@ make spend-by-shape LOG=run.log           # split by model and judgement
 
 `LOG` is **required** and names the text log a drain wrote to a terminal —
 `make questions | tee run.log` — not the shipped JSON. For a run happening
-now, use Grafana's **Pipeline throughput** dashboard or Phoenix.
+now, use Grafana's **2 · What each stage is doing** dashboard or Phoenix.
 
 `spend-by-shape` splits by the model that answered and the Pydantic class the
 call had to return, which is what each judgement costs.

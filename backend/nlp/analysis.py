@@ -285,9 +285,7 @@ _ANAPHORIC = frozenset(
 #: help, which is why this list is one word long per language at most.
 #:
 #: A question word cannot point outside the question it is asking, so this
-#: corrects a parse rather than making a judgement. It cost a real
-#: question: `Wessen Zustimmung braucht man für die Nutzung eines
-#: ISTQB-Lehrwerks?` was refused as pointing at something unseeable.
+#: corrects a parse rather than making a judgement.
 _ASKING = frozenset({"wessen", "whose"})
 
 #: What an anaphoric trigger has to be tagged as. `said` is the past tense of

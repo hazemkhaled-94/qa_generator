@@ -57,7 +57,7 @@ Neither is allowed to merge. That pair is why the Configuration panel on
 every page holds no list of settings: adding one to `catalog.py` adds it to
 the page.
 
-### The seven services
+### The eight services
 
 | Service | Configured on | Holds |
 |---|---|---|
@@ -67,7 +67,8 @@ the page.
 | `extraction` | Facts | What a fact may be, and the caps on each kind |
 | `topics` | Topics | The fit: how many topics, how many passes, the vocabulary bounds |
 | `questions` | Questions | The plan, the deal, the gates, the release |
-| `platform` | System health | The model, the tokenizer and the language pipelines the six share |
+| `assessment` | Assessment | Which artefacts the judge reads, and how many |
+| `platform` | System health | The model, the tokenizer and the language pipelines the rest share |
 
 The pool sizes and the addresses are read before a service could ask a
 database for anything, so they are marked `fixed`: served read-only and shown

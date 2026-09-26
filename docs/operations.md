@@ -54,10 +54,11 @@ evaluation phase on pays for one container polling an empty queue.
 
 ## What the model costs
 
-A median passage measured at 473 s on a 31B model. A passage whose sentences
-carry no finite verb is skipped before the call rather than sent.
+Per-call latency and per-stage spend for the last run are in
+[measurements.md](measurements.md). A passage whose sentences carry no finite
+verb is skipped before the call rather than sent.
 
-Live, that is the **Pipeline throughput** dashboard and Phoenix. Over a
+Live, that is the **2 · What each stage is doing** dashboard and Phoenix. Over a
 finished run, off a captured log:
 
 ```bash

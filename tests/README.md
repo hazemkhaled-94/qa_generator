@@ -189,5 +189,5 @@ request and every push to `main`:
   without updating it fails the contract test.
 - **`make test-fast` skips spaCy, pyright and every container.** It is a
   smoke-check while editing.
-- **Coverage figures quoted in a service README are a snapshot.**
-  `make test-coverage` is what re-measures.
+- **The coverage figures in [docs/measurements.md](../docs/measurements.md)
+  are a snapshot.** `make test-coverage` is what re-measures.

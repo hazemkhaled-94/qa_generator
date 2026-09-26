@@ -8,7 +8,7 @@ that way out either, and it is the near miss worth naming: it holds a
 from it gives back the hundred rows somebody was asked to look at rather
 than the set. The database is what has the set.
 
-So: one workbook, three sheets.
+So: one workbook, four sheets.
 
 - **Questions** - one row per question, the columns a reader filters on,
   and what that question rests on: the facts it cites, the evidence under

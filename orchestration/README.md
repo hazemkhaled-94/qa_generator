@@ -42,7 +42,7 @@ validates the documents without launching, stopping or switching anything.
 ## The asset graph
 
 ```
-parsed_documents → passages → facts → topics → questions
+parsed_documents → passages → facts → topics → questions → assessments
 ```
 
 Materialising one starts that stage and waits for the workers to drain it.
@@ -164,8 +164,7 @@ followable. `RUN_ID` overrides both, which is what keeps the A/B in
 
 The watch loop, the lease sweep and `FOR UPDATE SKIP LOCKED` are the
 execution model and they work. Moving the stages into Dagster ops would have
-thrown all three away in exchange for putting a 473-second model call inside
-an op.
+thrown all three away in exchange for putting a long model call inside an op.
 
 ## It cannot reach the database
 
@@ -192,10 +191,10 @@ make dagster-dev          # the same code location on the host, against the
 
 From [`configs/env/orchestration.env`](../configs/env/orchestration.env):
 
-| Setting | Default | What it does |
-|---|---|---|
-| `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | 28800 | How long an asset waits for a stage to drain. Giving up is not failing the rows |
-| `ORCHESTRATION_POLL_SECONDS` | 15 | How often it asks |
+| Setting | What it does |
+| --- | --- |
+| `ORCHESTRATION_DRAIN_TIMEOUT_SECONDS` | How long an asset waits for a stage to drain. Giving up is not failing the rows |
+| `ORCHESTRATION_POLL_SECONDS` | How often it asks |
 
 Plus `BACKEND_URL`, the only address it holds. The instance and its one code
 location are configured in [`configs/dagster/`](../configs/dagster/).

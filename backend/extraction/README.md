@@ -188,17 +188,17 @@ refuses to start if it will not answer. See
 Nine settings of its own, in `configs/env/backend.env`. Everything else is
 shared: `LLM_*`, `NLP_MODELS`, `EMBEDDING_MODEL`, `DATABASE_*`.
 
-| Setting | Default | What it does |
-|---|---|---|
-| `EXTRACTION_KINDS` | `atomic,summary,outline,bridge` | Which kinds a run writes. `atomic` is mandatory |
-| `EXTRACTION_DIGEST_MAX_SHARE` | 0.75 | The longest a digest may be, as a share of its passage |
-| `EXTRACTION_DIGEST_MIN_CHARS` | 800 | Shortest passage worth digesting |
-| `EXTRACTION_BRIDGES_PER_TOPIC` | 12 | Groups one topic is worth |
-| `EXTRACTION_BRIDGE_PASSAGES` | 2 | Passages one group holds. At least 2 |
-| `EXTRACTION_MIN_OTHER_SHARE` | 0.33 | The floor a passage's non-atomic kinds keep |
-| `EXTRACTION_DUPLICATE_COSINE` | 0.95 | How alike two facts may be |
-| `EXTRACTION_MODEL` | unset | A different reader. Unset means `LLM_MODEL` |
-| `EXTRACTION_DIGEST_MODEL` | `ollama_chat/gemma4:12b` | The model the digest call goes to |
+| Setting | What it does |
+| --- | --- |
+| `EXTRACTION_KINDS` | Which kinds a run writes. `atomic` is mandatory |
+| `EXTRACTION_DIGEST_MAX_SHARE` | The longest a digest may be, as a share of its passage |
+| `EXTRACTION_DIGEST_MIN_CHARS` | Shortest passage worth digesting |
+| `EXTRACTION_BRIDGES_PER_TOPIC` | Groups one topic is worth |
+| `EXTRACTION_BRIDGE_PASSAGES` | Passages one group holds. At least 2 |
+| `EXTRACTION_MIN_OTHER_SHARE` | The floor a passage's non-atomic kinds keep |
+| `EXTRACTION_DUPLICATE_COSINE` | How alike two facts may be |
+| `EXTRACTION_MODEL` | A different reader. Unset means `LLM_MODEL` |
+| `EXTRACTION_DIGEST_MODEL` | The model the digest call goes to |
 
 Naming `summary` or `outline` adds one model call per passage. Naming
 `bridge` costs nothing on the passage queue — it enables a separate pass.

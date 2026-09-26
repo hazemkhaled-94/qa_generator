@@ -141,11 +141,11 @@ pipeline does not use.
 
 ### Two of the three sets are scored
 
-| Set | Why |
-|---|---|
-| `extraction` | Its numbers are pure measurement, asserted against nothing |
-| `phrasing` | The same, and each judgement is scored beside the floor a judge that ignores its input reaches |
-| `questions` | Already **asserts**, so it is a gate that fails a pull request rather than a trend |
+| Set | Scored | Because |
+|---|---|---|
+| `extraction` | yes | Its numbers are pure measurement, asserted against nothing |
+| `phrasing` | yes | The same, and each judgement is scored beside the floor a judge that ignores its input reaches |
+| `questions` | no | It already **asserts**, so it is a gate that fails a pull request rather than a trend |
 
 The questions set is uploaded anyway, so the cases are browsable from the
 Phoenix UI.
@@ -186,12 +186,12 @@ gate verdicts in [`telemetry/evaluations.py`](../telemetry/evaluations.py).
 
 ## Configuration
 
-| Setting | Where | Default | What it does |
-|---|---|---|---|
-| `EVAL_RUN_NAME` | [`configs/env/evaluation.env`](../configs/env/evaluation.env) | unset | What a run is called. Unset names it after the model |
-| `PHOENIX_BASE_URL` | `.env` | `http://localhost:6006` | Phoenix's HTTP API, as the host reaches it |
-| `PHOENIX_ADMIN_SECRET` | `.env` | — | At least 32 characters, including a digit and a lower-case letter |
-| `LLM_MODEL`, `LLM_BASE_URL` | `.env` | — | The model being scored |
+| Setting | Where | What it does |
+| --- | --- | --- |
+| `EVAL_RUN_NAME` | [`configs/env/evaluation.env`](../configs/env/evaluation.env) | What a run is called. Unset names it after the model |
+| `PHOENIX_BASE_URL` | `.env` | Phoenix's HTTP API, as the host reaches it |
+| `PHOENIX_ADMIN_SECRET` | `.env` | At least 32 characters, including a digit and a lower-case letter |
+| `LLM_MODEL`, `LLM_BASE_URL` | `.env` | The model being scored |
 
 `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` is applied only when Phoenix first
 creates its admin user.

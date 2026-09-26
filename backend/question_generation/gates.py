@@ -1090,28 +1090,15 @@ def names_parties(
 ) -> bool:
     """Whether this passage is mostly the names of people.
 
-    The acknowledgements, which are the furniture the repetition reading
-    cannot see: every document thanks DIFFERENT people, so the section is
-    structurally identical and lexically different and no cross-document
-    similarity catches it. `Welches Unternehmen wird für die initiale
-    Übersetzung des Lehrplans gedankt?` is what comes out of one.
+    Reads the acknowledgements, which the repetition gate cannot see: every
+    document thanks different people, so the section is structurally
+    identical and lexically different.
 
-    What they share is not their wording but their shape - they are a list
-    of names and almost nothing else. Measured as the share of a passage's
-    alphabetic tokens that spaCy reads as `PER`:
-
-        acknowledgements   median 0.794, 65% above this floor
-        everything else    median 0.000, p90 0.031, NONE above it
-
-    Over 20 acknowledgements and 250 passages drawn from the rest. A floor
-    of 0.15 reaches 75% of them and starts costing 1% of the others, which
-    is the trade this setting is for.
-
-    `PER` and not `ORG`. A corpus names organisations throughout its subject
-    matter - ISTQB, ISO and IEEE are all `ORG` here - so counting those
-    would read a standards discussion as a credits page. The cost is the
-    acknowledgement that thanks a company rather than a person, which this
-    misses.
+    The share of a passage's alphabetic tokens spaCy tags `PER`, against
+    `floor`. `PER` and not `ORG`: a corpus names organisations throughout
+    its subject matter, so counting those would read a standards discussion
+    as a credits page. An acknowledgement thanking a company rather than a
+    person is missed.
     """
     if floor <= 0 or not text.strip():
         return False

@@ -36,8 +36,8 @@ the pipeline **kept** and the judge refused — one of the two is wrong, and a
 person is the only thing that settles which.
 
 Neither machine verdict is an answer key, and the guidelines say so on every
-dataset. Anchoring is the risk and it is the lesser one, for the reason the
-next paragraph gives: a sample nobody can interpret gets abandoned.
+dataset. Anchoring is the risk and it is the lesser one: a sample nobody can
+interpret gets abandoned.
 
 `not_judged` where the phase has not run, which is a filterable value rather
 than an absent field — "which of these has nobody judged" is a question a
@@ -82,8 +82,8 @@ python -m review.run --status
 often the person and the model reached the same one**:
 
 ```text
-facts: 120 of 6687 reviewed (98 accepted, 22 rejected); agreed with the model on 104 of them, 87%
-questions: 0 of 6997 reviewed; nobody has looked, so there is no agreement to report
+facts: 120 of 12154 reviewed (98 accepted, 22 rejected); agreed with the model on 104 of them, 87%
+questions: 0 of 5873 reviewed; nobody has looked, so there is no agreement to report
 ```
 
 It is a query because the two verdicts are kept in different columns and
@@ -141,18 +141,18 @@ finished having.
 
 From [`configs/env/review.env`](../configs/env/review.env), in git:
 
-| Setting | Default | What it does |
-|---|---|---|
-| `REVIEW_SAMPLE_SIZE` | 200 | How many records one push puts in front of a reviewer, split across the groups |
-| `REVIEW_REVIEWER` | unset | What to call the reviewer in a row's provenance |
+| Setting | What it does |
+| --- | --- |
+| `REVIEW_SAMPLE_SIZE` | How many records one push puts in front of a reviewer, split across the groups |
+| `REVIEW_REVIEWER` | What to call the reviewer in a row's provenance |
 
 From `.env`, not in git:
 
-| Setting | Default | What it does |
-|---|---|---|
-| `ARGILLA_API_URL` | `http://localhost:6900` | The **host's** address: this is a `make` target, not a container |
-| `ARGILLA_API_KEY` | — | Argilla shows it under "My settings". **Not** `ARGILLA_PASSWORD` |
-| `ARGILLA_WORKSPACE` | `qa_generator` | One per deployment |
+| Setting | What it does |
+| --- | --- |
+| `ARGILLA_API_URL` | The **host's** address: this is a `make` target, not a container |
+| `ARGILLA_API_KEY` | Argilla shows it under "My settings". **Not** `ARGILLA_PASSWORD` |
+| `ARGILLA_WORKSPACE` | One per deployment |
 
 Argilla's Elasticsearch is the one the logs already use — a shared heap, and
 [`configs/env/elasticsearch.env`](../configs/env/elasticsearch.env) is where

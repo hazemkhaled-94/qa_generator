@@ -236,8 +236,8 @@ no run of the writer produces — it is `make questions-reverify` carrying a
 change further up the pipeline through to the questions resting on it.
 
 `compound` is read off the tagger: a question using more than one
-interrogative word is two questions. It replaced a model-judged `wrong_type`,
-which fired zero times over 71 questions.
+interrogative word is two questions. It replaced a model-judged `wrong_type`
+that never fired.
 
 There is **no gate for "the question is its own fact rearranged"**. One was
 written in two formulations and both refused questions that are as good as a
@@ -357,7 +357,7 @@ Each follow-up is another writer call and another verifier call.
 
 ## Coverage
 
-`topics_covered` reads 38 of 38 whenever every topic produced one accepted
+`topics_covered` reads full whenever every topic produced one accepted
 question, which is a low bar, so `/questions/quality` also reports how much
 of the **material** the accepted questions reach.
 
@@ -375,9 +375,9 @@ again, lowering `QUESTIONS_FACT_SAMPLE`, and — marginally —
 ## The balanced release
 
 Accepting a question says it is sound. It says nothing about what the SET
-looks like — every gate can do its job and still leave a set that is 45%
-unanswerable and 96.5% easy, because what survives a filter is whatever the
-material happened to offer.
+looks like — every gate can do its job and still leave a set skewed to one
+band or one kind, because what survives a filter is whatever the material
+happened to offer.
 
 So the run overgenerates and the composition is chosen afterwards.
 `make questions-balance` fills a quota out of everything accepted and writes
@@ -409,9 +409,14 @@ with different shares replaces the first.
 make questions-export OUT=exam.xlsx FILTER="--status accepted --cognitive-level analyse"
 ```
 
-One workbook, three sheets: the **questions**, the **facts each cites** — one
-row per fact per passage, so a bridge takes two — and the **counts**, read
-off the same quality report the page shows.
+One workbook, four sheets:
+
+| Sheet | One row per |
+|---|---|
+| Questions | Question, with what it rests on folded in |
+| Citations | Question × fact × passage, so a bridge takes two |
+| Assessment | Judgement of a question. Empty unless the evaluation phase has run |
+| Summary | The counts, off the same quality report the page shows |
 
 The same on `GET /questions/export` and behind **Build a workbook** on the
 Questions page, built when asked for rather than on every render.
@@ -508,37 +513,40 @@ make questions-export           # write what a filter selects to an .xlsx
 
 ## Configuration
 
-| Setting | Default | What it does |
-|---|---|---|
-| `QUESTIONS_PER_TOPIC` | 120 | How many to aim for per topic. Not below the number of kinds with a weight |
-| `QUESTIONS_FACT_KINDS` | `atomic,summary,outline,bridge` | Which kinds of fact a question may be written from |
-| `QUESTIONS_FACT_SAMPLE` | 2 | How many facts are offered per call, divided between the passages |
-| `QUESTIONS_SAMPLES_PER_PASSAGE` | 3 | How many times one passage is dealt before the stride moves on |
-| `QUESTIONS_TYPE_MIX` | eleven kinds at 1; `entity` and `temporal` 0 | Which kinds are written and in what proportion |
-| `QUESTIONS_DIFFICULTY_MIX` | `easy:2,medium:3,hard:3` | Which bands the plan aims for |
-| `QUESTIONS_ANSWER_CHARS` | `value:1:80,list:3:300,explanation:20:600` | Shortest and longest target answer per form |
-| `QUESTIONS_ANSWER_COVERAGE` | 0.4 | How much of what the verifier found the target must account for. Lists only; `0` turns it off |
-| `QUESTIONS_PARTY_DENSITY` | 0.25 | How much of a passage may be people's names before it is read as a credits page. `0` turns it off |
-| `QUESTIONS_MEETS_FLOOR` | 0 | How much a candidate fact must share with the head of its sample before a second passage is offered. **Off** |
-| `QUESTIONS_EXPLANATION_CHARS` | `150:900` | Shortest and longest `answer_explanation` |
-| `QUESTIONS_BOILERPLATE_COSINE` | 0.95 | How alike a passage must be to one in another document before it is read as furniture. `0` turns it off |
-| `QUESTIONS_ANSWER_OVERLAP` | 0.6 | How much of a list or explanation has to come back. Numbers are always exact |
-| `QUESTIONS_UNANSWERABLE_SHARE` | 0.30 | What share are attempted with no answer in the corpus |
-| `QUESTIONS_OFF_TOPIC_OVERLAP` | 0.3 | Below this share of shared lemmas, an unanswerable question is off-topic |
-| `QUESTIONS_ELSEWHERE_PASSAGES` | 4 | How many uncited passages the `answerable_elsewhere` probe reads |
-| `QUESTIONS_ENTAILMENT_OVERLAP` | 0.3 | How much of what a question asks about must occur in its passages before the entailment pass may rescue it. `0` turns the guard off |
-| `QUESTIONS_FOLLOWUP_SHARE` | 0.5 | What share of accepted answerable roots get a thread |
-| `QUESTIONS_MAX_FOLLOWUPS` | 2 | How far a thread may run past its root |
-| `QUESTIONS_FOLLOWUP_TYPES` | `condition,reason,comparison` | The kinds the turns of a thread take, cycled |
-| `QUESTIONS_RETRIES` | 1 | How many further attempts a refused candidate gets. Every attempt is stored |
-| `QUESTIONS_LONG_ANSWER_CHARS` | 60 | Where an answer starts counting towards the band. Not a gate |
-| `QUESTIONS_DUPLICATE_COSINE` | 0.93 | How alike two questions must be before the later one is dropped |
-| `QUESTIONS_RELEASE_SIZE` | 0 | How many to draw. `0` is the largest the pool can fill |
-| `QUESTIONS_RELEASE_UNANSWERABLE` | 0.10 | The most of a release that may have no answer. A ceiling |
-| `QUESTIONS_RELEASE_DIFFICULTY` | `easy:1,medium:1,hard:1` | How a release spreads over the bands |
-| `QUESTIONS_MODEL` | unset | A different writer. Unset means `LLM_MODEL` |
-| `QUESTIONS_VERIFIER_MODEL` | unset | The second model. Naming the writer's own, or none, turns off the opinion gates |
-| `QUESTIONS_PHRASING_MODEL` | `ollama_chat/gemma4:12b` | The model asked what a question's wording amounts to. Never sees a passage |
+The values are in [`configs/env/backend.env`](../../configs/env/backend.env),
+each one exactly once.
+
+| Setting | What it does |
+| --- | --- |
+| `QUESTIONS_PER_TOPIC` | How many to aim for per topic. Not below the number of kinds with a weight |
+| `QUESTIONS_FACT_KINDS` | Which kinds of fact a question may be written from |
+| `QUESTIONS_FACT_SAMPLE` | How many facts are offered per call, divided between the passages |
+| `QUESTIONS_SAMPLES_PER_PASSAGE` | How many times one passage is dealt before the stride moves on |
+| `QUESTIONS_TYPE_MIX` | Which kinds are written and in what proportion |
+| `QUESTIONS_DIFFICULTY_MIX` | Which bands the plan aims for |
+| `QUESTIONS_ANSWER_CHARS` | Shortest and longest target answer per form |
+| `QUESTIONS_ANSWER_COVERAGE` | How much of what the verifier found the target must account for. Lists only; `0` turns it off |
+| `QUESTIONS_PARTY_DENSITY` | How much of a passage may be people's names before it is read as a credits page. `0` turns it off |
+| `QUESTIONS_MEETS_FLOOR` | How much a candidate fact must share with the head of its sample before a second passage is offered. **Off** |
+| `QUESTIONS_EXPLANATION_CHARS` | Shortest and longest `answer_explanation` |
+| `QUESTIONS_BOILERPLATE_COSINE` | How alike a passage must be to one in another document before it is read as furniture. `0` turns it off |
+| `QUESTIONS_ANSWER_OVERLAP` | How much of a list or explanation has to come back. Numbers are always exact |
+| `QUESTIONS_UNANSWERABLE_SHARE` | What share are attempted with no answer in the corpus |
+| `QUESTIONS_OFF_TOPIC_OVERLAP` | Below this share of shared lemmas, an unanswerable question is off-topic |
+| `QUESTIONS_ELSEWHERE_PASSAGES` | How many uncited passages the `answerable_elsewhere` probe reads |
+| `QUESTIONS_ENTAILMENT_OVERLAP` | How much of what a question asks about must occur in its passages before the entailment pass may rescue it. `0` turns the guard off |
+| `QUESTIONS_FOLLOWUP_SHARE` | What share of accepted answerable roots get a thread |
+| `QUESTIONS_MAX_FOLLOWUPS` | How far a thread may run past its root |
+| `QUESTIONS_FOLLOWUP_TYPES` | The kinds the turns of a thread take, cycled |
+| `QUESTIONS_RETRIES` | How many further attempts a refused candidate gets. Every attempt is stored |
+| `QUESTIONS_LONG_ANSWER_CHARS` | Where an answer starts counting towards the band. Not a gate |
+| `QUESTIONS_DUPLICATE_COSINE` | How alike two questions must be before the later one is dropped |
+| `QUESTIONS_RELEASE_SIZE` | How many to draw. `0` is the largest the pool can fill |
+| `QUESTIONS_RELEASE_UNANSWERABLE` | The most of a release that may have no answer. A ceiling |
+| `QUESTIONS_RELEASE_DIFFICULTY` | How a release spreads over the bands |
+| `QUESTIONS_MODEL` | A different writer. Unset means `LLM_MODEL` |
+| `QUESTIONS_VERIFIER_MODEL` | The second model. Naming the writer's own, or none, turns off the opinion gates |
+| `QUESTIONS_PHRASING_MODEL` | The model asked what a question's wording amounts to. Never sees a passage |
 
 Seven more are the platform's: `EMBEDDING_MODEL`, `EMBEDDING_MAX_TOKENS`,
 `NLI_MODEL`, `NLI_ENTAILMENT_THRESHOLD`, `QA_MODEL`, `QA_ANSWER_CONFIDENCE`

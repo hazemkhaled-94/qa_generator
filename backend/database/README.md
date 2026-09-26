@@ -25,7 +25,7 @@ this package owns the tables, the enums, the connection and the migrations.
 | `assessments` | What an independent judge made of one artefact, and the queue the phase claims over | [the assessment phase](../assessment/README.md) |
 | `assessment_metrics` | One judgement one judge made about one artefact — the name, the labels and the scores are Phoenix's, so a metric means the same here as anywhere else that posts one | the assessment phase |
 | `prompts` | One prompt per version per service, stored **as composed** — the system message, the user message as its template, and the JSON schema the answer came back in | each stage, once before its first claim |
-| `archived_rows` | Every row deleted from any of the twelve above, as JSON | an AFTER DELETE trigger |
+| `archived_rows` | Every row deleted from any of the thirteen above, as JSON | an AFTER DELETE trigger |
 
 ### `assessments` reaches its artefact through one of three keys
 
@@ -90,7 +90,7 @@ Installed by the initial revision and by
 
 | Extension | For |
 |---|---|
-| `vector` | `questions.embedding`, and the HNSW index the dedup gate probes |
+| `vector` | The embedding column on `passages`, `facts`, `topics` and `questions`, and the HNSW indexes the dedup gates probe |
 | `pg_trgm` | The substring search behind every page's `q` box |
 
 `tests/static/test_schema_extensions.py` checks that both routes build the
@@ -131,8 +131,8 @@ what a column is for.
 ## Connections
 
 Each process opens its **own** pool, sized by `DATABASE_POOL_SIZE` and
-`DATABASE_POOL_OVERFLOW` (5 and 5). The total across the API and every worker
-has to stay under PostgreSQL's `max_connections`.
+`DATABASE_POOL_OVERFLOW`. The total across the API and every worker has to
+stay under PostgreSQL's `max_connections`.
 
 Both are read before a service could ask a database for anything, so they are
 served read-only through `/settings/platform` and marked `fixed`. Changing
