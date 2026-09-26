@@ -220,7 +220,7 @@ machine from a container id.
 | Which gates ran | `questions.gates_ran`, in the order they read it | the Questions page, `GET /lineage/question/<id>` |
 | Lineage | the link tables — `fact_passages`, `question_facts`, `passage_topics` | `GET /lineage/<kind>/<id>`, the **How this was produced** fold |
 | The join between them | `trace_id` and `span_id`, on every artefact table | every artefact page links to both |
-| Prompts | composed in the source, recorded to the `prompts` table, and on each span | the Questions page, `GET /prompts`, Phoenix after `make prompts-publish` |
+| Prompts | composed in the source, recorded to the `prompts` table, published to Phoenix by the stage that recorded them, and on each span | the Questions page, `GET /prompts`, Phoenix |
 | Scores | golden cases run against the served model | `make eval-score`, Phoenix |
 | Human review | Postgres → a disposable copy in Argilla → the answers back | Argilla, `make review-*` |
 | Runs | which stage ran when | Dagster |

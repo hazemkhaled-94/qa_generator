@@ -1,4 +1,9 @@
-"""Every prompt this stage writes with, pinned to its version.
+"""Every prompt a stage writes with, pinned to its version.
+
+Question generation and the judge. The two are held the same way and for
+the same reason, and they are here together because a reader looking for
+"what stops a prompt moving under a fixed version" should find one file.
+
 
 "Two prompts are two datasets" is what PROMPT_VERSION is for, and nothing
 checked it: a rule could be added to `types.py`, every question written
@@ -21,6 +26,8 @@ import hashlib
 
 import pytest
 
+from assessment.templates import PROMPT_VERSION as JUDGE_VERSION
+from assessment.templates import TEMPLATES
 from question_generation import phrasing, verifier
 from question_generation.generation import _FOLLOW, _PERTURB
 from question_generation.types import PROMPT_VERSION, SPECS
@@ -93,6 +100,41 @@ OTHERS = {
     "follow": "7a0b084fee6bea7e",
 }
 
+#: The version the judging templates below were taken under.
+JUDGE = "2"
+
+#: What the judge asks, by kind and metric - the names `assessment/prompts.py`
+#: records and Phoenix shows, so a failure here names the same prompt the
+#: table and the Evaluations view do.
+#:
+#: One version over all eleven, unlike the question types above. The
+#: judge's PROMPT_VERSION covers the SET a kind is asked as well as the
+#: wording of each template, because a row's verdicts are read against
+#: both - which is why the pinning below checks the names too, and not
+#: only the texts.
+JUDGEMENTS = {
+    "fact: hallucination": "434e71c9f4e1da52",
+    "fact: relevance": "1f07d89037187981",
+    "fact: toxicity": "8aa7cbe4c3ec5524",
+    "topic: summarization": "34433bc756e189cd",
+    "topic: relevance": "6041b3bd157b74c5",
+    "question: hallucination": "627af3102475c8a9",
+    "question: qa_correctness": "09445b11658c776d",
+    "question: relevance": "2b28fc01a2f3a234",
+    "question: refusal": "b90c67879cbadc36",
+    "question: conciseness": "dbd2e6340ac0f180",
+    "question: toxicity": "7416cf020159f9ec",
+}
+
+
+def judgements() -> dict[str, str]:
+    """Every judging template's system prompt, by the name it is pinned under."""
+    return {
+        f"{kind}: {one.metric}": one.system
+        for kind, group in TEMPLATES.items()
+        for one in group
+    }
+
 
 def digest(text: str) -> str:
     """The first sixteen hex characters of one prompt's SHA-256."""
@@ -159,6 +201,43 @@ def test_every_type_the_mix_can_name_is_pinned() -> None:
     """A type added with no digest would be a prompt nothing watches."""
     assert set(SPECS) == set(TYPES), (
         "a question type was added or removed without pinning its prompt"
+    )
+
+
+def test_the_judge_declares_the_version_pinned_here() -> None:
+    """Bumping one and not the other leaves the pinning meaningless."""
+    assert JUDGE_VERSION == JUDGE, (
+        f"assessment's PROMPT_VERSION is {JUDGE_VERSION} and this file pins "
+        f"{JUDGE}. Update JUDGE and the digests below in the same commit."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(JUDGEMENTS))
+def test_a_judgement_asks_what_it_was_pinned_asking(name: str) -> None:
+    """A verdict names a template version, and the row outlives the source.
+
+    An edited template under a fixed version makes a corpus judged before
+    it and one judged after it the same seven columns, with nothing saying
+    they were asked different questions.
+    """
+    every = judgements()
+    assert name in every, f"{name} is pinned here and is no longer a template"
+
+    assert digest(every[name]) == JUDGEMENTS[name], (
+        f"the {name} template changed. Bump assessment's PROMPT_VERSION and "
+        f"write the new digest here."
+    )
+
+
+def test_every_judgement_the_judge_can_ask_is_pinned() -> None:
+    """The SET, because the version covers which metrics a kind is asked.
+
+    Version 2 is version 1 plus toxicity, conciseness and refusal. Adding a
+    fourth without bumping it would leave two corpora carrying different
+    metrics under one version, which no pinning of the texts alone catches.
+    """
+    assert set(judgements()) == set(JUDGEMENTS), (
+        "a judging template was added or removed without pinning it"
     )
 
 

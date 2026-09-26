@@ -399,7 +399,7 @@ a trigger, a data backfill, or anything ordered.
 | `make review-all` | Every artefact of every kind, not a sample |
 | `make eval-upload` | Put the golden cases in Phoenix |
 | `make eval-score` | Score the served model against them, and record it |
-| `make prompts-publish` | Send the recorded prompts to Phoenix |
+| `make prompts-publish` | Republish every recorded prompt to Phoenix. A stage publishes what it records when it starts, so this is for a Phoenix wiped while the rows stayed |
 | `make eval-phrasing` | Score the two phrasing judgements, each against its floor |
 | `make second-opinion` | An independent judge over one run, and where it disagrees |
 

@@ -62,10 +62,19 @@ prompt's: `prompt_description` is set when Phoenix creates a prompt and
 ignored on every version after it. The prompt's description carries only
 what never changes.
 
-It reads from the **database**, not from the code, which is what makes it
-work for a version the source has moved past and keeps the stages out of it —
-a publisher that asked `question_generation.prompts` would load litellm to
-read a string.
+**A stage publishes what it records when it starts**, so this target is the
+full republish rather than the only way in. The publisher lives in
+[`backend/stages/publish.py`](../backend/stages/publish.py), beside the
+write, and goes wherever that goes — a host command, a worker container,
+the stage a Dagster run set going. `record` hands it the prompts it
+actually wrote, which is none on every start-up after the first, and that
+is what stops an identical Phoenix version piling up per prompt per run.
+
+What this target covers is the one case the table cannot detect: a Phoenix
+wiped while the rows stayed. It reads from the **database**, not from the
+code, which is also what makes it work for a version the source has moved
+past — a publisher that asked `question_generation.prompts` would load
+litellm to read a string.
 
 **The source is the code.** Phoenix's UI allows an edit and an edit there
 reaches nothing: the next publish writes over whatever the UI did.
@@ -164,7 +173,6 @@ golden questions the right way round — whether the gate is wired up at all.
 | [`cases.py`](cases.py) | The golden cases, and nothing that runs them. Read by this package **and** by `tests/eval/` |
 | [`experiments.py`](experiments.py) | Scoring the cases into Phoenix, and the floor each score is read against |
 | [`second_opinion.py`](second_opinion.py) | An independent judge over one run |
-| [`prompts.py`](prompts.py) | Publishing the recorded prompts to Phoenix |
 | [`config.py`](config.py) | Where Phoenix is |
 | [`run.py`](run.py) | The command line |
 

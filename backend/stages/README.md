@@ -217,6 +217,15 @@ row can be resolved to the text that produced it. It runs after preflight and
 never fails a start. See [`prompts.py`](prompts.py) and
 [`backend/database/`](../database/README.md).
 
+What it writes it also **publishes to Phoenix**, so a span's
+`llm.prompt_template.version` opens against a prompt without anybody
+remembering a command. What it *wrote* and not the catalogue:
+`prompts.create` posts a new Phoenix version every call and compares
+nothing, so publishing everything each run would add an identical version
+per prompt per run. A start-up that changed nothing publishes nothing. See
+[`publish.py`](publish.py); `make prompts-publish` is the full republish,
+for a Phoenix wiped while the rows stayed.
+
 ### The worker
 
 `--watch` is what the five worker containers run: drain, sleep
@@ -255,6 +264,8 @@ poetry run pytest tests/unit/stages tests/integration/database/test_queue.py
 | [`test_cli.py`](../../tests/unit/stages/test_cli.py) | Which flag combinations are refused, and that no service is built until a flag needs one |
 | [`test_queue_narrowing.py`](../../tests/unit/stages/test_queue_narrowing.py) | Narrowing to one item, and both refusals |
 | [`test_worker.py`](../../tests/unit/stages/test_worker.py) | Ending a worker's loop |
+| [`test_prompt_recording.py`](../../tests/unit/stages/test_prompt_recording.py) | That what reaches Phoenix is what the write moved, and nothing on a start-up that changed nothing |
+| [`test_prompt_publishing.py`](../../tests/unit/stages/test_prompt_publishing.py) | What a published version carries beside its text |
 | [`test_queue.py`](../../tests/integration/database/test_queue.py) | Claiming, the lease sweep and the queue verbs against a real PostgreSQL |
 | [`test_prompt_store.py`](../../tests/integration/database/test_prompt_store.py) | Recording a prompt once per version, and reading back what a version asked for |
 | [`test_question_queue.py`](../../tests/integration/database/test_question_queue.py) | Two queues on one table |

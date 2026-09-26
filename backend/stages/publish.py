@@ -13,14 +13,29 @@ message as its template, the invocation parameters and the response format.
 It carried only the first of those, because `PromptVersion(...)` accepts
 nothing else; `from_openai` is the constructor that does.
 
-Read from the DATABASE rather than from the code, which is what makes it
-work for a version the source has moved past - the same reason the table
-exists. It also keeps the stages out of it: a publisher that asked
-`question_generation.prompts` would load litellm to read a string.
+**Called by `record`, so a run publishes what it just wrote.** This used
+to be host-side only, beside the golden sets, and a deployment therefore
+had prompts in its table and none in Phoenix until somebody remembered
+`make prompts-publish` - which is every deployment nobody remembered. It
+is here instead, beside the write, and it goes wherever that goes: a host
+command, a worker container, the stage a Dagster run set going.
 
-Here rather than in a package of its own because this is where the
-host-side Phoenix client already lives, beside the golden sets. Like
-those, it never runs in a container.
+That placement is also what makes it idempotent for nothing. `record`
+hands over the prompts it actually WROTE, which is none on every start-up
+after the first, and `client.prompts.create` posts a new Phoenix version
+every time it is called. Publishing everything on every run would pile up
+an identical version per prompt per run, which is the growth
+`telemetry/projects.py` exists to clean up in the other store.
+
+`publish_stored` is the full republish the make target still runs, for the
+case the table cannot detect: a Phoenix that was wiped while the rows
+stayed.
+
+Reads what the stage RECORDED rather than the code, which is what makes
+the republish work for a version the source has moved past - the same
+reason the table exists. It also keeps the stages out of each other: a
+publisher that asked `question_generation.prompts` would load litellm to
+read a string.
 
 **The source is the code.** Phoenix's UI allows an edit, and an edit there
 reaches nothing: the pipeline composes from the source, the row records
@@ -32,16 +47,31 @@ for the questions to change.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
-from evaluation.config import Settings
 from llm.config import Settings as ModelSettings
-from stages.prompts import stored
+from stages.prompts import Composed, stored
+from telemetry.evaluations import client
 
 if TYPE_CHECKING:
     from database.qa_generator import Prompt
 
 log = logging.getLogger(__name__)
+
+
+def composed_from(row: Prompt) -> Composed:
+    """One stored row as the thing a stage would have handed over.
+
+    So there is one shape to publish rather than two. A protocol covering
+    both does not work: a mapped column is `Mapped[str]` to a type checker
+    until it is read off an instance, so `Prompt` matches no protocol
+    spelled in the types it actually returns.
+
+    The digest is recomputed rather than read across, and is the same value
+    - `_write` writes the text and its digest together.
+    """
+    return Composed(row.name, row.version, row.text, row.user_text, row.response_schema)
 
 
 def named(service: str, name: str) -> str:
@@ -133,7 +163,7 @@ def order(version: str) -> tuple[int, str]:
     return (int(version), "") if version.isdigit() else (0, version)
 
 
-def _response_format(row: Prompt) -> dict[str, Any] | None:
+def _response_format(row: Composed) -> dict[str, Any] | None:
     """One row's shape, as an OpenAI `response_format`.
 
     None for a row recorded before the column existed, which publishes with
@@ -151,10 +181,13 @@ def _response_format(row: Prompt) -> dict[str, Any] | None:
     }
 
 
-def publish(
-    settings: Settings, model: ModelSettings, service: str | None = None
-) -> int:
-    """Sends every recorded prompt to Phoenix, and reports how many went.
+def publish(service: str, composed: Iterable[Composed], model: ModelSettings) -> int:
+    """Sends some prompts to Phoenix, and reports how many went.
+
+    Takes what to publish rather than reading the table, because the caller
+    that matters knows: `record` hands over the prompts it just WROTE, and
+    on every start-up after the first that is none. See this module's own
+    note on why publishing everything each time is the wrong shape.
 
     One Phoenix prompt per (service, name), with a VERSION per recorded
     version - which is Phoenix's own model and this table's, lined up: it
@@ -175,24 +208,31 @@ def publish(
     provider's parameter block the version carries, and its settings are
     what goes in that block and in the description beside it.
 
+    Never raises. A stage that cannot publish still sent the prompt and
+    still recorded it; what is lost is the copy Phoenix shows beside the
+    trace, and that must not fail a run.
+
     Returns:
         How many versions were sent.
     """
-    from phoenix.client import Client
+    rows = sorted(composed, key=lambda row: (row.name, order(row.version)))
+    if not rows:
+        return 0
+    connected = client()
+    if connected is None:
+        log.info(
+            "arize-phoenix-client is not installed, so %s's prompts are in the "
+            "table and not in Phoenix. `make prompts-publish` sends them.",
+            service,
+        )
+        return 0
+
     from phoenix.client.types import PromptVersion
 
-    client = Client(
-        base_url=settings.base_url,
-        headers={"Authorization": f"Bearer {settings.api_key}"},
-    )
     asked = parameters(model)
     also = aside(model)
     named_provider = provider(model.model)
-    rows = sorted(
-        stored(service=service),
-        key=lambda row: (row.service, row.name, order(row.version)),
-    )
-    sent = 0
+    sent, refused = 0, 0
     for row in rows:
         messages: list[dict[str, str]] = [{"role": "system", "content": row.text}]
         if row.user_text:
@@ -205,14 +245,14 @@ def publish(
         if (shape := _response_format(row)) is not None:
             call["response_format"] = shape
         try:
-            client.prompts.create(
-                name=named(row.service, row.name),
+            connected.prompts.create(
+                name=named(service, row.name),
                 # Nothing that goes stale. Phoenix sets this when it CREATES
                 # the prompt and ignores it on every version after, so a
                 # version or a digest written here is frozen at whichever
                 # one was published first and then quietly wrong.
                 prompt_description=(
-                    f"{row.service}: {row.name}. Composed in the source and "
+                    f"{service}: {row.name}. Composed in the source and "
                     f"recorded by the stage that sends it; an edit here "
                     f"reaches nothing."
                 ),
@@ -234,14 +274,44 @@ def publish(
                 ),
             )
         except Exception as exc:  # noqa: BLE001 - one bad prompt is not the rest
-            log.warning(
-                "could not publish %s's %r: %s: %s",
-                row.service,
-                row.name,
-                type(exc).__name__,
-                exc,
-            )
+            # The first in full and the rest counted. A Phoenix that is down
+            # refuses every prompt, and a stage recording thirty-one of them
+            # would otherwise open its log with thirty-one copies of one
+            # sentence - the failure `stages/cli.py` already quietens for an
+            # unreachable model.
+            if not refused:
+                log.warning(
+                    "could not publish %s's %r, so it is in the table and not "
+                    "in Phoenix: %s: %s",
+                    service,
+                    row.name,
+                    type(exc).__name__,
+                    exc,
+                )
+            refused += 1
             continue
         sent += 1
-    log.info("published %d of %d prompt version(s) to Phoenix", sent, len(rows))
+    if refused:
+        log.warning(
+            "%d of %s's %d prompt(s) did not reach Phoenix", refused, service, len(rows)
+        )
+    elif sent:
+        log.info("published %d %s prompt version(s) to Phoenix", sent, service)
     return sent
+
+
+def publish_stored(model: ModelSettings, service: str | None = None) -> int:
+    """Republishes every prompt the table holds, and reports how many went.
+
+    What `make prompts-publish` runs, and the one case `record` cannot
+    cover: a Phoenix wiped while the rows stayed. The table then matches
+    what the stages send and `record` writes nothing, so nothing would
+    republish without asking for it.
+
+    Also the way in for a version the SOURCE has moved past, which is the
+    reason the table is read here rather than the code.
+    """
+    held: dict[str, list[Composed]] = {}
+    for row in stored(service=service):
+        held.setdefault(row.service, []).append(composed_from(row))
+    return sum(publish(one, group, model) for one, group in held.items())

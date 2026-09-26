@@ -203,22 +203,39 @@ class Evaluations:
         """The Phoenix client, built once."""
         if self._client is not None:
             return self._client
-        try:
-            from phoenix.client import Client
-        except ImportError:
+        self._client = client(self._base_url)
+        if self._client is None:
             self._broken = True
             log.info(
                 "arize-phoenix-client is not installed, so gate verdicts stay "
                 "in the database and on the span and are not posted as "
                 "annotations"
             )
-            return None
-        key = next((os.getenv(name) for name in API_KEY if os.getenv(name)), None)
-        self._client = Client(
-            base_url=self._base_url,
-            headers={"Authorization": f"Bearer {key}"} if key else None,
-        )
         return self._client
+
+
+def client(base_url: str | None = None):
+    """A Phoenix client for this process, or None where there is no package.
+
+    Here because the address and the credential are this module's problem
+    already, and they are not only an annotation's: `stages/publish.py`
+    posts a prompt through the same API and must resolve both the same way
+    or a container will authenticate and a host command will not.
+
+    Returns:
+        A `phoenix.client.Client`, or None where arize-phoenix-client is
+        not installed. An absent address is NOT refused here - Phoenix's
+        own default is localhost, which is right for a host command.
+    """
+    try:
+        from phoenix.client import Client
+    except ImportError:
+        return None
+    key = next((os.getenv(name) for name in API_KEY if os.getenv(name)), None)
+    return Client(
+        base_url=base_url or os.getenv(ENDPOINT),
+        headers={"Authorization": f"Bearer {key}"} if key else None,
+    )
 
 
 @contextmanager

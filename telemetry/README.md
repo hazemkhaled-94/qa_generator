@@ -231,7 +231,8 @@ Three channels, three mechanisms, and they fail differently.
 |---|---|---|
 | **Spans** | a stage's unit of work, and one `completion` per model call | batched — every **5 s** or **512 spans**, whichever comes first |
 | **Annotations** | the gate verdicts and the judge's, per span | batched at **100**, flushed when a queue empties and at the end of a drain |
-| **Prompts, datasets** | what a version asked for, and the golden cases | only when `make prompts-publish` or `make eval-upload` is run |
+| **Prompts** | what a version asked for | when a stage starts and finds one changed; `make prompts-publish` republishes the lot |
+| **Datasets** | the golden cases | only when `make eval-upload` is run |
 
 The span batching is **OpenTelemetry's own**, configured by
 `OTEL_BSP_MAX_QUEUE_SIZE`, `OTEL_BSP_SCHEDULE_DELAY` and

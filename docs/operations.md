@@ -79,7 +79,8 @@ Wired by two lines on the `phoenix` service — `OLLAMA_BASE_URL` set to
 `host.docker.internal` resolves. With `OLLAMA_CONTAINER_URL` unset, Phoenix
 falls back to `localhost:11434`, which inside that container is Phoenix.
 
-`make prompts-publish` makes a prompt selectable there rather than pasted in.
+A prompt is selectable there rather than pasted in: a stage publishes what
+it records when it starts, and `make prompts-publish` republishes the lot.
 
 ## Dashboards
 

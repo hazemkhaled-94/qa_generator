@@ -22,7 +22,8 @@ from typing import ClassVar
 import pytest
 from phoenix.client.types import PromptVersion
 
-from evaluation.prompts import (
+from llm.config import Settings as ModelSettings
+from stages.publish import (
     _response_format,
     aside,
     named,
@@ -30,7 +31,6 @@ from evaluation.prompts import (
     parameters,
     provider,
 )
-from llm.config import Settings as ModelSettings
 
 
 def settings(model: str = "ollama/gemma3:12b", **overrides) -> ModelSettings:

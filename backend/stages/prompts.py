@@ -124,6 +124,14 @@ def record(service: str, composed: Iterable[Composed]) -> int:
     so. The row then matches what is actually being sent, which is the
     more useful of the two things it could say.
 
+    **What moved is also sent to Phoenix**, so a span's
+    `llm.prompt_template.version` opens against a prompt without anybody
+    remembering a command. What MOVED and not everything: the table is the
+    record of what is being sent, so a start-up that changes nothing has
+    nothing to publish - and `prompts.create` posts a new Phoenix version
+    every time it is called, so republishing the lot each run would pile up
+    an identical version per prompt per run. See `stages/publish.py`.
+
     Never raises. A stage that cannot record its prompts still has them;
     what is lost is the ability to read them back, and that must not stop
     a run.
@@ -136,7 +144,7 @@ def record(service: str, composed: Iterable[Composed]) -> int:
     if not held:
         return 0
     try:
-        return _write(service, held)
+        moved = _write(service, held)
     except Exception as exc:  # noqa: BLE001 - any failure is the same answer
         log.warning(
             "could not record %s's prompts, so questions written now cannot be "
@@ -146,16 +154,50 @@ def record(service: str, composed: Iterable[Composed]) -> int:
             exc,
         )
         return 0
+    _publish(service, moved)
+    return len(moved)
 
 
-def _write(service: str, held: Sequence[Composed]) -> int:
-    """Upserts the prompts, warning about any that changed under a version."""
+def _publish(service: str, moved: Sequence[Composed]) -> None:
+    """Sends the prompts just written to Phoenix, if there are any.
+
+    Imported here rather than at the top, and that is the whole reason this
+    is a function: `stages.publish` reads this module, so a module-level
+    import either way round is a cycle - and the api imports `stored` from
+    here and must not load a Phoenix client to serve `GET /prompts`.
+
+    Never raises, for the reason `record` does not: the prompt was sent and
+    recorded either way, and what is lost is the copy shown beside a trace.
+    """
+    if not moved:
+        return
+    try:
+        from llm.config import Settings as ModelSettings
+        from stages.publish import publish
+
+        publish(service, moved, ModelSettings.load())
+    except Exception as exc:  # noqa: BLE001 - any failure is the same answer
+        log.warning(
+            "could not publish %s's prompts to Phoenix, so they are in the "
+            "table and not beside the traces: %s: %s",
+            service,
+            type(exc).__name__,
+            exc,
+        )
+
+
+def _write(service: str, held: Sequence[Composed]) -> list[Composed]:
+    """Upserts the prompts, warning about any that changed under a version.
+
+    Returns the ones it wrote rather than a count, because that list is
+    also exactly what there is to publish.
+    """
     with sessions().begin() as session:
         stored = {
             (row.name, row.version): (row.digest, row.user_text, row.response_schema)
             for row in session.scalars(select(Prompt).where(Prompt.service == service))
         }
-        moved = 0
+        moved: list[Composed] = []
         for one in held:
             was = stored.get((one.name, one.version))
             sending = (one.digest, one.user_text, one.response_schema)
@@ -207,7 +249,7 @@ def _write(service: str, held: Sequence[Composed]) -> int:
                     },
                 )
             )
-            moved += 1
+            moved.append(one)
     if moved:
-        log.info("recorded %d %s prompt(s)", moved, service)
+        log.info("recorded %d %s prompt(s)", len(moved), service)
     return moved

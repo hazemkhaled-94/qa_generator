@@ -101,17 +101,26 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _publish(settings: Settings) -> int:
-    """Sends the recorded prompts to Phoenix.
+    """Republishes every recorded prompt to Phoenix.
 
     With the configured model's settings, which is what Phoenix needs to
     offer a prompt in its playground and to show what the call was made
     with: opened there, it is replayed against the model that sent it, at
     the temperature and the window that sent it.
-    """
-    from evaluation import prompts
-    from llm.config import Settings as ModelSettings
 
-    prompts.publish(settings, ModelSettings.load())
+    A stage now publishes what it records when it starts, so this is the
+    full republish rather than the only way in - the case it covers is a
+    Phoenix wiped while the rows stayed, which the table cannot detect.
+
+    `settings` is read for its side effect of proving PHOENIX_BASE_URL and
+    the credential are set before anything is attempted; the publisher
+    resolves both itself, the way a container has to.
+    """
+    from llm.config import Settings as ModelSettings
+    from stages.publish import publish_stored
+
+    del settings
+    publish_stored(ModelSettings.load())
     return 0
 
 

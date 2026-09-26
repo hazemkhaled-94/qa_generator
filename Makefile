@@ -1356,20 +1356,20 @@ eval-upload:
 eval-score:
 	$(EVAL) --score $(EVAL_DATASET)
 
-# Send the recorded prompts to Phoenix, so a span opens against one.
+# Republish every recorded prompt to Phoenix.
 #
-# The span already carries the prompt it sent, filled in with that call's
-# passages. What it cannot show is the TEMPLATE, and
-# `llm.prompt_template.version` on it names a version Phoenix knows nothing
-# about until this has run. One Phoenix prompt per prompt, one Phoenix
-# version per PROMPT_VERSION, so two are diffable there.
+# NOT the way prompts get there. A stage publishes what it records when it
+# starts, so this is a repair rather than a step: the case it covers is a
+# Phoenix wiped while the `prompts` rows stayed, which nothing can detect -
+# the table then matches what the stages send, so they write nothing and
+# publish nothing.
 #
 # Read from the `prompts` table rather than from the code, so a version the
 # source has moved past goes too - which is the reason that table exists.
 # The stages write it when they start, so run one of them first.
 #
 # The source is still the code. An edit in Phoenix's UI reaches nothing and
-# the next run of this writes over it.
+# the next publish writes over it.
 prompts-publish:
 	$(EVAL) --publish-prompts
 

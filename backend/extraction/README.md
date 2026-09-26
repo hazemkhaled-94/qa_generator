@@ -176,8 +176,8 @@ writes its composed prompt to the `prompts` table before the first claim.
 [`prompts.py`](prompts.py) is the catalogue. The atomic prompt is recorded
 with the cap paragraph `EXTRACTION_MIN_OTHER_SHARE` works out to.
 
-Read one back with `GET /prompts?service=extraction`, or in Phoenix after
-`make prompts-publish`.
+Read one back with `GET /prompts?service=extraction`, or in Phoenix, where
+this stage publishes whatever it records when it starts.
 
 A worker asks the configured model one question before it claims anything and
 refuses to start if it will not answer. See

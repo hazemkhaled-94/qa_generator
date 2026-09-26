@@ -440,7 +440,7 @@ to read one back:
 |---|---|
 | The Questions page | "The prompt that wrote this", under a selected question |
 | `GET /prompts?service=questions&version=10&name=factoid` | The same, as JSON |
-| Phoenix, after `make prompts-publish` | The prompt beside the traces |
+| Phoenix | The prompt beside the traces, published by the stage that recorded it |
 
 Each records the whole call: the system message, the user message as its
 template, and the JSON schema the answer had to come back in.
