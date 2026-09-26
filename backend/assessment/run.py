@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from assessment import prompts
 from assessment.config import Settings, judged_kinds
 from assessment.factory import build_service, judge_model
 from assessment.repository import AssessmentQueue
@@ -21,6 +22,7 @@ from llm.check import before_work
 from llm.config import Settings as ModelSettings
 from settings.store import snapshot
 from stages.cli import queue_main
+from stages.prompts import record
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         argv=sys.argv[1:] if argv is None else argv,
         extra=extra,
         preflight=preflight,
+        prompts=lambda: record(prompts.SERVICE, prompts.catalogue()),
     )
 
 

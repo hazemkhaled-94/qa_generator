@@ -66,6 +66,39 @@ def _assigned(module: Path, name: str) -> object:
     return bound[name]
 
 
+def _called_with(module: Path, call: str, keyword: str) -> list[str]:
+    """Every literal one call's keyword argument is given in a module."""
+    return [
+        argument.value.value
+        for node in ast.walk(ast.parse(module.read_text()))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == call
+        for argument in node.keywords
+        if argument.arg == keyword and isinstance(argument.value, ast.Constant)
+    ]
+
+
+def test_every_stage_command_line_names_a_stage_phoenix_can_place() -> None:
+    """The name a stage's CLI passes is the project its spans are filed under.
+
+    `queue_main` hands its `name` straight to `telemetry.configure`, and
+    that name is the stage's ROUTE prefix. Question generation passes
+    `questions`, `pipeline.project` could not place it, and its spans went
+    to a project called `questions` while every other stage carried its
+    number - `telemetry/README.md` documenting `6-question_generation` the
+    whole time. STAGE_OF is what resolves the two that differ.
+    """
+    for module in sorted((ROOT / "backend").rglob("run.py")):
+        for name in _called_with(module, "queue_main", "name"):
+            assert pipeline.project(name)[0].isdigit(), (
+                f"{module.relative_to(ROOT)} runs queue_main as {name!r}, which "
+                f"telemetry.pipeline cannot place in the pipeline, so its "
+                f"Phoenix project is filed without a stage number. Add it to "
+                f"pipeline.STAGE_OF."
+            )
+
+
 def test_every_stage_with_an_asset_is_one_dagster_defines() -> None:
     """The asset keys, and the order they are in.
 
@@ -100,6 +133,8 @@ def test_every_stage_with_a_dataset_is_one_review_pushes() -> None:
 
 def test_every_named_stage_is_a_stage() -> None:
     """A name for a stage the pipeline does not have is a link to nowhere."""
-    named = set(pipeline.ASSET) | set(pipeline.DATASET)
+    named = (
+        set(pipeline.ASSET) | set(pipeline.DATASET) | set(pipeline.STAGE_OF.values())
+    )
 
     assert named <= set(pipeline.STAGES), sorted(named - set(pipeline.STAGES))

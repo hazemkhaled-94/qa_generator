@@ -60,6 +60,19 @@ DATASET: dict[str, str] = {
     "question_generation": "questions",
 }
 
+#: Which stage a route prefix belongs to, for the two that answer to
+#: something other than their own name. `stages/cli.py` hands `queue_main`'s
+#: name straight to telemetry as the service, and that name is the prefix:
+#: question generation passed `questions`, `project` below could not place
+#: it, and its spans went to a Phoenix project called `questions` while
+#: every other stage carried its number.
+#:
+#: The prefix is the key because that is the side a caller holds.
+STAGE_OF: dict[str, str] = {
+    "topics": "topic_modelling",
+    "questions": "question_generation",
+}
+
 
 def numbered(name: str, stage: str | None = None, separator: str = "-") -> str:
     """Puts a stage's place in the pipeline in front of a name.
@@ -81,7 +94,9 @@ def project(service: str, run: str | None = None) -> str:
     """What Phoenix files one service's spans under.
 
     A service that is not a stage keeps its own name, so a host command
-    that names a run is still filed under something readable.
+    that names a run is still filed under something readable. A stage that
+    named itself by its ROUTE is resolved through STAGE_OF first, which is
+    what keeps question generation's project numbered with the rest.
 
     `run` is the NAME somebody chose, not the id every run has. Absent -
     which is every run nobody named - the project is the stage alone and
@@ -101,4 +116,5 @@ def project(service: str, run: str | None = None) -> str:
     `run.id` is a resource attribute on every span. What changed is that
     telling them apart is a filter rather than a hunt through a sidebar.
     """
-    return f"{numbered(service)}-{run}" if run else numbered(service)
+    stage = STAGE_OF.get(service, service)
+    return f"{numbered(stage)}-{run}" if run else numbered(stage)
