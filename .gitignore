@@ -246,8 +246,13 @@ configs/env/provider.env
 # Coursework and reports kept beside the code but not part of it. Named
 # rather than left untracked: `git add -A` in a public repository is one
 # keystroke, and these carry a real name and a module code.
-Project_Report_*.docx
-Project_Report_*.pdf
+#
+# By extension at the root rather than by stem: the submission convention
+# renamed these to `<date>_<name>_<matriculation>_<module>`, which the old
+# `Project_Report_*` rules no longer matched. The repository tracks no .docx
+# or .pdf anywhere, so the extension is the stable rule.
+/*.docx
+/*.pdf
 # The report's figures, rendered from a script into a throwaway venv.
 figures/
 # Every deck. Two of these were tracked and came to nine megabytes of
