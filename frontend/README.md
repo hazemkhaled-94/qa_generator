@@ -143,16 +143,14 @@ on every interaction, which is why the tests run each one the same way.
 
 ## Themes and colour
 
-The 2025 brand: `#A100FF` core purple, `#460073` and `#7500C0`
-deeps, `#C2A3FF` and `#E6DCFF` lights, `#FF50A0` / `#224BFF` / `#05F2DB`
-secondaries, neutral greys. No logo: the wordmark and the `>` chevron are
-both the brand marks.
+The palette: `#A100FF` core purple, `#460073` and `#7500C0` deeps, `#C2A3FF`
+and `#E6DCFF` lights, `#FF50A0` / `#224BFF` / `#05F2DB` secondaries, neutral
+greys. **No logo and no wordmark of any kind.**
 
-The template's **content** slides are the reference, not its covers. They are
-white, with black type and purple carrying the structure: a filled header on
-every table, figures set in the deep purple, purple section headings. The
-black slides are dividers, which an application does not have — so the app is
-light, and the purple is what makes it vivid.
+The **light** ground is the reference. White, with black type and purple
+carrying the structure: a filled header on every table, figures set in the
+deep purple, purple section headings. The app is light, and the purple is
+what makes it vivid.
 
 [`.streamlit/config.toml`](.streamlit/config.toml) carries most of it. It
 gives Streamlit a palette under `[theme.light]` and another under
@@ -160,18 +158,16 @@ gives Streamlit a palette under `[theme.light]` and another under
 switched per page from the toolbar menu. Put a colour in `[theme]` itself, or
 set `theme.base`, and it applies to **both**.
 
-The dark theme is a near-black carrying the brand's violet cast rather than
-the flat black of a cover slide, and swaps the core purple for the light one,
-which a dark ground needs to read an accent at all.
+The dark theme is a near-black carrying a violet cast rather than a flat
+black, and swaps the core purple for the light one, which a dark ground needs
+to read an accent at all.
 
-Tables get the template's light-header variant. The grid draws its header
-text on a canvas, so no stylesheet can correct that text: the fill has to be
-one it already reads on, which rules out the filled deep-purple header the
-printed tables use.
+Tables get the light-header variant. The grid draws its header text on a
+canvas, so no stylesheet can correct that text: the fill has to be one it
+already reads on, which rules out a filled deep-purple header.
 
-Type is Graphik, the brand face. It is licensed and not shipped, so the stack
-falls through to Arial — the substitute the brand itself names — and picks up
-a locally installed Graphik ahead of it.
+Type is Graphik. It is licensed and not shipped, so the stack falls through
+to Arial and picks up a locally installed Graphik ahead of it.
 
 [`styles.css`](styles.css) holds what the theme config cannot express: the
 masthead, the section headings, the queue state line and the delete box. It
@@ -187,9 +183,9 @@ deletion. Everything else is an outlined button, and a control that would do
 nothing right now is greyed rather than hidden.
 
 Red is not in the palette. It stays because a destructive control should not
-be the first place a reader learns what the brand colours mean.
+be the first place a reader learns what the colours mean.
 
-The sidebar is the deep end of the brand's purple ramp, `#460073`, and holds
+The sidebar is the deep end of the purple ramp, `#460073`, and holds
 the navigation and nothing else. Both sidebar palettes set their own
 `textColor` and `primaryColor`: a section that inherits them from the page
 puts dark type on a dark panel.

@@ -183,10 +183,10 @@ and it catches what the directive cannot enforce from inside the prompt.
 
 69 validated facts rest on evidence that appears verbatim in more than one of
 the 16 syllabi. Dedup keeps one copy and attributes it to whichever document
-reached the extractor first, so question 3 asks about the Test Analyst
-syllabus and cites CT-AI page 10 for it. 10 accepted questions, 6 in the
-release. The answers happen to be right — the sentence says the same thing in
-both books — but the page number sends a marker to the wrong one.
+reached the extractor first, so a question about one syllabus cites a page in
+another. 10 accepted questions, 6 in the release. The answers happen to be
+right — the sentence says the same thing in both — but the page number sends
+a marker to the wrong one.
 
 **Fix.** Where a duplicate is refused, record its passage into
 `fact_passages` beside the surviving fact rather than dropping it. The fact

@@ -1,4 +1,4 @@
-/* 2025, on top of the theme in .streamlit/config.toml.
+/* The custom styling, on top of the theme in .streamlit/config.toml.
 
    Two grounds, white and black. Every pair below is written light-first with
    light-dark(), which resolves against the `color-scheme` of the element using
@@ -27,12 +27,12 @@
   --qa-accent: light-dark(#A100FF, #C2A3FF);
   --qa-on-accent: light-dark(#FFFFFF, #16121D);
   --qa-shade: light-dark(#000000, #FFFFFF);
-  /* The deep purple the template sets its figures in. */
+  /* The deep purple figures are set in. */
   --qa-deep: light-dark(#460073, #C2A3FF);
   --qa-title: light-dark(#000000, #FFFFFF);
 
-  /* Deletion, and nothing else. Not a brand colour: the palette has no red,
-     and a destructive control should not be the first place to find out. */
+  /* Deletion, and nothing else. Not in the palette, which has no red, and a
+     destructive control should not be the first place to find out. */
   --qa-danger: light-dark(#A32020, #F08A8A);
   --qa-danger-line: color-mix(in srgb, var(--qa-danger) 40%, transparent);
   --qa-danger-wash: color-mix(in srgb, var(--qa-danger) 10%, transparent);
@@ -45,8 +45,7 @@ footer { visibility: hidden; }
 
 /* ── Masthead ───────────────────────────────────────────────────────── */
 
-/* The name over the brand rule, and no mark: the wordmark and the chevron
-   are both the brand's. */
+/* The name over the purple rule, and no mark of any kind. */
 .qa-brand {
   padding-bottom: .75rem;
   margin-bottom: 1.5rem;
@@ -66,7 +65,7 @@ footer { visibility: hidden; }
 
 /* ── Panels: one per section, which is what separates them ──────────── */
 
-/* Purple sentence-case section headings, as the template writes them. */
+/* Purple sentence-case section headings. */
 .qa-panel-label {
   font-size: 0.95rem; font-weight: 600; letter-spacing: -0.01em;
   color: var(--qa-accent); margin: 0 0 .25rem;
@@ -87,7 +86,7 @@ footer { visibility: hidden; }
   font-size: 0.7rem !important; font-weight: 600;
   letter-spacing: 0.02em; color: var(--qa-muted);
 }
-/* Figures are set in the deep purple, as the template sets its stat numerals. */
+/* Figures are set in the deep purple. */
 [data-testid="stMetricValue"] {
   font-size: 1.5rem !important; letter-spacing: -0.02em; line-height: 1.2;
   color: var(--qa-deep);

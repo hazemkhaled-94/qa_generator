@@ -1,12 +1,11 @@
-# 2025 theme.
+# The application theme.
 #
 # Theme colours: #A100FF core purple, #460073 and #7500C0 deeps, #C2A3FF and
 # #E6DCFF lights, #FF50A0 / #224BFF / #05F2DB secondaries, neutral greys.
 #
-# The template's content slides are white with black type and purple carrying
-# the structure: filled table headers, deep purple figures, purple section
-# headings. The black slides are covers and dividers, which an application
-# does not have.
+# The light ground is white with black type and purple carrying the
+# structure: filled table headers, deep purple figures, purple section
+# headings.
 #
 # Streamlit picks between [theme.light] and [theme.dark] from the browser's
 # prefers-color-scheme or the toolbar menu, and sets `color-scheme` on the app
@@ -14,7 +13,7 @@
 # with light-dark().
 
 [theme]
-# Graphik is licensed. Arial is the substitute the brand names; a local
+# Graphik is licensed and not shipped. Arial is the substitute; a local
 # Graphik is picked up ahead of it.
 font = "Graphik, Graphik Regular, Arial, Helvetica, sans-serif"
 headingFont = "Graphik Semibold, Graphik, Arial, Helvetica, sans-serif"
@@ -31,14 +30,14 @@ secondaryBackgroundColor = "#F7F4FB"
 textColor = "#1A1A1A"
 borderColor = "#E4E1EA"
 linkColor = "#7500C0"
-# The template's table, in its light-header variant. The grid draws its
-# header text on a canvas, so the fill has to be one the text reads on and
-# no stylesheet can correct it.
+# The light-header table variant. The grid draws its header text on a
+# canvas, so the fill has to be one the text reads on and no stylesheet
+# can correct it.
 dataframeHeaderBackgroundColor = "#E6DCFF"
 dataframeBorderColor = "#E4E1EA"
 
-# The deep end of the brand's purple ramp, which is the colour the rule under
-# the masthead starts from. Holds the navigation and nothing else.
+# The deep end of the purple ramp, which is the colour the rule under the
+# masthead starts from. Holds the navigation and nothing else.
 [theme.light.sidebar]
 backgroundColor = "#460073"
 secondaryBackgroundColor = "#5B1094"
@@ -47,9 +46,9 @@ primaryColor = "#C2A3FF"
 borderColor = "#6D2A9E"
 linkColor = "#C2A3FF"
 
-# Near-black carrying the brand's violet cast, rather than the flat black of
-# a cover slide. The core purple is too close to a dark ground to carry an
-# accent, so the light purple takes over.
+# Near-black carrying a violet cast, rather than a flat black. The core
+# purple is too close to a dark ground to carry an accent, so the light
+# purple takes over.
 [theme.dark]
 primaryColor = "#C2A3FF"
 backgroundColor = "#16121D"
