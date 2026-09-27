@@ -9,7 +9,7 @@ Or load the environment the way the Makefile does and run it directly:
     set -a && . ./configs/env/backend.env && \
       { [ ! -f ./configs/env/provider.env ] || . ./configs/env/provider.env; } && \
       . ./.env && set +a && \
-      PYTHONPATH=backend poetry run python restore_documents.py
+      PYTHONPATH=backend poetry run python -m archive.restore
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import sys
 
 import botocore.exceptions
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
 from blob_store.s3 import s3_client
@@ -52,9 +52,7 @@ def doc_key(sha256: str, media_type: str) -> str:
     return fanout_key(sha256, ext.lstrip("."))
 
 
-def copy_back(
-    s3: object, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str
-) -> bool:
+def copy_back(s3, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> bool:
     """Copies one archived object back, and says whether it was there.
 
     Returns:
@@ -82,7 +80,9 @@ def main() -> None:
     """Puts every archived document back where the pipeline reads it."""
     s3 = s3_client()
 
-    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
+    with psycopg.Connection[DictRow].connect(
+        DATABASE_URL, row_factory=dict_row
+    ) as conn:
         doc_rows = conn.execute(
             "SELECT payload FROM archived_rows WHERE table_name = 'documents' ORDER BY archived_at"
         ).fetchall()

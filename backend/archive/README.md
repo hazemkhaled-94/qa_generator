@@ -93,6 +93,7 @@ retention**.
 |---|---|
 | [`store.py`](store.py) | Reading the archive and emptying it, over both the table and the bucket |
 | [`run.py`](run.py) | The command line |
+| [`restore.py`](restore.py) | Putting archived documents back, before a purge makes the archive unreadable |
 
 The trigger and the table are in
 [`database/qa_generator/archived_rows.py`](../database/qa_generator/archived_rows.py),

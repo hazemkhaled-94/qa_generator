@@ -1202,7 +1202,7 @@ archive-purge:
 # Run it before `archive-purge`, which is what makes the archive unreadable.
 # The pipeline is re-run from parsing afterwards, and the script says so.
 restore-documents:
-	$(LOADENV) && PYTHONPATH=backend poetry run python restore_documents.py
+	$(LOADENV) && PYTHONPATH=backend poetry run python -m archive.restore
 
 # ── Tests ──────────────────────────────────────────────────────────────────
 
