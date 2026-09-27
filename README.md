@@ -246,6 +246,7 @@ repository, each service documents itself beside its code.
 | [`docs/configuration.md`](docs/configuration.md) | Where every setting lives |
 | [`docs/operations.md`](docs/operations.md) | Scaling, dashboards, and what goes wrong |
 | [`docs/measurements.md`](docs/measurements.md) | What one run produced |
+| [`docs/bugs.md`](docs/bugs.md) | What is wrong with what it produced, and the fix |
 
 ## How it is put together
 
