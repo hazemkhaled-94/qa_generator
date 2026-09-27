@@ -113,8 +113,9 @@ make schema-stamp                          # adopt a database that already holds
 
 **Read the generated revision before applying it.** Autogenerate compares
 tables, columns, indexes and constraints; it does not see a trigger, a data
-backfill, or anything ordered. Both such cases in this history are written by
-hand.
+backfill, or anything ordered. The three trigger functions and the fifteen
+triggers in the initial revision are written by hand for that reason, as is
+the predicate on the three partial indexes.
 
 Every revision is reversible, and
 `tests/integration/database/test_migration_rollback.py` applies and takes
