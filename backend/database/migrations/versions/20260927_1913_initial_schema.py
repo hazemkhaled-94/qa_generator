@@ -541,8 +541,9 @@ def upgrade() -> None:
         postgresql_where=sa.text("reviewed_verdict IS NOT NULL"),
     )
     op.create_index(op.f("ix_facts_run_id"), "facts", ["run_id"], unique=False)
-    # Partial: the column is low-cardinality and mostly NULL. The model says
-    # only `index=True`, so autogenerate does not render the predicate.
+    # Partial: the column is low-cardinality and mostly NULL. The model
+    # declares the predicate too, but autogenerate does not compare one, so
+    # this stays written out rather than left to a later regeneration.
     op.create_index(
         op.f("ix_facts_settings_version"),
         "facts",

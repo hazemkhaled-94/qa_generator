@@ -62,6 +62,14 @@ class Topic(Base):
             check("question_status", Status.GENERATED),
             name="topics_question_status_valid",
         ),
+        # Partial: the column is low-cardinality and mostly NULL. Declared
+        # here rather than as `index=True` on the column, because that
+        # renders a plain index and nothing compares the predicate.
+        Index(
+            "ix_topics_settings_version",
+            "settings_version",
+            postgresql_where=text("settings_version IS NOT NULL"),
+        ),
         {
             "comment": "Clusters over one language's own vocabulary, factorised out "
             "of a tf-idf weighted term matrix. "
@@ -183,7 +191,6 @@ class Topic(Base):
     )
     settings_version: Mapped[str | None] = mapped_column(
         Text,
-        index=True,
         comment="The configuration this topic was fitted under, as the digest "
         "settings.store computes, or 'environment' when nothing was overridden. "
         "A fit is not reproducible without the parameters it used, and the seed "

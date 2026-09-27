@@ -113,9 +113,14 @@ make schema-stamp                          # adopt a database that already holds
 
 **Read the generated revision before applying it.** Autogenerate compares
 tables, columns, indexes and constraints; it does not see a trigger, a data
-backfill, or anything ordered. The three trigger functions and the fifteen
-triggers in the initial revision are written by hand for that reason, as is
-the predicate on the three partial indexes.
+backfill, an extension, or anything ordered. The three trigger functions,
+the fifteen triggers and the two extensions in the initial revision are
+written by hand for that reason.
+
+It does not compare an index *predicate* either. A partial index therefore
+belongs in `__table_args__` as an `Index(..., postgresql_where=...)` rather
+than as `index=True` on the column: the second renders a plain index, and
+nothing downstream reports the difference.
 
 Every revision is reversible, and
 `tests/integration/database/test_migration_rollback.py` applies and takes

@@ -70,6 +70,14 @@ class Question(Base):
         # The dedup probe filters to the accepted questions before it orders
         # by distance, and the quality report groups on the same column.
         Index("ix_questions_status", "status"),
+        # Partial: the column is low-cardinality and mostly NULL. Declared
+        # here rather than as `index=True` on the column, because that
+        # renders a plain index and nothing compares the predicate.
+        Index(
+            "ix_questions_settings_version",
+            "settings_version",
+            postgresql_where=text("settings_version IS NOT NULL"),
+        ),
         # A margin, so it is a share like every other one in this schema.
         CheckConstraint(
             "confidence IS NULL OR confidence BETWEEN 0 AND 1",
@@ -375,7 +383,6 @@ class Question(Base):
     )
     settings_version: Mapped[str | None] = mapped_column(
         Text,
-        index=True,
         comment="The configuration this question was written under, as the digest "
         "settings.store computes, or 'environment' when nothing was overridden. "
         "Which model wrote it, what mix the plan aimed for and what bounds the "

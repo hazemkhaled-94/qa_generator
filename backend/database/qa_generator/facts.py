@@ -60,6 +60,14 @@ class Fact(Base):
         Index("ix_facts_rejection_code", "rejection_code"),
         # Filters the listing and groups the quality report by kind.
         Index("ix_facts_kind", "kind"),
+        # Partial: the column is low-cardinality and mostly NULL. Declared
+        # here rather than as `index=True` on the column, because that
+        # renders a plain index and nothing compares the predicate.
+        Index(
+            "ix_facts_settings_version",
+            "settings_version",
+            postgresql_where=text("settings_version IS NOT NULL"),
+        ),
         # A margin, so it is a share like every other one in this schema.
         CheckConstraint(
             "confidence IS NULL OR confidence BETWEEN 0 AND 1",
@@ -173,7 +181,6 @@ class Fact(Base):
     )
     settings_version: Mapped[str | None] = mapped_column(
         Text,
-        index=True,
         comment="The configuration this fact was extracted under, as the digest "
         "settings.store computes, or 'environment' when nothing was overridden. "
         "The columns above name the model and the prompt; this names the rest of "
