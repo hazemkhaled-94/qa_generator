@@ -243,17 +243,13 @@ configs/env/provider.env
 # Claude Code
 .claude
 
-# Coursework and reports kept beside the code but not part of it. Named
-# rather than left untracked: `git add -A` in a public repository is one
-# keystroke, and these carry a real name and a module code.
-#
-# By extension at the root rather than by stem: the submission convention
-# renamed these to `<date>_<name>_<matriculation>_<module>`, which the old
-# `Project_Report_*` rules no longer matched. The repository tracks no .docx
+# Documents kept beside the code but not part of it. By extension at the
+# root rather than by stem: a stem rule stops matching the moment a file is
+# renamed, and `git add -A` is one keystroke. The repository tracks no .docx
 # or .pdf anywhere, so the extension is the stable rule.
 /*.docx
 /*.pdf
-# The report's figures, rendered from a script into a throwaway venv.
+# Figures, rendered from a script into a throwaway venv.
 figures/
 # Every deck. Two of these were tracked and came to nine megabytes of
 # binary that no diff can read; they are rebuilt from the READMEs rather
@@ -262,5 +258,5 @@ figures/
 *.potx
 # The lock file Word and PowerPoint leave beside an open document. Named by
 # its prefix rather than by extension: Office truncates the stem to fit, so
-# `~$oject_Report_....docx` matches none of the rules above it.
+# a rule naming the extension alone would miss it.
 ~$*
